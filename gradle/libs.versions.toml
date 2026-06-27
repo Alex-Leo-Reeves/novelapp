@@ -16,6 +16,7 @@ coil = "3.0.4"
 ksp = "2.1.0-1.0.29"
 secretsGradle = "2.0.1"
 jsoup = "1.18.3"
+jspecify = "1.0.0"
 pdfbox = "3.0.3"
 
 [libraries]
@@ -39,6 +40,7 @@ sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sql
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
