@@ -173,12 +173,17 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
-            packageName = "Watch Anime Read Novels Read Manga"
+            packageName = "NovelApp"
             packageVersion = "1.0.0"
             description = "Watch Anime · Read Novels · Read Manga — All in One"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"
+
+            windows {
+                iconFile.set(project.file("src/desktopMain/resources/icons/novelapp.ico"))
+                menuGroup = "NovelApp"
+                upgradeUuid = "055ef1e1-ffe1-4d5a-89b5-efd053023af0"
+            }
         }
     }
 }
-
