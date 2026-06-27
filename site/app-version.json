@@ -1,10 +1,10 @@
 {
   "versionCode": 1,
   "versionName": "1.0",
-  "apkUrl": "https://novelapp.onrender.com/downloads/novelapp-latest.apk",
+  "apkUrl": "https://novelapp.onrender.com/downloads/novelapp-android.apk",
   "releaseNotes": [
-    "Initial Render update manifest.",
-    "Replace the APK URL after uploading a signed release build."
+    "Signed Android release build.",
+    "Includes real account login, opening animation, separate novel, manga, and anime tabs."
   ],
   "forceUpdate": false
 }

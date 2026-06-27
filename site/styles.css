@@ -333,6 +333,19 @@ footer p {
   padding: clamp(22px, 4vw, 36px);
 }
 
+.download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.button.disabled {
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: default;
+}
+
 code {
   color: #ffffff;
 }
@@ -374,6 +387,10 @@ footer p {
   footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .download-actions {
+    justify-content: flex-start;
   }
 }
 

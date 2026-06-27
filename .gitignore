@@ -1,4 +1,8 @@
 .gradle
+.kotlin/
+*.hprof
+normal-release-build.log
+normal-release-build.pid
 build/
 .idea/
 .vscode/
