@@ -17,7 +17,10 @@ import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.components.MiniPlayerWidget
 import com.alexleoreeves.novelapp.ui.theme.NovelAppTheme
+import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
+import com.alexleoreeves.novelapp.ui.theme.subTextColor
+import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
