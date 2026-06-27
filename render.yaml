@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: novelapp-site
+    name: novelapp
     runtime: static
     buildCommand: echo "Publishing NovelApp static site"
     staticPublishPath: ./site
