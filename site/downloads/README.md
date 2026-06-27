@@ -5,6 +5,7 @@ Place signed release builds here before deploying the site:
 ```text
 site/downloads/novelapp-android.apk
 site/downloads/novelapp-tv.apk
+site/downloads/novelapp-windows.msi
 ```
 
 The Android website download button and in-app update checker point to:
@@ -17,4 +18,10 @@ The TV website download button points to:
 
 ```text
 https://novelapp.onrender.com/downloads/novelapp-tv.apk
+```
+
+The Windows website download button points to:
+
+```text
+https://novelapp.onrender.com/downloads/novelapp-windows.msi
 ```
