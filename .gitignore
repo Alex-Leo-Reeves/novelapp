@@ -3,6 +3,7 @@
 *.hprof
 normal-release-build.log
 normal-release-build.pid
+tv-release-build.log
 build/
 .idea/
 .vscode/

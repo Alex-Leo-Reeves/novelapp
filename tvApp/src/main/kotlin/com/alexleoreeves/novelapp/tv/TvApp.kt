@@ -35,8 +35,8 @@ import io.ktor.client.*
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
+import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
@@ -281,7 +281,7 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
             .width(230.dp)
             .fillMaxHeight()
             .background(Color(0xFF06060A))
-            .border(end = 1.dp, color = Color.White.copy(0.06f))
+            .border(1.dp, Color.White.copy(0.06f))
             .padding(vertical = 24.dp, horizontal = 16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
