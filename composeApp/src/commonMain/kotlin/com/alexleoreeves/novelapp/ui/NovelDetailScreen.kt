@@ -1,0 +1,313 @@
+package com.alexleoreeves.novelapp.ui
+
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.*
+import coil3.compose.AsyncImage
+import com.alexleoreeves.novelapp.BuildKonfig
+import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.ui.theme.*
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NovelDetailScreen(
+    novel: UnifiedSearchResult,
+    currentTheme: AppTheme,
+    isFavorite: Boolean,
+    onToggleFavorite: (UnifiedSearchResult) -> Unit,
+    onChapterSelected: (Chapter) -> Unit,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
+    var isLoadingChapters by remember { mutableStateOf(true) }
+
+    val repository = remember {
+        NovelSearchRepository(
+            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
+            rapidApiKey = BuildKonfig.RAPID_API_KEY,
+            rapidApiHost = BuildKonfig.RAPID_API_HOST
+        )
+    }
+
+    LaunchedEffect(novel.detailPageUrl) {
+        isLoadingChapters = true
+        chapters = if (novel.isManga) {
+            repository.fetchMangaChapters(novel.detailPageUrl, novel.sourceName).map {
+                Chapter(
+                    title = it.title,
+                    url = it.url,
+                    chapterNumber = it.chapterNumber
+                )
+            }
+        } else {
+            repository.fetchChapters(novel.detailPageUrl, novel.sourceName)
+        }
+        isLoadingChapters = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(currentTheme.backgroundColor())
+    ) {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            // Hero Image + back button
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp)
+                ) {
+                    AsyncImage(
+                        model = novel.coverUrl,
+                        contentDescription = novel.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // Dark gradient overlay
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Black.copy(0.3f), Color.Black.copy(0.9f))
+                                )
+                            )
+                    )
+                    // Back button
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .padding(top = 40.dp, start = 8.dp)
+                            .align(Alignment.TopStart)
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowBack, "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    // Favorite button
+                    IconButton(
+                        onClick = { onToggleFavorite(novel) },
+                        modifier = Modifier
+                            .padding(top = 40.dp, end = 8.dp)
+                            .align(Alignment.TopEnd)
+                    ) {
+                        Icon(
+                            if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            "Favorite",
+                            tint = if (isFavorite) Color(0xFFE91E8C) else Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    // Title overlay at bottom
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            novel.title,
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (novel.author.isNotEmpty()) {
+                            Text(
+                                "by ${novel.author}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(0.7f)
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (novel.genre.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(5.dp),
+                                    color = currentTheme.accentColor()
+                                ) {
+                                    Text(
+                                        novel.genre,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(5.dp),
+                                color = Color.White.copy(0.2f)
+                            ) {
+                                Text(
+                                    novel.sourceName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Synopsis
+            if (novel.synopsis.isNotEmpty()) {
+                item {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            "Synopsis",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = currentTheme.textColor(),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            novel.synopsis,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = currentTheme.subTextColor()
+                        )
+                    }
+                    Divider(color = currentTheme.accentColor().copy(0.2f))
+                }
+            }
+
+            // Chapter list header
+            item {
+                Padding(horizontal = 16.dp, vertical = 12.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Chapters",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = currentTheme.textColor(),
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (!isLoadingChapters) {
+                            Text(
+                                "${chapters.size} chapters",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = currentTheme.subTextColor()
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isLoadingChapters) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = currentTheme.accentColor())
+                    }
+                }
+            } else if (chapters.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No chapters available from this source.",
+                            color = currentTheme.subTextColor(),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            } else {
+                items(chapters) { chapter ->
+                    ChapterListItem(
+                        chapter = chapter,
+                        currentTheme = currentTheme,
+                        onClick = { onChapterSelected(chapter) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Padding(
+    horizontal: Dp = 0.dp,
+    vertical: Dp = 0.dp,
+    content: @Composable () -> Unit
+) {
+    Box(modifier = Modifier.padding(horizontal = horizontal, vertical = vertical)) {
+        content()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChapterListItem(
+    chapter: Chapter,
+    currentTheme: AppTheme,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = currentTheme.accentColor().copy(0.15f),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "${chapter.chapterNumber}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = currentTheme.accentColor(),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                chapter.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = currentTheme.textColor(),
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = currentTheme.subTextColor()
+            )
+        }
+        Divider(
+            color = currentTheme.cardColor(),
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+    }
+}
