@@ -33,7 +33,11 @@ kotlin {
     }
 
     // Compose Desktop (PC — Windows / macOS / Linux)
-    jvm("desktop")
+    jvm("desktop") {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
 
     listOf(
         iosX64(),
