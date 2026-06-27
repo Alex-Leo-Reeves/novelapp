@@ -1,7 +1,7 @@
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.runtime.Composable
-import com.alexleoreeves.novelapp.ui.theme.AppTheme
+import com.alexleoreeves.novelapp.data.AppTheme
 
 /**
  * Expect declaration — platform-specific full-screen anime video player.

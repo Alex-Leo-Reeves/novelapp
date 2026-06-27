@@ -64,13 +64,7 @@ fun UniversalReadScreen(currentTheme: AppTheme) {
         TabRow(
             selectedTabIndex = activeTab,
             containerColor = currentTheme.surfaceColor(),
-            contentColor = currentTheme.accentColor(),
-            indicator = { tabPositions ->
-                SecondaryIndicator(
-                    Modifier.tabIndicatorOffset(tabPositions[activeTab]),
-                    color = currentTheme.accentColor()
-                )
-            }
+            contentColor = currentTheme.accentColor()
         ) {
             Tab(selected = activeTab == 0, onClick = { activeTab = 0 }) {
                 Row(
@@ -346,5 +340,4 @@ fun UniversalReadScreen(currentTheme: AppTheme) {
             }
         }
     }
-}
 }

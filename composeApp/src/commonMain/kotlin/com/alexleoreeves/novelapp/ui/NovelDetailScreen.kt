@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
@@ -28,6 +29,7 @@ fun NovelDetailScreen(
     novel: UnifiedSearchResult,
     currentTheme: AppTheme,
     isFavorite: Boolean,
+    downloadRepo: LocalDownloadRepository,
     onToggleFavorite: (UnifiedSearchResult) -> Unit,
     onChapterSelected: (Chapter) -> Unit,
     onBack: () -> Unit
@@ -35,6 +37,8 @@ fun NovelDetailScreen(
     val scope = rememberCoroutineScope()
     var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
     var isLoadingChapters by remember { mutableStateOf(true) }
+    var downloadingChapters by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var refreshTrigger by remember { mutableStateOf(0) } // force recomposition when downloads change
 
     val repository = remember {
         NovelSearchRepository(
@@ -236,10 +240,78 @@ fun NovelDetailScreen(
                 }
             } else {
                 items(chapters) { chapter ->
+                    // Read actual downloaded state
+                    val isDownloaded = remember(refreshTrigger, chapter.chapterNumber) {
+                        downloadRepo.isChapterDownloaded(novel.id, chapter.chapterNumber)
+                    }
+                    val isDownloading = chapter.chapterNumber in downloadingChapters
+
                     ChapterListItem(
                         chapter = chapter,
                         currentTheme = currentTheme,
-                        onClick = { onChapterSelected(chapter) }
+                        isDownloaded = isDownloaded,
+                        isDownloading = isDownloading,
+                        onClick = { onChapterSelected(chapter) },
+                        onDownloadClick = {
+                            if (isDownloaded) {
+                                // Delete chapter local data
+                                val savedCh = downloadRepo.getChaptersFor(novel.id).find { it.chapterNumber == chapter.chapterNumber }
+                                savedCh?.localFilePath?.let { deleteDownloadedText(it) }
+
+                                downloadRepo.deleteChapter(novel.id, chapter.chapterNumber)
+                                if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                    downloadRepo.deleteItem(novel.id)
+                                }
+                                refreshTrigger++
+                            } else {
+                                downloadingChapters = downloadingChapters + chapter.chapterNumber
+                                scope.launch {
+                                    try {
+                                        downloadRepo.addItem(
+                                            DownloadedItem(
+                                                id = novel.id,
+                                                title = novel.title,
+                                                coverUrl = novel.coverUrl,
+                                                type = if (novel.isManga) "MANGA" else "NOVEL",
+                                                sourceName = novel.sourceName
+                                            )
+                                        )
+                                        if (novel.isManga) {
+                                            val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
+                                            if (pages.isNotEmpty()) {
+                                                downloadRepo.addChapter(
+                                                    DownloadedChapter(
+                                                        parentId = novel.id,
+                                                        chapterNumber = chapter.chapterNumber,
+                                                        chapterTitle = chapter.title,
+                                                        localFilePath = pages.joinToString(","),
+                                                        pageCount = pages.size
+                                                    )
+                                                )
+                                            }
+                                        } else {
+                                            val text = repository.fetchChapterText(chapter.url, novel.sourceName)
+                                            if (text.isNotEmpty() && !text.startsWith("Failed")) {
+                                                val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
+                                                downloadRepo.addChapter(
+                                                    DownloadedChapter(
+                                                        parentId = novel.id,
+                                                        chapterNumber = chapter.chapterNumber,
+                                                        chapterTitle = chapter.title,
+                                                        localFilePath = path
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        // ignore
+                                    } finally {
+                                        downloadingChapters = downloadingChapters - chapter.chapterNumber
+                                        refreshTrigger++
+                                    }
+                                }
+                            }
+                        }
                     )
                 }
             }
@@ -263,7 +335,10 @@ private fun Padding(
 fun ChapterListItem(
     chapter: Chapter,
     currentTheme: AppTheme,
-    onClick: () -> Unit
+    isDownloaded: Boolean,
+    isDownloading: Boolean,
+    onClick: () -> Unit,
+    onDownloadClick: () -> Unit
 ) {
     Surface(
         onClick = onClick,
@@ -299,6 +374,28 @@ fun ChapterListItem(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
+
+            // Download Status Action
+            IconButton(onClick = onDownloadClick, modifier = Modifier.padding(end = 4.dp)) {
+                when {
+                    isDownloading -> CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = currentTheme.accentColor()
+                    )
+                    isDownloaded -> Icon(
+                        Icons.Default.OfflinePin,
+                        contentDescription = "Downloaded offline",
+                        tint = Color(0xFF4CAF50)
+                    )
+                    else -> Icon(
+                        Icons.Outlined.Download,
+                        contentDescription = "Download chapter",
+                        tint = currentTheme.subTextColor()
+                    )
+                }
+            }
+
             Icon(
                 Icons.Default.ChevronRight,
                 contentDescription = null,

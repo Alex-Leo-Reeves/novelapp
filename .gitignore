@@ -1,6 +1,7 @@
 .gradle
 build/
 .idea/
+.vscode/
 *.iml
 local.properties
 .DS_Store
@@ -9,4 +10,7 @@ captures/
 .cxx/
 *.aar
 *.keystore
+*.jks
+keystores/
+server-data/
 !debug.keystore

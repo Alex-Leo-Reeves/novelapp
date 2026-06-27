@@ -18,7 +18,7 @@ class WebNovelApiSource(
 
     override val sourceName = "WebNovel API"
 
-    override suspend fun search(query: String): List<UnifiedSearchResult> = safeRun {
+    override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val response = httpClient.get("https://$apiHost/search") {
             parameter("query", query)
             headers {
@@ -28,7 +28,7 @@ class WebNovelApiSource(
         }.bodyAsText()
 
         val json = Json.parseToJsonElement(response).jsonObject
-        val novels = json["novels"]?.jsonArray ?: return@safeRun emptyList()
+        val novels = json["novels"]?.jsonArray ?: return@safeListRun emptyList()
         novels.map { el ->
             val obj = el.jsonObject
             UnifiedSearchResult(
@@ -44,7 +44,7 @@ class WebNovelApiSource(
         }
     }
 
-    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeRun {
+    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val novelId = novelUrl.removePrefix("webnovel-api://")
         val response = httpClient.get("https://$apiHost/novels/$novelId/chapters") {
             headers {
@@ -53,7 +53,7 @@ class WebNovelApiSource(
             }
         }.bodyAsText()
         val json = Json.parseToJsonElement(response).jsonObject
-        val chapters = json["chapters"]?.jsonArray ?: return@safeRun emptyList()
+        val chapters = json["chapters"]?.jsonArray ?: return@safeListRun emptyList()
         chapters.mapIndexed { index, el ->
             val obj = el.jsonObject
             Chapter(
@@ -64,7 +64,7 @@ class WebNovelApiSource(
         }
     }
 
-    override suspend fun fetchChapterText(chapterUrl: String): String = safeRun {
+    override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val parts = chapterUrl.removePrefix("webnovel-api-chapter://").split("/")
         val novelId = parts[0]
         val chapterId = parts[1]
@@ -78,7 +78,7 @@ class WebNovelApiSource(
         json["content"]?.jsonPrimitive?.content ?: ""
     }.ifEmpty { "Chapter content unavailable." }
 
-    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeRun {
+    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val response = httpClient.get("https://$apiHost/novels/$page") {
             headers {
                 append("X-RapidAPI-Key", apiKey)
@@ -86,7 +86,7 @@ class WebNovelApiSource(
             }
         }.bodyAsText()
         val json = Json.parseToJsonElement(response).jsonObject
-        val novels = json["novels"]?.jsonArray ?: return@safeRun emptyList()
+        val novels = json["novels"]?.jsonArray ?: return@safeListRun emptyList()
         novels.map { el ->
             val obj = el.jsonObject
             UnifiedSearchResult(
@@ -108,7 +108,7 @@ class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
     override val sourceName = "LightNovelPub"
     private val baseUrl = "https://www.lightnovelpub.com"
 
-    override suspend fun search(query: String): List<UnifiedSearchResult> = safeRun {
+    override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/search?inputContent=${query.encodeURL()}").bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("li.novel-item").map { el ->
@@ -123,7 +123,7 @@ class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
         }
     }
 
-    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeRun {
+    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("ul.chapter-list li a").mapIndexed { index, el ->
@@ -135,14 +135,14 @@ class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
         }
     }
 
-    override suspend fun fetchChapterText(chapterUrl: String): String = safeRun {
+    override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("#chapter-container").text()
             .ifEmpty { doc.select("div.chapter-content").text() }
     }.ifEmpty { "Content unavailable." }
 
-    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeRun {
+    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/novel-list?pg=$page&sort=hot").bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("li.novel-item").map { el ->
@@ -165,7 +165,7 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
     override val sourceName = "BoxNovel"
     private val baseUrl = "https://boxnovel.com"
 
-    override suspend fun search(query: String): List<UnifiedSearchResult> = safeRun {
+    override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/?s=${query.encodeURL()}&post_type=wp-manga").bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("div.c-tabs-item__content").map { el ->
@@ -180,7 +180,7 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
         }
     }
 
-    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeRun {
+    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("ul.main li a").reversed().mapIndexed { index, el ->
@@ -192,13 +192,13 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
         }
     }
 
-    override suspend fun fetchChapterText(chapterUrl: String): String = safeRun {
+    override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("div.reading-content").text()
     }.ifEmpty { "Content unavailable." }
 
-    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeRun {
+    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/novel-list/?m_orderby=trending&page=$page").bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("div.page-item-detail").map { el ->
@@ -221,7 +221,7 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
     override val sourceName = "RoyalRoad"
     private val baseUrl = "https://www.royalroad.com"
 
-    override suspend fun search(query: String): List<UnifiedSearchResult> = safeRun {
+    override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/fictions/search?title=${query.encodeURL()}").bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("div.fiction-list-item").map { el ->
@@ -237,7 +237,7 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
         }
     }
 
-    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeRun {
+    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("tr.chapter-row td a").mapIndexed { index, el ->
@@ -249,13 +249,13 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
         }
     }
 
-    override suspend fun fetchChapterText(chapterUrl: String): String = safeRun {
+    override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("div.chapter-content").text()
     }.ifEmpty { "Content unavailable." }
 
-    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeRun {
+    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/fictions/best-rated?page=$page").bodyAsText()
         val doc = Jsoup.parse(html)
         doc.select("div.fiction-list-item").map { el ->
@@ -277,7 +277,7 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
 private fun String.encodeURL(): String = this.replace(" ", "+")
 
 /** Safely execute [block], swallowing exceptions and returning emptyList(). */
-private suspend fun <T> safeRun(block: suspend () -> List<T>): List<T> {
+private suspend fun <T> safeListRun(block: suspend () -> List<T>): List<T> {
     return try {
         block()
     } catch (e: Exception) {
@@ -286,7 +286,7 @@ private suspend fun <T> safeRun(block: suspend () -> List<T>): List<T> {
     }
 }
 
-private suspend fun safeRun(block: suspend () -> String): String {
+private suspend fun safeStringRun(block: suspend () -> String): String {
     return try {
         block()
     } catch (e: Exception) {

@@ -1,6 +1,17 @@
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+val localPropertiesFile = rootProject.file("local.properties")
+val localProperties = Properties().apply {
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun localProperty(name: String): String? =
+    localProperties.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -21,6 +32,9 @@ kotlin {
         }
     }
 
+    // Compose Desktop (PC — Windows / macOS / Linux)
+    jvm("desktop")
+
     listOf(
         iosX64(),
         iosArm64(),
@@ -38,6 +52,7 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.ktor.client.okhttp)
             implementation(libs.kotlinx.coroutines.android)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
             implementation("com.google.mlkit:text-recognition:16.0.0")
             implementation("com.google.mlkit:text-recognition-japanese:16.0.0")
             implementation("com.google.mlkit:text-recognition-korean:16.0.0")
@@ -51,6 +66,7 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.material3)
             implementation(compose.ui)
+            implementation(compose.materialIconsExtended)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodel)
@@ -70,12 +86,24 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
         }
+        val desktopMain by getting {
+            dependencies {
+                implementation(compose.desktop.currentOs)
+                implementation(libs.ktor.client.cio)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
+            }
+        }
     }
 }
 
 android {
     namespace = "com.alexleoreeves.novelapp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
+
+    val releaseStoreFile = localProperty("RELEASE_STORE_FILE")
+    val releaseStorePassword = localProperty("RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = localProperty("RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = localProperty("RELEASE_KEY_PASSWORD")
 
     defaultConfig {
         applicationId = "com.alexleoreeves.novelapp"
@@ -90,8 +118,27 @@ android {
         }
     }
     buildTypes {
+        if (
+            releaseStoreFile != null &&
+            releaseStorePassword != null &&
+            releaseKeyAlias != null &&
+            releaseKeyPassword != null
+        ) {
+            signingConfigs {
+                create("release") {
+                    storeFile = rootProject.file(releaseStoreFile)
+                    storePassword = releaseStorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                }
+            }
+        }
+
         getByName("release") {
             isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let {
+                signingConfig = it
+            }
         }
     }
     compileOptions {
@@ -116,3 +163,22 @@ secrets {
     propertiesFileName = "local.properties"
     defaultPropertiesFileName = "local.defaults.properties"
 }
+
+compose.desktop {
+    application {
+        mainClass = "com.alexleoreeves.novelapp.MainKt"
+        nativeDistributions {
+            targetFormats(
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
+            )
+            packageName = "Watch Anime Read Novels Read Manga"
+            packageVersion = "1.0.0"
+            description = "Watch Anime · Read Novels · Read Manga — All in One"
+            copyright = "© 2025 Mike A. (Alex Leo Reeves)"
+            vendor = "Alex Leo Reeves"
+        }
+    }
+}
+

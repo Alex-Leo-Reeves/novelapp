@@ -14,7 +14,7 @@ This repository is an early application build. Android is the most complete targ
 - Anime video player support through Android Media3/ExoPlayer
 - Favorites screen
 - Opening animation with developer contact
-- Local sign-in/create-account gate with saved user details
+- API-backed sign-in/create-account gate with saved auth session
 - You tab with account details, contact links, and update checking
 - Theme switching for reading modes
 - Gemini-powered narration controller
@@ -47,7 +47,8 @@ This repository is an early application build. Android is the most complete targ
 ├── iosApp/                     # iOS Swift app shell
 ├── gradle/                     # Gradle version catalog and wrapper files
 ├── site/                       # Render static website and update manifest
-├── render.yaml                 # Render Blueprint for the website
+├── server/                     # Node API server for auth and website hosting
+├── render.yaml                 # Render Blueprint for the web service
 ├── local.defaults.properties   # Safe placeholder secret defaults
 ├── local.properties            # Local machine settings and real secrets; ignored
 └── README.md
@@ -146,9 +147,9 @@ Play Store bundle output:
 composeApp/build/outputs/bundle/release/composeApp-release.aab
 ```
 
-## Website and In-App Updates
+## Website, Auth API, and In-App Updates
 
-The `site/` folder contains a Render-ready static website for the app.
+The `site/` folder contains the public website assets. The `server/` folder contains a small Node web service that serves the website and provides real account endpoints for the app.
 
 Important files:
 
@@ -157,8 +158,23 @@ site/index.html
 site/styles.css
 site/app-version.json
 site/downloads/README.md
+server/index.js
+package.json
 render.yaml
 ```
+
+Auth API endpoints:
+
+```text
+POST https://novelapp.onrender.com/api/auth/register
+POST https://novelapp.onrender.com/api/auth/login
+GET  https://novelapp.onrender.com/api/auth/me
+POST https://novelapp.onrender.com/api/auth/logout
+```
+
+The app stores the returned auth token locally and verifies it with `/api/auth/me` on startup, so users do not need to sign in every time.
+
+The server stores account data under `DATA_DIR`, which `render.yaml` maps to `/var/data` on a Render persistent disk. Do not remove that disk if you want existing accounts to remain available.
 
 The app checks this update manifest:
 
@@ -180,7 +196,7 @@ site/downloads/novelapp-latest.apk
 
 Then update `site/app-version.json` with a higher `versionCode`, the visible `versionName`, release notes, and the final APK URL.
 
-Deploy on Render by connecting this Git repository and using the root `render.yaml` Blueprint. The static site publishes from `./site`.
+Deploy on Render by connecting this Git repository and using the root `render.yaml` Blueprint. The service is a Node web service because real login requires backend routes and persistent account storage. It serves the existing website from `./site`.
 
 ## Release Signing
 
@@ -198,7 +214,28 @@ keytool -genkeypair \
 
 Store the keystore path and passwords in a private local file or CI secret store. Never commit `.jks`, `.keystore`, passwords, API keys, or store credentials.
 
-The current Gradle file does not define a production signing config yet. Add one before distributing release APKs/AABs.
+The Gradle release build reads signing details from ignored `local.properties` values. Keep the keystore and passwords private.
+
+This project supports local release signing through ignored `local.properties` values:
+
+```properties
+RELEASE_STORE_FILE=keystores/novelapp-release.jks
+RELEASE_STORE_PASSWORD=your_private_store_password
+RELEASE_KEY_ALIAS=novelapp
+RELEASE_KEY_PASSWORD=your_private_key_password
+```
+
+Signed release APK:
+
+```bash
+./gradlew :composeApp:assembleRelease
+```
+
+Signed release bundle:
+
+```bash
+./gradlew :composeApp:bundleRelease
+```
 
 ## Versioning
 

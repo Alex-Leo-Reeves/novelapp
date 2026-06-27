@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -18,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -59,6 +61,7 @@ enum class AuthMode(val label: String) {
 @Composable
 fun AuthScreen(
     currentTheme: AppTheme,
+    isSubmitting: Boolean = false,
     errorMessage: String?,
     onClearError: () -> Unit,
     onSignIn: (email: String, password: String) -> Unit,
@@ -199,11 +202,20 @@ fun AuthScreen(
 
                 Button(
                     onClick = { validateAndSubmit() },
+                    enabled = !isSubmitting,
                     colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(mode.label, color = Color.White, fontWeight = FontWeight.Bold)
+                    if (isSubmitting) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    } else {
+                        Text(mode.label, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 Spacer(Modifier.height(4.dp))
@@ -215,6 +227,33 @@ fun AuthScreen(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun AuthLoadingScreen(
+    currentTheme: AppTheme,
+    message: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(currentTheme.backgroundColor())
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            CircularProgressIndicator(color = currentTheme.accentColor())
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = currentTheme.subTextColor(),
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

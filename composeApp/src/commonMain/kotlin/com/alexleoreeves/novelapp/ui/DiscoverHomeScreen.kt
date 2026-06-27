@@ -47,6 +47,7 @@ private val animeAccent = Color(0xFFFF5722)
 fun DiscoverHomeScreen(
     currentTheme: AppTheme,
     contentTab: ContentTab = ContentTab.NOVELS,
+    isDesktop: Boolean = false,
     onNovelSelected: (UnifiedSearchResult) -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -60,7 +61,7 @@ fun DiscoverHomeScreen(
 
     // ── State ──────────────────────────────────────────────────────────────
     var searchQuery by remember { mutableStateOf("") }
-    val activeTab = contentTab
+    var activeTab by remember { mutableStateOf(contentTab) }
     var selectedCategory by remember { mutableStateOf(NovelCategory.ALL) }
     var isSearching by remember { mutableStateOf(false) }
 
@@ -261,6 +262,49 @@ fun DiscoverHomeScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp)
                 )
+
+                Spacer(Modifier.height(14.dp))
+
+                // Premium Segmented Tab Selector
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(currentTheme.cardColor().copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ContentTab.values().forEach { tab ->
+                        val selected = activeTab == tab
+                        val tabColor = if (tab == ContentTab.ANIME) animeAccent else currentTheme.accentColor()
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) tabColor else Color.Transparent)
+                                .clickable { activeTab = tab }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    tab.icon,
+                                    null,
+                                    tint = if (selected) Color.White else currentTheme.subTextColor(),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    tab.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selected) Color.White else currentTheme.subTextColor()
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -412,6 +456,10 @@ fun DiscoverHomeScreen(
         }
 
         // ── Content Area ────────────────────────────────────────────────────
+        val animeCols = if (isDesktop) 4 else 2
+        val mangaCols = if (isDesktop) 5 else 3
+        val novelCols = if (isDesktop) 4 else 2
+
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 // Anime tab
@@ -423,7 +471,7 @@ fun DiscoverHomeScreen(
                         EmptyStateView(currentTheme = currentTheme, tab = activeTab, hasSearch = searchQuery.isNotEmpty())
                     } else {
                         LazyVerticalGrid(
-                            columns = GridCells.Fixed(2),
+                            columns = GridCells.Fixed(animeCols),
                             contentPadding = PaddingValues(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -464,7 +512,7 @@ fun DiscoverHomeScreen(
                 )
                 else -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(if (activeTab == ContentTab.MANGA) 3 else 2),
+                        columns = GridCells.Fixed(if (activeTab == ContentTab.MANGA) mangaCols else novelCols),
                         contentPadding = PaddingValues(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),

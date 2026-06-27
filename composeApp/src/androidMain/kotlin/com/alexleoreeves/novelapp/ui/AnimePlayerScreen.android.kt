@@ -24,7 +24,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import com.alexleoreeves.novelapp.ui.theme.AppTheme
+import com.alexleoreeves.novelapp.data.AppTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

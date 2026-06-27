@@ -10,7 +10,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.alexleoreeves.novelapp.ui.theme.AppTheme
+import com.alexleoreeves.novelapp.data.AppTheme
 
 /**
  * iOS stub — AVPlayer integration can be wired here via
