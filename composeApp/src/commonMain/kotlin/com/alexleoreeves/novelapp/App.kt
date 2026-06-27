@@ -14,19 +14,34 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import com.alexleoreeves.novelapp.audio.GeminiTtsController
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.EmptyUserSessionStore
+import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
+import com.alexleoreeves.novelapp.platform.NoOpExternalLinkOpener
+import com.alexleoreeves.novelapp.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.platform.UserSessionStore
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.components.MiniPlayerWidget
 import com.alexleoreeves.novelapp.ui.theme.NovelAppTheme
+import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
+import com.alexleoreeves.novelapp.ui.theme.subTextColor
+import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Root composable — entry point for shared KMP UI
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-fun App() {
+fun App(
+    userSessionStore: UserSessionStore = EmptyUserSessionStore,
+    linkOpener: ExternalLinkOpener = NoOpExternalLinkOpener
+) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
-    val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
+    val currentTab = remember { mutableStateOf(BottomTab.NOVELS) }
+
+    var splashComplete by remember { mutableStateOf(false) }
+    var account by remember { mutableStateOf(userSessionStore.loadAccount()) }
+    var authError by remember { mutableStateOf<String?>(null) }
 
     // App state
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
@@ -54,12 +69,56 @@ fun App() {
     }
 
     NovelAppTheme(appTheme = appTheme.value) {
+        val currentAccount = account
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(appTheme.value.backgroundColor())
         ) {
             when {
+                !splashComplete -> {
+                    OpeningSplashScreen(
+                        currentTheme = appTheme.value,
+                        onFinished = { splashComplete = true }
+                    )
+                }
+
+                currentAccount == null -> {
+                    AuthScreen(
+                        currentTheme = appTheme.value,
+                        errorMessage = authError,
+                        onClearError = { authError = null },
+                        onSignIn = { email, password ->
+                            val stored = userSessionStore.loadAccount()
+                            if (stored == null) {
+                                val localAccount = SavedUserAccount(
+                                    username = email.substringBefore("@").ifBlank { "Reader" },
+                                    email = email,
+                                    password = password
+                                )
+                                userSessionStore.saveAccount(localAccount)
+                                account = localAccount
+                                authError = null
+                            } else if (stored.email.equals(email, ignoreCase = true) && stored.password == password) {
+                                account = stored
+                                authError = null
+                            } else {
+                                authError = "Email or password does not match this device account."
+                            }
+                        },
+                        onCreateAccount = { username, email, password ->
+                            val newAccount = SavedUserAccount(
+                                username = username,
+                                email = email,
+                                password = password
+                            )
+                            userSessionStore.saveAccount(newAccount)
+                            account = newAccount
+                            authError = null
+                        }
+                    )
+                }
+
                 // ── 1. Anime full-screen player ────────────────────────────
                 animeStreamUrl.value != null -> {
                     AnimePlayerScreen(
@@ -145,10 +204,33 @@ fun App() {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Box(modifier = Modifier.weight(1f)) {
                             when (currentTab.value) {
-                                BottomTab.DISCOVER -> DiscoverHomeScreen(
+                                BottomTab.NOVELS -> DiscoverHomeScreen(
                                     currentTheme = appTheme.value,
+                                    contentTab = ContentTab.NOVELS,
                                     onNovelSelected = { item ->
                                         // Route anime items to detail screen
+                                        if (item.isAnime && item.animeResult != null) {
+                                            selectedAnime.value = item.animeResult
+                                        } else {
+                                            selectedNovel.value = item
+                                        }
+                                    }
+                                )
+                                BottomTab.MANGA -> DiscoverHomeScreen(
+                                    currentTheme = appTheme.value,
+                                    contentTab = ContentTab.MANGA,
+                                    onNovelSelected = { item ->
+                                        if (item.isAnime && item.animeResult != null) {
+                                            selectedAnime.value = item.animeResult
+                                        } else {
+                                            selectedNovel.value = item
+                                        }
+                                    }
+                                )
+                                BottomTab.ANIME -> DiscoverHomeScreen(
+                                    currentTheme = appTheme.value,
+                                    contentTab = ContentTab.ANIME,
+                                    onNovelSelected = { item ->
                                         if (item.isAnime && item.animeResult != null) {
                                             selectedAnime.value = item.animeResult
                                         } else {
@@ -174,6 +256,20 @@ fun App() {
                                 )
                                 BottomTab.READ -> UniversalReadScreen(
                                     currentTheme = appTheme.value
+                                )
+                                BottomTab.YOU -> YouScreen(
+                                    account = currentAccount,
+                                    currentTheme = appTheme.value,
+                                    linkOpener = linkOpener,
+                                    onSignOut = {
+                                        userSessionStore.clearAccount()
+                                        account = null
+                                        currentTab.value = BottomTab.NOVELS
+                                        selectedNovel.value = null
+                                        selectedChapterUrl.value = null
+                                        selectedAnime.value = null
+                                        animeStreamUrl.value = null
+                                    }
                                 )
                             }
                         }
@@ -234,9 +330,12 @@ fun App() {
 //  Bottom Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 enum class BottomTab(val label: String, val icon: ImageVector) {
-    DISCOVER("Discover", Icons.Default.Home),
+    NOVELS("Novels", Icons.Default.AutoStories),
+    MANGA("Manga", Icons.Default.Collections),
+    ANIME("Anime", Icons.Default.PlayCircle),
     FAVORITES("Favorites", Icons.Default.Favorite),
-    READ("Read", Icons.Default.MenuBook)
+    READ("Read", Icons.Default.MenuBook),
+    YOU("You", Icons.Default.Info)
 }
 
 @Composable

@@ -1,0 +1,10 @@
+{
+  "versionCode": 1,
+  "versionName": "1.0",
+  "apkUrl": "https://novelapp-site.onrender.com/downloads/novelapp-latest.apk",
+  "releaseNotes": [
+    "Initial Render update manifest.",
+    "Replace the APK URL after uploading a signed release build."
+  ],
+  "forceUpdate": false
+}

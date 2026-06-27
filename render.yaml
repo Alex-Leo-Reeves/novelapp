@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: novelapp-site
+    runtime: static
+    buildCommand: echo "Publishing NovelApp static site"
+    staticPublishPath: ./site
+    autoDeployTrigger: commit
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

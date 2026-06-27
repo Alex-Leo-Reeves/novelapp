@@ -28,10 +28,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Content type tab selector — All / Novels / Manga / Anime
+//  Content type tab selector: Novels / Manga / Anime
 // ─────────────────────────────────────────────────────────────────────────────
 enum class ContentTab(val label: String, val icon: ImageVector) {
-    ALL("All", Icons.Default.GridView),
     NOVELS("Novels", Icons.Default.AutoStories),
     MANGA("Manga", Icons.Default.Collections),
     ANIME("Anime", Icons.Default.PlayCircle)
@@ -41,12 +40,13 @@ enum class ContentTab(val label: String, val icon: ImageVector) {
 private val animeAccent = Color(0xFFFF5722)
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Discover Home Screen — All / Novels / Manga / Anime tabbed dashboard
+//  Discover Home Screen: separated Novels / Manga / Anime dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun DiscoverHomeScreen(
     currentTheme: AppTheme,
+    contentTab: ContentTab = ContentTab.NOVELS,
     onNovelSelected: (UnifiedSearchResult) -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -60,7 +60,7 @@ fun DiscoverHomeScreen(
 
     // ── State ──────────────────────────────────────────────────────────────
     var searchQuery by remember { mutableStateOf("") }
-    var activeTab by remember { mutableStateOf(ContentTab.ALL) }
+    val activeTab = contentTab
     var selectedCategory by remember { mutableStateOf(NovelCategory.ALL) }
     var isSearching by remember { mutableStateOf(false) }
 
@@ -72,6 +72,14 @@ fun DiscoverHomeScreen(
     var isLoadingAnime by remember { mutableStateOf(true) }
 
     val categories = NovelCategory.values().toList()
+
+    LaunchedEffect(contentTab) {
+        searchQuery = ""
+        searchResults = emptyList()
+        animeSearchResults = emptyList()
+        isSearching = false
+        selectedCategory = NovelCategory.ALL
+    }
 
     // ── Initial popular content load ───────────────────────────────────────
     LaunchedEffect(Unit) {
@@ -93,7 +101,6 @@ fun DiscoverHomeScreen(
     val filteredPopular by remember(popularItems, activeTab, selectedCategory) {
         derivedStateOf {
             var list = when (activeTab) {
-                ContentTab.ALL -> popularItems
                 ContentTab.NOVELS -> popularItems.filter { !it.isManga && !it.isAnime }
                 ContentTab.MANGA -> popularItems.filter { it.isManga }
                 ContentTab.ANIME -> popularItems.filter { it.isAnime }
@@ -111,7 +118,6 @@ fun DiscoverHomeScreen(
     val filteredSearch by remember(searchResults, activeTab) {
         derivedStateOf {
             when (activeTab) {
-                ContentTab.ALL -> searchResults
                 ContentTab.NOVELS -> searchResults.filter { !it.isManga && !it.isAnime }
                 ContentTab.MANGA -> searchResults.filter { it.isManga }
                 ContentTab.ANIME -> searchResults.filter { it.isAnime }
@@ -138,7 +144,6 @@ fun DiscoverHomeScreen(
                 }
                 else -> {
                     searchResults = when (activeTab) {
-                        ContentTab.ALL -> repository.searchAll(q)
                         ContentTab.NOVELS -> repository.searchAll(q).filter { !it.isManga && !it.isAnime }
                         ContentTab.MANGA -> repository.searchAll(q).filter { it.isManga }
                         else -> emptyList()
@@ -178,14 +183,13 @@ fun DiscoverHomeScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Discover",
+                            activeTab.label,
                             style = MaterialTheme.typography.headlineLarge,
                             color = currentTheme.textColor(),
                             fontWeight = FontWeight.Black
                         )
                         Text(
                             when (activeTab) {
-                                ContentTab.ALL -> "Novels, Manga & Anime — all in one place"
                                 ContentTab.NOVELS -> "Light Novels from 5 sources"
                                 ContentTab.MANGA -> "Manga from MangaDex, MangaSee & MangaFire"
                                 ContentTab.ANIME -> "Currently airing · GogoAnime & Hianime streams"
@@ -213,7 +217,6 @@ fun DiscoverHomeScreen(
                     placeholder = {
                         Text(
                             when (activeTab) {
-                                ContentTab.ALL -> "Search novels, manga & anime..."
                                 ContentTab.NOVELS -> "Search light novels..."
                                 ContentTab.MANGA -> "Search manga titles..."
                                 ContentTab.ANIME -> "Search anime (AniList)..."
@@ -261,52 +264,12 @@ fun DiscoverHomeScreen(
             }
         }
 
-        // ── Tab Row ────────────────────────────────────────────────────────
         val tabAccent = if (activeTab == ContentTab.ANIME) animeAccent else currentTheme.accentColor()
-        TabRow(
-            selectedTabIndex = ContentTab.values().indexOf(activeTab),
-            containerColor = currentTheme.surfaceColor(),
-            contentColor = tabAccent,
-            indicator = { tabPositions ->
-                val idx = ContentTab.values().indexOf(activeTab)
-                SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[idx]),
-                    color = tabAccent
-                )
-            }
-        ) {
-            ContentTab.values().forEach { tab ->
-                val isSelected = activeTab == tab
-                val tintColor = when {
-                    isSelected && tab == ContentTab.ANIME -> animeAccent
-                    isSelected -> currentTheme.accentColor()
-                    else -> currentTheme.subTextColor()
-                }
-                Tab(
-                    selected = isSelected,
-                    onClick = { activeTab = tab; searchQuery = "" }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(tab.icon, null, modifier = Modifier.size(16.dp), tint = tintColor)
-                        Text(
-                            tab.label,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = tintColor,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                }
-            }
-        }
 
         // ── Genre / Filter Chips ───────────────────────────────────────────
         // Novel genre chips
         AnimatedVisibility(
-            visible = activeTab == ContentTab.NOVELS || activeTab == ContentTab.ALL,
+            visible = activeTab == ContentTab.NOVELS,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
@@ -437,10 +400,9 @@ fun DiscoverHomeScreen(
             ) {
                 Text(
                     when (activeTab) {
-                        ContentTab.ALL -> "🔥 Trending Now"
-                        ContentTab.NOVELS -> "📚 Popular Novels"
-                        ContentTab.MANGA -> "🎌 Popular Manga"
-                        ContentTab.ANIME -> "🌸 Currently Airing"
+                        ContentTab.NOVELS -> "Popular Novels"
+                        ContentTab.MANGA -> "Popular Manga"
+                        ContentTab.ANIME -> "Currently Airing"
                     },
                     style = MaterialTheme.typography.titleMedium,
                     color = currentTheme.textColor(),
@@ -797,7 +759,6 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     ContentTab.MANGA -> "No manga loaded yet"
                     ContentTab.NOVELS -> "No novels loaded yet"
                     ContentTab.ANIME -> "Loading anime schedule..."
-                    ContentTab.ALL -> "Loading content..."
                 },
                 style = MaterialTheme.typography.titleMedium,
                 color = currentTheme.subTextColor()
