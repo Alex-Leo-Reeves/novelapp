@@ -163,13 +163,13 @@ render.yaml
 The app checks this update manifest:
 
 ```text
-https://novelapp-site.onrender.com/app-version.json
+https://novelapp.onrender.com/app-version.json
 ```
 
 The website and app expect the latest APK at:
 
 ```text
-https://novelapp-site.onrender.com/downloads/novelapp-latest.apk
+https://novelapp.onrender.com/downloads/novelapp-latest.apk
 ```
 
 Before deploying a real public release, build and sign the APK, then place it here:

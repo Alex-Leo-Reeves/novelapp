@@ -54,13 +54,11 @@ a {
 }
 
 .brand-mark {
-  display: grid;
   width: 34px;
   height: 34px;
-  place-items: center;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #071011;
+  box-shadow: 0 8px 22px rgba(232, 77, 138, 0.22);
+  display: block;
 }
 
 nav {
@@ -208,14 +206,11 @@ h3 {
   font-weight: 900;
 }
 
-.app-top strong {
-  display: grid;
+.app-icon {
   width: 34px;
   height: 34px;
-  place-items: center;
   border-radius: 8px;
-  background: rgba(66, 214, 181, 0.16);
-  color: var(--accent-2);
+  box-shadow: 0 8px 22px rgba(66, 214, 181, 0.18);
 }
 
 .search-pill {

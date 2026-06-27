@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-labelledby="title desc">
+  <title id="title">NovelApp icon</title>
+  <desc id="desc">An open book with a play mark for novels, manga, and anime.</desc>
+  <rect width="108" height="108" rx="24" fill="#0b0d10"/>
+  <circle cx="54" cy="54" r="48" fill="#151922"/>
+  <path fill="#e84d8a" d="M18 25c0-6 5-11 11-11h18c7 0 12 5 12 12v65c-4-4-9-6-16-6H29c-6 0-11-5-11-11V25z"/>
+  <path fill="#42d6b5" d="M90 25c0-6-5-11-11-11H61c-7 0-12 5-12 12v65c4-4 9-6 16-6h14c6 0 11-5 11-11V25z"/>
+  <path fill="#f4f1ec" fill-opacity=".9" d="M29 31h18v4H29zm0 11h15v4H29zm0 11h18v4H29zm0 11h13v4H29zm34-33h16v4H63zm0 11h13v4H63zm0 22h16v4H63z"/>
+  <path fill="#f2c766" d="m47 38 24 16-24 16V38z"/>
+  <path fill="#fff" fill-opacity=".24" d="M54 18c3 2 5 5 5 9v58c-2 1-4 3-5 5-1-2-3-4-5-5V27c0-4 2-7 5-9z"/>
+</svg>

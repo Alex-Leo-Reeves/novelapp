@@ -9,5 +9,5 @@ site/downloads/novelapp-latest.apk
 The website download buttons and in-app update checker both point to:
 
 ```text
-https://novelapp-site.onrender.com/downloads/novelapp-latest.apk
+https://novelapp.onrender.com/downloads/novelapp-latest.apk
 ```
