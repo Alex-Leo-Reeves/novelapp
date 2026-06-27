@@ -12,39 +12,40 @@ import com.alexleoreeves.novelapp.data.AppTheme
 //  Color Palettes for each theme
 // ─────────────────────────────────────────────────────────────────────────────
 object NovelColors {
-    // Dark Theme
-    val darkBackground    = Color(0xFF0D0D0D)
-    val darkSurface       = Color(0xFF1A1A2E)
-    val darkCard          = Color(0xFF16213E)
-    val darkAccent        = Color(0xFF7B2FBE)
-    val darkAccentGlow    = Color(0xFFAB6BEB)
-    val darkText          = Color(0xFFE8E8E8)
-    val darkSubText       = Color(0xFF9E9E9E)
+    // Amethyst Black
+    val darkBackground     = Color(0xFF000000)
+    val darkSurface        = Color(0xFF0A0A0A)
+    val darkCard           = Color(0xFF121212)
+    val darkAccent         = Color(0xFF9D4EDD)
+    val darkAccentGlow     = Color(0xFFC77DFF)
+    val darkText           = Color(0xFFF3F3F3)
+    val darkSubText        = Color(0xFF9E9E9E)
 
-    // White-Pink Theme
-    val pinkBackground    = Color(0xFFFFF0F5)
-    val pinkSurface       = Color(0xFFFFE4EF)
-    val pinkCard          = Color(0xFFFFD6E7)
-    val pinkAccent        = Color(0xFFE91E8C)
-    val pinkText          = Color(0xFF2C2C2C)
-    val pinkSubText       = Color(0xFF666666)
+    // Rose Black
+    val pinkBackground     = Color(0xFF000000)
+    val pinkSurface        = Color(0xFF0D0609)
+    val pinkCard           = Color(0xFF1A0C12)
+    val pinkAccent         = Color(0xFFFF2A85)
+    val pinkAccentGlow     = Color(0xFFFF758F)
+    val pinkText           = Color(0xFFFFF0F5)
+    val pinkSubText        = Color(0xFFB0A0A5)
 
-    // Lavender Mint Theme
-    val lavenderBackground = Color(0xFFF0ECF8)
-    val lavenderSurface    = Color(0xFFE6E0F5)
-    val lavenderCard       = Color(0xFFD8D0EE)
-    val lavenderAccent     = Color(0xFF6A5ACD)
-    val lavenderMint       = Color(0xFF98E4B0)
-    val lavenderText       = Color(0xFF1A1A3A)
-    val lavenderSubText    = Color(0xFF4A4A6A)
+    // Lavender Black
+    val lavenderBackground = Color(0xFF000000)
+    val lavenderSurface    = Color(0xFF0A0714)
+    val lavenderCard       = Color(0xFF140E28)
+    val lavenderAccent     = Color(0xFF8B5CF6)
+    val lavenderMint       = Color(0xFF34D399)
+    val lavenderText       = Color(0xFFEDE9FE)
+    val lavenderSubText    = Color(0xFFA78BFA)
 
-    // Green Theme
-    val greenBackground    = Color(0xFFE8F5E9)
-    val greenSurface       = Color(0xFFDCEFDD)
-    val greenCard          = Color(0xFFCCE5CD)
-    val greenAccent        = Color(0xFF2E7D32)
-    val greenText          = Color(0xFF1B301B)
-    val greenSubText       = Color(0xFF3E6B3E)
+    // Emerald Black
+    val greenBackground    = Color(0xFF000000)
+    val greenSurface       = Color(0xFF050F08)
+    val greenCard          = Color(0xFF0A1F10)
+    val greenAccent        = Color(0xFF10B981)
+    val greenText          = Color(0xFFECFDF5)
+    val greenSubText       = Color(0xFF6EE7B7)
 
     // Common
     val error              = Color(0xFFCF6679)
@@ -52,7 +53,7 @@ object NovelColors {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Color scheme generators
+//  Color scheme generators (all dark/black now)
 // ─────────────────────────────────────────────────────────────────────────────
 fun darkColorScheme() = darkColorScheme(
     background = NovelColors.darkBackground,
@@ -67,18 +68,20 @@ fun darkColorScheme() = darkColorScheme(
     onError = NovelColors.onError,
 )
 
-fun pinkColorScheme() = lightColorScheme(
+fun pinkColorScheme() = darkColorScheme(
     background = NovelColors.pinkBackground,
     surface = NovelColors.pinkSurface,
     primary = NovelColors.pinkAccent,
     onPrimary = Color.White,
     onBackground = NovelColors.pinkText,
     onSurface = NovelColors.pinkText,
-    secondary = NovelColors.pinkAccent,
-    onSecondary = Color.White,
+    secondary = NovelColors.pinkAccentGlow,
+    onSecondary = Color.Black,
+    error = NovelColors.error,
+    onError = NovelColors.onError,
 )
 
-fun lavenderColorScheme() = lightColorScheme(
+fun lavenderColorScheme() = darkColorScheme(
     background = NovelColors.lavenderBackground,
     surface = NovelColors.lavenderSurface,
     primary = NovelColors.lavenderAccent,
@@ -86,10 +89,12 @@ fun lavenderColorScheme() = lightColorScheme(
     onBackground = NovelColors.lavenderText,
     onSurface = NovelColors.lavenderText,
     secondary = NovelColors.lavenderMint,
-    onSecondary = NovelColors.lavenderText,
+    onSecondary = Color.Black,
+    error = NovelColors.error,
+    onError = NovelColors.onError,
 )
 
-fun greenColorScheme() = lightColorScheme(
+fun greenColorScheme() = darkColorScheme(
     background = NovelColors.greenBackground,
     surface = NovelColors.greenSurface,
     primary = NovelColors.greenAccent,
@@ -97,7 +102,9 @@ fun greenColorScheme() = lightColorScheme(
     onBackground = NovelColors.greenText,
     onSurface = NovelColors.greenText,
     secondary = NovelColors.greenAccent,
-    onSecondary = Color.White,
+    onSecondary = Color.Black,
+    error = NovelColors.error,
+    onError = NovelColors.onError,
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

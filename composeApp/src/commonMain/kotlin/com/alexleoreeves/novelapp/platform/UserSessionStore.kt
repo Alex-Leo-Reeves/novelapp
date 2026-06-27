@@ -3,7 +3,7 @@ package com.alexleoreeves.novelapp.platform
 data class SavedUserAccount(
     val username: String,
     val email: String,
-    val password: String
+    val authToken: String
 )
 
 interface UserSessionStore {

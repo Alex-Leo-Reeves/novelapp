@@ -14,44 +14,31 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import com.alexleoreeves.novelapp.audio.GeminiTtsController
 import com.alexleoreeves.novelapp.data.*
-import com.alexleoreeves.novelapp.platform.EmptyUserSessionStore
-import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
-import com.alexleoreeves.novelapp.platform.NoOpExternalLinkOpener
-import com.alexleoreeves.novelapp.platform.SavedUserAccount
-import com.alexleoreeves.novelapp.platform.UserSessionStore
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.components.MiniPlayerWidget
 import com.alexleoreeves.novelapp.ui.theme.NovelAppTheme
-import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
-import com.alexleoreeves.novelapp.ui.theme.subTextColor
-import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Root composable — entry point for shared KMP UI
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-fun App(
-    userSessionStore: UserSessionStore = EmptyUserSessionStore,
-    linkOpener: ExternalLinkOpener = NoOpExternalLinkOpener
-) {
+fun App() {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
-    val currentTab = remember { mutableStateOf(BottomTab.NOVELS) }
-
-    var splashComplete by remember { mutableStateOf(false) }
-    var account by remember { mutableStateOf(userSessionStore.loadAccount()) }
-    var authError by remember { mutableStateOf<String?>(null) }
+    val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
+    var showSplash by remember { mutableStateOf(true) }
 
     // App state
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
+    val downloadRepo = remember { LocalDownloadRepository() }
     val selectedNovel = remember { mutableStateOf<UnifiedSearchResult?>(null) }
     val selectedChapterUrl = remember { mutableStateOf<String?>(null) }
     val selectedChapterTitle = remember { mutableStateOf("") }
     val selectedNovelTitle = remember { mutableStateOf("") }
     val selectedSourceName = remember { mutableStateOf("") }
 
-    // ── Anime navigation state ──────────────────────────────────────────────
+    // Anime navigation state
     val selectedAnime = remember { mutableStateOf<AnimeResult?>(null) }
     val animeStreamUrl = remember { mutableStateOf<String?>(null) }
     val animeEpisodeTitle = remember { mutableStateOf("") }
@@ -69,56 +56,18 @@ fun App(
     }
 
     NovelAppTheme(appTheme = appTheme.value) {
-        val currentAccount = account
+        // ── Splash Screen ───────────────────────────────────────────────────
+        if (showSplash) {
+            SplashScreen(onFinished = { showSplash = false })
+            return@NovelAppTheme
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(appTheme.value.backgroundColor())
         ) {
             when {
-                !splashComplete -> {
-                    OpeningSplashScreen(
-                        currentTheme = appTheme.value,
-                        onFinished = { splashComplete = true }
-                    )
-                }
-
-                currentAccount == null -> {
-                    AuthScreen(
-                        currentTheme = appTheme.value,
-                        errorMessage = authError,
-                        onClearError = { authError = null },
-                        onSignIn = { email, password ->
-                            val stored = userSessionStore.loadAccount()
-                            if (stored == null) {
-                                val localAccount = SavedUserAccount(
-                                    username = email.substringBefore("@").ifBlank { "Reader" },
-                                    email = email,
-                                    password = password
-                                )
-                                userSessionStore.saveAccount(localAccount)
-                                account = localAccount
-                                authError = null
-                            } else if (stored.email.equals(email, ignoreCase = true) && stored.password == password) {
-                                account = stored
-                                authError = null
-                            } else {
-                                authError = "Email or password does not match this device account."
-                            }
-                        },
-                        onCreateAccount = { username, email, password ->
-                            val newAccount = SavedUserAccount(
-                                username = username,
-                                email = email,
-                                password = password
-                            )
-                            userSessionStore.saveAccount(newAccount)
-                            account = newAccount
-                            authError = null
-                        }
-                    )
-                }
-
                 // ── 1. Anime full-screen player ────────────────────────────
                 animeStreamUrl.value != null -> {
                     AnimePlayerScreen(
@@ -135,6 +84,7 @@ fun App(
                         anime = selectedAnime.value!!,
                         repository = repository,
                         currentTheme = appTheme.value,
+                        downloadRepo = downloadRepo,
                         onPlayEpisode = { streamUrl, epTitle ->
                             animeStreamUrl.value = streamUrl
                             animeEpisodeTitle.value = epTitle
@@ -173,6 +123,7 @@ fun App(
                         novel = selectedNovel.value!!,
                         currentTheme = appTheme.value,
                         isFavorite = favorites.any { it.id == selectedNovel.value!!.id },
+                        downloadRepo = downloadRepo,
                         onToggleFavorite = { novel ->
                             val fav = favorites.find { it.id == novel.id }
                             if (fav != null) favorites.remove(fav)
@@ -204,32 +155,8 @@ fun App(
                     Column(modifier = Modifier.fillMaxSize()) {
                         Box(modifier = Modifier.weight(1f)) {
                             when (currentTab.value) {
-                                BottomTab.NOVELS -> DiscoverHomeScreen(
+                                BottomTab.DISCOVER -> DiscoverHomeScreen(
                                     currentTheme = appTheme.value,
-                                    contentTab = ContentTab.NOVELS,
-                                    onNovelSelected = { item ->
-                                        // Route anime items to detail screen
-                                        if (item.isAnime && item.animeResult != null) {
-                                            selectedAnime.value = item.animeResult
-                                        } else {
-                                            selectedNovel.value = item
-                                        }
-                                    }
-                                )
-                                BottomTab.MANGA -> DiscoverHomeScreen(
-                                    currentTheme = appTheme.value,
-                                    contentTab = ContentTab.MANGA,
-                                    onNovelSelected = { item ->
-                                        if (item.isAnime && item.animeResult != null) {
-                                            selectedAnime.value = item.animeResult
-                                        } else {
-                                            selectedNovel.value = item
-                                        }
-                                    }
-                                )
-                                BottomTab.ANIME -> DiscoverHomeScreen(
-                                    currentTheme = appTheme.value,
-                                    contentTab = ContentTab.ANIME,
                                     onNovelSelected = { item ->
                                         if (item.isAnime && item.animeResult != null) {
                                             selectedAnime.value = item.animeResult
@@ -257,18 +184,24 @@ fun App(
                                 BottomTab.READ -> UniversalReadScreen(
                                     currentTheme = appTheme.value
                                 )
-                                BottomTab.YOU -> YouScreen(
-                                    account = currentAccount,
+                                BottomTab.DOWNLOADS -> DownloadsScreen(
                                     currentTheme = appTheme.value,
-                                    linkOpener = linkOpener,
-                                    onSignOut = {
-                                        userSessionStore.clearAccount()
-                                        account = null
-                                        currentTab.value = BottomTab.NOVELS
-                                        selectedNovel.value = null
-                                        selectedChapterUrl.value = null
-                                        selectedAnime.value = null
-                                        animeStreamUrl.value = null
+                                    downloadRepo = downloadRepo,
+                                    onPlayEpisode = { path, title ->
+                                        animeStreamUrl.value = path
+                                        animeEpisodeTitle.value = title
+                                    },
+                                    onReadMangaChapter = { path, title ->
+                                        selectedChapterUrl.value = path
+                                        selectedChapterTitle.value = title
+                                        selectedNovelTitle.value = title
+                                        selectedSourceName.value = "local"
+                                    },
+                                    onReadNovelChapter = { path, title, source ->
+                                        selectedChapterUrl.value = path
+                                        selectedChapterTitle.value = title
+                                        selectedNovelTitle.value = title
+                                        selectedSourceName.value = source
                                     }
                                 )
                             }
@@ -295,11 +228,8 @@ fun App(
                         .pointerInput(Unit) {
                             detectDragGestures(
                                 onDragEnd = {
-                                    if (offsetX < 200f) {
-                                        offsetX = 10f; isExpanded = false
-                                    } else {
-                                        offsetX = 550f; isExpanded = false
-                                    }
+                                    if (offsetX < 200f) { offsetX = 10f; isExpanded = false }
+                                    else { offsetX = 550f; isExpanded = false }
                                 }
                             ) { change, dragAmount ->
                                 change.consume()
@@ -327,15 +257,13 @@ fun App(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Bottom Navigation
+//  Bottom Navigation — now 4 tabs including Downloads
 // ─────────────────────────────────────────────────────────────────────────────
 enum class BottomTab(val label: String, val icon: ImageVector) {
-    NOVELS("Novels", Icons.Default.AutoStories),
-    MANGA("Manga", Icons.Default.Collections),
-    ANIME("Anime", Icons.Default.PlayCircle),
+    DISCOVER("Discover", Icons.Default.Home),
     FAVORITES("Favorites", Icons.Default.Favorite),
     READ("Read", Icons.Default.MenuBook),
-    YOU("You", Icons.Default.Info)
+    DOWNLOADS("Downloads", Icons.Default.Download)
 }
 
 @Composable

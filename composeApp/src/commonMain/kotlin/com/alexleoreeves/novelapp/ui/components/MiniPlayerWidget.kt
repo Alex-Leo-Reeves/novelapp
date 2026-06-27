@@ -1,4 +1,4 @@
-package com.alexleoreeves.novelapp.ui
+package com.alexleoreeves.novelapp.ui.components
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*

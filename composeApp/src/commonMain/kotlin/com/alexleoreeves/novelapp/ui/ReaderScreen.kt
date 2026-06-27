@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -80,7 +81,11 @@ fun ReaderScreen(
     // Load chapter text
     LaunchedEffect(chapterUrl) {
         isLoading = true
-        chapterText = repository.fetchChapterText(chapterUrl, sourceName)
+        chapterText = if (sourceName == "local" || chapterUrl.endsWith(".txt")) {
+            loadDownloadedText(chapterUrl)
+        } else {
+            repository.fetchChapterText(chapterUrl, sourceName)
+        }
         isLoading = false
     }
 
@@ -129,7 +134,7 @@ fun ReaderScreen(
             ) {
                 LazyColumn(
                     state = lazyListState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxHeight().widthIn(max = 800dp).align(Alignment.TopCenter),
                     contentPadding = PaddingValues(
                         top = 72.dp, bottom = 100.dp,
                         start = 22.dp, end = 22.dp
@@ -333,6 +338,8 @@ fun ReaderScreen(
                                                 color = currentTheme.subTextColor()
                                             )
                                         }
+                                    }
+                                }
                             }
 
                             // Sleep Timer controls row

@@ -72,7 +72,11 @@ fun MangaViewerScreen(
     // Load pages on launch
     LaunchedEffect(chapterUrl) {
         isLoading = true
-        pages = repository.fetchMangaPages(chapterUrl, sourceName)
+        pages = if (sourceName == "local") {
+            chapterUrl.split(",")
+        } else {
+            repository.fetchMangaPages(chapterUrl, sourceName)
+        }
         isLoading = false
     }
 
@@ -211,7 +215,7 @@ fun MangaViewerScreen(
                     }
                     MangaScrollMode.RTL -> {
                         // Traditional Japanese RTL horizontal swipes
-                        CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.platform.LayoutDirection.Rtl) {
+                        CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
                             HorizontalPager(
                                 state = pagerState,
                                 modifier = Modifier.fillMaxSize()

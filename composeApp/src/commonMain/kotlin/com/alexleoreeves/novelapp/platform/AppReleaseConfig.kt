@@ -3,6 +3,7 @@ package com.alexleoreeves.novelapp.platform
 object AppReleaseConfig {
     const val CURRENT_VERSION_CODE = 1
     const val CURRENT_VERSION_NAME = "1.0"
+    const val API_BASE_URL = "https://novelapp.onrender.com/api"
     const val UPDATE_MANIFEST_URL = "https://novelapp.onrender.com/app-version.json"
     const val DOWNLOAD_URL = "https://novelapp.onrender.com/downloads/novelapp-latest.apk"
 }
