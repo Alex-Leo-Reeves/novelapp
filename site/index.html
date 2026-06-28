@@ -6,7 +6,7 @@
     <title>NovelApp - Novels, Manga, Anime, Movies</title>
     <meta
       name="description"
-      content="NovelApp is a mobile entertainment app for novels, manga, anime, K-drama, cartoons, movies, favorites, AI narration, and manga OCR."
+      content="NovelApp is a mobile entertainment app for novels, manga, anime, K-drama, cartoons, movies, saved accounts, in-app updates, AI narration, and manga OCR."
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/assets/novelapp-icon.svg" />
@@ -21,6 +21,7 @@
       <nav aria-label="Main navigation">
         <a href="#features">Features</a>
         <a href="#download">Download</a>
+        <a href="#release">Release</a>
         <a href="#contact">Contact</a>
       </nav>
     </header>
@@ -28,18 +29,18 @@
     <main id="top">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Novels. Manga. Anime. K-Drama. Cartoons. Movies.</p>
+          <p class="eyebrow">Version 1.5 is live on Render</p>
           <h1>NovelApp</h1>
           <p class="lede">
-            A focused entertainment app for discovering stories, reading chapters,
-            browsing screen titles, saving favorites, and listening with AI-assisted narration.
+            A focused entertainment app for novels, manga, anime, K-drama,
+            cartoons, movies, saved accounts, in-app updates, and AI-assisted narration.
           </p>
           <div class="hero-actions" id="download">
             <a class="button primary" href="/downloads/novelapp-android.apk" download>
-              Download Android APK
+              Download Android APK v1.5
             </a>
-            <a class="button secondary" href="/downloads/novelapp-android.apk" download>
-              Normal app
+            <a class="button secondary" href="/downloads/novelapp-tv.apk" download>
+              Android TV APK
             </a>
             <a class="button secondary" href="/downloads/novelapp-ios.ipa" download>
               iPhone IPA
@@ -51,7 +52,7 @@
               Update manifest
             </a>
           </div>
-          <p class="developer">Developed by Mike</p>
+          <p class="developer">Developed by Mike · Account service: online</p>
         </div>
 
         <div class="phone-preview" aria-label="NovelApp interface preview">
@@ -113,10 +114,36 @@
             <p>Gemini-powered narration highlights the active paragraph while chapters play.</p>
           </article>
           <article>
-            <h3>In-app updates</h3>
-            <p>The app checks this Render-hosted manifest and links users to the latest APK.</p>
+            <h3>Accounts and updates</h3>
+            <p>Sign in once, keep the session saved, and receive the latest Android APK through the Render-hosted manifest.</p>
           </article>
         </div>
+      </section>
+
+      <section class="release-panel" id="release">
+        <div class="release-copy">
+          <p class="eyebrow">Current release</p>
+          <h2>NovelApp 1.5 fixes login and account creation.</h2>
+          <p>
+            This release points the app to the working NovelApp Render web service,
+            improves auth response handling, and keeps the anime playback, manga sorting,
+            and update fixes from version 1.4.
+          </p>
+        </div>
+        <dl class="release-list">
+          <div>
+            <dt>Version</dt>
+            <dd>1.5 · code 6</dd>
+          </div>
+          <div>
+            <dt>Service</dt>
+            <dd>novelapp1.onrender.com</dd>
+          </div>
+          <div>
+            <dt>Manifest</dt>
+            <dd><a href="/app-version.json">/app-version.json</a></dd>
+          </div>
+        </dl>
       </section>
 
       <section class="download-panel">

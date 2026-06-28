@@ -290,6 +290,7 @@ h3 {
 }
 
 .section,
+.release-panel,
 .download-panel,
 footer {
   margin: 0 auto;
@@ -311,6 +312,7 @@ footer {
 }
 
 .feature-grid article,
+.release-panel,
 .download-panel {
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -322,10 +324,51 @@ footer {
 }
 
 .feature-grid p,
+.release-panel p,
 .download-panel p,
 footer p {
   color: var(--muted);
   line-height: 1.6;
+}
+
+.release-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: 24px;
+  margin-bottom: 18px;
+  padding: clamp(22px, 4vw, 36px);
+}
+
+.release-copy h2 {
+  font-size: clamp(1.75rem, 3vw, 2.7rem);
+}
+
+.release-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.release-list div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.release-list dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.release-list dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .download-panel {
@@ -387,10 +430,15 @@ footer p {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .release-panel,
   .download-panel,
   footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .release-panel {
+    grid-template-columns: 1fr;
   }
 
   .download-actions {
