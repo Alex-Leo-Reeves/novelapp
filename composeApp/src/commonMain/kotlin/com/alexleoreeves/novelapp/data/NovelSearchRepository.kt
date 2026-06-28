@@ -6,6 +6,7 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
 import io.ktor.serialization.kotlinx.json.*
+import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 
@@ -19,7 +20,7 @@ class NovelSearchRepository(
     rapidApiKey: String,
     rapidApiHost: String
 ) {
-    private val httpClient = HttpClient {
+    val httpClient = platformHttpClient {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }
@@ -230,13 +231,28 @@ class NovelSearchRepository(
      * Fetch episode list for a given anime title.
      * Tries Anineko first, falls back to AnimePahe.
      */
-    suspend fun fetchEpisodes(animeTitleQuery: String, episodeCount: Int = 0): List<AnimeEpisode> = coroutineScope {
-        val anineko = async { aninekoScraper.fetchEpisodes(animeTitleQuery) }
-        val animePahe = async { animePaheScraper.fetchEpisodes(animeTitleQuery) }
-        val episodes = (anineko.await() + animePahe.await())
-            .distinctBy { it.url }
-            .sortedByDescending { it.episodeNumber }
-        episodes.ifEmpty { aninekoScraper.fallbackEpisodes(animeTitleQuery, episodeCount) }
+    suspend fun fetchEpisodes(
+        animeTitleQuery: String,
+        episodeCount: Int = 0,
+        alternateQueries: List<String> = emptyList()
+    ): List<AnimeEpisode> {
+        val queries = (listOf(animeTitleQuery) + alternateQueries)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+
+        for (query in queries) {
+            val episodes = coroutineScope {
+                val anineko = async { aninekoScraper.fetchEpisodes(query) }
+                val animePahe = async { animePaheScraper.fetchEpisodes(query) }
+                (anineko.await() + animePahe.await())
+                    .distinctBy { it.url }
+                    .sortedByDescending { it.episodeNumber }
+            }
+            if (episodes.isNotEmpty()) return episodes
+        }
+
+        return aninekoScraper.fallbackEpisodes(queries.firstOrNull().orEmpty(), episodeCount)
     }
 
     /**
@@ -257,7 +273,7 @@ class NovelSearchRepository(
     // ─────────────────────────────────────────────────────────────────────────
     suspend fun fetchChapters(novelUrl: String, sourceName: String): List<Chapter> {
         val source = sources.find { it.sourceName == sourceName } ?: sources.first()
-        return try { source.fetchChapters(novelUrl) } catch (e: Exception) { emptyList() }
+        return try { source.fetchChapters(novelUrl).normalizedChapterOrder() } catch (e: Exception) { emptyList() }
     }
 
     suspend fun fetchChapterText(chapterUrl: String, sourceName: String): String {
@@ -268,7 +284,7 @@ class NovelSearchRepository(
 
     suspend fun fetchMangaChapters(mangaUrl: String, sourceName: String): List<MangaChapter> {
         val scraper = mangaSources.find { it.sourceName == sourceName } ?: mangaSources.first()
-        return try { scraper.fetchMangaChapters(mangaUrl) } catch (e: Exception) { emptyList() }
+        return try { scraper.fetchMangaChapters(mangaUrl).normalizedMangaChapterOrder() } catch (e: Exception) { emptyList() }
     }
 
     suspend fun fetchMangaPages(chapterUrl: String, sourceName: String): List<String> {

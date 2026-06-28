@@ -2,6 +2,7 @@ package com.alexleoreeves.novelapp.ui
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.net.Uri
 import android.view.ViewGroup
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -71,17 +72,24 @@ actual fun AnimePlayerScreen(
         }
     }
 
+    val isDirectMedia = streamUrl.isDirectPlayableMediaUrl()
+    val isWebEmbed = streamUrl.startsWith("http", ignoreCase = true) && !isDirectMedia
+
     // ── ExoPlayer setup ───────────────────────────────────────────────────
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(streamUrl))
-            prepare()
-            if (initialPositionMs > 0L) seekTo(initialPositionMs)
-            playWhenReady = true
+        if (!isWebEmbed || isDirectMedia) {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(streamUrl))
+                prepare()
+                if (initialPositionMs > 0L) seekTo(initialPositionMs)
+                playWhenReady = true
+            }
+        } else {
+            null
         }
     }
     DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
+        onDispose { exoPlayer?.release() }
     }
 
     // ── UI State ──────────────────────────────────────────────────────────
@@ -100,48 +108,98 @@ actual fun AnimePlayerScreen(
     }
 
     LaunchedEffect(exoPlayer) {
-        while (true) {
-            onProgress(exoPlayer.currentPosition)
-            delay(2500)
+        if (exoPlayer != null) {
+            while (true) {
+                onProgress(exoPlayer.currentPosition)
+                delay(2500)
+            }
         }
     }
 
     // Apply audio language to ExoPlayer
     LaunchedEffect(audioLanguage) {
-        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-            .buildUpon()
-            .setPreferredAudioLanguage(audioLanguage)
-            .build()
+        exoPlayer?.let { player ->
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setPreferredAudioLanguage(audioLanguage)
+                .build()
+        }
     }
 
     // Apply subtitle track to ExoPlayer
     LaunchedEffect(subtitleMode) {
-        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-            .buildUpon()
-            .apply {
-                if (subtitleMode == "off") {
-                    setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                } else {
-                    setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                    setPreferredTextLanguage(subtitleMode)
+        exoPlayer?.let { player ->
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .apply {
+                    if (subtitleMode == "off") {
+                        setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    } else {
+                        setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        setPreferredTextLanguage(subtitleMode)
+                    }
                 }
-            }
-            .build()
+                .build()
+        }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .clickable(indication = null, interactionSource = remember {
-                androidx.compose.foundation.interaction.MutableInteractionSource()
-            }) { showControls = !showControls }
-    ) {
+    if (isWebEmbed) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            setSupportMultipleWindows(false)
+                        }
+                        webViewClient = object : android.webkit.WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): Boolean {
+                                val url = request?.url?.toString() ?: ""
+                                return !url.isAllowedPlayerNavigation(streamUrl)
+                            }
+                        }
+                        loadUrl(streamUrl)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .align(Alignment.TopStart)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
+            ) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+        }
+    } else {
+        val player = exoPlayer ?: return
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(indication = null, interactionSource = remember {
+                    androidx.compose.foundation.interaction.MutableInteractionSource()
+                }) { showControls = !showControls }
+        ) {
         // ── Video View ────────────────────────────────────────────────────
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
-                    player = exoPlayer
+                    this.player = player
                     useController = false   // We use our own custom controls
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -199,7 +257,7 @@ actual fun AnimePlayerScreen(
                     // Skip back 10s
                     IconButton(
                         onClick = {
-                            exoPlayer.seekTo(maxOf(0L, exoPlayer.currentPosition - 10_000L))
+                            player.seekTo(maxOf(0L, player.currentPosition - 10_000L))
                             showControls = true
                         },
                         modifier = Modifier.size(56.dp)
@@ -212,15 +270,15 @@ actual fun AnimePlayerScreen(
                         )
                     }
                     // Play / Pause
-                    val isPlaying by produceState(initialValue = exoPlayer.isPlaying) {
+                    val isPlaying by produceState(initialValue = player.isPlaying) {
                         while (true) {
-                            value = exoPlayer.isPlaying
+                            value = player.isPlaying
                             delay(300)
                         }
                     }
                     IconButton(
                         onClick = {
-                            if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            if (player.isPlaying) player.pause() else player.play()
                             showControls = true
                         },
                         modifier = Modifier.size(72.dp)
@@ -235,7 +293,7 @@ actual fun AnimePlayerScreen(
                     // Skip forward 10s
                     IconButton(
                         onClick = {
-                            exoPlayer.seekTo(exoPlayer.currentPosition + 10_000L)
+                            player.seekTo(player.currentPosition + 10_000L)
                             showControls = true
                         },
                         modifier = Modifier.size(56.dp)
@@ -259,15 +317,15 @@ actual fun AnimePlayerScreen(
                     // Seek bar
                     val position by produceState(initialValue = 0L) {
                         while (true) {
-                            value = exoPlayer.currentPosition
+                            value = player.currentPosition
                             delay(500)
                         }
                     }
-                    val duration = exoPlayer.duration.takeIf { it > 0 } ?: 1L
+                    val duration = player.duration.takeIf { it > 0 } ?: 1L
                     Slider(
                         value = position.toFloat() / duration.toFloat(),
                         onValueChange = { pct ->
-                            exoPlayer.seekTo((pct * duration).toLong())
+                            player.seekTo((pct * duration).toLong())
                             showControls = true
                         },
                         colors = SliderDefaults.colors(
@@ -418,6 +476,7 @@ actual fun AnimePlayerScreen(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -447,4 +506,40 @@ private fun formatMs(ms: Long): String {
     } else {
         "%d:%02d".format(minutes, seconds)
     }
+}
+
+private fun String.isDirectPlayableMediaUrl(): Boolean {
+    val clean = substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".m3u8") ||
+        clean.endsWith(".mp4") ||
+        clean.endsWith(".mpd") ||
+        clean.endsWith(".webm") ||
+        clean.endsWith(".mkv") ||
+        clean.endsWith(".mov") ||
+        !startsWith("http", ignoreCase = true)
+}
+
+private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
+    if (isBlank()) return false
+    if (startsWith("about:", ignoreCase = true) || startsWith("data:", ignoreCase = true) || startsWith("blob:", ignoreCase = true)) {
+        return true
+    }
+    val requestedHost = runCatching { Uri.parse(this).host.orEmpty().lowercase() }.getOrDefault("")
+    val initialHost = runCatching { Uri.parse(initialUrl).host.orEmpty().lowercase() }.getOrDefault("")
+    if (requestedHost.isBlank()) return false
+    if (requestedHost == initialHost || requestedHost.endsWith(".$initialHost")) return true
+
+    return listOf(
+        "anineko.to",
+        "anizara.store",
+        "vivibebe.site",
+        "bibiemb.xyz",
+        "otakuhg.site",
+        "otakuvid.online",
+        "playmogo.com",
+        "kwik.",
+        "dood",
+        "vidsrc",
+        "tmdb"
+    ).any { requestedHost.contains(it) }
 }

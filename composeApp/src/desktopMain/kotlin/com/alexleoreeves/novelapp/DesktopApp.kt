@@ -40,6 +40,7 @@ fun DesktopApp() {
     val selectedAnime = remember { mutableStateOf<AnimeResult?>(null) }
     val animeStreamUrl = remember { mutableStateOf<String?>(null) }
     val animeEpisodeTitle = remember { mutableStateOf("") }
+    val desktopRequireAuth: (() -> Unit) -> Unit = { action -> action() }
 
     val repository = remember {
         NovelSearchRepository(
@@ -128,12 +129,16 @@ fun DesktopApp() {
                         currentTheme = appTheme.value,
                         downloadRepo = downloadRepo,
                         onPlayEpisode = { url, title -> animeStreamUrl.value = url; animeEpisodeTitle.value = title },
-                        onBack = { selectedAnime.value = null }
+                        onBack = { selectedAnime.value = null },
+                        requireAuth = desktopRequireAuth
                     )
                     selectedMedia.value != null -> MediaDetailScreen(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
-                        onOpenWatchOptions = {},
+                        onPlayStream = { url, title ->
+                            animeStreamUrl.value = url
+                            animeEpisodeTitle.value = title
+                        },
                         onBack = { selectedMedia.value = null }
                     )
                     selectedNovel.value != null -> NovelDetailScreen(
@@ -155,7 +160,8 @@ fun DesktopApp() {
                             selectedChapterUrl.value = chapter.url
                             selectedSourceName.value = selectedNovel.value!!.sourceName
                         },
-                        onBack = { selectedNovel.value = null }
+                        onBack = { selectedNovel.value = null },
+                        requireAuth = desktopRequireAuth
                     )
                     else -> when (currentSection) {
                         DesktopSection.DISCOVER -> DiscoverHomeScreen(
@@ -177,7 +183,10 @@ fun DesktopApp() {
                             },
                             onRemoveFavorite = { fav -> favorites.remove(fav) }
                         )
-                        DesktopSection.READ -> UniversalReadScreen(currentTheme = appTheme.value)
+                        DesktopSection.READ -> UniversalReadScreen(
+                            currentTheme = appTheme.value,
+                            requireAuth = desktopRequireAuth
+                        )
                         DesktopSection.DOWNLOADS -> DownloadsScreen(
                             currentTheme = appTheme.value,
                             downloadRepo = downloadRepo,

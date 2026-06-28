@@ -22,6 +22,7 @@ import com.alexleoreeves.novelapp.platform.PlatformBackHandler
 import com.alexleoreeves.novelapp.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.platform.UserSessionStore
 import com.alexleoreeves.novelapp.platform.currentTimeMillis
+import com.alexleoreeves.novelapp.platform.platformHttpClient
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.components.MiniPlayerWidget
 import com.alexleoreeves.novelapp.ui.theme.NovelAppTheme
@@ -29,7 +30,6 @@ import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
-import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.launch
@@ -87,7 +87,7 @@ fun App(
         GeminiTtsController(BuildKonfig.GEMINI_API_KEY)
     }
     val updateClient = remember {
-        HttpClient {
+        platformHttpClient {
             install(ContentNegotiation) {
                 json(Json { ignoreUnknownKeys = true })
             }
@@ -144,8 +144,43 @@ fun App(
             return@NovelAppTheme
         }
 
-        // ── No hard wall — guests proceed to main app.
-        // Auth sheet is shown as an overlay when they try to use gated content.
+        if (account == null) {
+            AuthScreen(
+                currentTheme = appTheme.value,
+                isSubmitting = isAuthSubmitting,
+                errorMessage = authError,
+                onClearError = { authError = null },
+                onSignIn = { email, password ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching { authApi.login(email, password) }
+                            .onSuccess { signedIn ->
+                                userSessionStore.saveAccount(signedIn)
+                                account = signedIn
+                                showAuthSheet = false
+                            }
+                            .onFailure { authError = it.message ?: "Sign in failed." }
+                        isAuthSubmitting = false
+                    }
+                },
+                onCreateAccount = { username, email, password ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching { authApi.register(username, email, password) }
+                            .onSuccess { created ->
+                                userSessionStore.saveAccount(created)
+                                account = created
+                                showAuthSheet = false
+                            }
+                            .onFailure { authError = it.message ?: "Account creation failed." }
+                        isAuthSubmitting = false
+                    }
+                }
+            )
+            return@NovelAppTheme
+        }
 
         fun openReadHistory(item: ReadHistoryItem) {
             selectedNovel.value = UnifiedSearchResult(
@@ -299,7 +334,10 @@ fun App(
                     MediaDetailScreen(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
-                        onOpenWatchOptions = { url -> linkOpener.open(url) },
+                        onPlayStream = { url, title ->
+                            animeStreamUrl.value = url
+                            animeEpisodeTitle.value = title
+                        },
                         onBack = { selectedMedia.value = null }
                     )
                 }
@@ -563,7 +601,7 @@ fun App(
                             }
                         }
                     ) {
-                        Text("Download")
+                        Text("Install update")
                     }
                 },
                 dismissButton = {

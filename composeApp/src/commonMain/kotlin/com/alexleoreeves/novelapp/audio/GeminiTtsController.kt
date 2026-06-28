@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.audio
 
+import com.alexleoreeves.novelapp.platform.platformHttpClient
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -42,7 +43,7 @@ class GeminiTtsController(private val apiKey: String) {
     private var _chunkCursor = 0
     private var textChunks: List<String> = emptyList()
 
-    private val httpClient = HttpClient()
+    private val httpClient = platformHttpClient()
 
     // Sleep Timer duration flow
     val sleepTimerMinutes = MutableStateFlow(0)

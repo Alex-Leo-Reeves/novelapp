@@ -57,8 +57,13 @@ fun AnimeDetailScreen(
     // Load episodes on mount
     LaunchedEffect(anime.id) {
         isLoadingEpisodes = true
+        val titleQueries = listOf(anime.displayTitle, anime.titleEnglish, anime.titleRomaji)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
         episodes = repository.fetchEpisodes(
-            animeTitleQuery = anime.titleRomaji.ifEmpty { anime.titleEnglish },
+            animeTitleQuery = titleQueries.firstOrNull() ?: anime.displayTitle,
+            alternateQueries = titleQueries.drop(1),
             episodeCount = anime.episodeCount
         )
         isLoadingEpisodes = false

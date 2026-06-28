@@ -68,7 +68,7 @@ import com.alexleoreeves.novelapp.ui.theme.cardColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
-import io.ktor.client.HttpClient
+import com.alexleoreeves.novelapp.platform.platformHttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.launch
@@ -97,7 +97,7 @@ fun YouScreen(
 ) {
     val scope = rememberCoroutineScope()
     val client = remember {
-        HttpClient {
+        platformHttpClient {
             install(ContentNegotiation) {
                 json(Json { ignoreUnknownKeys = true })
             }
@@ -616,7 +616,7 @@ private fun UpdateCard(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Download", color = Color.White)
+                        Text("Install update", color = Color.White)
                     }
                 }
             }
