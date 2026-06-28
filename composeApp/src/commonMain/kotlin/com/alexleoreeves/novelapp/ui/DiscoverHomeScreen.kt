@@ -3,6 +3,7 @@ package com.alexleoreeves.novelapp.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
@@ -16,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.*
@@ -26,6 +28,7 @@ import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Content type tab selector: Novels / Manga / Anime / TMDB media
@@ -96,8 +99,16 @@ fun DiscoverHomeScreen(
     var isLoadingPopular by remember { mutableStateOf(true) }
     var isLoadingAnime by remember { mutableStateOf(true) }
     var isLoadingVideo by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var showTopArea by remember { mutableStateOf(true) }
+    var pullDistance by remember { mutableStateOf(0f) }
+    var pageByTab by remember {
+        mutableStateOf(ContentTab.values().associateWith { 1 })
+    }
 
     val categories = NovelCategory.values().toList()
+    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(contentTab) {
         searchQuery = ""
@@ -109,6 +120,32 @@ fun DiscoverHomeScreen(
         selectedCategory = NovelCategory.ALL
         selectedMangaGenre = "All"
         selectedAnimeGenre = "All"
+        showTopArea = true
+    }
+
+    LaunchedEffect(activeTab) {
+        gridState.scrollToItem(0)
+        showTopArea = true
+        pullDistance = 0f
+    }
+
+    LaunchedEffect(gridState, activeTab) {
+        var lastIndex = gridState.firstVisibleItemIndex
+        var lastOffset = gridState.firstVisibleItemScrollOffset
+        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val atTop = index == 0 && offset < 10
+                val scrollingUp = index < lastIndex || (index == lastIndex && offset < lastOffset)
+                val scrollingDown = index > lastIndex || (index == lastIndex && offset > lastOffset + 10)
+                showTopArea = when {
+                    atTop -> true
+                    scrollingUp && index <= 2 -> true
+                    scrollingDown -> false
+                    else -> showTopArea
+                }
+                lastIndex = index
+                lastOffset = offset
+            }
     }
 
     // ── Initial popular content load ───────────────────────────────────────
@@ -222,6 +259,68 @@ fun DiscoverHomeScreen(
         activeTab.videoCategory()?.let { videoItemsByTab[activeTab].orEmpty() } ?: filteredPopular
     }
     val tabAccent = activeTab.tabAccent(currentTheme)
+    fun refreshActiveTab() {
+        if (isRefreshing) return
+        scope.launch {
+            isRefreshing = true
+            val nextPage = ((pageByTab[activeTab] ?: 1) + 1).let { if (it > 8) 1 else it }
+            pageByTab = pageByTab + (activeTab to nextPage)
+            try {
+                if (searchQuery.length >= 2) {
+                    when (activeTab) {
+                        ContentTab.ANIME -> animeSearchResults = repository.searchAnime(searchQuery)
+                        ContentTab.K_DRAMA,
+                        ContentTab.CARTOON,
+                        ContentTab.MOVIES -> {
+                            val category = activeTab.videoCategory()
+                            videoSearchResults = if (category != null) {
+                                repository.searchVideo(category, searchQuery, nextPage)
+                            } else {
+                                emptyList()
+                            }
+                        }
+                        ContentTab.NOVELS -> searchResults = repository.searchNovels(searchQuery)
+                        ContentTab.MANGA -> searchResults = repository.searchManga(searchQuery)
+                    }
+                } else {
+                    when (activeTab) {
+                        ContentTab.NOVELS,
+                        ContentTab.MANGA -> {
+                            isLoadingPopular = true
+                            popularItems = repository.fetchPopularAll(page = nextPage)
+                            isLoadingPopular = false
+                        }
+                        ContentTab.ANIME -> {
+                            isLoadingAnime = true
+                            airingAnime = if (nextPage % 2 == 0) {
+                                repository.fetchTrendingAnime(page = nextPage)
+                            } else {
+                                repository.fetchCurrentlyAiring(page = nextPage)
+                            }
+                            isLoadingAnime = false
+                        }
+                        ContentTab.K_DRAMA,
+                        ContentTab.CARTOON,
+                        ContentTab.MOVIES -> {
+                            val category = activeTab.videoCategory()
+                            if (category != null) {
+                                isLoadingVideo = true
+                                videoItemsByTab = videoItemsByTab + (activeTab to repository.fetchVideo(category, nextPage))
+                                isLoadingVideo = false
+                            }
+                        }
+                    }
+                }
+                gridState.animateScrollToItem(0)
+            } finally {
+                isLoadingPopular = false
+                isLoadingAnime = false
+                isLoadingVideo = false
+                isRefreshing = false
+                pullDistance = 0f
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -229,138 +328,144 @@ fun DiscoverHomeScreen(
             .background(currentTheme.backgroundColor())
     ) {
         // ── Header ─────────────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(currentTheme.surfaceColor(), currentTheme.backgroundColor())
-                    )
-                )
+        AnimatedVisibility(
+            visible = showTopArea,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
         ) {
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            activeTab.label,
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = currentTheme.textColor(),
-                            fontWeight = FontWeight.Black
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(currentTheme.surfaceColor(), currentTheme.backgroundColor())
                         )
-                        Text(
-                            "Search, browse, and continue your stories.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = currentTheme.subTextColor()
-                        )
-                    }
-                    Icon(
-                        activeTab.icon,
-                        null,
-                        tint = tabAccent,
-                        modifier = Modifier.size(28.dp)
                     )
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = {
-                        Text(
-                            when (activeTab) {
-                                ContentTab.NOVELS -> "Search light novels..."
-                                ContentTab.MANGA -> "Search manga titles..."
-                                ContentTab.ANIME -> "Search anime (AniList)..."
-                                ContentTab.K_DRAMA -> "Search K-drama..."
-                                ContentTab.CARTOON -> "Search cartoons..."
-                                ContentTab.MOVIES -> "Search movies..."
-                            },
-                            color = currentTheme.subTextColor()
-                        )
-                    },
-                    leadingIcon = {
-                        if (isSearching) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = tabAccent
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Search,
-                                null,
-                                tint = tabAccent
-                            )
-                        }
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Close, null, tint = currentTheme.subTextColor())
-                            }
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = tabAccent,
-                        unfocusedBorderColor = currentTheme.subTextColor().copy(0.3f),
-                        focusedTextColor = currentTheme.textColor(),
-                        unfocusedTextColor = currentTheme.textColor(),
-                        cursorColor = tabAccent,
-                        unfocusedContainerColor = currentTheme.cardColor().copy(0.5f),
-                        focusedContainerColor = currentTheme.cardColor().copy(0.5f)
-                    ),
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp)
-                )
-
-                Spacer(Modifier.height(14.dp))
-
-                // Swipeable tab rail
-                LazyRow(
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(currentTheme.cardColor().copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
                 ) {
-                    items(ContentTab.values().toList()) { tab ->
-                        val selected = activeTab == tab
-                        val tabColor = tab.tabAccent(currentTheme)
-                        Box(
-                            modifier = Modifier
-                                .widthIn(min = 104.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selected) tabColor else Color.Transparent)
-                                .clickable { activeTab = tab }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                activeTab.label,
+                                style = MaterialTheme.typography.headlineLarge,
+                                color = currentTheme.textColor(),
+                                fontWeight = FontWeight.Black
+                            )
+                            Text(
+                                "Search, browse, and continue your stories.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = currentTheme.subTextColor()
+                            )
+                        }
+                        Icon(
+                            activeTab.icon,
+                            null,
+                            tint = tabAccent,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = {
+                            Text(
+                                when (activeTab) {
+                                    ContentTab.NOVELS -> "Search light novels..."
+                                    ContentTab.MANGA -> "Search manga titles..."
+                                    ContentTab.ANIME -> "Search anime (AniList)..."
+                                    ContentTab.K_DRAMA -> "Search K-drama..."
+                                    ContentTab.CARTOON -> "Search cartoons..."
+                                    ContentTab.MOVIES -> "Search movies..."
+                                },
+                                color = currentTheme.subTextColor()
+                            )
+                        },
+                        leadingIcon = {
+                            if (isSearching) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = tabAccent
+                                )
+                            } else {
                                 Icon(
-                                    tab.icon,
+                                    Icons.Default.Search,
                                     null,
-                                    tint = if (selected) Color.White else currentTheme.subTextColor(),
-                                    modifier = Modifier.size(16.dp)
+                                    tint = tabAccent
                                 )
-                                Text(
-                                    tab.label,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) Color.White else currentTheme.subTextColor()
-                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, null, tint = currentTheme.subTextColor())
+                                }
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = tabAccent,
+                            unfocusedBorderColor = currentTheme.subTextColor().copy(0.3f),
+                            focusedTextColor = currentTheme.textColor(),
+                            unfocusedTextColor = currentTheme.textColor(),
+                            cursorColor = tabAccent,
+                            unfocusedContainerColor = currentTheme.cardColor().copy(0.5f),
+                            focusedContainerColor = currentTheme.cardColor().copy(0.5f)
+                        ),
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+
+                    Spacer(Modifier.height(14.dp))
+
+                    // Swipeable tab rail
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(currentTheme.cardColor().copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(ContentTab.values().toList()) { tab ->
+                            val selected = activeTab == tab
+                            val tabColor = tab.tabAccent(currentTheme)
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(min = 104.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) tabColor else Color.Transparent)
+                                    .clickable { activeTab = tab }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        tab.icon,
+                                        null,
+                                        tint = if (selected) Color.White else currentTheme.subTextColor(),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        tab.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (selected) Color.White else currentTheme.subTextColor()
+                                    )
+                                }
                             }
                         }
                     }
@@ -371,7 +476,7 @@ fun DiscoverHomeScreen(
         // ── Genre / Filter Chips ───────────────────────────────────────────
         // Novel genre chips
         AnimatedVisibility(
-            visible = activeTab == ContentTab.NOVELS,
+            visible = showTopArea && activeTab == ContentTab.NOVELS,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
@@ -409,7 +514,7 @@ fun DiscoverHomeScreen(
 
         // Manga genre chips
         AnimatedVisibility(
-            visible = activeTab == ContentTab.MANGA,
+            visible = showTopArea && activeTab == ContentTab.MANGA,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
@@ -442,7 +547,7 @@ fun DiscoverHomeScreen(
 
         // Anime genre chips
         AnimatedVisibility(
-            visible = activeTab == ContentTab.ANIME,
+            visible = showTopArea && activeTab == ContentTab.ANIME,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
@@ -474,47 +579,53 @@ fun DiscoverHomeScreen(
         }
 
         // ── Section Label ──────────────────────────────────────────────────
-        if (searchQuery.length >= 2) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.Search, null, tint = tabAccent, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Results for \"$searchQuery\"", style = MaterialTheme.typography.labelLarge, color = currentTheme.subTextColor())
-                val resultCount = when {
-                    activeTab == ContentTab.ANIME -> animeSearchResults.size
-                    activeTab.videoCategory() != null -> videoSearchResults.size
-                    else -> filteredSearch.size
-                }
-                if (resultCount > 0) {
+        AnimatedVisibility(
+            visible = showTopArea,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            if (searchQuery.length >= 2) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Search, null, tint = tabAccent, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("· $resultCount found", style = MaterialTheme.typography.labelLarge, color = tabAccent, fontWeight = FontWeight.Bold)
+                    Text("Results for \"$searchQuery\"", style = MaterialTheme.typography.labelLarge, color = currentTheme.subTextColor())
+                    val resultCount = when {
+                        activeTab == ContentTab.ANIME -> animeSearchResults.size
+                        activeTab.videoCategory() != null -> videoSearchResults.size
+                        else -> filteredSearch.size
+                    }
+                    if (resultCount > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        Text("· $resultCount found", style = MaterialTheme.typography.labelLarge, color = tabAccent, fontWeight = FontWeight.Bold)
+                    }
                 }
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    when (activeTab) {
-                        ContentTab.NOVELS -> "Popular Novels"
-                        ContentTab.MANGA -> "Popular Manga"
-                        ContentTab.ANIME -> "Currently Airing"
-                        ContentTab.K_DRAMA -> "Popular K-Drama"
-                        ContentTab.CARTOON -> "Popular Cartoons"
-                        ContentTab.MOVIES -> "Popular Movies"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = currentTheme.textColor(),
-                    fontWeight = FontWeight.Bold
-                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        when (activeTab) {
+                            ContentTab.NOVELS -> "Popular Novels"
+                            ContentTab.MANGA -> "Popular Manga"
+                            ContentTab.ANIME -> "Currently Airing"
+                            ContentTab.K_DRAMA -> "Popular K-Drama"
+                            ContentTab.CARTOON -> "Popular Cartoons"
+                            ContentTab.MOVIES -> "Popular Movies"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = currentTheme.textColor(),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
@@ -524,7 +635,66 @@ fun DiscoverHomeScreen(
         val novelCols = if (isDesktop) 4 else 2
         val mediaCols = if (isDesktop) 4 else 2
 
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(activeTab, isRefreshing) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            val shouldRefresh =
+                                pullDistance > 120f &&
+                                    gridState.firstVisibleItemIndex == 0 &&
+                                    gridState.firstVisibleItemScrollOffset == 0
+                            if (shouldRefresh) refreshActiveTab() else pullDistance = 0f
+                        },
+                        onDragCancel = { pullDistance = 0f },
+                        onVerticalDrag = { change, dragAmount ->
+                            val atTop = gridState.firstVisibleItemIndex == 0 &&
+                                gridState.firstVisibleItemScrollOffset == 0
+                            if (atTop && dragAmount > 0f && !isRefreshing) {
+                                pullDistance = (pullDistance + dragAmount).coerceAtMost(180f)
+                                change.consume()
+                            } else if (dragAmount < 0f) {
+                                pullDistance = 0f
+                            }
+                        }
+                    )
+                }
+        ) {
+            if (isRefreshing || pullDistance > 24f) {
+                Surface(
+                    color = currentTheme.cardColor().copy(alpha = 0.96f),
+                    shape = RoundedCornerShape(18.dp),
+                    tonalElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(2f)
+                        .padding(top = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = tabAccent,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Refresh, null, tint = tabAccent, modifier = Modifier.size(16.dp))
+                        }
+                        Text(
+                            if (isRefreshing) "Refreshing" else "Release to refresh",
+                            color = currentTheme.textColor(),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
             when {
                 // Anime tab
                 activeTab == ContentTab.ANIME -> {
@@ -544,6 +714,7 @@ fun DiscoverHomeScreen(
                         EmptyStateView(currentTheme = currentTheme, tab = activeTab, hasSearch = searchQuery.isNotEmpty())
                     } else {
                         LazyVerticalGrid(
+                            state = gridState,
                             columns = GridCells.Fixed(animeCols),
                             contentPadding = PaddingValues(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -584,6 +755,7 @@ fun DiscoverHomeScreen(
                         EmptyStateView(currentTheme = currentTheme, tab = activeTab, hasSearch = searchQuery.isNotEmpty())
                     } else {
                         LazyVerticalGrid(
+                            state = gridState,
                             columns = GridCells.Fixed(mediaCols),
                             contentPadding = PaddingValues(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -610,6 +782,7 @@ fun DiscoverHomeScreen(
                 )
                 else -> {
                     LazyVerticalGrid(
+                        state = gridState,
                         columns = GridCells.Fixed(if (activeTab == ContentTab.MANGA) mangaCols else novelCols),
                         contentPadding = PaddingValues(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),

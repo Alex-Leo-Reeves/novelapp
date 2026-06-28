@@ -41,7 +41,9 @@ actual class MangaOcrReader actual constructor() {
                 )
                 OcrTextPanel(
                     text = block.text,
-                    bounds = rect
+                    bounds = rect,
+                    imageWidth = bitmap.width,
+                    imageHeight = bitmap.height
                 )
             }
         } catch (e: Exception) {

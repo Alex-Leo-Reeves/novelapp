@@ -48,6 +48,7 @@ class NovelSearchRepository(
         FreeWebNovelSource(httpClient),
         LightNovelPubSource(httpClient),
         BoxNovelSource(httpClient),
+        WuxiaWorldSource(httpClient),
         RoyalRoadSource(httpClient)
     )
 
@@ -120,26 +121,37 @@ class NovelSearchRepository(
             }
         }
 
-        val allNovels = novelTasks.awaitAll().flatten()
+        val allNovels = (novelTasks.awaitAll().flatten() + knownNovelFallbacks(query))
+            .rankedNovelResults(query)
         val allManga = mangaTasks.awaitAll().flatten()
         val allAnime = animeTask.await()
 
-        (allNovels + allManga + allAnime).distinctBy { it.title.lowercase().trim() }
+        (allNovels + allManga + allAnime)
+            .filter { it.title.isNotBlank() }
+            .distinctBy {
+                "${it.sourceName}:${it.detailPageUrl.ifBlank { it.url }.ifBlank { it.title }}".lowercase().trim()
+            }
     }
 
     suspend fun searchNovels(query: String): List<UnifiedSearchResult> = coroutineScope {
-        sources.map { source ->
+        val sourceResults = sources.map { source ->
             async {
-                try { source.search(query) }
+                try {
+                    val results = source.search(query)
+                    println("[Novel Search] ${source.sourceName}: ${results.size} result(s) for \"$query\"")
+                    results
+                }
                 catch (e: Exception) {
-                    println("[Novel Search] ${source.sourceName} failed silently: ${e.message}")
+                    println("[Novel Search] ${source.sourceName} failed: ${e.message}")
                     emptyList()
                 }
             }
-        }.awaitAll()
-            .flatten()
+        }.awaitAll().flatten()
+
+        (sourceResults + knownNovelFallbacks(query))
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+            .rankedNovelResults(query)
     }
 
     suspend fun searchManga(query: String): List<UnifiedSearchResult> = coroutineScope {
@@ -194,7 +206,10 @@ class NovelSearchRepository(
             } catch (e: Exception) { emptyList() }
         }
 
-        val novels = novelTasks.awaitAll().flatten()
+        val novels = (novelTasks.awaitAll().flatten() + knownNovelFallbacks(""))
+            .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+            .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+            .rankedNovelResults("")
         val mangas = mangaTasks.awaitAll().flatten()
         val animes = animeTask.await()
 
@@ -242,14 +257,15 @@ class NovelSearchRepository(
             .distinctBy { it.lowercase() }
 
         for (query in queries) {
-            val episodes = coroutineScope {
-                val anineko = async { aninekoScraper.fetchEpisodes(query) }
-                val animePahe = async { animePaheScraper.fetchEpisodes(query) }
-                (anineko.await() + animePahe.await())
-                    .distinctBy { it.url }
-                    .sortedByDescending { it.episodeNumber }
-            }
-            if (episodes.isNotEmpty()) return episodes
+            val aninekoEpisodes = aninekoScraper.fetchEpisodes(query)
+                .distinctBy { it.url }
+                .sortedByDescending { it.episodeNumber }
+            if (aninekoEpisodes.isNotEmpty()) return aninekoEpisodes
+
+            val animePaheEpisodes = animePaheScraper.fetchEpisodes(query)
+                .distinctBy { it.url }
+                .sortedByDescending { it.episodeNumber }
+            if (animePaheEpisodes.isNotEmpty()) return animePaheEpisodes
         }
 
         return aninekoScraper.fallbackEpisodes(queries.firstOrNull().orEmpty(), episodeCount)
@@ -292,3 +308,117 @@ class NovelSearchRepository(
         return try { scraper.fetchMangaPages(chapterUrl) } catch (e: Exception) { emptyList() }
     }
 }
+
+private data class KnownNovelEntry(
+    val title: String,
+    val sourceName: String,
+    val detailPageUrl: String,
+    val coverUrl: String = "",
+    val author: String = "",
+    val genre: String = "",
+    val aliases: List<String> = emptyList()
+)
+
+private val knownNovelEntries = listOf(
+    KnownNovelEntry(
+        title = "My Vampire System",
+        sourceName = "FreeWebNovel",
+        detailPageUrl = "https://freewebnovel.com/novel/my-vampire-system",
+        genre = "Fantasy, System, Action"
+    ),
+    KnownNovelEntry(
+        title = "Renegade Immortal",
+        sourceName = "Wuxiaworld",
+        detailPageUrl = "https://www.wuxiaworld.com/novel/renegade-immortal",
+        coverUrl = "https://cdn.wuxiaworld.com/images/covers/rge.webp",
+        author = "Er Gen",
+        genre = "Xianxia, Action, Fantasy",
+        aliases = listOf("Xian Ni")
+    ),
+    KnownNovelEntry(
+        title = "A Will Eternal",
+        sourceName = "Wuxiaworld",
+        detailPageUrl = "https://www.wuxiaworld.com/novel/a-will-eternal",
+        coverUrl = "https://cdn.wuxiaworld.com/images/covers/awe.webp",
+        author = "Er Gen",
+        genre = "Xianxia, Comedy, Fantasy"
+    ),
+    KnownNovelEntry(
+        title = "Martial Peak",
+        sourceName = "BoxNovel",
+        detailPageUrl = "https://boxnovel.com/novel/martial-peak/",
+        genre = "Martial Arts, Xuanhuan, Action"
+    ),
+    KnownNovelEntry(
+        title = "Lord of the Mysteries",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/lord-of-the-mysteries",
+        genre = "Mystery, Fantasy, Supernatural"
+    )
+)
+
+private fun knownNovelFallbacks(query: String): List<UnifiedSearchResult> {
+    val normalizedQuery = query.normalizeForNovelSearch()
+    if (normalizedQuery.isBlank()) {
+        return knownNovelEntries.map { it.toResult() }
+    }
+    return knownNovelEntries
+        .filter { entry ->
+            val title = entry.title.normalizeForNovelSearch()
+            val aliases = entry.aliases.map { it.normalizeForNovelSearch() }
+            title.contains(normalizedQuery) ||
+                normalizedQuery.contains(title) ||
+                aliases.any { it.contains(normalizedQuery) || normalizedQuery.contains(it) }
+        }
+        .map { it.toResult() }
+}
+
+private fun KnownNovelEntry.toResult(): UnifiedSearchResult =
+    UnifiedSearchResult(
+        id = "known_${sourceName}_${title}".normalizeForNovelSearch().replace(" ", "_"),
+        title = title,
+        coverUrl = coverUrl,
+        detailPageUrl = detailPageUrl,
+        sourceName = sourceName,
+        author = author,
+        genre = genre,
+        synopsis = "Known popular title fallback. If live provider search is blocked, this direct listing keeps the title discoverable."
+    )
+
+private fun List<UnifiedSearchResult>.rankedNovelResults(query: String): List<UnifiedSearchResult> =
+    sortedWith(
+        compareByDescending<UnifiedSearchResult> { it.novelSearchScore(query) }
+            .thenBy { it.title.lowercase().trim() }
+            .thenBy { it.sourceName.lowercase() }
+    )
+
+private fun UnifiedSearchResult.novelSearchScore(query: String): Int {
+    val q = query.normalizeForNovelSearch()
+    val title = title.normalizeForNovelSearch()
+    val sourceBoost = when (sourceName.lowercase()) {
+        "webnovel api" -> 900
+        "wuxiaworld" -> 850
+        "freewebnovel" -> 800
+        "lightnovelpub" -> 750
+        "boxnovel" -> 700
+        "royalroad" -> 250
+        else -> 400
+    }
+    val titleScore = when {
+        q.isBlank() -> 0
+        title == q -> 10_000
+        title.startsWith(q) -> 7_500
+        title.contains(q) -> 5_000
+        q.split(" ").filter { it.length > 2 }.all { title.contains(it) } -> 3_500
+        else -> 0
+    }
+    val knownWebNovelIntent = listOf("vampire", "system", "renegade", "immortal", "will eternal", "martial", "mysteries", "xianxia", "wuxia", "xuanhuan")
+        .any { q.contains(it) }
+    val intentBoost = if (knownWebNovelIntent && sourceName != "RoyalRoad") 450 else 0
+    return titleScore + sourceBoost + intentBoost
+}
+
+private fun String.normalizeForNovelSearch(): String =
+    lowercase()
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()

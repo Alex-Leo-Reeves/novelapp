@@ -3,7 +3,14 @@ package com.alexleoreeves.novelapp.ui
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.os.Build
+import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -151,25 +158,79 @@ actual fun AnimePlayerScreen(
         ) {
             AndroidView(
                 factory = { ctx ->
-                    android.webkit.WebView(ctx).apply {
+                    WebView(ctx).apply {
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
+                            databaseEnabled = true
                             mediaPlaybackRequiresUserGesture = false
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             setSupportMultipleWindows(false)
+                            javaScriptCanOpenWindowsAutomatically = true
+                            loadsImagesAutomatically = true
+                            allowContentAccess = true
+                            allowFileAccess = false
+                            userAgentString =
+                                "Mozilla/5.0 (Linux; Android 13; NovelApp) AppleWebKit/537.36 " +
+                                    "(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            }
                         }
-                        webViewClient = object : android.webkit.WebViewClient() {
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        }
+                        webChromeClient = object : WebChromeClient() {
+                            private var customView: View? = null
+                            private var customViewCallback: CustomViewCallback? = null
+
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                val decor = activity?.window?.decorView as? ViewGroup
+                                if (view == null || decor == null) {
+                                    callback?.onCustomViewHidden()
+                                    return
+                                }
+                                if (customView != null) {
+                                    callback?.onCustomViewHidden()
+                                    return
+                                }
+                                customView = view
+                                customViewCallback = callback
+                                decor.addView(
+                                    view,
+                                    ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                )
+                            }
+
+                            override fun onHideCustomView() {
+                                val decor = activity?.window?.decorView as? ViewGroup
+                                customView?.let { decor?.removeView(it) }
+                                customView = null
+                                customViewCallback?.onCustomViewHidden()
+                                customViewCallback = null
+                            }
+                        }
+                        webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
-                                view: android.webkit.WebView?,
+                                view: WebView?,
                                 request: android.webkit.WebResourceRequest?
                             ): Boolean {
                                 val url = request?.url?.toString() ?: ""
                                 return !url.isAllowedPlayerNavigation(streamUrl)
                             }
                         }
-                        loadUrl(streamUrl)
+                        loadUrl(
+                            streamUrl,
+                            mapOf(
+                                "Referer" to streamUrl.playerReferer(),
+                                "Origin" to streamUrl.playerOrigin()
+                            )
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -540,6 +601,23 @@ private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
         "kwik.",
         "dood",
         "vidsrc",
+        "vidlink",
+        "stream",
+        "embed",
         "tmdb"
     ).any { requestedHost.contains(it) }
+}
+
+private fun String.playerReferer(): String {
+    val uri = runCatching { Uri.parse(this) }.getOrNull()
+    val scheme = uri?.scheme ?: "https"
+    val host = uri?.host ?: return "https://vidsrc.to/"
+    return "$scheme://$host/"
+}
+
+private fun String.playerOrigin(): String {
+    val uri = runCatching { Uri.parse(this) }.getOrNull()
+    val scheme = uri?.scheme ?: "https"
+    val host = uri?.host ?: return "https://vidsrc.to"
+    return "$scheme://$host"
 }

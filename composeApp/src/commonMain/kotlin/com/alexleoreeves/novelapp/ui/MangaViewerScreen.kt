@@ -14,12 +14,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.BuildKonfig
@@ -62,15 +64,16 @@ fun MangaViewerScreen(
     var autoScrollEnabled by remember { mutableStateOf(true) }
 
     // TTS and OCR Tracking
-    val isTtsPlaying = ttsController.isPlaying.collectAsState()
     var isOcrActive by remember { mutableStateOf(false) }
     var ocrPanels by remember { mutableStateOf<List<OcrTextPanel>>(emptyList()) }
     var activeBubbleIndex by remember { mutableStateOf(-1) }
     var currentPageIndex by remember { mutableStateOf(0) }
+    var pageSizes by remember { mutableStateOf<Map<Int, IntSize>>(emptyMap()) }
 
     // Scroll states
     val lazyListState = rememberLazyListState()
     val pagerState = rememberPagerState(pageCount = { pages.size })
+    val density = LocalDensity.current
 
     // Load pages on launch
     LaunchedEffect(chapterUrl) {
@@ -136,30 +139,29 @@ fun MangaViewerScreen(
         }
     }
 
-    // Read active speech bubble
-    LaunchedEffect(activeBubbleIndex) {
+    // Read active speech bubble, then advance only after audio finishes.
+    LaunchedEffect(activeBubbleIndex, currentPageIndex, ocrPanels) {
         if (isOcrActive && activeBubbleIndex in ocrPanels.indices) {
             val panel = ocrPanels[activeBubbleIndex]
             
             // Auto-scroll the view to center on speech bubble coordinates
             if (scrollMode == MangaScrollMode.WEBTOON) {
-                // Scroll in vertical mode
-                val targetY = panel.bounds.top.roundToInt()
-                lazyListState.animateScrollToItem(currentPageIndex, targetY - 100)
+                val pageSize = pageSizes[currentPageIndex]
+                val scaleY = if (pageSize != null && panel.imageHeight > 0) {
+                    pageSize.height.toFloat() / panel.imageHeight.toFloat()
+                } else {
+                    1f
+                }
+                val targetY = (panel.bounds.top * scaleY).roundToInt()
+                lazyListState.animateScrollToItem(currentPageIndex, (targetY - 120).coerceAtLeast(0))
             }
 
             // Play narration
             ttsController.readText(panel.text)
-        }
-    }
-
-    // Listen to TTS completion to skip to next speech bubble
-    LaunchedEffect(isTtsPlaying.value) {
-        if (isOcrActive && !isTtsPlaying.value && activeBubbleIndex >= 0) {
-            if (activeBubbleIndex < ocrPanels.size - 1) {
+            if (!isOcrActive) return@LaunchedEffect
+            if (activeBubbleIndex in 0 until ocrPanels.lastIndex) {
                 activeBubbleIndex++
             } else {
-                // Read all bubbles on this page, swipe/scroll to next page!
                 if (autoScrollEnabled && currentPageIndex < pages.size - 1) {
                     currentPageIndex++
                     if (scrollMode == MangaScrollMode.WEBTOON) {
@@ -199,10 +201,18 @@ fun MangaViewerScreen(
                         LazyColumn(
                             state = lazyListState,
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(0.dp),
+                            contentPadding = PaddingValues(0.dp)
                         ) {
                             itemsIndexed(pages) { index, pageUrl ->
-                                Box(modifier = Modifier.fillMaxWidth()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.Black)
+                                        .onGloballyPositioned { coordinates ->
+                                            pageSizes = pageSizes + (index to coordinates.size)
+                                        }
+                                ) {
                                     AsyncImage(
                                         model = pageUrl,
                                         contentDescription = "Page ${index + 1}",
@@ -213,17 +223,30 @@ fun MangaViewerScreen(
                                     // Render speech bubble highlights when OCR active
                                     if (isOcrActive && index == currentPageIndex) {
                                         ocrPanels.forEachIndexed { pIdx, panel ->
+                                            val renderedSize = pageSizes[index]
+                                            val scaleX = if (renderedSize != null && panel.imageWidth > 0) {
+                                                renderedSize.width.toFloat() / panel.imageWidth.toFloat()
+                                            } else {
+                                                1f
+                                            }
+                                            val scaleY = if (renderedSize != null && panel.imageHeight > 0) {
+                                                renderedSize.height.toFloat() / panel.imageHeight.toFloat()
+                                            } else {
+                                                1f
+                                            }
+                                            val boxWidth = with(density) { (panel.bounds.width * scaleX).toDp() }
+                                            val boxHeight = with(density) { (panel.bounds.height * scaleY).toDp() }
                                             Box(
                                                 modifier = Modifier
                                                     .offset {
                                                         IntOffset(
-                                                            panel.bounds.left.roundToInt(),
-                                                            panel.bounds.top.roundToInt()
+                                                            (panel.bounds.left * scaleX).roundToInt(),
+                                                            (panel.bounds.top * scaleY).roundToInt()
                                                         )
                                                     }
                                                     .size(
-                                                        width = panel.bounds.width.dp,
-                                                        height = panel.bounds.height.dp
+                                                        width = boxWidth,
+                                                        height = boxHeight
                                                     )
                                                     .border(
                                                         width = if (pIdx == activeBubbleIndex) 3.dp else 1.5.dp,

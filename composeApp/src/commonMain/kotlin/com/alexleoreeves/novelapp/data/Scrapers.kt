@@ -268,54 +268,93 @@ class FreeWebNovelSource(private val httpClient: HttpClient) : NovelSource {
 class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
 
     override val sourceName = "LightNovelPub"
-    private val baseUrl = "https://www.lightnovelpub.com"
+    private val baseUrl = "https://lightnovelpub.me"
 
     override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/search?inputContent=${query.encodeURL()}").bodyAsText()
         val doc = Ksoup.parse(html)
-        doc.select("li.novel-item").map { el ->
+        doc.select("li.novel-item, .novel-item, .book-item, .row")
+            .mapNotNull { el ->
+                val link = el.select("a[href*=/book/], a[href*=/novel/]").firstOrNull()
+                    ?: return@mapNotNull null
+                val href = link.attr("href")
+                val title = el.select("h4.novel-title, .novel-title, h3, h4, a").firstOrNull()?.text()
+                    ?.decodeHtmlEntitiesLite()
+                    .orEmpty()
+                if (title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
             UnifiedSearchResult(
-                id = el.select("a").attr("href"),
-                title = el.select("h4.novel-title").text(),
-                coverUrl = el.select("img").attr("data-src").ifEmpty { el.select("img").attr("src") },
-                detailPageUrl = "$baseUrl${el.select("a").attr("href")}",
+                id = href,
+                title = title,
+                coverUrl = absoluteUrl(baseUrl, el.select("img").attr("data-src").ifEmpty { el.select("img").attr("src") }),
+                detailPageUrl = absoluteUrl(baseUrl, href),
                 sourceName = sourceName,
                 author = el.select("span.author").text()
             )
-        }
+        }.distinctBy { it.detailPageUrl }.take(30)
     }
 
     override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeListRun emptyList()
         val doc = Ksoup.parse(html)
-        doc.select("ul.chapter-list li a").mapIndexed { index, el ->
+        val origin = originFromUrl(novelUrl).ifBlank { baseUrl }
+        val explicit = doc.select("ul.chapter-list li a, .chapter-list a, a[href*=chapter-]")
+            .mapNotNull { el ->
+                val href = el.attr("href")
+                val chapterNumber = parseChapterNumber(href, -1)
+                if (href.isBlank() || chapterNumber <= 0) return@mapNotNull null
             Chapter(
-                title = el.text().ifEmpty { "Chapter ${index + 1}" },
-                url = "$baseUrl${el.attr("href")}",
-                chapterNumber = index + 1
+                    title = el.text().decodeHtmlEntitiesLite().ifEmpty { "Chapter $chapterNumber" },
+                    url = absoluteUrl(origin, href),
+                    chapterNumber = chapterNumber
+            )
+        }.distinctBy { it.url }.sortedBy { it.chapterNumber }
+        if (explicit.size > 2) return@safeListRun explicit
+
+        val first = explicit.minOfOrNull { it.chapterNumber } ?: 1
+        val last = explicit.maxOfOrNull { it.chapterNumber }
+            ?: Regex("""chapter-(\d+)""", RegexOption.IGNORE_CASE)
+                .findAll(html)
+                .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
+                .maxOrNull()
+            ?: return@safeListRun explicit
+        val novelPath = novelUrl.substringAfter(origin).trimEnd('/')
+        (first..last).map { number ->
+            Chapter(
+                title = "Chapter $number",
+                url = "$origin$novelPath/chapter-$number",
+                chapterNumber = number
             )
         }
     }
 
     override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeStringRun ""
         val doc = Ksoup.parse(html)
-        doc.select("#chapter-container").text()
+        doc.select("#chapter-container, .chapter-content, .chapter-text, article").text()
             .ifEmpty { doc.select("div.chapter-content").text() }
     }.ifEmpty { "Content unavailable." }
 
     override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
-        val html = httpClient.get("$baseUrl/novel-list?pg=$page&sort=hot").bodyAsText()
+        val html = httpClient.get("$baseUrl/list/most-popular-novels/?page=$page").bodyAsText()
         val doc = Ksoup.parse(html)
-        doc.select("li.novel-item").map { el ->
+        doc.select("li.novel-item, .novel-item, .book-item").mapNotNull { el ->
+            val link = el.select("a[href*=/book/], a[href*=/novel/]").firstOrNull()
+                ?: return@mapNotNull null
+            val href = link.attr("href")
+            val title = el.select("h4.novel-title, .novel-title, h3, h4, a").firstOrNull()?.text()
+                ?.decodeHtmlEntitiesLite()
+                .orEmpty()
+            if (title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
             UnifiedSearchResult(
-                id = el.select("a").attr("href"),
-                title = el.select("h4.novel-title").text(),
-                coverUrl = el.select("img").attr("data-src").ifEmpty { el.select("img").attr("src") },
-                detailPageUrl = "$baseUrl${el.select("a").attr("href")}",
+                id = href,
+                title = title,
+                coverUrl = absoluteUrl(baseUrl, el.select("img").attr("data-src").ifEmpty { el.select("img").attr("src") }),
+                detailPageUrl = absoluteUrl(baseUrl, href),
                 sourceName = sourceName
             )
-        }
+        }.distinctBy { it.detailPageUrl }.take(30)
     }
 }
 
@@ -372,6 +411,108 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
                 sourceName = sourceName
             )
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Wuxiaworld Source — strong xianxia/wuxia coverage
+// ─────────────────────────────────────────────────────────────────────────────
+class WuxiaWorldSource(private val httpClient: HttpClient) : NovelSource {
+
+    override val sourceName = "Wuxiaworld"
+    private val baseUrl = "https://www.wuxiaworld.com"
+
+    override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
+        val response = httpClient.get("$baseUrl/api/novels/search") {
+            parameter("query", query)
+            header("Referer", "$baseUrl/novels")
+            header("Accept", "application/json,text/plain,*/*")
+        }.bodyAsText()
+        val root = Json.parseToJsonElement(response).jsonObject
+        val items = root["items"]?.jsonArray ?: return@safeListRun emptyList()
+        items.mapNotNull { item ->
+            val obj = item.jsonObject
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull.orEmpty().decodeHtmlEntitiesLite()
+            val slug = obj["slug"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (name.isBlank() || slug.isBlank()) return@mapNotNull null
+            UnifiedSearchResult(
+                id = "wuxiaworld_$slug",
+                title = name,
+                coverUrl = obj["coverUrl"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                detailPageUrl = "$baseUrl/novel/$slug",
+                sourceName = sourceName,
+                author = obj["authorName"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                genre = obj["genres"]?.jsonArray?.joinToString(", ") {
+                    it.jsonPrimitive.contentOrNull.orEmpty()
+                }.orEmpty(),
+                synopsis = obj["synopsis"]?.jsonPrimitive?.contentOrNull.orEmpty().htmlToPlainText()
+            )
+        }.take(30)
+    }
+
+    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
+        val html = httpClient.get(novelUrl) {
+            header("Referer", baseUrl)
+        }.bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeListRun emptyList()
+
+        val slug = novelUrl.substringAfter("/novel/")
+            .substringBefore("/")
+            .substringBefore("?")
+            .trim()
+        if (slug.isBlank()) return@safeListRun emptyList()
+
+        val doc = Ksoup.parse(html)
+        val linkedChapters = doc.select("a[href*=/novel/$slug/]")
+            .mapNotNull { link ->
+                val href = link.attr("href")
+                val number = parseChapterNumber(href, -1)
+                if (number <= 0) return@mapNotNull null
+                Chapter(
+                    title = link.text().decodeHtmlEntitiesLite().ifBlank { "Chapter $number" },
+                    url = absoluteUrl(baseUrl, href),
+                    chapterNumber = number
+                )
+            }
+            .distinctBy { it.url }
+            .sortedBy { it.chapterNumber }
+        if (linkedChapters.size > 1) return@safeListRun linkedChapters
+
+        val prefix = html.extractWuxiaWorldChapterPrefix()
+        val latestNumber = html.extractWuxiaWorldLatestChapter()
+        if (prefix.isBlank() || latestNumber <= 0) return@safeListRun linkedChapters
+
+        (1..latestNumber).map { number ->
+            Chapter(
+                title = "Chapter $number",
+                url = "$baseUrl/novel/$slug/$prefix-chapter-$number",
+                chapterNumber = number
+            )
+        }
+    }
+
+    override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
+        val html = httpClient.get(chapterUrl) {
+            header("Referer", chapterUrl.substringBeforeLast("/", baseUrl))
+        }.bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeStringRun ""
+        val doc = Ksoup.parse(html)
+        val selectorText = doc
+            .select(".chapter-content, .chapter-body, .fr-view, article")
+            .firstOrNull()
+            ?.text()
+            .orEmpty()
+        if (selectorText.length > 200) return@safeStringRun selectorText
+
+        html.extractWuxiaWorldChapterContent()
+    }.ifEmpty { "This chapter is unavailable from Wuxiaworld right now. It may be locked or blocked by the provider." }
+
+    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
+        listOf("renegade immortal", "a will eternal", "i shall seal the heavens", "against the gods")
+            .drop(((page - 1).coerceAtLeast(0)) % 2)
+            .take(2)
+            .flatMap { search(it) }
+            .distinctBy { it.detailPageUrl }
     }
 }
 
@@ -444,6 +585,11 @@ private fun absoluteUrl(baseUrl: String, href: String): String {
     return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
 }
 
+private fun originFromUrl(url: String): String {
+    val match = Regex("""^(https?://[^/]+)""").find(url)
+    return match?.groupValues?.getOrNull(1).orEmpty()
+}
+
 private fun isFreeWebNovelBookHref(href: String): Boolean {
     val clean = href.substringBefore("?").trim()
     if (clean.isBlank()) return false
@@ -464,6 +610,62 @@ private fun parseChapterNumber(href: String, fallback: Int): Int =
         ?.getOrNull(1)
         ?.toIntOrNull()
         ?: fallback
+
+private fun String.htmlToPlainText(): String =
+    Ksoup.parse(this.decodeHtmlEntitiesLite()).text().decodeHtmlEntitiesLite()
+
+private fun String.extractWuxiaWorldChapterPrefix(): String {
+    val firstSlug = Regex(""""firstChapter":\{.*?"slug":"([^"]+)"""", RegexOption.DOT_MATCHES_ALL)
+        .find(this)
+        ?.groupValues
+        ?.getOrNull(1)
+        .orEmpty()
+    if (firstSlug.contains("chapter-", ignoreCase = true)) {
+        return firstSlug.substringBefore("chapter-").trimEnd('-')
+    }
+    val abbreviation = Regex(""""abbreviation":"([^"]+)"""")
+        .find(this)
+        ?.groupValues
+        ?.getOrNull(1)
+        .orEmpty()
+        .lowercase()
+        .replace(Regex("""[^a-z0-9]+"""), "")
+    return abbreviation.ifBlank { firstSlug.substringBefore("-chapter-") }
+}
+
+private fun String.extractWuxiaWorldLatestChapter(): Int {
+    val latest = Regex(""""latestChapter":\{.*?"number":\{"units":(\d+)""", RegexOption.DOT_MATCHES_ALL)
+        .find(this)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+    if (latest != null && latest > 0) return latest
+    return Regex(""""chapterCount":\{"value":(\d+)""")
+        .find(this)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?: 0
+}
+
+private fun String.extractWuxiaWorldChapterContent(): String {
+    return Regex(""""content":"((?:\\.|[^"\\])*)"""")
+        .findAll(this)
+        .mapNotNull { match -> decodeJsonString(match.groupValues[1]) }
+        .map { html ->
+            val doc = Ksoup.parse(html)
+            val paragraphs = doc.select("p").map { it.text().decodeHtmlEntitiesLite() }
+                .filter { it.isNotBlank() }
+            paragraphs.ifEmpty { listOf(doc.text().decodeHtmlEntitiesLite()) }
+                .joinToString("\n\n")
+        }
+        .firstOrNull { it.length > 400 }
+        .orEmpty()
+}
+
+private fun decodeJsonString(raw: String): String? =
+    runCatching { Json.parseToJsonElement("\"$raw\"").jsonPrimitive.content }
+        .getOrNull()
 
 /** Safely execute [block], swallowing exceptions and returning emptyList(). */
 private suspend fun <T> safeListRun(block: suspend () -> List<T>): List<T> {
