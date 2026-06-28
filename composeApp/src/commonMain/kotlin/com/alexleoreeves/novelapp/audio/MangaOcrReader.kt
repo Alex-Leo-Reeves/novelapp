@@ -4,7 +4,9 @@ import androidx.compose.ui.geometry.Rect
 
 data class OcrTextPanel(
     val text: String,
-    val bounds: Rect
+    val bounds: Rect,
+    val imageWidth: Int = 0,
+    val imageHeight: Int = 0
 )
 
 /**

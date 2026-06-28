@@ -12,10 +12,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.*
 
 /**
- * Controller for Gemini 3.1 Flash TTS audio narration.
+ * Controller for Gemini TTS audio narration.
  *
  * Architecture:
- *  1. Splits input text into ~1000 word chunks (by paragraph boundaries).
+ *  1. Splits input text into paragraph/sentence chunks.
  *  2. For each chunk, sends a pre-processing request to inject SSML-style
  *     tonal director notes (action, whisper, dialogue gender, dramatic pauses).
  *  3. Streams audio from Gemini TTS and plays each chunk.
@@ -36,6 +36,9 @@ class GeminiTtsController(private val apiKey: String) {
      */
     private val _chunkBoundaries = MutableStateFlow<List<Int>>(emptyList())
     val chunkBoundaries: StateFlow<List<Int>> = _chunkBoundaries
+
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError
 
     private var playbackJob: Job? = null
     private var sleepTimerJob: Job? = null
@@ -103,40 +106,31 @@ class GeminiTtsController(private val apiKey: String) {
         _chunkBoundaries.value = result.second
         _chunkCursor = 0
         _currentChunkFlow.value = 0
+        _lastError.value = null
+        isPaused = false
+        if (textChunks.isEmpty() || textChunks.first().isBlank()) {
+            _lastError.value = "There is no readable text in this chapter."
+            return
+        }
         _isPlaying.value = true
 
-        playbackJob = CoroutineScope(Dispatchers.Default).launch {
-            for (index in textChunks.indices) {
-                if (!isActive || isPaused) break
-                _chunkCursor = index
-                _currentChunkFlow.value = index
-                val chunk = textChunks[index]
-                val directedText = addToneDirection(chunk)
-                generateAndPlayAudio(directedText)
-            }
-            _isPlaying.value = false
-        }
+        val job = CoroutineScope(Dispatchers.Default).launch { playFromCursor(0) }
+        playbackJob = job
+        job.join()
     }
 
     fun pause() {
         isPaused = true
+        playbackJob?.cancel()
         _isPlaying.value = false
     }
 
     fun resume() {
         if (textChunks.isNotEmpty()) {
             isPaused = false
+            playbackJob?.cancel()
             _isPlaying.value = true
-            playbackJob = CoroutineScope(Dispatchers.Default).launch {
-                for (index in _chunkCursor until textChunks.size) {
-                    if (!isActive || isPaused) break
-                    _chunkCursor = index
-                    _currentChunkFlow.value = index
-                    val directed = addToneDirection(textChunks[index])
-                    generateAndPlayAudio(directed)
-                }
-                _isPlaying.value = false
-            }
+            playbackJob = CoroutineScope(Dispatchers.Default).launch { playFromCursor(_chunkCursor) }
         }
     }
 
@@ -145,16 +139,8 @@ class GeminiTtsController(private val apiKey: String) {
             stopInternal()
             _chunkCursor++
             _currentChunkFlow.value = _chunkCursor
-            CoroutineScope(Dispatchers.Default).launch {
-                _isPlaying.value = true
-                for (index in _chunkCursor until textChunks.size) {
-                    if (isPaused) break
-                    _chunkCursor = index
-                    _currentChunkFlow.value = index
-                    generateAndPlayAudio(addToneDirection(textChunks[index]))
-                }
-                _isPlaying.value = false
-            }
+            _isPlaying.value = true
+            playbackJob = CoroutineScope(Dispatchers.Default).launch { playFromCursor(_chunkCursor) }
         }
     }
 
@@ -163,16 +149,8 @@ class GeminiTtsController(private val apiKey: String) {
             stopInternal()
             _chunkCursor = maxOf(0, _chunkCursor - 1)
             _currentChunkFlow.value = _chunkCursor
-            CoroutineScope(Dispatchers.Default).launch {
-                _isPlaying.value = true
-                for (index in _chunkCursor until textChunks.size) {
-                    if (isPaused) break
-                    _chunkCursor = index
-                    _currentChunkFlow.value = index
-                    generateAndPlayAudio(addToneDirection(textChunks[index]))
-                }
-                _isPlaying.value = false
-            }
+            _isPlaying.value = true
+            playbackJob = CoroutineScope(Dispatchers.Default).launch { playFromCursor(_chunkCursor) }
         }
     }
 
@@ -194,38 +172,32 @@ class GeminiTtsController(private val apiKey: String) {
     }
 
     /**
-     * Split text into paragraph-aware chunks of ~1000 words.
+     * Split text into display-sized blocks.
      * Returns a Pair of (chunks, chunkBoundaries) where boundaries[i] is the
-     * index of the first paragraph (in the flat list) that belongs to chunk i.
+     * index of the display block that belongs to chunk i.
      */
     private fun chunkTextWithBoundaries(text: String): Pair<List<String>, List<Int>> {
-        val paragraphs = text.split("\n\n").filter { it.isNotBlank() }
-        val chunks = mutableListOf<String>()
-        val boundaries = mutableListOf<Int>() // paragraph index where each chunk starts
-        val currentChunk = StringBuilder()
-        var chunkStartParagraphIndex = 0
-        var currentParagraphCount = 0
-
-        for ((paraIdx, para) in paragraphs.withIndex()) {
-            val wordCount = currentChunk.toString().split("\\s+".toRegex()).size
-            if (wordCount + para.split("\\s+".toRegex()).size > 1000 && currentChunk.isNotEmpty()) {
-                chunks.add(currentChunk.toString().trim())
-                boundaries.add(chunkStartParagraphIndex)
-                chunkStartParagraphIndex = paraIdx
-                currentChunk.clear()
-                currentParagraphCount = 0
-            }
-            currentChunk.append(para).append("\n\n")
-            currentParagraphCount++
-        }
-        if (currentChunk.isNotEmpty()) {
-            chunks.add(currentChunk.toString().trim())
-            boundaries.add(chunkStartParagraphIndex)
-        }
-        return if (chunks.isEmpty()) {
-            Pair(listOf(text), listOf(0))
+        val blocks = text.toReadableTtsBlocks()
+        return if (blocks.isEmpty()) {
+            Pair(emptyList(), emptyList())
         } else {
-            Pair(chunks, boundaries)
+            Pair(blocks, blocks.indices.toList())
+        }
+    }
+
+    private suspend fun playFromCursor(startIndex: Int) {
+        try {
+            for (index in startIndex until textChunks.size) {
+                if (!currentCoroutineContext().isActive || isPaused) break
+                _chunkCursor = index
+                _currentChunkFlow.value = index
+                val directedText = addToneDirection(textChunks[index])
+                generateAndPlayAudio(directedText)
+            }
+        } finally {
+            if (!isPaused) {
+                _isPlaying.value = false
+            }
         }
     }
 
@@ -279,6 +251,10 @@ class GeminiTtsController(private val apiKey: String) {
      */
     private suspend fun generateAndPlayAudio(directedText: String) {
         try {
+            if (apiKey.isBlank()) {
+                _lastError.value = "Gemini API key is missing."
+                return
+            }
             val requestBody = buildJsonObject {
                 putJsonArray("contents") {
                     addJsonObject {
@@ -301,7 +277,7 @@ class GeminiTtsController(private val apiKey: String) {
             }
 
             val response = httpClient.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-live-001:generateContent?key=$apiKey"
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=$apiKey"
             ) {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody.toString())
@@ -309,18 +285,30 @@ class GeminiTtsController(private val apiKey: String) {
 
             // Parse audio data and hand to platform audio player
             val json = Json.parseToJsonElement(response).jsonObject
-            val audioData = json["candidates"]?.jsonArray?.firstOrNull()
+            val apiError = json["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
+            if (!apiError.isNullOrBlank()) {
+                _lastError.value = apiError
+                return
+            }
+            val parts = json["candidates"]?.jsonArray?.firstOrNull()
                 ?.jsonObject?.get("content")
                 ?.jsonObject?.get("parts")
-                ?.jsonArray?.firstOrNull()
-                ?.jsonObject?.get("inlineData")
-                ?.jsonObject?.get("data")
-                ?.jsonPrimitive?.content
+                ?.jsonArray
+            val audioData = parts?.firstNotNullOfOrNull { part ->
+                val obj = part.jsonObject
+                obj["inlineData"]?.jsonObject?.get("data")?.jsonPrimitive?.contentOrNull
+                    ?: obj["inline_data"]?.jsonObject?.get("data")?.jsonPrimitive?.contentOrNull
+            }
 
             if (audioData != null) {
+                _lastError.value = null
                 playAudioBytes(audioData)
+            } else {
+                _lastError.value = "Gemini returned no audio for this chunk."
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            _lastError.value = e.message ?: "Audio generation failed."
             println("[TTS] Audio generation failed: ${e.message}")
         }
     }
@@ -378,6 +366,45 @@ class GeminiTtsController(private val apiKey: String) {
 
         return header + pcmBytes
     }
+}
+
+private fun String.toReadableTtsBlocks(): List<String> =
+    split(Regex("""\n\s*\n"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .flatMap { paragraph ->
+            if (paragraph.length <= 520) {
+                listOf(paragraph)
+            } else {
+                paragraph.splitIntoSentenceBlocks(maxChars = 420)
+            }
+        }
+
+private fun String.splitIntoSentenceBlocks(maxChars: Int): List<String> {
+    val sentences = split(Regex("""(?<=[.!?。！？…])\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+    if (sentences.isEmpty()) return chunked(maxChars)
+
+    val blocks = mutableListOf<String>()
+    val current = StringBuilder()
+    for (sentence in sentences) {
+        if (current.isNotEmpty() && current.length + sentence.length + 1 > maxChars) {
+            blocks.add(current.toString().trim())
+            current.clear()
+        }
+        if (sentence.length > maxChars) {
+            if (current.isNotEmpty()) {
+                blocks.add(current.toString().trim())
+                current.clear()
+            }
+            blocks.addAll(sentence.chunked(maxChars))
+        } else {
+            current.append(sentence).append(' ')
+        }
+    }
+    if (current.isNotEmpty()) blocks.add(current.toString().trim())
+    return blocks
 }
 
 /**

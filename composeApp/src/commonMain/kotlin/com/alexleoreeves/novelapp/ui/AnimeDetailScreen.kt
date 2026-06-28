@@ -57,7 +57,15 @@ fun AnimeDetailScreen(
     // Load episodes on mount
     LaunchedEffect(anime.id) {
         isLoadingEpisodes = true
-        val titleQueries = listOf(anime.displayTitle, anime.titleEnglish, anime.titleRomaji)
+        val rawTitles = listOf(anime.displayTitle, anime.titleEnglish, anime.titleRomaji)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        val titleQueries = (rawTitles + rawTitles.flatMap { title ->
+            listOf(
+                title.cleanAnimeSearchTitle(),
+                title.removeAnimeSeasonSuffix()
+            )
+        })
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
@@ -425,6 +433,16 @@ fun AnimeDetailScreen(
         }
     }
 }
+
+private fun String.cleanAnimeSearchTitle(): String =
+    replace(Regex("""[^\p{L}\p{N}\s]+"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
+private fun String.removeAnimeSeasonSuffix(): String =
+    cleanAnimeSearchTitle()
+        .replace(Regex("""\b(season\s+[2-9]|\d+(st|nd|rd|th)\s+season|part\s+\d+|cour\s+\d+|ova|ona|special|movie|recap)\b.*$""", RegexOption.IGNORE_CASE), "")
+        .trim()
 
 @Composable
 private fun EpisodeRow(

@@ -1,12 +1,12 @@
 {
-  "versionCode": 6,
-  "versionName": "1.5",
+  "versionCode": 7,
+  "versionName": "1.6",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Moved login and account creation to the working NovelApp Render web service.",
-    "Fixed auth response handling so empty or invalid server responses show a clear error.",
-    "Kept the anime playback, manga sorting, and update handling fixes from version 1.4."
+    "Improved novel search coverage with Wuxiaworld fallback, source diagnostics, and better result ordering.",
+    "Added hide-on-scroll discovery controls, pull-to-refresh feeds, smaller Gemini narration chunks, and manga OCR scaling.",
+    "Improved anime title matching, stream/provider extraction, in-app embed playback, and mobile website layout."
   ],
   "forceUpdate": false
 }

@@ -309,38 +309,14 @@ class AninekoScraper(private val client: HttpClient) {
             }.body()
             if (html.isBlockedOrErrorPage()) return@runCatching null
 
-            // Strategy 1: Look for a direct m3u8 link
-            val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
-            val mp4Regex = Regex("""https?://[^\s"']+\.mp4[^\s"']*""")
-            val directM3u8 = m3u8Regex.find(html)?.value
-            if (directM3u8 != null) return@runCatching directM3u8
-            mp4Regex.find(html)?.value?.let { return@runCatching it }
+            extractDirectMediaUrl(html)?.let { return@runCatching it }
 
-            Regex("""data-video="([^"]+)"""")
-                .findAll(html)
-                .map { it.groupValues[1].decodeHtmlEntitiesLite() }
-                .filter { it.startsWith("http") }
-                .toList()
-                .also { providerUrls ->
-                    providerUrls.forEach { providerUrl ->
-                        val stream = extractProviderStream(providerUrl, effectiveUrl)
-                        if (stream != null) return@runCatching stream
-                    }
-                    providerUrls.firstOrNull()?.let { return@runCatching it }
-                }
-
-            Regex("""data-video='([^']+)'""")
-                .findAll(html)
-                .map { it.groupValues[1].decodeHtmlEntitiesLite() }
-                .filter { it.startsWith("http") }
-                .toList()
-                .also { providerUrls ->
-                    providerUrls.forEach { providerUrl ->
-                        val stream = extractProviderStream(providerUrl, effectiveUrl)
-                        if (stream != null) return@runCatching stream
-                    }
-                    providerUrls.firstOrNull()?.let { return@runCatching it }
-                }
+            val providerUrls = extractProviderUrls(html, liveBase)
+            providerUrls.forEach { providerUrl ->
+                val stream = extractProviderStream(providerUrl, effectiveUrl)
+                if (stream != null) return@runCatching stream
+            }
+            providerUrls.firstOrNull()?.let { return@runCatching it }
 
             // Strategy 2: Find the embedded iframe server URL
             val iframeRegex = Regex("""<iframe[^>]+src="([^"]+)"""")
@@ -355,8 +331,7 @@ class AninekoScraper(private val client: HttpClient) {
                     BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
                     header("Referer", effectiveUrl)
                 }.body()
-                return@runCatching m3u8Regex.find(iframeHtml)?.value
-                    ?: mp4Regex.find(iframeHtml)?.value
+                return@runCatching extractDirectMediaUrl(iframeHtml)
             }
 
             null
@@ -367,18 +342,64 @@ class AninekoScraper(private val client: HttpClient) {
     }
 
     private suspend fun extractProviderStream(providerUrl: String, referer: String): String? = runCatching {
+        if (providerUrl.isDirectAnimeMediaUrl()) return@runCatching providerUrl
         val html: String = client.get(providerUrl) {
             BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             header("Referer", referer)
         }.body()
         if (html.isBlockedOrErrorPage()) return@runCatching null
-        Regex("""https?://[^\s"']+\.m3u8[^\s"']*""").find(html)?.value
-            ?: Regex("""https?://[^\s"']+\.mp4[^\s"']*""").find(html)?.value
-            ?: Regex("""(?:const|var)\s+src\s*=\s*["']([^"']+)["']""")
+        extractDirectMediaUrl(html)
+            ?: Regex("""(?:const|var|let)\s+(?:src|file|url)\s*=\s*["']([^"']+)["']""")
                 .find(html)
                 ?.groupValues
                 ?.getOrNull(1)
+                ?.decodeHtmlEntitiesLite()
     }.getOrNull()
+
+    private fun extractDirectMediaUrl(html: String): String? {
+        val cleaned = html
+            .replace("\\/", "/")
+            .replace("&amp;", "&")
+            .decodeHtmlEntitiesLite()
+        val directPatterns = listOf(
+            Regex("""https?://[^\s"'<>]+\.m3u8[^\s"'<>]*"""),
+            Regex("""https?://[^\s"'<>]+\.mp4[^\s"'<>]*"""),
+            Regex("""["'](?:file|src|url)["']\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE),
+            Regex("""(?:file|src|url)\s*=\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE)
+        )
+        return directPatterns.firstNotNullOfOrNull { pattern ->
+            pattern.find(cleaned)?.let { match ->
+                match.groupValues.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: match.value.trim('"', '\'')
+            }
+        }?.decodeHtmlEntitiesLite()
+    }
+
+    private fun extractProviderUrls(html: String, baseUrl: String): List<String> {
+        val cleaned = html.replace("\\/", "/").decodeHtmlEntitiesLite()
+        val patterns = listOf(
+            Regex("""data-video\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""data-src\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""<iframe[^>]+src\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""<source[^>]+src\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            Regex("""["'](?:embed|player|video|src)["']\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        )
+        return patterns
+            .flatMap { pattern -> pattern.findAll(cleaned).map { it.groupValues[1] }.toList() }
+            .mapNotNull { normalizeProviderUrl(it, baseUrl) }
+            .filter { it.startsWith("http", ignoreCase = true) }
+            .distinct()
+    }
+
+    private fun normalizeProviderUrl(rawUrl: String, baseUrl: String): String? {
+        val cleaned = rawUrl.trim().decodeHtmlEntitiesLite()
+        if (cleaned.isBlank() || cleaned.startsWith("javascript:", ignoreCase = true)) return null
+        return when {
+            cleaned.startsWith("//") -> "https:$cleaned"
+            cleaned.startsWith("/") -> baseUrl.trimEnd('/') + cleaned
+            cleaned.startsWith("http://") || cleaned.startsWith("https://") -> cleaned
+            else -> null
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,17 +487,26 @@ private fun animeTitleMatchScore(query: String, title: String): Int {
     val t = title.normalizedAnimeTitle()
     if (q.isBlank() || t.isBlank()) return 0
 
-    val penalty = when {
-        Regex("""\b(movie|special|ova|ona|recap|season\s+\d+|part\s+\d+)\b""").containsMatchIn(t) -> 500
+    val sequelPenalty = when {
+        Regex("""\b(movie|special|ova|ona|recap|summary|theatrical|part\s+\d+|cour\s+\d+)\b""").containsMatchIn(t) -> 900
+        Regex("""\b(season\s+[2-9]|\d+(st|nd|rd|th)\s+season|s[2-9])\b""").containsMatchIn(t) -> 800
+        Regex("""\b(culling game|hidden inventory|shibuya incident|final season)\b""").containsMatchIn(t) -> 700
+        else -> 0
+    }
+    val baseBoost = when {
+        t == q -> 2_000
+        t == "$q tv" || t == "$q the animation" -> 1_500
+        t.removeSuffix(" tv") == q -> 1_300
+        Regex("""\b(tv|the animation)\b""").containsMatchIn(t) && t.startsWith(q) -> 700
         else -> 0
     }
 
     return when {
-        t == q -> 10_000
-        t.removeSuffix(" tv") == q -> 9_500
-        t.startsWith("$q season 1") -> 9_000
-        t.startsWith("$q ") -> 8_000 - penalty
-        t.contains(q) -> 5_000 - penalty
+        t == q -> 10_000 + baseBoost
+        t.removeSuffix(" tv") == q -> 9_500 + baseBoost
+        t.startsWith("$q season 1") -> 9_000 + baseBoost
+        t.startsWith("$q ") -> 8_000 + baseBoost - sequelPenalty
+        t.contains(q) -> 5_000 + baseBoost - sequelPenalty
         else -> 0
     }
 }
@@ -492,3 +522,8 @@ private fun String.slugifyAnimeTitle(): String =
     lowercase()
         .replace(Regex("""[^a-z0-9]+"""), "-")
         .trim('-')
+
+private fun String.isDirectAnimeMediaUrl(): Boolean {
+    val clean = substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") || clean.endsWith(".webm")
+}

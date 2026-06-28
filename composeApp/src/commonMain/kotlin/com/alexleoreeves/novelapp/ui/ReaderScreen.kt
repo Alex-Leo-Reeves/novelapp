@@ -62,17 +62,14 @@ fun ReaderScreen(
     val isPlaying = ttsController.isPlaying.collectAsState()
     val ttsChunkIndex = ttsController.currentChunkIndex.collectAsState()
     val ttsChunkBoundaries = ttsController.chunkBoundaries.collectAsState()
+    val ttsError = ttsController.lastError.collectAsState()
     val lazyListState = rememberLazyListState()
     val paragraphs by remember(chapterText, isLoading) {
         derivedStateOf {
             if (isLoading || chapterText.startsWith("Loading")) {
                 emptyList()
             } else {
-                chapterText
-                    .split(Regex("""\n\s*\n"""))
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                    .ifEmpty { listOf(chapterText) }
+                chapterText.toReaderBlocks().ifEmpty { listOf(chapterText) }
             }
         }
     }
@@ -120,15 +117,14 @@ fun ReaderScreen(
         }
     }
 
-    LaunchedEffect(isPlaying.value, autoScrollEnabled, paragraphs.size) {
+    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsChunkIndex.value, ttsChunkBoundaries.value, paragraphs.size) {
         if (!isPlaying.value || !autoScrollEnabled || paragraphs.isEmpty()) return@LaunchedEffect
-        var target = (lazyListState.firstVisibleItemIndex - 1).coerceAtLeast(0)
-        while (isPlaying.value && autoScrollEnabled && target < paragraphs.size) {
-            lazyListState.animateScrollToItem(target + 1)
-            onProgress(target)
-            delay(4500L)
-            target++
-        }
+        val boundaries = ttsChunkBoundaries.value
+        val chunkIdx = ttsChunkIndex.value
+        val paragraphIndex = boundaries.getOrNull(chunkIdx) ?: return@LaunchedEffect
+        val listIndex = (paragraphIndex + 2).coerceIn(0, paragraphs.size + 1)
+        lazyListState.animateScrollToItem(listIndex)
+        onProgress(paragraphIndex)
     }
 
     // Update text color on theme change
@@ -369,8 +365,14 @@ fun ReaderScreen(
                                         if (isPlaying.value) {
                                             ttsController.pause()
                                         } else {
-                                            scope.launch {
-                                                ttsController.readText(chapterText)
+                                            val hasPausedChunks = ttsChunkBoundaries.value.isNotEmpty() &&
+                                                ttsChunkIndex.value < ttsChunkBoundaries.value.lastIndex
+                                            if (hasPausedChunks) {
+                                                ttsController.resume()
+                                            } else {
+                                                scope.launch {
+                                                    ttsController.readText(chapterText)
+                                                }
                                             }
                                         }
                                     }
@@ -383,6 +385,17 @@ fun ReaderScreen(
                                         modifier = Modifier.size(36.dp)
                                     )
                                 }
+                            }
+
+                            ttsError.value?.takeIf { it.isNotBlank() }?.let { error ->
+                                Text(
+                                    text = error,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp)
+                                )
                             }
 
                             Row(
@@ -497,4 +510,43 @@ fun ReaderScreen(
             }
         }
     }
+}
+
+private fun String.toReaderBlocks(): List<String> =
+    split(Regex("""\n\s*\n"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .flatMap { paragraph ->
+            if (paragraph.length <= 520) {
+                listOf(paragraph)
+            } else {
+                paragraph.splitReaderSentenceBlocks(maxChars = 420)
+            }
+        }
+
+private fun String.splitReaderSentenceBlocks(maxChars: Int): List<String> {
+    val sentences = split(Regex("""(?<=[.!?。！？…])\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+    if (sentences.isEmpty()) return chunked(maxChars)
+
+    val blocks = mutableListOf<String>()
+    val current = StringBuilder()
+    for (sentence in sentences) {
+        if (current.isNotEmpty() && current.length + sentence.length + 1 > maxChars) {
+            blocks.add(current.toString().trim())
+            current.clear()
+        }
+        if (sentence.length > maxChars) {
+            if (current.isNotEmpty()) {
+                blocks.add(current.toString().trim())
+                current.clear()
+            }
+            blocks.addAll(sentence.chunked(maxChars))
+        } else {
+            current.append(sentence).append(' ')
+        }
+    }
+    if (current.isNotEmpty()) blocks.add(current.toString().trim())
+    return blocks
 }
