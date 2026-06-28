@@ -12,23 +12,23 @@ site/downloads/novelapp-windows.msi
 The Android website download button and in-app update checker point to:
 
 ```text
-https://novelapp.onrender.com/downloads/novelapp-android.apk
+https://novelapp1.onrender.com/downloads/novelapp-android.apk
 ```
 
 The TV website download button points to:
 
 ```text
-https://novelapp.onrender.com/downloads/novelapp-tv.apk
+https://novelapp1.onrender.com/downloads/novelapp-tv.apk
 ```
 
 The iPhone website download button points to:
 
 ```text
-https://novelapp.onrender.com/downloads/novelapp-ios.ipa
+https://novelapp1.onrender.com/downloads/novelapp-ios.ipa
 ```
 
 The Windows website download button points to:
 
 ```text
-https://novelapp.onrender.com/downloads/novelapp-windows.msi
+https://novelapp1.onrender.com/downloads/novelapp-windows.msi
 ```
