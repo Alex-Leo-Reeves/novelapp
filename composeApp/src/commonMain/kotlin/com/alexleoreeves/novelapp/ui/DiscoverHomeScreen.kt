@@ -26,7 +26,6 @@ import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Content type tab selector: Novels / Manga / Anime / TMDB media
@@ -72,7 +71,6 @@ fun DiscoverHomeScreen(
     isDesktop: Boolean = false,
     onNovelSelected: (UnifiedSearchResult) -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val repository = remember {
         NovelSearchRepository(
             geminiApiKey = BuildKonfig.GEMINI_API_KEY,
@@ -194,27 +192,26 @@ fun DiscoverHomeScreen(
         isSearching = true
         kotlinx.coroutines.delay(400)
         val q = searchQuery
-        scope.launch {
-            when (activeTab) {
-                ContentTab.ANIME -> {
-                    animeSearchResults = repository.searchAnime(q)
-                    isSearching = false
+        val tab = activeTab
+        when (tab) {
+            ContentTab.ANIME -> {
+                animeSearchResults = repository.searchAnime(q)
+                isSearching = false
+            }
+            ContentTab.K_DRAMA,
+            ContentTab.CARTOON,
+            ContentTab.MOVIES -> {
+                val category = tab.videoCategory()
+                videoSearchResults = if (category != null) repository.searchVideo(category, q) else emptyList()
+                isSearching = false
+            }
+            else -> {
+                searchResults = when (tab) {
+                    ContentTab.NOVELS -> repository.searchNovels(q)
+                    ContentTab.MANGA -> repository.searchManga(q)
+                    else -> emptyList()
                 }
-                ContentTab.K_DRAMA,
-                ContentTab.CARTOON,
-                ContentTab.MOVIES -> {
-                    val category = activeTab.videoCategory()
-                    videoSearchResults = if (category != null) repository.searchVideo(category, q) else emptyList()
-                    isSearching = false
-                }
-                else -> {
-                    searchResults = when (activeTab) {
-                        ContentTab.NOVELS -> repository.searchAll(q).filter { !it.isManga && !it.isAnime }
-                        ContentTab.MANGA -> repository.searchAll(q).filter { it.isManga }
-                        else -> emptyList()
-                    }
-                    isSearching = false
-                }
+                isSearching = false
             }
         }
     }
@@ -853,6 +850,21 @@ fun ContentCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White.copy(0.9f),
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+                if (!compact) {
+                    Text(
+                        item.title,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 6.dp, end = 6.dp, bottom = 30.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 3.dp)
                     )
                 }
             }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,6 +31,7 @@ import com.alexleoreeves.novelapp.ui.theme.textColor
 fun MediaDetailScreen(
     item: UnifiedSearchResult,
     currentTheme: AppTheme,
+    onOpenWatchOptions: (String) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -119,6 +121,18 @@ fun MediaDetailScreen(
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(16.dp)
                 )
+            }
+
+            if (item.url.startsWith("http")) {
+                Button(
+                    onClick = { onOpenWatchOptions(item.url) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Watch options")
+                }
             }
         }
     }

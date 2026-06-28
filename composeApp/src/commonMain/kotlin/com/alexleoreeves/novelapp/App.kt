@@ -299,6 +299,7 @@ fun App(
                     MediaDetailScreen(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
+                        onOpenWatchOptions = { url -> linkOpener.open(url) },
                         onBack = { selectedMedia.value = null }
                     )
                 }

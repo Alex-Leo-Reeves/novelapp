@@ -133,6 +133,7 @@ fun DesktopApp() {
                     selectedMedia.value != null -> MediaDetailScreen(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
+                        onOpenWatchOptions = {},
                         onBack = { selectedMedia.value = null }
                     )
                     selectedNovel.value != null -> NovelDetailScreen(

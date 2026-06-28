@@ -7,6 +7,60 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.json.*
 import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Element
+
+data class DirectoryListing(
+    val title: String,
+    val url: String,
+    val description: String = "",
+    val source: String = ""
+)
+
+suspend fun scrapeDirectoryLinks(
+    httpClient: HttpClient,
+    baseUrl: String,
+    query: String,
+    linkSelector: String,
+    searchPath: String = "/search",
+    queryParameter: String = "q",
+    userAgent: String = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    referer: String = baseUrl,
+    mapper: (Element, String) -> DirectoryListing? = { link, origin ->
+        val href = link.attr("href")
+        val title = link.attr("title")
+            .ifBlank { link.text() }
+            .decodeHtmlEntitiesLite()
+
+        if (href.isBlank() || title.isBlank()) {
+            null
+        } else {
+            val parentText = link.parent()?.text().orEmpty()
+            DirectoryListing(
+                title = title,
+                url = absoluteUrl(origin, href),
+                description = parentText.removePrefix(title).trim(),
+                source = origin
+            )
+        }
+    }
+): List<DirectoryListing> {
+    val origin = baseUrl.trimEnd('/')
+    return safeListRun {
+        val html = httpClient.get("$origin/${searchPath.trimStart('/')}") {
+            parameter(queryParameter, query)
+            header("User-Agent", userAgent)
+            header("Referer", referer)
+            header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        }.bodyAsText()
+
+        if (html.isBlockedOrErrorPage()) return@safeListRun emptyList()
+
+        Ksoup.parse(html)
+            .select(linkSelector)
+            .mapNotNull { mapper(it, origin) }
+            .distinctBy { it.url }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WebNovel RapidAPI Source
@@ -114,16 +168,20 @@ class FreeWebNovelSource(private val httpClient: HttpClient) : NovelSource {
             url = "$baseUrl/search",
             formParameters = Parameters.build { append("searchkey", query) }
         ).bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeListRun emptyList()
         val doc = Ksoup.parse(html)
-        doc.select(".li-row, .book, .item, .novel-item, li")
+        doc.select(".li-row, .book, .item, .novel-item, .book-item, .novel")
             .filter { it.select("a[href]").isNotEmpty() && it.text().length > 3 }
             .mapNotNull { el ->
             val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
             val href = link.attr("href")
+            if (!isFreeWebNovelBookHref(href)) return@mapNotNull null
             val title = el.select("h3, h4, .tit, .title, a").firstOrNull()?.text()
                 ?.ifBlank { link.attr("title") }
                 ?.ifBlank { link.text() }
+                ?.decodeHtmlEntitiesLite()
                 ?: return@mapNotNull null
+            if (title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
             UnifiedSearchResult(
                 id = href,
                 title = title,
@@ -139,21 +197,35 @@ class FreeWebNovelSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeListRun emptyList()
         val doc = Ksoup.parse(html)
-        val links = doc.select("a[href*=/chapter-], a[href*=/chapter/], ul.chapter-list a, .chapter-list a, .m-newest a")
+        val novelSlug = novelUrl.substringAfterLast("/")
+            .substringBefore("?")
+            .removeSuffix(".html")
+            .trim()
+        val links = doc.select("a[href*=/chapter-], a[href*=/chapter/], ul.chapter-list a, .chapter-list a")
             .filter { it.attr("href").isNotBlank() }
+            .filter { el ->
+                val href = el.attr("href")
+                val title = el.text().trim()
+                !title.isNavigationTitle() &&
+                    (novelSlug.isBlank() || href.contains("/$novelSlug/") || href.contains("$novelSlug/chapter")) &&
+                    (href.contains("chapter", ignoreCase = true) || title.contains("chapter", ignoreCase = true))
+            }
             .distinctBy { it.attr("href") }
         links.mapIndexed { index, el ->
+            val href = el.attr("href")
             Chapter(
-                title = el.text().ifBlank { "Chapter ${index + 1}" },
-                url = absoluteUrl(baseUrl, el.attr("href")),
-                chapterNumber = index + 1
+                title = el.text().decodeHtmlEntitiesLite().ifBlank { "Chapter ${index + 1}" },
+                url = absoluteUrl(baseUrl, href),
+                chapterNumber = parseChapterNumber(href, index + 1)
             )
         }
     }
 
     override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeStringRun ""
         val doc = Ksoup.parse(html)
         doc.select("#chapter-content, .chapter-content, .txt, .cha-words, article")
             .firstOrNull()
@@ -163,16 +235,20 @@ class FreeWebNovelSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/sort/most-popular?page=$page").bodyAsText()
+        if (html.isBlockedOrErrorPage()) return@safeListRun emptyList()
         val doc = Ksoup.parse(html)
-        doc.select(".li-row, .book, .item, .novel-item, li")
+        doc.select(".li-row, .book, .item, .novel-item, .book-item, .novel")
             .filter { it.select("a[href]").isNotEmpty() && it.text().length > 3 }
             .mapNotNull { el ->
             val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
             val href = link.attr("href")
+            if (!isFreeWebNovelBookHref(href)) return@mapNotNull null
             val title = el.select("h3, h4, .tit, .title, a").firstOrNull()?.text()
                 ?.ifBlank { link.attr("title") }
                 ?.ifBlank { link.text() }
+                ?.decodeHtmlEntitiesLite()
                 ?: return@mapNotNull null
+            if (title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
             UnifiedSearchResult(
                 id = href,
                 title = title,
@@ -367,6 +443,27 @@ private fun absoluteUrl(baseUrl: String, href: String): String {
     if (href.startsWith("http://") || href.startsWith("https://")) return href
     return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
 }
+
+private fun isFreeWebNovelBookHref(href: String): Boolean {
+    val clean = href.substringBefore("?").trim()
+    if (clean.isBlank()) return false
+    val lower = clean.lowercase()
+    if (lower.contains("/genre/") ||
+        lower.contains("/tag/") ||
+        lower.contains("/category/") ||
+        lower.contains("/chapter") ||
+        lower.contains("javascript:")
+    ) return false
+    return lower.endsWith(".html")
+}
+
+private fun parseChapterNumber(href: String, fallback: Int): Int =
+    Regex("""chapter[-/](\d+)""", RegexOption.IGNORE_CASE)
+        .find(href)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.toIntOrNull()
+        ?: fallback
 
 /** Safely execute [block], swallowing exceptions and returning emptyList(). */
 private suspend fun <T> safeListRun(block: suspend () -> List<T>): List<T> {
