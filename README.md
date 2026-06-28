@@ -166,10 +166,10 @@ render.yaml
 Auth API endpoints:
 
 ```text
-POST https://novelapp.onrender.com/api/auth/register
-POST https://novelapp.onrender.com/api/auth/login
-GET  https://novelapp.onrender.com/api/auth/me
-POST https://novelapp.onrender.com/api/auth/logout
+POST https://novelapp1.onrender.com/api/auth/register
+POST https://novelapp1.onrender.com/api/auth/login
+GET  https://novelapp1.onrender.com/api/auth/me
+POST https://novelapp1.onrender.com/api/auth/logout
 ```
 
 The app stores the returned auth token locally and verifies it with `/api/auth/me` on startup, so users do not need to sign in every time.
@@ -179,13 +179,13 @@ The server stores account data under `DATA_DIR`, which `render.yaml` maps to `/v
 The app checks this update manifest:
 
 ```text
-https://novelapp.onrender.com/app-version.json
+https://novelapp1.onrender.com/app-version.json
 ```
 
 The website and app expect the latest APK at:
 
 ```text
-https://novelapp.onrender.com/downloads/novelapp-android.apk
+https://novelapp1.onrender.com/downloads/novelapp-android.apk
 ```
 
 Before deploying a real public release, build and sign the APK, then place it here:

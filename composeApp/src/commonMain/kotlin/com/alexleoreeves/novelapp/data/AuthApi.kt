@@ -8,6 +8,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.*
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -20,7 +21,7 @@ class AuthApi(
 ) {
     private val client = platformHttpClient {
         install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true })
+            json(authJson)
         }
         install(HttpTimeout) {
             connectTimeoutMillis = 10_000
@@ -31,6 +32,7 @@ class AuthApi(
 
     suspend fun register(username: String, email: String, password: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/register") {
+            accept(ContentType.Application.Json)
             contentType(ContentType.Application.Json)
             setBody(AuthRequest(username = username, email = email, password = password))
         }
@@ -39,6 +41,7 @@ class AuthApi(
 
     suspend fun login(email: String, password: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/login") {
+            accept(ContentType.Application.Json)
             contentType(ContentType.Application.Json)
             setBody(AuthRequest(email = email, password = password))
         }
@@ -47,6 +50,7 @@ class AuthApi(
 
     suspend fun me(token: String): SavedUserAccount {
         val response = client.get("$baseUrl/auth/me") {
+            accept(ContentType.Application.Json)
             bearerAuth(token)
         }
         return response.toSavedUserAccount(existingToken = token)
@@ -54,17 +58,26 @@ class AuthApi(
 
     suspend fun logout(token: String) {
         client.post("$baseUrl/auth/logout") {
+            accept(ContentType.Application.Json)
             bearerAuth(token)
         }
     }
 
     private suspend fun HttpResponse.toSavedUserAccount(existingToken: String? = null): SavedUserAccount {
+        val rawBody = bodyAsText()
+
         if (status != HttpStatusCode.OK && status != HttpStatusCode.Created) {
-            val error = runCatching { body<AuthErrorResponse>().error }.getOrNull()
+            val error = rawBody.decodeAuthError()
             throw IllegalStateException(error ?: "Authentication failed.")
         }
 
-        val payload = body<AuthResponse>()
+        if (rawBody.isBlank()) {
+            throw IllegalStateException(
+                "Authentication server returned an empty response. Make sure Render is running the NovelApp web service, not a static site."
+            )
+        }
+
+        val payload = rawBody.decodeAuthResponse()
         val token = payload.token ?: existingToken
         if (token.isNullOrBlank()) {
             throw IllegalStateException("Authentication token was missing.")
@@ -76,7 +89,21 @@ class AuthApi(
             authToken = token
         )
     }
+
+    private fun String.decodeAuthResponse(): AuthResponse =
+        runCatching { authJson.decodeFromString<AuthResponse>(this) }
+            .getOrElse {
+                throw IllegalStateException(
+                    "Authentication server returned invalid JSON. Make sure Render is running the NovelApp web service."
+                )
+            }
+
+    private fun String.decodeAuthError(): String? =
+        takeIf { it.isNotBlank() }
+            ?.let { raw -> runCatching { authJson.decodeFromString<AuthErrorResponse>(raw).error }.getOrNull() }
 }
+
+private val authJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 @Serializable
 private data class AuthRequest(

@@ -1,12 +1,12 @@
 {
-  "versionCode": 5,
-  "versionName": "1.4",
-  "apkUrl": "https://novelapp.onrender.com/downloads/novelapp-android.apk",
-  "ipaUrl": "https://novelapp.onrender.com/downloads/novelapp-ios.ipa",
+  "versionCode": 6,
+  "versionName": "1.5",
+  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Fixed anime episode matching so base titles are preferred over specials and later seasons.",
-    "Improved anime stream extraction and Android playback for HLS provider streams.",
-    "Expanded manga chapter pagination, sorting, update handling, and login reliability."
+    "Moved login and account creation to the working NovelApp Render web service.",
+    "Fixed auth response handling so empty or invalid server responses show a clear error.",
+    "Kept the anime playback, manga sorting, and update handling fixes from version 1.4."
   ],
   "forceUpdate": false
 }
