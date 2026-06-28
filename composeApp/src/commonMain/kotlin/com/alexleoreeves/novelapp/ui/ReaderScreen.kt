@@ -1,6 +1,7 @@
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -33,6 +34,8 @@ fun ReaderScreen(
     sourceName: String,
     currentTheme: AppTheme,
     onThemeChange: (AppTheme) -> Unit,
+    initialParagraphIndex: Int = 0,
+    onProgress: (Int) -> Unit = {},
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -55,8 +58,24 @@ fun ReaderScreen(
     var selectedTextColor by remember { mutableStateOf(currentTheme.textColor()) }
     var fontSize by remember { mutableStateOf(18f) }
     var showAmbientScreen by remember { mutableStateOf(false) }
+    var autoScrollEnabled by remember { mutableStateOf(true) }
     val isPlaying = ttsController.isPlaying.collectAsState()
+    val ttsChunkIndex = ttsController.currentChunkIndex.collectAsState()
+    val ttsChunkBoundaries = ttsController.chunkBoundaries.collectAsState()
     val lazyListState = rememberLazyListState()
+    val paragraphs by remember(chapterText, isLoading) {
+        derivedStateOf {
+            if (isLoading || chapterText.startsWith("Loading")) {
+                emptyList()
+            } else {
+                chapterText
+                    .split(Regex("""\n\s*\n"""))
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .ifEmpty { listOf(chapterText) }
+            }
+        }
+    }
 
     // — Start sleep detection when playing, stop when paused —
     LaunchedEffect(isPlaying.value) {
@@ -87,6 +106,29 @@ fun ReaderScreen(
             repository.fetchChapterText(chapterUrl, sourceName)
         }
         isLoading = false
+    }
+
+    LaunchedEffect(isLoading, initialParagraphIndex, paragraphs.size) {
+        if (!isLoading && paragraphs.isNotEmpty() && initialParagraphIndex > 0) {
+            lazyListState.scrollToItem((initialParagraphIndex + 1).coerceAtMost(paragraphs.size))
+        }
+    }
+
+    LaunchedEffect(lazyListState.firstVisibleItemIndex, isLoading) {
+        if (!isLoading) {
+            onProgress((lazyListState.firstVisibleItemIndex - 1).coerceAtLeast(0))
+        }
+    }
+
+    LaunchedEffect(isPlaying.value, autoScrollEnabled, paragraphs.size) {
+        if (!isPlaying.value || !autoScrollEnabled || paragraphs.isEmpty()) return@LaunchedEffect
+        var target = (lazyListState.firstVisibleItemIndex - 1).coerceAtLeast(0)
+        while (isPlaying.value && autoScrollEnabled && target < paragraphs.size) {
+            lazyListState.animateScrollToItem(target + 1)
+            onProgress(target)
+            delay(4500L)
+            target++
+        }
     }
 
     // Update text color on theme change
@@ -154,8 +196,49 @@ fun ReaderScreen(
                                 CircularProgressIndicator(color = currentTheme.accentColor())
                             }
                         } else {
+                            Spacer(Modifier.height(1.dp))
+                        }
+                    }
+                    itemsIndexed(paragraphs) { index, paragraph ->
+                        // Derive which paragraph the TTS cursor is currently narrating
+                        val boundaries = ttsChunkBoundaries.value
+                        val chunkIdx = ttsChunkIndex.value
+                        val highlightedPara = if (boundaries.isNotEmpty() && chunkIdx < boundaries.size)
+                            boundaries[chunkIdx]
+                        else -1
+                        val isHighlighted = isPlaying.value && index == highlightedPara
+
+                        val highlightColor by animateColorAsState(
+                            targetValue = if (isHighlighted)
+                                currentTheme.accentColor().copy(alpha = 0.18f)
+                            else Color.Transparent,
+                            animationSpec = tween(durationMillis = 400),
+                            label = "paragraphHighlight"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(highlightColor)
+                                .padding(horizontal = if (isHighlighted) 8.dp else 0.dp)
+                        ) {
                             Text(
-                                text = chapterText,
+                                text = paragraph,
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Serif,
+                                    fontSize = fontSize.sp,
+                                    lineHeight = (fontSize * 1.6f).sp,
+                                    color = selectedTextColor
+                                ),
+                                modifier = Modifier.padding(bottom = 18.dp)
+                            )
+                        }
+                    }
+                    if (!isLoading && paragraphs.isEmpty()) {
+                        item {
+                            Text(
+                                text = "Chapter content unavailable.",
                                 style = TextStyle(
                                     fontFamily = FontFamily.Serif,
                                     fontSize = fontSize.sp,
@@ -300,6 +383,36 @@ fun ReaderScreen(
                                         modifier = Modifier.size(36.dp)
                                     )
                                 }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.SwipeUp,
+                                    contentDescription = null,
+                                    tint = currentTheme.subTextColor(),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Auto-scroll",
+                                    color = currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Switch(
+                                    checked = autoScrollEnabled,
+                                    onCheckedChange = { autoScrollEnabled = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = currentTheme.accentColor(),
+                                        checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                    )
+                                )
                             }
 
                             // Theme picker panel

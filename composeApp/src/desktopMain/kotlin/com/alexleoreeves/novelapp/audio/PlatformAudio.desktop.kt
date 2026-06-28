@@ -2,14 +2,12 @@ package com.alexleoreeves.novelapp.audio
 
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.ByteArrayInputStream
-import java.util.Base64
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.LineEvent
 import kotlin.coroutines.resume
 
-actual suspend fun platformPlayAudio(base64AudioData: String) {
+actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     runCatching {
-        val audioBytes = Base64.getDecoder().decode(base64AudioData)
         val audioInput = AudioSystem.getAudioInputStream(ByteArrayInputStream(audioBytes))
         val clip = AudioSystem.getClip()
 

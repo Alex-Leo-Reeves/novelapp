@@ -8,6 +8,10 @@ import kotlinx.serialization.json.*
 
 private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+// Domain resolution for Anineko is handled by the shared resolveLiveDomain()
+// function in DomainResolver.kt (DomainCache TTL = 6 h, DDG HTML fallback).
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  AniList GraphQL API — 100% free, no API key required
 //  Endpoint: https://graphql.anilist.co
@@ -166,30 +170,40 @@ class AniListSource(private val client: HttpClient) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  GogoAnime Scraper — Extracts HLS .m3u8 stream URLs
-//  Acts as a regular browser, no API key required
+//  Anineko scraper — extracts HLS .m3u8 stream URLs
+//  Acts as a regular browser, no API key required.
+//  BASE_URL is resolved lazily via DuckDuckGo so a domain shift auto-heals.
 // ─────────────────────────────────────────────────────────────────────────────
-class GogoAnimeScraper(private val client: HttpClient) {
+class AninekoScraper(private val client: HttpClient) {
 
     companion object {
-        private const val BASE_URL = "https://gogoanime3.co"
-        private const val SEARCH_URL = "$BASE_URL/search.html"
+        // Hardcoded fallback; the live domain is resolved at runtime via DDG.
+        private const val FALLBACK_URL = "https://anineko.to"
+        private const val BRAND_QUERY = "anineko anime official"
 
         private val BROWSER_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language" to "en-US,en;q=0.9",
-            "Referer" to BASE_URL
+            "Referer" to FALLBACK_URL
         )
     }
 
+    /** Resolves (and caches) the live Anineko domain before making any request. */
+    private suspend fun liveBaseUrl(): String =
+        resolveLiveDomain(client, BRAND_QUERY, FALLBACK_URL)
+
     /**
-     * Search GogoAnime for an anime title and return a list of episode pages.
+     * Search Anineko for an anime title and return a list of episode pages.
+     * The live domain is resolved via DDG before any network call.
      */
     suspend fun fetchEpisodes(animeTitleQuery: String, maxEpisodes: Int = 24): List<AnimeEpisode> {
         return runCatching {
+            val BASE_URL = liveBaseUrl()
+            val searchUrl = "$BASE_URL/search.html"
+
             // 1. Search for the anime series page
-            val searchHtml: String = client.get(SEARCH_URL) {
+            val searchHtml: String = client.get(searchUrl) {
                 parameter("keyword", animeTitleQuery)
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
@@ -204,7 +218,7 @@ class GogoAnimeScraper(private val client: HttpClient) {
             }.body()
 
             // Extract episode count
-            val epEndRegex = Regex("""id="episode_page".*?<a.*?ep_end\s*=\s*"(\d+)"""", RegexOption.DOT_MATCHES_ALL)
+            val epEndRegex = Regex("""id="episode_page"[\s\S]*?<a[\s\S]*?ep_end\s*=\s*"(\d+)"""")
             val totalEpisodes = epEndRegex.find(seriesHtml)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
             // 4. Build episode list (limit to last N episodes to avoid massive lists)
@@ -218,17 +232,22 @@ class GogoAnimeScraper(private val client: HttpClient) {
                 )
             }.reversed() // Newest first
         }.getOrElse { e ->
-            println("[GogoAnime] Error fetching episodes for '$animeTitleQuery': ${e.message}")
+            println("[Anineko] Error fetching episodes for '$animeTitleQuery': ${e.message}")
             emptyList()
         }
     }
 
     /**
-     * Scrapes a GogoAnime episode page and extracts the .m3u8 HLS stream URL.
+     * Scrapes an Anineko episode page and extracts the .m3u8 HLS stream URL.
+     * The live domain is resolved via DDG before any network call.
      */
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
         return runCatching {
-            val html: String = client.get(episodePageUrl) {
+            // Rewrite the episode URL to the live domain in case the stored URL is stale
+            val liveBase = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(episodePageUrl, liveBase)
+
+            val html: String = client.get(effectiveUrl) {
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
 
@@ -241,32 +260,37 @@ class GogoAnimeScraper(private val client: HttpClient) {
             val iframeRegex = Regex("""<iframe[^>]+src="([^"]+)"""")
             val iframeUrl = iframeRegex.find(html)?.groupValues?.get(1)
             if (iframeUrl != null) {
-                val iframeHtml: String = client.get(iframeUrl) {
+                val absoluteIframeUrl = when {
+                    iframeUrl.startsWith("//") -> "https:$iframeUrl"
+                    iframeUrl.startsWith("/") -> "$liveBase$iframeUrl"
+                    else -> iframeUrl
+                }
+                val iframeHtml: String = client.get(absoluteIframeUrl) {
                     BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
-                    header("Referer", episodePageUrl)
+                    header("Referer", effectiveUrl)
                 }.body()
                 return@runCatching m3u8Regex.find(iframeHtml)?.value
             }
 
             null
         }.getOrElse { e ->
-            println("[GogoAnime] Stream extraction error: ${e.message}")
+            println("[Anineko] Stream extraction error: ${e.message}")
             null
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Hianime Scraper — Fallback anime stream source
+//  AnimePahe Scraper — Fallback anime stream source
 // ─────────────────────────────────────────────────────────────────────────────
-class HianimeScraper(private val client: HttpClient) {
+class AnimePaheScraper(private val client: HttpClient) {
 
     companion object {
-        private const val BASE_URL = "https://hianime.to"
-        private const val SEARCH_URL = "$BASE_URL/search"
+        private const val BASE_URL = "https://animepahe.pw"
+        private const val API_URL = "$BASE_URL/api"
         private val BROWSER_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            "Accept" to "text/html,application/xhtml+xml",
+            "Accept" to "text/html,application/xhtml+xml,application/json",
             "Accept-Language" to "en-US,en;q=0.9",
             "Referer" to BASE_URL
         )
@@ -274,29 +298,44 @@ class HianimeScraper(private val client: HttpClient) {
 
     suspend fun fetchEpisodes(animeTitleQuery: String): List<AnimeEpisode> {
         return runCatching {
-            val searchHtml: String = client.get(SEARCH_URL) {
-                parameter("keyword", animeTitleQuery)
+            val searchResponse: String = client.get(API_URL) {
+                parameter("m", "search")
+                parameter("q", animeTitleQuery)
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
 
-            val slugRegex = Regex("""href="/([^"?]+)\?[^"]*"""")
-            val slug = slugRegex.find(searchHtml)?.groupValues?.get(1) ?: return@runCatching emptyList()
+            val searchJson = json.parseToJsonElement(searchResponse).jsonObject
+            val first = searchJson["data"]?.jsonArray?.firstOrNull()?.jsonObject
+                ?: return@runCatching emptyList()
+            val session = first["session"]?.jsonPrimitive?.contentOrNull
+                ?: first["id"]?.jsonPrimitive?.contentOrNull
+                ?: return@runCatching emptyList()
 
-            val seriesHtml: String = client.get("$BASE_URL/$slug") {
+            val releaseResponse: String = client.get(API_URL) {
+                parameter("m", "release")
+                parameter("id", session)
+                parameter("sort", "episode_asc")
+                parameter("page", 1)
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
 
-            val epCountRegex = Regex("""class="tick-eps">(\d+)<""")
-            val total = epCountRegex.find(seriesHtml)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-            (1..total).map { ep ->
+            val releaseJson = json.parseToJsonElement(releaseResponse).jsonObject
+            val data = releaseJson["data"]?.jsonArray ?: return@runCatching emptyList()
+            data.mapIndexed { index, item ->
+                val obj = item.jsonObject
+                val episodeNumber = obj["episode"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toInt()
+                    ?: (index + 1)
+                val episodeSession = obj["session"]?.jsonPrimitive?.contentOrNull.orEmpty()
                 AnimeEpisode(
-                    episodeNumber = ep,
-                    title = "Episode $ep",
-                    url = "$BASE_URL/watch/$slug?ep=$ep"
+                    episodeNumber = episodeNumber,
+                    title = "Episode $episodeNumber",
+                    url = "$BASE_URL/play/$session/$episodeSession"
                 )
             }.reversed()
-        }.getOrElse { emptyList() }
+        }.getOrElse { e ->
+            println("[AnimePahe] Episode fetch failed: ${e.message}")
+            emptyList()
+        }
     }
 
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
@@ -305,7 +344,10 @@ class HianimeScraper(private val client: HttpClient) {
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
             val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
+            val mp4Regex = Regex("""https?://[^\s"']+\.mp4[^\s"']*""")
             m3u8Regex.find(html)?.value
+                ?: mp4Regex.find(html)?.value
+                ?: Regex("""https?://kwik\.[^\s"']+""").find(html)?.value
         }.getOrNull()
     }
 }

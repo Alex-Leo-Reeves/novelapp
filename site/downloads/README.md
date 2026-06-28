@@ -4,6 +4,7 @@ Place signed release builds here before deploying the site:
 
 ```text
 site/downloads/novelapp-android.apk
+site/downloads/novelapp-ios.ipa
 site/downloads/novelapp-tv.apk
 site/downloads/novelapp-windows.msi
 ```
@@ -18,6 +19,12 @@ The TV website download button points to:
 
 ```text
 https://novelapp.onrender.com/downloads/novelapp-tv.apk
+```
+
+The iPhone website download button points to:
+
+```text
+https://novelapp.onrender.com/downloads/novelapp-ios.ipa
 ```
 
 The Windows website download button points to:

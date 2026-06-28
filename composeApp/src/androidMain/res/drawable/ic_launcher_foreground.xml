@@ -4,21 +4,60 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Left page (pink) -->
     <path
         android:fillColor="#E84D8A"
-        android:pathData="M18,25c0,-6 5,-11 11,-11h18c7,0 12,5 12,12v65c-4,-4 -9,-6 -16,-6h-14c-6,0 -11,-5 -11,-11z" />
+        android:pathData="M16,22 C16,16 21,12 27,12 L47,12 C54,12 58,17 58,24 L58,88 C53,84 47,82 40,82 L27,82 C20,82 16,77 16,70 Z" />
+
+    <!-- Right page (teal) -->
     <path
         android:fillColor="#42D6B5"
-        android:pathData="M90,25c0,-6 -5,-11 -11,-11h-18c-7,0 -12,5 -12,12v65c4,-4 9,-6 16,-6h14c6,0 11,-5 11,-11z" />
+        android:pathData="M92,22 C92,16 87,12 81,12 L61,12 C54,12 50,17 50,24 L50,88 C55,84 61,82 68,82 L81,82 C88,82 92,77 92,70 Z" />
+
+    <!-- Left page text lines -->
     <path
         android:fillColor="#F4F1EC"
-        android:fillAlpha="0.9"
-        android:pathData="M29,31h18v4h-18zM29,42h15v4h-15zM29,53h18v4h-18zM29,64h13v4h-13zM63,31h16v4h-16zM63,42h13v4h-13zM63,64h16v4h-16z" />
+        android:fillAlpha="0.88"
+        android:pathData="M24,28 L50,28 L50,32 L24,32 Z
+                          M24,39 L48,39 L48,43 L24,43 Z
+                          M24,50 L50,50 L50,54 L24,54 Z
+                          M24,61 L46,61 L46,65 L24,65 Z
+                          M24,72 L44,72 L44,76 L24,76 Z" />
+
+    <!-- Right page text lines -->
     <path
-        android:fillColor="#F2C766"
-        android:pathData="M47,38l24,16 -24,16z" />
+        android:fillColor="#F4F1EC"
+        android:fillAlpha="0.88"
+        android:pathData="M58,28 L84,28 L84,32 L58,32 Z
+                          M58,39 L82,39 L82,43 L58,43 Z
+                          M58,50 L84,50 L84,54 L58,54 Z
+                          M60,61 L82,61 L82,65 L60,65 Z" />
+
+    <!-- Central spine glow -->
     <path
         android:fillColor="#FFFFFF"
-        android:fillAlpha="0.24"
-        android:pathData="M54,18c3,2 5,5 5,9v58c-2,1 -4,3 -5,5 -1,-2 -3,-4 -5,-5v-58c0,-4 2,-7 5,-9z" />
+        android:fillAlpha="0.20"
+        android:pathData="M52,10 C55,12 57,16 57,20 L57,86 C55,88 53,90 52,92 C51,90 49,88 47,86 L47,20 C47,16 49,12 52,10 Z" />
+
+    <!-- Gold play triangle (anime symbol) -->
+    <path
+        android:fillColor="#F2C766"
+        android:pathData="M44,56 L68,70 L44,84 Z" />
+
+    <!-- Spark star top-left -->
+    <path
+        android:fillColor="#F2C766"
+        android:pathData="M22,10 L23.4,14 L27,15.4 L23.4,16.8 L22,21 L20.6,16.8 L17,15.4 L20.6,14 Z" />
+
+    <!-- Spark dot top-centre -->
+    <path
+        android:fillColor="#42D6B5"
+        android:pathData="M52,6 L53,9 L56,10 L53,11 L52,14 L51,11 L48,10 L51,9 Z" />
+
+    <!-- Spark star top-right -->
+    <path
+        android:fillColor="#E84D8A"
+        android:pathData="M86,10 L87.4,14 L91,15.4 L87.4,16.8 L86,21 L84.6,16.8 L81,15.4 L84.6,14 Z" />
+
 </vector>

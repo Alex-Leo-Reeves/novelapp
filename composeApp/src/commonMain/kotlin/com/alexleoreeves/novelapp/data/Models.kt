@@ -17,6 +17,8 @@ data class UnifiedSearchResult(
     val synopsis: String = "",
     val isManga: Boolean = false,
     val isAnime: Boolean = false,
+    val isVideo: Boolean = false,
+    val mediaKind: String = "",
     // Convenience alias used in newer code
     val url: String = detailPageUrl,
     @kotlinx.serialization.Transient
@@ -34,6 +36,12 @@ enum class MangaScrollMode(val displayName: String) {
     WEBTOON("Webtoon"),
     RTL("Right-to-Left"),
     LTR("Left-to-Right")
+}
+
+enum class VideoCategory(val label: String) {
+    K_DRAMA("K-Drama"),
+    CARTOON("Cartoon"),
+    MOVIES("Movies")
 }
 
 // ───────────────────────────────────────────────
@@ -125,7 +133,6 @@ data class AnimeResult(
 data class AnimeEpisode(
     val episodeNumber: Int,
     val title: String,
-    val url: String,       // GogoAnime/Hianime page URL to scrape stream from
+    val url: String,       // Anineko/AnimePahe page URL to scrape stream from
     val thumbnail: String = ""
 )
-

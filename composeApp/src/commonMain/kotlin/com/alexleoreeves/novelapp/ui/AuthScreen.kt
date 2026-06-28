@@ -65,7 +65,8 @@ fun AuthScreen(
     errorMessage: String?,
     onClearError: () -> Unit,
     onSignIn: (email: String, password: String) -> Unit,
-    onCreateAccount: (username: String, email: String, password: String) -> Unit
+    onCreateAccount: (username: String, email: String, password: String) -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     var mode by remember { mutableStateOf(AuthMode.CREATE_ACCOUNT) }
     var username by remember { mutableStateOf("") }
@@ -215,6 +216,19 @@ fun AuthScreen(
                         )
                     } else {
                         Text(mode.label, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (onDismiss != null) {
+                    androidx.compose.material3.TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Browse as Guest",
+                            color = currentTheme.accentColor(),
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
 

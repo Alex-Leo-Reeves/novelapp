@@ -18,4 +18,7 @@ captures/
 *.jks
 keystores/
 server-data/
+iosApp/*.xcodeproj/
+iosApp/*.xcworkspace/
+*.xcarchive
 !debug.keystore

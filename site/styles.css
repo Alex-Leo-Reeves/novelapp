@@ -225,10 +225,14 @@ h3 {
 .tab-row {
   gap: 8px;
   margin-bottom: 18px;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .tab-row span {
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: 74px;
   border-radius: 8px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.06);

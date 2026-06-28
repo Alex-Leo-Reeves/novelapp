@@ -40,8 +40,35 @@ data class DownloadedChapter(
 )
 
 @Serializable
+data class ReadHistoryItem(
+    val parentId: String,
+    val title: String,
+    val coverUrl: String,
+    val sourceName: String,
+    val chapterTitle: String,
+    val chapterUrl: String,
+    val isManga: Boolean = false,
+    val positionIndex: Int = 0,
+    val updatedAt: Long = 0L
+)
+
+@Serializable
+data class WatchHistoryItem(
+    val parentId: String,
+    val title: String,
+    val coverUrl: String,
+    val episodeTitle: String,
+    val streamUrl: String,
+    val episodeNumber: Int = 0,
+    val positionMs: Long = 0L,
+    val updatedAt: Long = 0L
+)
+
+@Serializable
 data class DownloadIndex(
     val items: List<DownloadedItem> = emptyList(),
     val episodes: List<DownloadedEpisode> = emptyList(),
-    val chapters: List<DownloadedChapter> = emptyList()
+    val chapters: List<DownloadedChapter> = emptyList(),
+    val readHistory: List<ReadHistoryItem> = emptyList(),
+    val watchHistory: List<WatchHistoryItem> = emptyList()
 )

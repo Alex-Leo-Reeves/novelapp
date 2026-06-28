@@ -7,7 +7,7 @@ import kotlinx.coroutines.delay
  * Full implementation would use AVAudioPlayer / AVFoundation via Kotlin/Native interop.
  * This stub prevents compile errors in this phase.
  */
-actual suspend fun platformPlayAudio(base64AudioData: String) {
+actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     // TODO: Implement using AVFoundation
     // val audioData = NSData.create(base64Encoded = base64AudioData)
     // val player = AVAudioPlayer(data = audioData)

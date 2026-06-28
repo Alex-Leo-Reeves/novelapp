@@ -85,7 +85,7 @@ kotlin {
             implementation(libs.sqlite.bundled)
             implementation(libs.coil.compose)
             implementation(libs.coil.network.ktor)
-            implementation(libs.jsoup)
+            implementation(libs.ksoup)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -114,8 +114,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
     packaging {
         resources {

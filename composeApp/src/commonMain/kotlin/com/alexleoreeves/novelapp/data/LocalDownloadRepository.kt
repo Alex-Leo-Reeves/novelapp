@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.data
 
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -83,7 +84,9 @@ class LocalDownloadRepository {
             idx.copy(
                 items = idx.items.filter { it.id != itemId },
                 episodes = idx.episodes.filter { it.parentId != itemId },
-                chapters = idx.chapters.filter { it.parentId != itemId }
+                chapters = idx.chapters.filter { it.parentId != itemId },
+                readHistory = idx.readHistory.filter { it.parentId != itemId },
+                watchHistory = idx.watchHistory.filter { it.parentId != itemId }
             )
         )
     }
@@ -91,14 +94,16 @@ class LocalDownloadRepository {
     fun deleteEpisode(parentId: String, episodeNumber: Int) {
         val idx = loadIndex()
         saveIndex(idx.copy(
-            episodes = idx.episodes.filter { !(it.parentId == parentId && it.episodeNumber == episodeNumber) }
+            episodes = idx.episodes.filter { !(it.parentId == parentId && it.episodeNumber == episodeNumber) },
+            watchHistory = idx.watchHistory.filter { !(it.parentId == parentId && it.episodeNumber == episodeNumber) }
         ))
     }
 
     fun deleteChapter(parentId: String, chapterNumber: Int) {
         val idx = loadIndex()
         saveIndex(idx.copy(
-            chapters = idx.chapters.filter { !(it.parentId == parentId && it.chapterNumber == chapterNumber) }
+            chapters = idx.chapters.filter { !(it.parentId == parentId && it.chapterNumber == chapterNumber) },
+            readHistory = idx.readHistory.filter { !(it.parentId == parentId && it.chapterTitle.contains("Chapter $chapterNumber", ignoreCase = true)) }
         ))
     }
 
@@ -107,4 +112,49 @@ class LocalDownloadRepository {
 
     fun isChapterDownloaded(parentId: String, chapterNumber: Int): Boolean =
         loadIndex().chapters.any { it.parentId == parentId && it.chapterNumber == chapterNumber }
+
+    // ── History / Resume ─────────────────────────────────────────────────
+    fun getReadHistory(): List<ReadHistoryItem> =
+        loadIndex().readHistory.sortedByDescending { it.updatedAt }
+
+    fun getWatchHistory(): List<WatchHistoryItem> =
+        loadIndex().watchHistory.sortedByDescending { it.updatedAt }
+
+    fun getReadProgress(chapterUrl: String): ReadHistoryItem? =
+        loadIndex().readHistory.firstOrNull { it.chapterUrl == chapterUrl }
+
+    fun getWatchProgress(streamUrl: String): WatchHistoryItem? =
+        loadIndex().watchHistory.firstOrNull { it.streamUrl == streamUrl }
+
+    fun recordReadProgress(item: ReadHistoryItem) {
+        val idx = loadIndex()
+        val updated = item.copy(
+            positionIndex = item.positionIndex.coerceAtLeast(0),
+            updatedAt = currentTimeMillis()
+        )
+        saveIndex(
+            idx.copy(
+                readHistory = (listOf(updated) + idx.readHistory.filter { it.chapterUrl != item.chapterUrl })
+                    .take(MAX_HISTORY_ITEMS)
+            )
+        )
+    }
+
+    fun recordWatchProgress(item: WatchHistoryItem) {
+        val idx = loadIndex()
+        val updated = item.copy(
+            positionMs = item.positionMs.coerceAtLeast(0L),
+            updatedAt = currentTimeMillis()
+        )
+        saveIndex(
+            idx.copy(
+                watchHistory = (listOf(updated) + idx.watchHistory.filter { it.streamUrl != item.streamUrl })
+                    .take(MAX_HISTORY_ITEMS)
+            )
+        )
+    }
+
+    private companion object {
+        const val MAX_HISTORY_ITEMS = 40
+    }
 }

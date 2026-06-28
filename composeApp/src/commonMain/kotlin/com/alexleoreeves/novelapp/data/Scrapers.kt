@@ -2,10 +2,11 @@ package com.alexleoreeves.novelapp.data
 
 import io.ktor.client.*
 import io.ktor.client.request.*
+import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.json.*
-import org.jsoup.Jsoup
+import com.fleeksoft.ksoup.Ksoup
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WebNovel RapidAPI Source
@@ -101,6 +102,91 @@ class WebNovelApiSource(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  FreeWebNovel Scraper — western/chinese/korean web novels
+// ─────────────────────────────────────────────────────────────────────────────
+class FreeWebNovelSource(private val httpClient: HttpClient) : NovelSource {
+
+    override val sourceName = "FreeWebNovel"
+    private val baseUrl = "https://freewebnovel.com"
+
+    override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
+        val html = httpClient.submitForm(
+            url = "$baseUrl/search",
+            formParameters = Parameters.build { append("searchkey", query) }
+        ).bodyAsText()
+        val doc = Ksoup.parse(html)
+        doc.select(".li-row, .book, .item, .novel-item, li")
+            .filter { it.select("a[href]").isNotEmpty() && it.text().length > 3 }
+            .mapNotNull { el ->
+            val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
+            val href = link.attr("href")
+            val title = el.select("h3, h4, .tit, .title, a").firstOrNull()?.text()
+                ?.ifBlank { link.attr("title") }
+                ?.ifBlank { link.text() }
+                ?: return@mapNotNull null
+            UnifiedSearchResult(
+                id = href,
+                title = title,
+                coverUrl = absoluteUrl(baseUrl, el.select("img").firstOrNull()?.attr("data-src").orEmpty()
+                    .ifBlank { el.select("img").firstOrNull()?.attr("src").orEmpty() }),
+                detailPageUrl = absoluteUrl(baseUrl, href),
+                sourceName = sourceName,
+                author = el.select(".author, .s1, span:contains(Author)").firstOrNull()?.text().orEmpty(),
+                genre = el.select(".genre, .s2, a[href*=/genre/]").joinToString(", ") { it.text() }
+            )
+        }.distinctBy { it.detailPageUrl }.take(30)
+    }
+
+    override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
+        val html = httpClient.get(novelUrl).bodyAsText()
+        val doc = Ksoup.parse(html)
+        val links = doc.select("a[href*=/chapter-], a[href*=/chapter/], ul.chapter-list a, .chapter-list a, .m-newest a")
+            .filter { it.attr("href").isNotBlank() }
+            .distinctBy { it.attr("href") }
+        links.mapIndexed { index, el ->
+            Chapter(
+                title = el.text().ifBlank { "Chapter ${index + 1}" },
+                url = absoluteUrl(baseUrl, el.attr("href")),
+                chapterNumber = index + 1
+            )
+        }
+    }
+
+    override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
+        val html = httpClient.get(chapterUrl).bodyAsText()
+        val doc = Ksoup.parse(html)
+        doc.select("#chapter-content, .chapter-content, .txt, .cha-words, article")
+            .firstOrNull()
+            ?.text()
+            .orEmpty()
+    }.ifEmpty { "Content unavailable." }
+
+    override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
+        val html = httpClient.get("$baseUrl/sort/most-popular?page=$page").bodyAsText()
+        val doc = Ksoup.parse(html)
+        doc.select(".li-row, .book, .item, .novel-item, li")
+            .filter { it.select("a[href]").isNotEmpty() && it.text().length > 3 }
+            .mapNotNull { el ->
+            val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
+            val href = link.attr("href")
+            val title = el.select("h3, h4, .tit, .title, a").firstOrNull()?.text()
+                ?.ifBlank { link.attr("title") }
+                ?.ifBlank { link.text() }
+                ?: return@mapNotNull null
+            UnifiedSearchResult(
+                id = href,
+                title = title,
+                coverUrl = absoluteUrl(baseUrl, el.select("img").firstOrNull()?.attr("data-src").orEmpty()
+                    .ifBlank { el.select("img").firstOrNull()?.attr("src").orEmpty() }),
+                detailPageUrl = absoluteUrl(baseUrl, href),
+                sourceName = sourceName,
+                genre = el.select("a[href*=/genre/]").joinToString(", ") { it.text() }
+            )
+        }.distinctBy { it.detailPageUrl }.take(30)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  LightNovelPub Scraper
 // ─────────────────────────────────────────────────────────────────────────────
 class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
@@ -110,7 +196,7 @@ class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/search?inputContent=${query.encodeURL()}").bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("li.novel-item").map { el ->
             UnifiedSearchResult(
                 id = el.select("a").attr("href"),
@@ -125,7 +211,7 @@ class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("ul.chapter-list li a").mapIndexed { index, el ->
             Chapter(
                 title = el.text().ifEmpty { "Chapter ${index + 1}" },
@@ -137,14 +223,14 @@ class LightNovelPubSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("#chapter-container").text()
             .ifEmpty { doc.select("div.chapter-content").text() }
     }.ifEmpty { "Content unavailable." }
 
     override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/novel-list?pg=$page&sort=hot").bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("li.novel-item").map { el ->
             UnifiedSearchResult(
                 id = el.select("a").attr("href"),
@@ -167,7 +253,7 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/?s=${query.encodeURL()}&post_type=wp-manga").bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("div.c-tabs-item__content").map { el ->
             UnifiedSearchResult(
                 id = el.select("a").attr("href"),
@@ -182,7 +268,7 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("ul.main li a").reversed().mapIndexed { index, el ->
             Chapter(
                 title = el.select("p").first()?.text() ?: "Chapter ${index + 1}",
@@ -194,13 +280,13 @@ class BoxNovelSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("div.reading-content").text()
     }.ifEmpty { "Content unavailable." }
 
     override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/novel-list/?m_orderby=trending&page=$page").bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("div.page-item-detail").map { el ->
             UnifiedSearchResult(
                 id = el.select("a").attr("href"),
@@ -223,7 +309,7 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun search(query: String): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/fictions/search?title=${query.encodeURL()}").bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("div.fiction-list-item").map { el ->
             val link = el.select("h2.fiction-title a")
             UnifiedSearchResult(
@@ -239,7 +325,7 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapters(novelUrl: String): List<Chapter> = safeListRun {
         val html = httpClient.get(novelUrl).bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("tr.chapter-row td a").mapIndexed { index, el ->
             Chapter(
                 title = el.text().trim(),
@@ -251,13 +337,13 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
 
     override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {
         val html = httpClient.get(chapterUrl).bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("div.chapter-content").text()
     }.ifEmpty { "Content unavailable." }
 
     override suspend fun fetchPopular(page: Int): List<UnifiedSearchResult> = safeListRun {
         val html = httpClient.get("$baseUrl/fictions/best-rated?page=$page").bodyAsText()
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         doc.select("div.fiction-list-item").map { el ->
             val link = el.select("h2.fiction-title a")
             UnifiedSearchResult(
@@ -275,6 +361,12 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
 //  Helper extensions
 // ─────────────────────────────────────────────────────────────────────────────
 private fun String.encodeURL(): String = this.replace(" ", "+")
+
+private fun absoluteUrl(baseUrl: String, href: String): String {
+    if (href.isBlank()) return ""
+    if (href.startsWith("http://") || href.startsWith("https://")) return href
+    return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
+}
 
 /** Safely execute [block], swallowing exceptions and returning emptyList(). */
 private suspend fun <T> safeListRun(block: suspend () -> List<T>): List<T> {

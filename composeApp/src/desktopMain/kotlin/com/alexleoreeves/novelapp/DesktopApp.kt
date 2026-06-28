@@ -32,6 +32,7 @@ fun DesktopApp() {
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
     val downloadRepo = remember { LocalDownloadRepository() }
     val selectedNovel = remember { mutableStateOf<UnifiedSearchResult?>(null) }
+    val selectedMedia = remember { mutableStateOf<UnifiedSearchResult?>(null) }
     val selectedChapterUrl = remember { mutableStateOf<String?>(null) }
     val selectedChapterTitle = remember { mutableStateOf("") }
     val selectedNovelTitle = remember { mutableStateOf("") }
@@ -63,6 +64,8 @@ fun DesktopApp() {
                     streamUrl = animeStreamUrl.value!!,
                     episodeTitle = animeEpisodeTitle.value,
                     currentTheme = appTheme.value,
+                    initialPositionMs = 0L,
+                    onProgress = {},
                     onBack = { animeStreamUrl.value = null }
                 )
                 return@NovelAppTheme
@@ -75,6 +78,8 @@ fun DesktopApp() {
                         chapterTitle = selectedChapterTitle.value,
                         sourceName = selectedSourceName.value,
                         currentTheme = appTheme.value,
+                        initialPageIndex = 0,
+                        onProgress = {},
                         onBack = { selectedChapterUrl.value = null }
                     )
                 } else {
@@ -85,6 +90,8 @@ fun DesktopApp() {
                         sourceName = selectedSourceName.value,
                         currentTheme = appTheme.value,
                         onThemeChange = { appTheme.value = it },
+                        initialParagraphIndex = 0,
+                        onProgress = {},
                         onBack = { selectedChapterUrl.value = null }
                     )
                 }
@@ -103,7 +110,12 @@ fun DesktopApp() {
                 currentSection = currentSection,
                 currentTheme = appTheme.value,
                 ttsController = ttsController,
-                onSectionChange = { currentSection = it; selectedNovel.value = null; selectedAnime.value = null },
+                onSectionChange = {
+                    currentSection = it
+                    selectedNovel.value = null
+                    selectedAnime.value = null
+                    selectedMedia.value = null
+                },
                 onThemeChange = { appTheme.value = it }
             )
 
@@ -117,6 +129,11 @@ fun DesktopApp() {
                         downloadRepo = downloadRepo,
                         onPlayEpisode = { url, title -> animeStreamUrl.value = url; animeEpisodeTitle.value = title },
                         onBack = { selectedAnime.value = null }
+                    )
+                    selectedMedia.value != null -> MediaDetailScreen(
+                        item = selectedMedia.value!!,
+                        currentTheme = appTheme.value,
+                        onBack = { selectedMedia.value = null }
                     )
                     selectedNovel.value != null -> NovelDetailScreen(
                         novel = selectedNovel.value!!,
@@ -145,6 +162,7 @@ fun DesktopApp() {
                             isDesktop = true,
                             onNovelSelected = { item ->
                                 if (item.isAnime && item.animeResult != null) selectedAnime.value = item.animeResult
+                                else if (item.isVideo) selectedMedia.value = item
                                 else selectedNovel.value = item
                             }
                         )

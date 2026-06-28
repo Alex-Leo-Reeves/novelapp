@@ -20,6 +20,8 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".apk": "application/vnd.android.package-archive",
+  ".ipa": "application/octet-stream",
+  ".msi": "application/octet-stream",
   ".txt": "text/plain; charset=utf-8"
 };
 

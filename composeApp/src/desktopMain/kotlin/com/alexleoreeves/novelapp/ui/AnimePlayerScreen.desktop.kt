@@ -35,6 +35,8 @@ actual fun AnimePlayerScreen(
     streamUrl: String,
     episodeTitle: String,
     currentTheme: AppTheme,
+    initialPositionMs: Long,
+    onProgress: (Long) -> Unit,
     onBack: () -> Unit
 ) {
     Box(

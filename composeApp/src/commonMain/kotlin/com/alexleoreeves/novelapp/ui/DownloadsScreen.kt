@@ -34,7 +34,8 @@ fun DownloadsScreen(
     downloadRepo: LocalDownloadRepository,
     onPlayEpisode: (localPath: String, title: String) -> Unit,
     onReadMangaChapter: (localPath: String, title: String) -> Unit,
-    onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit
+    onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
+    onRootBack: (() -> Unit)? = null
 ) {
     var activeSection by remember { mutableStateOf(DownloadSection.NONE) }
     var selectedItem by remember { mutableStateOf<DownloadedItem?>(null) }
@@ -86,7 +87,8 @@ fun DownloadsScreen(
             else -> DownloadsRootScreen(
                 currentTheme = currentTheme,
                 downloadRepo = downloadRepo,
-                onSectionClick = { activeSection = it }
+                onSectionClick = { activeSection = it },
+                onBack = onRootBack
             )
         }
     }
@@ -99,7 +101,8 @@ fun DownloadsScreen(
 private fun DownloadsRootScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
-    onSectionClick: (DownloadSection) -> Unit
+    onSectionClick: (DownloadSection) -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     val animeCount = remember { downloadRepo.getAnimeItems().size }
     val mangaCount = remember { downloadRepo.getMangaItems().size }
@@ -118,6 +121,11 @@ private fun DownloadsRootScreen(
                 .padding(horizontal = 20.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                }
+            }
             Icon(
                 Icons.Default.Download,
                 null,
