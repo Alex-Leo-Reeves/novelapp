@@ -53,9 +53,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.AppTheme
+import com.alexleoreeves.novelapp.data.AppUpdateManifest
 import com.alexleoreeves.novelapp.data.LocalDownloadRepository
 import com.alexleoreeves.novelapp.data.ReadHistoryItem
 import com.alexleoreeves.novelapp.data.WatchHistoryItem
+import com.alexleoreeves.novelapp.data.fetchAppUpdateManifest
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.DeveloperContact
 import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
@@ -67,28 +69,16 @@ import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-
-@Serializable
-private data class UpdateManifest(
-    val versionCode: Int = AppReleaseConfig.CURRENT_VERSION_CODE,
-    val versionName: String = AppReleaseConfig.CURRENT_VERSION_NAME,
-    val apkUrl: String = AppReleaseConfig.DOWNLOAD_URL,
-    val releaseNotes: List<String> = emptyList(),
-    val forceUpdate: Boolean = false
-)
 
 private sealed class UpdateState {
     data object Idle : UpdateState()
     data object Checking : UpdateState()
     data object Current : UpdateState()
-    data class Available(val manifest: UpdateManifest) : UpdateState()
+    data class Available(val manifest: AppUpdateManifest) : UpdateState()
     data class Failed(val message: String) : UpdateState()
 }
 
@@ -119,8 +109,8 @@ fun YouScreen(
     suspend fun checkForUpdates() {
         updateState = UpdateState.Checking
         updateState = try {
-            val manifest = client.get(AppReleaseConfig.UPDATE_MANIFEST_URL).body<UpdateManifest>()
-            if (manifest.versionCode > AppReleaseConfig.CURRENT_VERSION_CODE) {
+            val manifest = fetchAppUpdateManifest(client) ?: error("Update manifest unavailable")
+            if (manifest.isAvailable) {
                 UpdateState.Available(manifest)
             } else {
                 UpdateState.Current

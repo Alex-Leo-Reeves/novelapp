@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.audio.GeminiTtsController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.EmptyUserSessionStore
@@ -28,7 +29,11 @@ import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,6 +55,8 @@ fun App(
     var authError by remember { mutableStateOf<String?>(null) }
     // Shown as an overlay when a guest tries to use a gated action
     var showAuthSheet by remember { mutableStateOf(false) }
+    var startupUpdateManifest by remember { mutableStateOf<AppUpdateManifest?>(null) }
+    var isStartupUpdateDismissed by remember { mutableStateOf(false) }
     val authApi = remember { AuthApi() }
 
     // App state
@@ -79,6 +86,17 @@ fun App(
     val ttsController = remember {
         GeminiTtsController(BuildKonfig.GEMINI_API_KEY)
     }
+    val updateClient = remember {
+        HttpClient {
+            install(ContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true })
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { updateClient.close() }
+    }
 
     LaunchedEffect(Unit) {
         val savedAccount = userSessionStore.loadAccount()
@@ -97,6 +115,13 @@ fun App(
                 account = null
             }
         isAuthChecked = true
+    }
+
+    LaunchedEffect(showSplash, isAuthChecked) {
+        if (!showSplash && isAuthChecked) {
+            val manifest = fetchAppUpdateManifest(updateClient)
+            startupUpdateManifest = manifest?.takeIf { it.isAvailable }
+        }
     }
 
     // Helper: run [action] if the user has an account, otherwise show the auth sheet.
@@ -494,6 +519,57 @@ fun App(
                             }
                             .onFailure { authError = it.message ?: "Account creation failed." }
                         isAuthSubmitting = false
+                    }
+                }
+            )
+        }
+
+        val startupUpdate = startupUpdateManifest
+        if (startupUpdate != null && !isStartupUpdateDismissed && !showAuthSheet) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (!startupUpdate.forceUpdate) {
+                        isStartupUpdateDismissed = true
+                    }
+                },
+                icon = {
+                    Icon(
+                        Icons.Default.Download,
+                        contentDescription = null,
+                        tint = appTheme.value.accentColor()
+                    )
+                },
+                title = {
+                    Text("Update available")
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Version ${startupUpdate.versionName} is ready to install.")
+                        if (startupUpdate.releaseNotes.isNotEmpty()) {
+                            Text(
+                                startupUpdate.releaseNotes.joinToString(separator = "\n") { "- $it" },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            linkOpener.open(startupUpdate.apkUrl.ifBlank { com.alexleoreeves.novelapp.platform.AppReleaseConfig.DOWNLOAD_URL })
+                            if (!startupUpdate.forceUpdate) {
+                                isStartupUpdateDismissed = true
+                            }
+                        }
+                    ) {
+                        Text("Download")
+                    }
+                },
+                dismissButton = {
+                    if (!startupUpdate.forceUpdate) {
+                        TextButton(onClick = { isStartupUpdateDismissed = true }) {
+                            Text("Later")
+                        }
                     }
                 }
             )
