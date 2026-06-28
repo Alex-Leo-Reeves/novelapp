@@ -32,7 +32,8 @@ fun NovelDetailScreen(
     downloadRepo: LocalDownloadRepository,
     onToggleFavorite: (UnifiedSearchResult) -> Unit,
     onChapterSelected: (Chapter) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    requireAuth: (() -> Unit) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
@@ -108,7 +109,7 @@ fun NovelDetailScreen(
                     }
                     // Favorite button
                     IconButton(
-                        onClick = { onToggleFavorite(novel) },
+                        onClick = { requireAuth { onToggleFavorite(novel) } },
                         modifier = Modifier
                             .padding(top = 40.dp, end = 8.dp)
                             .align(Alignment.TopEnd)
@@ -251,63 +252,65 @@ fun NovelDetailScreen(
                         currentTheme = currentTheme,
                         isDownloaded = isDownloaded,
                         isDownloading = isDownloading,
-                        onClick = { onChapterSelected(chapter) },
+                        onClick = { requireAuth { onChapterSelected(chapter) } },
                         onDownloadClick = {
-                            if (isDownloaded) {
-                                // Delete chapter local data
-                                val savedCh = downloadRepo.getChaptersFor(novel.id).find { it.chapterNumber == chapter.chapterNumber }
-                                savedCh?.localFilePath?.let { deleteDownloadedText(it) }
+                            requireAuth {
+                                if (isDownloaded) {
+                                    // Delete chapter local data
+                                    val savedCh = downloadRepo.getChaptersFor(novel.id).find { it.chapterNumber == chapter.chapterNumber }
+                                    savedCh?.localFilePath?.let { deleteDownloadedText(it) }
 
-                                downloadRepo.deleteChapter(novel.id, chapter.chapterNumber)
-                                if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
-                                    downloadRepo.deleteItem(novel.id)
-                                }
-                                refreshTrigger++
-                            } else {
-                                downloadingChapters = downloadingChapters + chapter.chapterNumber
-                                scope.launch {
-                                    try {
-                                        downloadRepo.addItem(
-                                            DownloadedItem(
-                                                id = novel.id,
-                                                title = novel.title,
-                                                coverUrl = novel.coverUrl,
-                                                type = if (novel.isManga) "MANGA" else "NOVEL",
-                                                sourceName = novel.sourceName
+                                    downloadRepo.deleteChapter(novel.id, chapter.chapterNumber)
+                                    if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                        downloadRepo.deleteItem(novel.id)
+                                    }
+                                    refreshTrigger++
+                                } else {
+                                    downloadingChapters = downloadingChapters + chapter.chapterNumber
+                                    scope.launch {
+                                        try {
+                                            downloadRepo.addItem(
+                                                DownloadedItem(
+                                                    id = novel.id,
+                                                    title = novel.title,
+                                                    coverUrl = novel.coverUrl,
+                                                    type = if (novel.isManga) "MANGA" else "NOVEL",
+                                                    sourceName = novel.sourceName
+                                                )
                                             )
-                                        )
-                                        if (novel.isManga) {
-                                            val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
-                                            if (pages.isNotEmpty()) {
-                                                downloadRepo.addChapter(
-                                                    DownloadedChapter(
-                                                        parentId = novel.id,
-                                                        chapterNumber = chapter.chapterNumber,
-                                                        chapterTitle = chapter.title,
-                                                        localFilePath = pages.joinToString(","),
-                                                        pageCount = pages.size
+                                            if (novel.isManga) {
+                                                val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
+                                                if (pages.isNotEmpty()) {
+                                                    downloadRepo.addChapter(
+                                                        DownloadedChapter(
+                                                            parentId = novel.id,
+                                                            chapterNumber = chapter.chapterNumber,
+                                                            chapterTitle = chapter.title,
+                                                            localFilePath = pages.joinToString(","),
+                                                            pageCount = pages.size
+                                                        )
                                                     )
-                                                )
-                                            }
-                                        } else {
-                                            val text = repository.fetchChapterText(chapter.url, novel.sourceName)
-                                            if (text.isNotEmpty() && !text.startsWith("Failed")) {
-                                                val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
-                                                downloadRepo.addChapter(
-                                                    DownloadedChapter(
-                                                        parentId = novel.id,
-                                                        chapterNumber = chapter.chapterNumber,
-                                                        chapterTitle = chapter.title,
-                                                        localFilePath = path
+                                                }
+                                            } else {
+                                                val text = repository.fetchChapterText(chapter.url, novel.sourceName)
+                                                if (text.isNotEmpty() && !text.startsWith("Failed")) {
+                                                    val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
+                                                    downloadRepo.addChapter(
+                                                        DownloadedChapter(
+                                                            parentId = novel.id,
+                                                            chapterNumber = chapter.chapterNumber,
+                                                            chapterTitle = chapter.title,
+                                                            localFilePath = path
+                                                        )
                                                     )
-                                                )
+                                                }
                                             }
+                                        } catch (e: Exception) {
+                                            // ignore
+                                        } finally {
+                                            downloadingChapters = downloadingChapters - chapter.chapterNumber
+                                            refreshTrigger++
                                         }
-                                    } catch (e: Exception) {
-                                        // ignore
-                                    } finally {
-                                        downloadingChapters = downloadingChapters - chapter.chapterNumber
-                                        refreshTrigger++
                                     }
                                 }
                             }

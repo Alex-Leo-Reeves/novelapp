@@ -1,8 +1,10 @@
 package com.alexleoreeves.novelapp.data
 
 import io.ktor.client.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
+import io.ktor.client.request.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
@@ -24,11 +26,20 @@ class NovelSearchRepository(
         install(Logging) {
             level = LogLevel.NONE
         }
+        install(HttpRedirect) {
+            checkHttpMethod = false
+        }
+        defaultRequest {
+            header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+            header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,application/json,*/*;q=0.8")
+            header("Accept-Language", "en-US,en;q=0.9")
+        }
     }
 
     /** Novel sources */
     private val sources: List<NovelSource> = listOf(
         WebNovelApiSource(httpClient, rapidApiKey, rapidApiHost),
+        FreeWebNovelSource(httpClient),
         LightNovelPubSource(httpClient),
         BoxNovelSource(httpClient),
         RoyalRoadSource(httpClient)
@@ -43,14 +54,20 @@ class NovelSearchRepository(
             username = com.alexleoreeves.novelapp.BuildKonfig.MANGADEX_USERNAME,
             password = com.alexleoreeves.novelapp.BuildKonfig.MANGADEX_PASSWORD
         ),
-        MangaSeeScraper(httpClient),
-        MangaFireScraper(httpClient)
+        MangaFireScraper(httpClient),
+        WebtoonScraper(httpClient),
+        WeebCentralScraper(httpClient)  // replaces MangaSeeScraper (mangasee123.com → weebcentral.com)
     )
 
     /** Anime sources */
     internal val aniListSource = AniListSource(httpClient)
-    internal val gogoAnimeScraper = GogoAnimeScraper(httpClient)
-    internal val hianimeScraper = HianimeScraper(httpClient)
+    internal val aninekoScraper = AninekoScraper(httpClient)
+    internal val animePaheScraper = AnimePaheScraper(httpClient)
+    internal val tmdbSource = TmdbSource(
+        client = httpClient,
+        readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
+        apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
+    )
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Unified Search — Novels + Manga + Anime all simultaneously
@@ -117,7 +134,7 @@ class NovelSearchRepository(
         val mangaTasks = mangaSources.map { source ->
             async {
                 try {
-                    if (source is MangaDexSource) source.searchManga("a") else emptyList()
+                    source.searchManga("one")
                 } catch (e: Exception) { emptyList() }
             }
         }
@@ -151,38 +168,52 @@ class NovelSearchRepository(
     }
 
     /** Fetch currently airing anime for the Anime tab home feed */
-    suspend fun fetchCurrentlyAiring(page: Int = 1): List<AnimeResult> =
-        aniListSource.fetchCurrentlyAiring(page = page, perPage = 24)
+    suspend fun fetchCurrentlyAiring(page: Int = 1): List<AnimeResult> {
+        val aniList = aniListSource.fetchCurrentlyAiring(page = page, perPage = 24)
+        return aniList.ifEmpty { tmdbSource.fetchAnimeFallback(page) }
+    }
 
     /** Fetch trending anime */
-    suspend fun fetchTrendingAnime(page: Int = 1): List<AnimeResult> =
-        aniListSource.fetchTrending(page = page, perPage = 24)
+    suspend fun fetchTrendingAnime(page: Int = 1): List<AnimeResult> {
+        val aniList = aniListSource.fetchTrending(page = page, perPage = 24)
+        return aniList.ifEmpty { tmdbSource.fetchAnimeFallback(page) }
+    }
 
     /** Search anime only */
-    suspend fun searchAnime(query: String): List<AnimeResult> =
-        aniListSource.search(query)
+    suspend fun searchAnime(query: String): List<AnimeResult> {
+        val aniList = aniListSource.search(query)
+        return aniList.ifEmpty { tmdbSource.searchAnimeFallback(query) }
+    }
+
+    suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
+        tmdbSource.fetchVideo(category, page)
+
+    suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
+        tmdbSource.searchVideo(category, query, page)
 
     /**
      * Fetch episode list for a given anime title.
-     * Tries GogoAnime first, falls back to Hianime.
+     * Tries Anineko first, falls back to AnimePahe.
      */
-    suspend fun fetchEpisodes(animeTitleQuery: String): List<AnimeEpisode> {
-        val gogo = gogoAnimeScraper.fetchEpisodes(animeTitleQuery)
-        if (gogo.isNotEmpty()) return gogo
-        return hianimeScraper.fetchEpisodes(animeTitleQuery)
+    suspend fun fetchEpisodes(animeTitleQuery: String): List<AnimeEpisode> = coroutineScope {
+        val anineko = async { aninekoScraper.fetchEpisodes(animeTitleQuery) }
+        val animePahe = async { animePaheScraper.fetchEpisodes(animeTitleQuery) }
+        (anineko.await() + animePahe.await())
+            .distinctBy { it.url }
+            .sortedByDescending { it.episodeNumber }
     }
 
     /**
      * Extract a streaming .m3u8 URL for a specific episode page.
-     * Tries GogoAnime first, falls back to Hianime.
+     * Tries Anineko first, falls back to AnimePahe.
      */
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
-        if (episodePageUrl.contains("gogoanime")) {
-            return gogoAnimeScraper.extractStreamUrl(episodePageUrl)
-                ?: hianimeScraper.extractStreamUrl(episodePageUrl)
+        if (episodePageUrl.contains("animepahe", ignoreCase = true)) {
+            return animePaheScraper.extractStreamUrl(episodePageUrl)
+                ?: aninekoScraper.extractStreamUrl(episodePageUrl)
         }
-        return hianimeScraper.extractStreamUrl(episodePageUrl)
-            ?: gogoAnimeScraper.extractStreamUrl(episodePageUrl)
+        return aninekoScraper.extractStreamUrl(episodePageUrl)
+            ?: animePaheScraper.extractStreamUrl(episodePageUrl)
     }
 
     // ─────────────────────────────────────────────────────────────────────────

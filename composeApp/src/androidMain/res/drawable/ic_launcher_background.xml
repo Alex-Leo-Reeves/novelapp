@@ -4,10 +4,26 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Deep navy base fill -->
     <path
-        android:fillColor="#0B0D10"
+        android:fillColor="#080A0D"
         android:pathData="M0,0h108v108h-108z" />
+
+    <!-- Outer indigo ring — subtle depth -->
     <path
-        android:fillColor="#151922"
-        android:pathData="M54,6C80.51,6 102,27.49 102,54C102,80.51 80.51,102 54,102C27.49,102 6,80.51 6,54C6,27.49 27.49,6 54,6Z" />
+        android:fillColor="#0F1420"
+        android:pathData="M54,4 C82.72,4 104,25.28 104,54 C104,82.72 82.72,104 54,104 C25.28,104 4,82.72 4,54 C4,25.28 25.28,4 54,4 Z" />
+
+    <!-- Mid ring — slightly lighter navy -->
+    <path
+        android:fillColor="#131A28"
+        android:pathData="M54,16 C76.09,16 92,31.91 92,54 C92,76.09 76.09,92 54,92 C31.91,92 16,76.09 16,54 C16,31.91 31.91,16 54,16 Z" />
+
+    <!-- Inner soft glow ring — hint of indigo-blue -->
+    <path
+        android:fillColor="#182035"
+        android:fillAlpha="0.70"
+        android:pathData="M54,28 C69.46,28 80,38.54 80,54 C80,69.46 69.46,80 54,80 C38.54,80 28,69.46 28,54 C28,38.54 38.54,28 54,28 Z" />
+
 </vector>

@@ -4,7 +4,7 @@ NovelApp is a Kotlin Multiplatform entertainment reader built with Compose Multi
 
 ## Project Status
 
-This repository is an early application build. Android is the most complete target. iOS scaffolding exists through Kotlin Multiplatform and the `iosApp` shell, but iOS secret injection and release hardening still need to be completed before a production launch.
+This repository is an early application build. Android is the most complete target. iOS now has a SwiftUI host, asset catalog, XcodeGen project spec, and GitHub Actions signing workflow, but Apple signing secrets and physical-device testing are still required before a production launch.
 
 ## Features
 
@@ -30,7 +30,7 @@ This repository is an early application build. Android is the most complete targ
 - Kotlin serialization
 - Coil image loading
 - Room and bundled SQLite
-- JSoup scraping/parsing helpers
+- Ksoup multiplatform scraping/parsing helpers
 - ML Kit text recognition on Android
 - Media3 ExoPlayer on Android
 - Google Secrets Gradle Plugin for Android build secrets
@@ -185,13 +185,13 @@ https://novelapp.onrender.com/app-version.json
 The website and app expect the latest APK at:
 
 ```text
-https://novelapp.onrender.com/downloads/novelapp-latest.apk
+https://novelapp.onrender.com/downloads/novelapp-android.apk
 ```
 
 Before deploying a real public release, build and sign the APK, then place it here:
 
 ```text
-site/downloads/novelapp-latest.apk
+site/downloads/novelapp-android.apk
 ```
 
 Then update `site/app-version.json` with a higher `versionCode`, the visible `versionName`, release notes, and the final APK URL.
@@ -276,15 +276,61 @@ This app connects to third-party novel, manga, anime, and AI services. Selling a
 
 ## iOS Notes
 
-The iOS shell is located in `iosApp/`. The shared Kotlin framework is named `ComposeApp`.
+The iOS shell is located in `iosApp/`. The shared Kotlin framework is named `ComposeApp`, and the Xcode project is generated from `iosApp/project.yml` using XcodeGen.
 
-For a production iOS release:
+Generate the Xcode project on macOS:
 
-- Replace mock iOS secrets with secure configuration
-- Configure signing in Xcode
-- Add the correct bundle identifier and app display name
-- Test on simulator and physical device
-- Prepare App Store privacy nutrition labels and review notes
+```bash
+brew install xcodegen
+xcodegen generate --spec iosApp/project.yml --project iosApp/NovelApp.xcodeproj
+```
+
+GitHub Actions workflow:
+
+```text
+.github/workflows/ios-ipa-build.yml
+```
+
+Required GitHub repository secrets for a signed installable `.ipa`:
+
+```text
+IOS_BUNDLE_ID
+IOS_CERTIFICATE_P12_BASE64
+IOS_CERTIFICATE_PASSWORD
+IOS_PROVISIONING_PROFILE_BASE64
+IOS_PROVISIONING_PROFILE_NAME
+IOS_TEAM_ID
+```
+
+Optional secrets:
+
+```text
+IOS_EXPORT_METHOD=ad-hoc
+IOS_KEYCHAIN_PASSWORD
+GEMINI_API_KEY
+RAPID_API_KEY
+RAPID_API_HOST
+MANGADEX_CLIENT_ID
+MANGADEX_CLIENT_SECRET
+MANGADEX_USERNAME
+MANGADEX_PASSWORD
+```
+
+For direct iPhone installation, the provisioning profile must include the iPhone UDID. The workflow publishes the signed output to:
+
+```text
+site/downloads/novelapp-ios.ipa
+```
+
+Current iOS native hardening items before calling the iPhone app production-ready:
+
+- Replace the iOS anime player placeholder with AVPlayer playback
+- Replace the iOS universal file picker placeholder with UIDocumentPicker
+- Replace iOS narration playback placeholder with AVFoundation audio playback
+- Replace iOS manga OCR placeholder with Vision/Core ML OCR
+- Replace iOS sleep detection placeholder with CoreMotion behavior
+
+Before a production iOS release, replace mock iOS secrets with secure configuration, test on a physical iPhone, and prepare App Store/TestFlight privacy and review details.
 
 ## Development Tips
 

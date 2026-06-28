@@ -40,6 +40,8 @@ fun MangaViewerScreen(
     chapterTitle: String,
     sourceName: String,
     currentTheme: AppTheme,
+    initialPageIndex: Int = 0,
+    onProgress: (Int) -> Unit = {},
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -57,6 +59,7 @@ fun MangaViewerScreen(
     var isLoading by remember { mutableStateOf(true) }
     var showOverlays by remember { mutableStateOf(true) }
     var scrollMode by remember { mutableStateOf(MangaScrollMode.WEBTOON) }
+    var autoScrollEnabled by remember { mutableStateOf(true) }
 
     // TTS and OCR Tracking
     val isTtsPlaying = ttsController.isPlaying.collectAsState()
@@ -78,6 +81,19 @@ fun MangaViewerScreen(
             repository.fetchMangaPages(chapterUrl, sourceName)
         }
         isLoading = false
+        currentPageIndex = initialPageIndex.coerceAtLeast(0)
+    }
+
+    LaunchedEffect(isLoading, pages.size, initialPageIndex, scrollMode) {
+        if (!isLoading && pages.isNotEmpty()) {
+            val target = initialPageIndex.coerceIn(0, pages.lastIndex)
+            currentPageIndex = target
+            if (scrollMode == MangaScrollMode.WEBTOON) {
+                lazyListState.scrollToItem(target)
+            } else {
+                pagerState.scrollToPage(target)
+            }
+        }
     }
 
     // Sync currentPageIndex between Pager and Vertical List
@@ -85,6 +101,16 @@ fun MangaViewerScreen(
         if (scrollMode != MangaScrollMode.WEBTOON) {
             currentPageIndex = pagerState.currentPage
         }
+    }
+
+    LaunchedEffect(lazyListState.firstVisibleItemIndex) {
+        if (scrollMode == MangaScrollMode.WEBTOON) {
+            currentPageIndex = lazyListState.firstVisibleItemIndex.coerceAtLeast(0)
+        }
+    }
+
+    LaunchedEffect(currentPageIndex) {
+        onProgress(currentPageIndex.coerceAtLeast(0))
     }
 
     // AI Panel Reader Auto-Scroll & Read loop
@@ -97,7 +123,7 @@ fun MangaViewerScreen(
             } else {
                 // No text bubbles on page, proceed to next page automatically
                 delay(2000)
-                if (currentPageIndex < pages.size - 1) {
+                if (autoScrollEnabled && currentPageIndex < pages.size - 1) {
                     if (scrollMode == MangaScrollMode.WEBTOON) {
                         lazyListState.animateScrollToItem(currentPageIndex + 1)
                     } else {
@@ -134,7 +160,7 @@ fun MangaViewerScreen(
                 activeBubbleIndex++
             } else {
                 // Read all bubbles on this page, swipe/scroll to next page!
-                if (currentPageIndex < pages.size - 1) {
+                if (autoScrollEnabled && currentPageIndex < pages.size - 1) {
                     currentPageIndex++
                     if (scrollMode == MangaScrollMode.WEBTOON) {
                         lazyListState.animateScrollToItem(currentPageIndex)
@@ -369,6 +395,36 @@ fun MangaViewerScreen(
                                     tint = Color.White
                                 )
                             }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.SwipeUp,
+                                null,
+                                tint = Color.White.copy(0.6f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Auto-scroll",
+                                color = Color.White.copy(0.75f),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Switch(
+                                checked = autoScrollEnabled,
+                                onCheckedChange = { autoScrollEnabled = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = currentTheme.accentColor(),
+                                    checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                )
+                            )
                         }
                     }
                 }

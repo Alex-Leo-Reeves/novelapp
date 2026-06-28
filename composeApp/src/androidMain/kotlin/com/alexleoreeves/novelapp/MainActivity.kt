@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.alexleoreeves.novelapp.platform.AndroidExternalLinkOpener
+import com.alexleoreeves.novelapp.platform.AndroidUserSessionStore
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
 
 class MainActivity : ComponentActivity() {
@@ -14,8 +16,12 @@ class MainActivity : ComponentActivity() {
         AppContextHolder.applicationContext = applicationContext
 
         enableEdgeToEdge()
+        val appContext = applicationContext
         setContent {
-            App()
+            App(
+                userSessionStore = AndroidUserSessionStore(appContext),
+                linkOpener = AndroidExternalLinkOpener(appContext)
+            )
         }
     }
 }

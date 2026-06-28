@@ -41,6 +41,8 @@ actual fun AnimePlayerScreen(
     streamUrl: String,
     episodeTitle: String,
     currentTheme: AppTheme,
+    initialPositionMs: Long,
+    onProgress: (Long) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -74,6 +76,7 @@ actual fun AnimePlayerScreen(
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(streamUrl))
             prepare()
+            if (initialPositionMs > 0L) seekTo(initialPositionMs)
             playWhenReady = true
         }
     }
@@ -93,6 +96,13 @@ actual fun AnimePlayerScreen(
         if (showControls) {
             delay(3000)
             showControls = false
+        }
+    }
+
+    LaunchedEffect(exoPlayer) {
+        while (true) {
+            onProgress(exoPlayer.currentPosition)
+            delay(2500)
         }
     }
 

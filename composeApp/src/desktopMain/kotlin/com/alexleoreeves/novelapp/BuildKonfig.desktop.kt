@@ -11,4 +11,6 @@ actual object BuildKonfig {
     actual val MANGADEX_CLIENT_SECRET: String = envOrDefault("MANGADEX_CLIENT_SECRET", "mock_client_secret")
     actual val MANGADEX_USERNAME: String = envOrDefault("MANGADEX_USERNAME", "mock_user")
     actual val MANGADEX_PASSWORD: String = envOrDefault("MANGADEX_PASSWORD", "mock_pass")
+    actual val TMDB_API_KEY: String = envOrDefault("TMDB_API_KEY", "mock_tmdb_api_key")
+    actual val TMDB_READ_ACCESS_TOKEN: String = envOrDefault("TMDB_READ_ACCESS_TOKEN", "mock_tmdb_read_access_token")
 }

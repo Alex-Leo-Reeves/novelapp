@@ -12,6 +12,8 @@ import com.alexleoreeves.novelapp.data.AppTheme
  * @param streamUrl     The HLS .m3u8 stream URL to play
  * @param episodeTitle  Display title shown in the player header
  * @param currentTheme  App theme reference
+ * @param initialPositionMs Saved playback position to resume from
+ * @param onProgress    Called periodically with playback position
  * @param onBack        Called when the user exits the player
  */
 @Composable
@@ -19,5 +21,7 @@ expect fun AnimePlayerScreen(
     streamUrl: String,
     episodeTitle: String,
     currentTheme: AppTheme,
+    initialPositionMs: Long = 0L,
+    onProgress: (Long) -> Unit = {},
     onBack: () -> Unit
 )

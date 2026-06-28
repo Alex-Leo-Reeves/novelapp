@@ -6,7 +6,8 @@ import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.json.*
-import org.jsoup.Jsoup
+import com.fleeksoft.ksoup.Ksoup
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 
 /**
  * Baseline interface that every Manga scraping / API source must implement.
@@ -37,7 +38,7 @@ class MangaDexSource(
      * Checks if current token is expired, if so updates it via OAuth password flow.
      */
     private suspend fun ensureAuthenticated() {
-        val now = System.currentTimeMillis()
+        val now = currentTimeMillis()
         if (accessToken != null && now < tokenExpiryTime) return
 
         try {
@@ -169,80 +170,152 @@ class MangaDexSource(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  MangaSee Scraper
+//  WeebCentral Scraper  (successor to MangaSee123)
+//  Primary URL : https://weebcentral.com
+//  Domain auto-heals via DuckDuckGo resolver if the site hops.
 // ─────────────────────────────────────────────────────────────────────────────
-class MangaSeeScraper(private val httpClient: HttpClient) : MangaScraper {
+class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
 
-    override val sourceName = "MangaSee"
-    private val baseUrl = "https://mangasee123.com"
+    override val sourceName = "WeebCentral"
+
+    companion object {
+        private const val FALLBACK_URL = "https://weebcentral.com"
+        private const val BRAND_QUERY  = "weebcentral manga official site"
+        private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    /** Resolves (and caches for 6 h) the live WeebCentral domain via DDG. */
+    private suspend fun liveBase(): String =
+        resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
 
     override suspend fun searchManga(query: String): List<UnifiedSearchResult> {
         return try {
-            // MangaSee uses a browser search form. We send a direct browser User-Agent
-            val html = httpClient.get("$baseUrl/search/?name=${query.replace(" ", "%20")}") {
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            val base = liveBase()
+            // WeebCentral search: GET /search?keyword=...
+            val html = httpClient.get("$base/search") {
+                parameter("keyword", query)
+                header("User-Agent", UA)
+                header("Referer", base)
             }.bodyAsText()
 
-            val doc = Jsoup.parse(html)
-            doc.select("div.col-md-8 div.row").map { el ->
-                val title = el.select("a.text-bold").text()
-                val path = el.select("a.text-bold").attr("href")
-                val cover = el.select("img").attr("src")
-                UnifiedSearchResult(
-                    id = path,
-                    title = title,
-                    coverUrl = cover,
-                    detailPageUrl = "$baseUrl$path",
-                    sourceName = sourceName,
-                    isManga = true
-                )
-            }
+            val doc = Ksoup.parse(html)
+            // WeebCentral lists results as <article> or <li> wrappers containing
+            // an anchor whose href contains /series/.
+            // The broad multi-selector covers both the current and any light redesign.
+            doc.select("article, li.result, div.series-item, section.grid > div")
+                .filter { it.select("a[href*=/series/]").isNotEmpty() }
+                .mapNotNull { el ->
+                    val link = el.select("a[href*=/series/]").firstOrNull()
+                        ?: return@mapNotNull null
+                    val href  = link.attr("href")
+                    val title = el.select("h2, h3, strong, .title, .name").firstOrNull()?.text()
+                        ?.ifBlank { link.attr("title") }
+                        ?.ifBlank { link.text() }
+                        ?: return@mapNotNull null
+                    val cover = el.select("img[data-src], img[src]").firstOrNull()?.let {
+                        it.attr("data-src").ifBlank { it.attr("src") }
+                    }.orEmpty()
+                    if (title.isBlank() || href.isBlank()) return@mapNotNull null
+                    UnifiedSearchResult(
+                        id   = href,
+                        title = title,
+                        coverUrl = absoluteMangaUrl(base, cover),
+                        detailPageUrl = absoluteMangaUrl(base, href),
+                        sourceName = sourceName,
+                        isManga = true,
+                        genre = el.select("a[href*=/genre/], span.genre").joinToString(", ") { it.text() }
+                    )
+                }
+                .distinctBy { it.detailPageUrl }
+                .take(30)
         } catch (e: Exception) {
+            println("[WeebCentral] Search failed: ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun fetchMangaChapters(mangaUrl: String): List<MangaChapter> {
         return try {
+            val base = liveBase()
             val html = httpClient.get(mangaUrl) {
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                header("User-Agent", UA)
+                header("Referer", base)
             }.bodyAsText()
 
-            val doc = Jsoup.parse(html)
-            doc.select("div.chapter-list a.list-group-item").reversed().mapIndexed { idx, el ->
-                val title = el.select("span.chapterLabel").text().ifEmpty { el.text().trim() }
-                MangaChapter(
-                    title = title,
-                    url = "$baseUrl${el.attr("href")}",
-                    chapterNumber = idx + 1
-                )
-            }
+            val doc = Ksoup.parse(html)
+            // WeebCentral chapter list: anchors whose href contains /chapters/
+            // Fallback selectors catch common list/table patterns.
+            doc.select(
+                "a[href*=/chapters/], " +
+                ".chapter-list a[href], " +
+                "ul.chapters a[href], " +
+                "div.chapter a[href]"
+            )
+                .filter { it.attr("href").isNotBlank() }
+                .distinctBy { it.attr("href") }
+                .reversed()   // oldest first → numbered ascending
+                .mapIndexed { idx, el ->
+                    val rawTitle = el.select("span, strong, .chapter-title, .title")
+                        .firstOrNull()?.text()
+                        ?.ifBlank { el.text().trim() }
+                        ?: el.text().trim()
+                    MangaChapter(
+                        title = rawTitle.ifBlank { "Chapter ${idx + 1}" },
+                        url   = absoluteMangaUrl(base, el.attr("href")),
+                        chapterNumber = idx + 1
+                    )
+                }
         } catch (e: Exception) {
+            println("[WeebCentral] Chapter fetch failed: ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun fetchMangaPages(chapterUrl: String): List<String> {
         return try {
-            val html = httpClient.get(chapterUrl) {
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                header("Referer", baseUrl)
+            val base = liveBase()
+            // Rewrite host in stored URL in case domain hopped since last search
+            val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
+            val html = httpClient.get(effectiveUrl) {
+                header("User-Agent", UA)
+                header("Referer", base)
             }.bodyAsText()
 
-            // MangaSee embeds its images list inside a javascript variable.
-            // We search for `val vm = this; vm.CurChapter = ...` and parse JSON.
-            val script = Jsoup.parse(html).select("script").firstOrNull { it.html().contains("CurChapter") }?.html() ?: ""
-            val jsonString = script.substringAfter("vm.CurChapter = ").substringBefore(";")
-            val json = Json.parseToJsonElement(jsonString).jsonObject
-            val pageCount = json["Page"]?.jsonPrimitive?.int ?: 1
-            val domain = json["Directory"]?.jsonPrimitive?.content ?: ""
+            val doc = Ksoup.parse(html)
+            // Strategy 1: direct img tags in the reader container
+            val fromImages = doc.select(
+                "img.lazy, img[data-src], " +
+                "#reader img, .reader img, " +
+                "img[src*=/uploads/], img[src*=/manga/], img[src*=/images/]"
+            )
+                .map { it.attr("data-src").ifBlank { it.attr("src") } }
+                .filter { it.isNotBlank() }
+                .map { absoluteMangaUrl(base, it) }
 
-            // Reconstruct image URLs
-            (1..pageCount).map { pageNum ->
-                val formattedPage = pageNum.toString().padStart(3, '0')
-                "https://temp.compsci88.com/manga/$domain/$formattedPage.png"
+            if (fromImages.isNotEmpty()) return fromImages
+
+            // Strategy 2: JSON data embedded in a <script> (WeebCentral sometimes
+            // uses a JSON array of image URLs in a window.__NUXT__ or similar blob)
+            val scriptText = doc.select("script").firstOrNull { s ->
+                s.html().contains(".jpg") || s.html().contains(".webp") || s.html().contains(".png")
+            }?.html().orEmpty()
+            if (scriptText.isNotBlank()) {
+                val urls = Regex("""https?://[^\s"']+\.(?:jpg|jpeg|png|webp)[^\s"']*""")
+                    .findAll(scriptText)
+                    .map { it.value }
+                    .filter { it.contains("/manga/") || it.contains("/uploads/") || it.contains("/images/") }
+                    .toList()
+                if (urls.isNotEmpty()) return urls
             }
+
+            // Strategy 3: brute-force regex over the full HTML
+            Regex("""https?://[^\s"']+\.(?:jpg|jpeg|png|webp)[^\s"']*""")
+                .findAll(html)
+                .map { it.value }
+                .filter { !it.contains("logo") && !it.contains("avatar") && !it.contains("icon") }
+                .toList()
         } catch (e: Exception) {
+            println("[WeebCentral] Page fetch failed: ${e.message}")
             emptyList()
         }
     }
@@ -255,26 +328,40 @@ class MangaFireScraper(private val httpClient: HttpClient) : MangaScraper {
 
     override val sourceName = "MangaFire"
     private val baseUrl = "https://mangafire.to"
+    private val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    private suspend fun liveBase(): String =
+        resolveLiveDomain(httpClient, "mangafire official", baseUrl)
 
     override suspend fun searchManga(query: String): List<UnifiedSearchResult> {
         return try {
-            val html = httpClient.get("$baseUrl/filter?keyword=${query.replace(" ", "+")}") {
-                header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+            val base = liveBase()
+            val html = httpClient.get("$base/filter?keyword=${query.replace(" ", "+")}") {
+                header("User-Agent", userAgent)
+                header("Referer", "$base/")
             }.bodyAsText()
 
-            val doc = Jsoup.parse(html)
-            doc.select("div.original div.inner").map { el ->
-                val link = el.select("a.title")
-                val cover = el.select("img").attr("src")
+            val doc = Ksoup.parse(html)
+            val cards = doc.select("div.original div.inner, .item, .unit, .manga, .poster")
+                .filter { it.select("a[href]").isNotEmpty() }
+            cards.mapNotNull { el ->
+                val link = el.select("a.title, a.name, a[href*=/manga/]").firstOrNull()
+                    ?: return@mapNotNull null
+                val href = link.attr("href")
+                val cover = el.select("img").firstOrNull()?.attr("data-src").orEmpty()
+                    .ifBlank { el.select("img").firstOrNull()?.attr("src").orEmpty() }
+                val title = link.text().ifBlank { link.attr("title") }
+                if (title.isBlank() || href.isBlank()) return@mapNotNull null
                 UnifiedSearchResult(
-                    id = link.attr("href"),
-                    title = link.text(),
-                    coverUrl = cover,
-                    detailPageUrl = "$baseUrl${link.attr("href")}",
+                    id = href,
+                    title = title,
+                    coverUrl = absoluteMangaUrl(base, cover),
+                    detailPageUrl = absoluteMangaUrl(base, href),
                     sourceName = sourceName,
-                    isManga = true
+                    isManga = true,
+                    genre = el.select("a[href*=/genre/], .genres").joinToString(", ") { it.text() }
                 )
-            }
+            }.distinctBy { it.detailPageUrl }.take(30)
         } catch (e: Exception) {
             emptyList()
         }
@@ -282,15 +369,21 @@ class MangaFireScraper(private val httpClient: HttpClient) : MangaScraper {
 
     override suspend fun fetchMangaChapters(mangaUrl: String): List<MangaChapter> {
         return try {
-            val html = httpClient.get(mangaUrl) {
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            val base = liveBase()
+            val html = httpClient.get(rewriteUrlOrigin(mangaUrl, base)) {
+                header("User-Agent", userAgent)
+                header("Referer", "$base/")
             }.bodyAsText()
 
-            val doc = Jsoup.parse(html)
-            doc.select("ul.chapters li a").reversed().mapIndexed { idx, el ->
+            val doc = Ksoup.parse(html)
+            doc.select("ul.chapters li a, .chapters a, a[href*=/read/], a[href*=chapter]")
+                .filter { it.attr("href").isNotBlank() }
+                .distinctBy { it.attr("href") }
+                .reversed()
+                .mapIndexed { idx, el ->
                 MangaChapter(
-                    title = el.text().trim(),
-                    url = "$baseUrl${el.attr("href")}",
+                    title = el.text().trim().ifBlank { "Chapter ${idx + 1}" },
+                    url = absoluteMangaUrl(base, el.attr("href")),
                     chapterNumber = idx + 1
                 )
             }
@@ -301,19 +394,104 @@ class MangaFireScraper(private val httpClient: HttpClient) : MangaScraper {
 
     override suspend fun fetchMangaPages(chapterUrl: String): List<String> {
         return try {
-            val html = httpClient.get(chapterUrl) {
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                header("Referer", baseUrl)
+            val base = liveBase()
+            val html = httpClient.get(rewriteUrlOrigin(chapterUrl, base)) {
+                header("User-Agent", userAgent)
+                header("Referer", "$base/")
             }.bodyAsText()
 
-            val doc = Jsoup.parse(html)
+            val doc = Ksoup.parse(html)
             // Parse Webtoon pages directly from standard manga viewer markup
-            doc.select("div#images-container img.page-image").map { it.attr("src") }
+            doc.select("div#images-container img.page-image, div.reader-images img, img.page-image, img[src*=/manga/]")
+                .map { it.attr("data-src").ifBlank { it.attr("src") } }
+                .filter { it.isNotBlank() }
+                .map { absoluteMangaUrl(base, it) }
                 .ifEmpty {
-                    doc.select("div.reader-images img").map { it.attr("src") }
+                    Regex("""https?://[^\s"']+\.(?:jpg|jpeg|png|webp)[^\s"']*""")
+                        .findAll(html)
+                        .map { it.value }
+                        .toList()
                 }
         } catch (e: Exception) {
             emptyList()
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Webtoon Scraper — vertical webtoon/manhwa pages
+// ─────────────────────────────────────────────────────────────────────────────
+class WebtoonScraper(private val httpClient: HttpClient) : MangaScraper {
+
+    override val sourceName = "Webtoon"
+    private val baseUrl = "https://www.webtoons.com"
+
+    override suspend fun searchManga(query: String): List<UnifiedSearchResult> {
+        return try {
+            val html = httpClient.get("$baseUrl/en/search") {
+                parameter("keyword", query)
+            }.bodyAsText()
+            val doc = Ksoup.parse(html)
+            val links = doc.select("a[href*=title_no=], a[href*=/en/]")
+                .filter { it.attr("href").contains("title_no=") }
+                .distinctBy { it.attr("href").substringBefore("?").substringBefore("&") }
+            links.mapNotNull { link ->
+                val href = link.attr("href")
+                val title = link.select("img").firstOrNull()?.attr("alt")
+                    ?.ifBlank { link.select(".subj, .title").text() }
+                    ?.ifBlank { link.text() }
+                    ?: return@mapNotNull null
+                UnifiedSearchResult(
+                    id = href,
+                    title = title,
+                    coverUrl = absoluteMangaUrl(baseUrl, link.select("img").firstOrNull()?.attr("src").orEmpty()),
+                    detailPageUrl = absoluteMangaUrl(baseUrl, href),
+                    sourceName = sourceName,
+                    isManga = true,
+                    genre = "Webtoon"
+                )
+            }.filter { it.title.isNotBlank() }.take(30)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    override suspend fun fetchMangaChapters(mangaUrl: String): List<MangaChapter> {
+        return try {
+            val html = httpClient.get(mangaUrl).bodyAsText()
+            val doc = Ksoup.parse(html)
+            doc.select("a[href*=episode_no=], li._episodeItem a")
+                .filter { it.attr("href").contains("episode_no=") }
+                .distinctBy { it.attr("href") }
+                .mapIndexed { index, el ->
+                    MangaChapter(
+                        title = el.select(".subj, .tx, .title").text().ifBlank { el.text().ifBlank { "Episode ${index + 1}" } },
+                        url = absoluteMangaUrl(baseUrl, el.attr("href")),
+                        chapterNumber = index + 1
+                    )
+                }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    override suspend fun fetchMangaPages(chapterUrl: String): List<String> {
+        return try {
+            val html = httpClient.get(chapterUrl).bodyAsText()
+            val doc = Ksoup.parse(html)
+            doc.select("img._images, .viewer_img img, img[src*=webtoon], img[data-url]")
+                .map { it.attr("data-url").ifBlank { it.attr("data-src") }.ifBlank { it.attr("src") } }
+                .filter { it.isNotBlank() }
+                .map { absoluteMangaUrl(baseUrl, it) }
+                .distinct()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+}
+
+private fun absoluteMangaUrl(baseUrl: String, href: String): String {
+    if (href.isBlank()) return ""
+    if (href.startsWith("http://") || href.startsWith("https://")) return href
+    return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
 }

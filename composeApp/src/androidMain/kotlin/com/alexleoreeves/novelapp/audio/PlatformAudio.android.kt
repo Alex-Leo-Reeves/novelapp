@@ -1,7 +1,6 @@
 package com.alexleoreeves.novelapp.audio
 
 import android.media.MediaPlayer
-import android.util.Base64
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.io.FileOutputStream
@@ -9,13 +8,12 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Android implementation: decodes base64 PCM/MP3 audio from Gemini
+ * Android implementation: plays WAV audio bytes from Gemini
  * and plays it via MediaPlayer, suspending until playback completes.
  */
-actual suspend fun platformPlayAudio(base64AudioData: String) {
+actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     try {
-        val audioBytes = Base64.decode(base64AudioData, Base64.DEFAULT)
-        val tempFile = File.createTempFile("gemini_audio", ".mp3")
+        val tempFile = File.createTempFile("gemini_audio", ".wav")
         FileOutputStream(tempFile).use { it.write(audioBytes) }
 
         suspendCancellableCoroutine { cont ->

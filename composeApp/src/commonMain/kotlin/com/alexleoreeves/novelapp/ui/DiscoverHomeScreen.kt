@@ -23,21 +23,43 @@ import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.BuildKonfig
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Content type tab selector: Novels / Manga / Anime
+//  Content type tab selector: Novels / Manga / Anime / TMDB media
 // ─────────────────────────────────────────────────────────────────────────────
 enum class ContentTab(val label: String, val icon: ImageVector) {
     NOVELS("Novels", Icons.Default.AutoStories),
     MANGA("Manga", Icons.Default.Collections),
-    ANIME("Anime", Icons.Default.PlayCircle)
+    ANIME("Anime", Icons.Default.PlayCircle),
+    K_DRAMA("K-Drama", Icons.Default.LiveTv),
+    CARTOON("Cartoon", Icons.Default.Animation),
+    MOVIES("Movies", Icons.Default.Movie)
 }
 
 // Anime-specific accent color
 private val animeAccent = Color(0xFFFF5722)
+private val kDramaAccent = Color(0xFFE53935)
+private val cartoonAccent = Color(0xFF00A8A8)
+private val moviesAccent = Color(0xFF7C4DFF)
+
+private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
+    ContentTab.K_DRAMA -> VideoCategory.K_DRAMA
+    ContentTab.CARTOON -> VideoCategory.CARTOON
+    ContentTab.MOVIES -> VideoCategory.MOVIES
+    else -> null
+}
+
+private fun ContentTab.tabAccent(currentTheme: AppTheme): Color = when (this) {
+    ContentTab.ANIME -> animeAccent
+    ContentTab.K_DRAMA -> kDramaAccent
+    ContentTab.CARTOON -> cartoonAccent
+    ContentTab.MOVIES -> moviesAccent
+    else -> currentTheme.accentColor()
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Discover Home Screen: separated Novels / Manga / Anime dashboard
@@ -63,14 +85,19 @@ fun DiscoverHomeScreen(
     var searchQuery by remember { mutableStateOf("") }
     var activeTab by remember { mutableStateOf(contentTab) }
     var selectedCategory by remember { mutableStateOf(NovelCategory.ALL) }
+    var selectedMangaGenre by remember { mutableStateOf("All") }
+    var selectedAnimeGenre by remember { mutableStateOf("All") }
     var isSearching by remember { mutableStateOf(false) }
 
     var popularItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var airingAnime by remember { mutableStateOf<List<AnimeResult>>(emptyList()) }
     var animeSearchResults by remember { mutableStateOf<List<AnimeResult>>(emptyList()) }
+    var videoItemsByTab by remember { mutableStateOf<Map<ContentTab, List<UnifiedSearchResult>>>(emptyMap()) }
+    var videoSearchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var searchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var isLoadingPopular by remember { mutableStateOf(true) }
     var isLoadingAnime by remember { mutableStateOf(true) }
+    var isLoadingVideo by remember { mutableStateOf(false) }
 
     val categories = NovelCategory.values().toList()
 
@@ -78,8 +105,12 @@ fun DiscoverHomeScreen(
         searchQuery = ""
         searchResults = emptyList()
         animeSearchResults = emptyList()
+        videoSearchResults = emptyList()
         isSearching = false
+        activeTab = contentTab
         selectedCategory = NovelCategory.ALL
+        selectedMangaGenre = "All"
+        selectedAnimeGenre = "All"
     }
 
     // ── Initial popular content load ───────────────────────────────────────
@@ -98,18 +129,40 @@ fun DiscoverHomeScreen(
         }
     }
 
+    // ── TMDB-backed video tabs ────────────────────────────────────────────
+    LaunchedEffect(activeTab) {
+        val category = activeTab.videoCategory() ?: return@LaunchedEffect
+        if (videoItemsByTab[activeTab].isNullOrEmpty()) {
+            isLoadingVideo = true
+            val loaded = repository.fetchVideo(category)
+            videoItemsByTab = videoItemsByTab + (activeTab to loaded)
+            isLoadingVideo = false
+        }
+    }
+
     // ── Filter popular content by active tab ───────────────────────────────
-    val filteredPopular by remember(popularItems, activeTab, selectedCategory) {
+    val filteredPopular by remember(popularItems, activeTab, selectedCategory, selectedMangaGenre) {
         derivedStateOf {
             var list = when (activeTab) {
                 ContentTab.NOVELS -> popularItems.filter { !it.isManga && !it.isAnime }
                 ContentTab.MANGA -> popularItems.filter { it.isManga }
                 ContentTab.ANIME -> popularItems.filter { it.isAnime }
+                ContentTab.K_DRAMA,
+                ContentTab.CARTOON,
+                ContentTab.MOVIES -> emptyList()
             }
             if (activeTab == ContentTab.NOVELS && selectedCategory != NovelCategory.ALL) {
-                list = list.filter {
+                val genreFiltered = list.filter {
                     it.genre.contains(selectedCategory.label, ignoreCase = true)
                 }
+                if (genreFiltered.isNotEmpty()) list = genreFiltered
+            }
+            if (activeTab == ContentTab.MANGA && selectedMangaGenre != "All") {
+                val genreFiltered = list.filter {
+                    it.genre.contains(selectedMangaGenre, ignoreCase = true) ||
+                        it.title.contains(selectedMangaGenre, ignoreCase = true)
+                }
+                if (genreFiltered.isNotEmpty()) list = genreFiltered
             }
             list
         }
@@ -122,6 +175,9 @@ fun DiscoverHomeScreen(
                 ContentTab.NOVELS -> searchResults.filter { !it.isManga && !it.isAnime }
                 ContentTab.MANGA -> searchResults.filter { it.isManga }
                 ContentTab.ANIME -> searchResults.filter { it.isAnime }
+                ContentTab.K_DRAMA,
+                ContentTab.CARTOON,
+                ContentTab.MOVIES -> videoSearchResults
             }
         }
     }
@@ -132,6 +188,7 @@ fun DiscoverHomeScreen(
             isSearching = false
             searchResults = emptyList()
             animeSearchResults = emptyList()
+            videoSearchResults = emptyList()
             return@LaunchedEffect
         }
         isSearching = true
@@ -141,6 +198,13 @@ fun DiscoverHomeScreen(
             when (activeTab) {
                 ContentTab.ANIME -> {
                     animeSearchResults = repository.searchAnime(q)
+                    isSearching = false
+                }
+                ContentTab.K_DRAMA,
+                ContentTab.CARTOON,
+                ContentTab.MOVIES -> {
+                    val category = activeTab.videoCategory()
+                    videoSearchResults = if (category != null) repository.searchVideo(category, q) else emptyList()
                     isSearching = false
                 }
                 else -> {
@@ -155,7 +219,12 @@ fun DiscoverHomeScreen(
         }
     }
 
-    val displayItems = if (searchQuery.length >= 2) filteredSearch else filteredPopular
+    val displayItems = if (searchQuery.length >= 2) {
+        filteredSearch
+    } else {
+        activeTab.videoCategory()?.let { videoItemsByTab[activeTab].orEmpty() } ?: filteredPopular
+    }
+    val tabAccent = activeTab.tabAccent(currentTheme)
 
     Column(
         modifier = Modifier
@@ -190,21 +259,15 @@ fun DiscoverHomeScreen(
                             fontWeight = FontWeight.Black
                         )
                         Text(
-                            when (activeTab) {
-                                ContentTab.NOVELS -> "Light Novels from 5 sources"
-                                ContentTab.MANGA -> "Manga from MangaDex, MangaSee & MangaFire"
-                                ContentTab.ANIME -> "Currently airing · GogoAnime & Hianime streams"
-                            },
+                            "Search, browse, and continue your stories.",
                             style = MaterialTheme.typography.bodySmall,
                             color = currentTheme.subTextColor()
                         )
                     }
                     Icon(
-                        if (activeTab == ContentTab.ANIME) Icons.Default.PlayCircle
-                        else Icons.Default.AutoAwesome,
+                        activeTab.icon,
                         null,
-                        tint = if (activeTab == ContentTab.ANIME) animeAccent
-                               else currentTheme.accentColor(),
+                        tint = tabAccent,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -221,6 +284,9 @@ fun DiscoverHomeScreen(
                                 ContentTab.NOVELS -> "Search light novels..."
                                 ContentTab.MANGA -> "Search manga titles..."
                                 ContentTab.ANIME -> "Search anime (AniList)..."
+                                ContentTab.K_DRAMA -> "Search K-drama..."
+                                ContentTab.CARTOON -> "Search cartoons..."
+                                ContentTab.MOVIES -> "Search movies..."
                             },
                             color = currentTheme.subTextColor()
                         )
@@ -230,15 +296,13 @@ fun DiscoverHomeScreen(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 strokeWidth = 2.dp,
-                                color = if (activeTab == ContentTab.ANIME) animeAccent
-                                        else currentTheme.accentColor()
+                                color = tabAccent
                             )
                         } else {
                             Icon(
                                 Icons.Default.Search,
                                 null,
-                                tint = if (activeTab == ContentTab.ANIME) animeAccent
-                                       else currentTheme.accentColor()
+                                tint = tabAccent
                             )
                         }
                     },
@@ -250,12 +314,11 @@ fun DiscoverHomeScreen(
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = if (activeTab == ContentTab.ANIME) animeAccent
-                                            else currentTheme.accentColor(),
+                        focusedBorderColor = tabAccent,
                         unfocusedBorderColor = currentTheme.subTextColor().copy(0.3f),
                         focusedTextColor = currentTheme.textColor(),
                         unfocusedTextColor = currentTheme.textColor(),
-                        cursorColor = currentTheme.accentColor(),
+                        cursorColor = tabAccent,
                         unfocusedContainerColor = currentTheme.cardColor().copy(0.5f),
                         focusedContainerColor = currentTheme.cardColor().copy(0.5f)
                     ),
@@ -265,24 +328,24 @@ fun DiscoverHomeScreen(
 
                 Spacer(Modifier.height(14.dp))
 
-                // Premium Segmented Tab Selector
-                Row(
+                // Swipeable tab rail
+                LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(currentTheme.cardColor().copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    ContentTab.values().forEach { tab ->
+                    items(ContentTab.values().toList()) { tab ->
                         val selected = activeTab == tab
-                        val tabColor = if (tab == ContentTab.ANIME) animeAccent else currentTheme.accentColor()
+                        val tabColor = tab.tabAccent(currentTheme)
                         Box(
                             modifier = Modifier
-                                .weight(1f)
+                                .widthIn(min = 104.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (selected) tabColor else Color.Transparent)
                                 .clickable { activeTab = tab }
-                                .padding(vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
@@ -307,8 +370,6 @@ fun DiscoverHomeScreen(
                 }
             }
         }
-
-        val tabAccent = if (activeTab == ContentTab.ANIME) animeAccent else currentTheme.accentColor()
 
         // ── Genre / Filter Chips ───────────────────────────────────────────
         // Novel genre chips
@@ -355,16 +416,15 @@ fun DiscoverHomeScreen(
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            var mangaCategory by remember { mutableStateOf("All") }
-            val mangaGenres = listOf("All","Action","Romance","Fantasy","Horror","Comedy","Sports","Sci-Fi","Supernatural")
+            val mangaGenres = listOf("All","Action","Romance","Fantasy","Horror","Comedy","Sports","Sci-Fi","Supernatural","Manhwa","Manhua","Webtoon")
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(mangaGenres) { genre ->
                     FilterChip(
-                        selected = mangaCategory == genre,
-                        onClick = { mangaCategory = genre },
+                        selected = selectedMangaGenre == genre,
+                        onClick = { selectedMangaGenre = genre },
                         label = { Text(genre) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Color(0xFFE91E8C),
@@ -373,7 +433,7 @@ fun DiscoverHomeScreen(
                             labelColor = currentTheme.subTextColor()
                         ),
                         border = FilterChipDefaults.filterChipBorder(
-                            enabled = true, selected = mangaCategory == genre,
+                            enabled = true, selected = selectedMangaGenre == genre,
                             selectedBorderColor = Color(0xFFE91E8C),
                             borderColor = currentTheme.subTextColor().copy(0.3f)
                         ),
@@ -389,7 +449,6 @@ fun DiscoverHomeScreen(
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            var animeGenre by remember { mutableStateOf("All") }
             val animeGenres = listOf("All","Action","Romance","Fantasy","Horror","Comedy","Sports","Sci-Fi","Supernatural","Isekai","Shonen","Seinen")
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
@@ -397,8 +456,8 @@ fun DiscoverHomeScreen(
             ) {
                 items(animeGenres) { genre ->
                     FilterChip(
-                        selected = animeGenre == genre,
-                        onClick = { animeGenre = genre },
+                        selected = selectedAnimeGenre == genre,
+                        onClick = { selectedAnimeGenre = genre },
                         label = { Text(genre) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = animeAccent,
@@ -407,7 +466,7 @@ fun DiscoverHomeScreen(
                             labelColor = currentTheme.subTextColor()
                         ),
                         border = FilterChipDefaults.filterChipBorder(
-                            enabled = true, selected = animeGenre == genre,
+                            enabled = true, selected = selectedAnimeGenre == genre,
                             selectedBorderColor = animeAccent,
                             borderColor = currentTheme.subTextColor().copy(0.3f)
                         ),
@@ -428,7 +487,11 @@ fun DiscoverHomeScreen(
                 Icon(Icons.Default.Search, null, tint = tabAccent, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Results for \"$searchQuery\"", style = MaterialTheme.typography.labelLarge, color = currentTheme.subTextColor())
-                val resultCount = if (activeTab == ContentTab.ANIME) animeSearchResults.size else filteredSearch.size
+                val resultCount = when {
+                    activeTab == ContentTab.ANIME -> animeSearchResults.size
+                    activeTab.videoCategory() != null -> videoSearchResults.size
+                    else -> filteredSearch.size
+                }
                 if (resultCount > 0) {
                     Spacer(Modifier.width(6.dp))
                     Text("· $resultCount found", style = MaterialTheme.typography.labelLarge, color = tabAccent, fontWeight = FontWeight.Bold)
@@ -447,6 +510,9 @@ fun DiscoverHomeScreen(
                         ContentTab.NOVELS -> "Popular Novels"
                         ContentTab.MANGA -> "Popular Manga"
                         ContentTab.ANIME -> "Currently Airing"
+                        ContentTab.K_DRAMA -> "Popular K-Drama"
+                        ContentTab.CARTOON -> "Popular Cartoons"
+                        ContentTab.MOVIES -> "Popular Movies"
                     },
                     style = MaterialTheme.typography.titleMedium,
                     color = currentTheme.textColor(),
@@ -459,12 +525,22 @@ fun DiscoverHomeScreen(
         val animeCols = if (isDesktop) 4 else 2
         val mangaCols = if (isDesktop) 5 else 3
         val novelCols = if (isDesktop) 4 else 2
+        val mediaCols = if (isDesktop) 4 else 2
 
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 // Anime tab
                 activeTab == ContentTab.ANIME -> {
-                    val showAnime = if (searchQuery.length >= 2) animeSearchResults else airingAnime
+                    val baseAnime = if (searchQuery.length >= 2) animeSearchResults else airingAnime
+                    val filteredAnime = if (selectedAnimeGenre == "All") {
+                        baseAnime
+                    } else {
+                        baseAnime.filter { anime ->
+                            anime.genres.any { it.equals(selectedAnimeGenre, ignoreCase = true) } ||
+                                anime.displayTitle.contains(selectedAnimeGenre, ignoreCase = true)
+                        }.ifEmpty { baseAnime }
+                    }
+                    val showAnime = filteredAnime
                     if (isLoadingAnime && searchQuery.isEmpty()) {
                         LoadingShimmerGrid(currentTheme)
                     } else if (showAnime.isEmpty() && !isSearching) {
@@ -498,6 +574,31 @@ fun DiscoverHomeScreen(
                                             )
                                         )
                                     }
+                                )
+                            }
+                        }
+                    }
+                }
+                // TMDB-backed video tabs
+                activeTab.videoCategory() != null -> {
+                    if (isLoadingVideo && searchQuery.isEmpty()) {
+                        LoadingShimmerGrid(currentTheme)
+                    } else if (displayItems.isEmpty() && !isSearching) {
+                        EmptyStateView(currentTheme = currentTheme, tab = activeTab, hasSearch = searchQuery.isNotEmpty())
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(mediaCols),
+                            contentPadding = PaddingValues(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(displayItems, key = { it.id }) { item ->
+                                ContentCard(
+                                    item = item,
+                                    currentTheme = currentTheme,
+                                    compact = false,
+                                    onClick = { onNovelSelected(item) }
                                 )
                             }
                         }
@@ -547,7 +648,7 @@ fun AnimeCard(
     val countdown by produceState(initialValue = "") {
         while (true) {
             if (anime.nextAiringAt > 0L) {
-                val nowSec = System.currentTimeMillis() / 1000L
+                val nowSec = currentTimeMillis() / 1000L
                 val diff = anime.nextAiringAt - nowSec
                 value = if (diff > 0) {
                     val h = diff / 3600
@@ -714,6 +815,12 @@ fun ContentCard(
                     color = when {
                         item.isAnime -> animeAccent
                         item.isManga -> Color(0xFFE91E8C)
+                        item.isVideo -> when (item.mediaKind) {
+                            VideoCategory.K_DRAMA.name -> kDramaAccent
+                            VideoCategory.CARTOON.name -> cartoonAccent
+                            VideoCategory.MOVIES.name -> moviesAccent
+                            else -> moviesAccent
+                        }
                         else -> currentTheme.accentColor()
                     },
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
@@ -722,6 +829,12 @@ fun ContentCard(
                         when {
                             item.isAnime -> "A"
                             item.isManga -> "M"
+                            item.isVideo -> when (item.mediaKind) {
+                                VideoCategory.K_DRAMA.name -> "K"
+                                VideoCategory.CARTOON.name -> "C"
+                                VideoCategory.MOVIES.name -> "V"
+                                else -> "V"
+                            }
                             else -> "N"
                         },
                         style = MaterialTheme.typography.labelSmall,
@@ -795,6 +908,9 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     hasSearch -> Icons.Default.SearchOff
                     tab == ContentTab.MANGA -> Icons.Default.Collections
                     tab == ContentTab.ANIME -> Icons.Default.PlayCircle
+                    tab == ContentTab.K_DRAMA -> Icons.Default.LiveTv
+                    tab == ContentTab.CARTOON -> Icons.Default.Animation
+                    tab == ContentTab.MOVIES -> Icons.Default.Movie
                     else -> Icons.Default.AutoStories
                 },
                 null,
@@ -807,6 +923,9 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     ContentTab.MANGA -> "No manga loaded yet"
                     ContentTab.NOVELS -> "No novels loaded yet"
                     ContentTab.ANIME -> "Loading anime schedule..."
+                    ContentTab.K_DRAMA -> "No K-drama loaded yet"
+                    ContentTab.CARTOON -> "No cartoons loaded yet"
+                    ContentTab.MOVIES -> "No movies loaded yet"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 color = currentTheme.subTextColor()

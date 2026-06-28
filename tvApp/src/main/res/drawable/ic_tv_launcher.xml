@@ -3,25 +3,56 @@
     android:height="432dp"
     android:viewportWidth="432"
     android:viewportHeight="432">
+
+    <!-- Card background -->
     <path
-        android:fillColor="#0B0D10"
-        android:pathData="M64,36h304c15.5,0 28,12.5 28,28v304c0,15.5 -12.5,28 -28,28H64c-15.5,0 -28,-12.5 -28,-28V64c0,-15.5 12.5,-28 28,-28z" />
+        android:fillColor="#0B0D12"
+        android:pathData="M60,30h312c16.57,0 30,13.43 30,30v312c0,16.57 -13.43,30 -30,30H60c-16.57,0 -30,-13.43 -30,-30V60c0,-16.57 13.43,-30 30,-30z" />
+
+    <!-- Inner screen panel -->
     <path
         android:fillColor="#182033"
-        android:pathData="M84,94h264c12.2,0 22,9.8 22,22v172c0,12.2 -9.8,22 -22,22H84c-12.2,0 -22,-9.8 -22,-22V116c0,-12.2 9.8,-22 22,-22z" />
-    <path
-        android:fillColor="#42D6B5"
-        android:pathData="M196,153l91,49 -91,49z" />
+        android:pathData="M80,88h272c12.15,0 22,9.85 22,22v176c0,12.15 -9.85,22 -22,22H80c-12.15,0 -22,-9.85 -22,-22V110c0,-12.15 9.85,-22 22,-22z" />
+
+    <!-- Left book page (pink) -->
     <path
         android:fillColor="#E84D8A"
-        android:pathData="M112,128h56c13.3,0 24,10.7 24,24v120c0,5.5 -4.5,10 -10,10h-70c-13.3,0 -24,-10.7 -24,-24V152c0,-13.3 10.7,-24 24,-24z" />
+        android:pathData="M100,110 C100,103 105,98 112,98 L164,98 C171,98 175,103 175,110 L175,276 C169,273 162,271 154,271 L112,271 C105,271 100,266 100,259 Z" />
+
+    <!-- Left page text lines -->
+    <path
+        android:fillColor="#F4F1EC"
+        android:fillAlpha="0.85"
+        android:pathData="M110,120 L167,120 L167,130 L110,130 Z
+                          M110,145 L160,145 L160,155 L110,155 Z
+                          M110,170 L167,170 L167,180 L110,180 Z
+                          M110,195 L156,195 L156,205 L110,205 Z
+                          M110,220 L167,220 L167,230 L110,230 Z" />
+
+    <!-- Book spine glow -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.18"
+        android:pathData="M179,95 C183,99 185,104 185,110 L185,275 C183,277 181,279 179,281 C177,279 175,277 173,275 L173,110 C173,104 175,99 179,95 Z" />
+
+    <!-- Large teal play button -->
+    <path
+        android:fillColor="#42D6B5"
+        android:pathData="M214,148 L330,214 L214,280 Z" />
+
+    <!-- Gold accent bar (TV stand indicator) -->
     <path
         android:fillColor="#F2C766"
-        android:pathData="M118,162h50v14h-50zM118,194h44v14h-44zM118,226h52v14h-52z" />
-    <path
-        android:fillColor="#E84D8A"
-        android:pathData="M159,334h114v26H159z" />
+        android:pathData="M163,324 L269,324 L269,344 L163,344 Z" />
+
+    <!-- Teal base bar -->
     <path
         android:fillColor="#42D6B5"
-        android:pathData="M126,354h180v18H126z" />
+        android:pathData="M128,348 L304,348 L304,362 L128,362 Z" />
+
+    <!-- Spark top-right -->
+    <path
+        android:fillColor="#F2C766"
+        android:pathData="M358,72 L362,84 L374,88 L362,92 L358,104 L354,92 L342,88 L354,84 Z" />
+
 </vector>

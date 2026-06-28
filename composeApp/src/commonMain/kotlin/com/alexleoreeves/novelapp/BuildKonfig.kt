@@ -13,4 +13,6 @@ expect object BuildKonfig {
     val MANGADEX_CLIENT_SECRET: String
     val MANGADEX_USERNAME: String
     val MANGADEX_PASSWORD: String
+    val TMDB_API_KEY: String
+    val TMDB_READ_ACCESS_TOKEN: String
 }

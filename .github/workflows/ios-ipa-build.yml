@@ -1,0 +1,184 @@
+name: iOS IPA Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    name: Build signed iPhone IPA
+    runs-on: macos-15
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+      IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_EXPORT_METHOD: ${{ secrets.IOS_EXPORT_METHOD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+      KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+      MANGADEX_CLIENT_ID: ${{ secrets.MANGADEX_CLIENT_ID }}
+      MANGADEX_CLIENT_SECRET: ${{ secrets.MANGADEX_CLIENT_SECRET }}
+      MANGADEX_PASSWORD: ${{ secrets.MANGADEX_PASSWORD }}
+      MANGADEX_USERNAME: ${{ secrets.MANGADEX_USERNAME }}
+      RAPID_API_HOST: ${{ secrets.RAPID_API_HOST }}
+      RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate signing secrets
+        run: |
+          missing=0
+          for name in \
+            IOS_BUNDLE_ID \
+            IOS_CERTIFICATE_P12_BASE64 \
+            IOS_CERTIFICATE_PASSWORD \
+            IOS_PROVISIONING_PROFILE_BASE64 \
+            IOS_PROVISIONING_PROFILE_NAME \
+            IOS_TEAM_ID
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required for a signed installable iPhone IPA."
+              missing=1
+            fi
+          done
+          if [ -z "$IOS_EXPORT_METHOD" ]; then
+            echo "IOS_EXPORT_METHOD was not set; defaulting to ad-hoc."
+            echo "IOS_EXPORT_METHOD=ad-hoc" >> "$GITHUB_ENV"
+          fi
+          if [ -z "$KEYCHAIN_PASSWORD" ]; then
+            echo "KEYCHAIN_PASSWORD=$(uuidgen)" >> "$GITHUB_ENV"
+          fi
+          exit "$missing"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec iosApp/project.yml --project iosApp/NovelApp.xcodeproj
+
+      - name: Install Apple signing assets
+        run: |
+          set -euo pipefail
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/ios_distribution.p12"
+          PROFILE_PATH="$RUNNER_TEMP/NovelApp.mobileprovision"
+          KEYCHAIN_PATH="$RUNNER_TEMP/ios-build.keychain-db"
+
+          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH" 2>/dev/null \
+            || echo "$IOS_CERTIFICATE_P12_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH" 2>/dev/null \
+            || echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -D > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$IOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/NovelApp.mobileprovision"
+
+      - name: Archive iPhone app
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios
+
+          xcodebuild \
+            -project iosApp/NovelApp.xcodeproj \
+            -scheme NovelApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/ios/NovelApp.xcarchive \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME" \
+            GEMINI_API_KEY="${GEMINI_API_KEY:-mock_gemini_api_key}" \
+            RAPID_API_KEY="${RAPID_API_KEY:-mock_rapid_api_key}" \
+            RAPID_API_HOST="${RAPID_API_HOST:-webnovel.p.rapidapi.com}" \
+            MANGADEX_CLIENT_ID="${MANGADEX_CLIENT_ID:-mock_client_id}" \
+            MANGADEX_CLIENT_SECRET="${MANGADEX_CLIENT_SECRET:-mock_client_secret}" \
+            MANGADEX_USERNAME="${MANGADEX_USERNAME:-mock_user}" \
+            MANGADEX_PASSWORD="${MANGADEX_PASSWORD:-mock_pass}" \
+            clean archive
+
+      - name: Export signed IPA
+        run: |
+          set -euo pipefail
+
+          cat > build/ios/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${IOS_EXPORT_METHOD}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${IOS_TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${IOS_BUNDLE_ID}</key>
+              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
+            </dict>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/ios/NovelApp.xcarchive \
+            -exportPath build/ios/export \
+            -exportOptionsPlist build/ios/ExportOptions.plist
+
+          mkdir -p site/downloads
+          cp build/ios/export/*.ipa site/downloads/novelapp-ios.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: novelapp-ios-ipa
+          path: site/downloads/novelapp-ios.ipa
+
+      - name: Publish IPA to Render site folder
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/downloads/novelapp-ios.ipa
+          if git diff --cached --quiet; then
+            echo "No iOS IPA change to commit."
+          else
+            git commit -m "Publish iOS release [skip ci]"
+            git push
+          fi

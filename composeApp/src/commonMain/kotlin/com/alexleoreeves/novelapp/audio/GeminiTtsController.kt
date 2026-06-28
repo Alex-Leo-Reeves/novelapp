@@ -4,6 +4,7 @@ import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import io.ktor.util.decodeBase64Bytes
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +25,21 @@ class GeminiTtsController(private val apiKey: String) {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
+    /** Index of the chunk currently being narrated (0-based). */
+    private val _currentChunkFlow = MutableStateFlow(0)
+    val currentChunkIndex: StateFlow<Int> = _currentChunkFlow
+
+    /**
+     * For each chunk i, the index of its first paragraph in the flat paragraph list.
+     * ReaderScreen uses this to map chunk → paragraph for highlight.
+     */
+    private val _chunkBoundaries = MutableStateFlow<List<Int>>(emptyList())
+    val chunkBoundaries: StateFlow<List<Int>> = _chunkBoundaries
+
     private var playbackJob: Job? = null
     private var sleepTimerJob: Job? = null
     private var isPaused = false
-    private var currentChunkIndex = 0
+    private var _chunkCursor = 0
     private var textChunks: List<String> = emptyList()
 
     private val httpClient = HttpClient()
@@ -85,14 +97,18 @@ class GeminiTtsController(private val apiKey: String) {
 
     suspend fun readText(text: String) {
         stopInternal()
-        textChunks = chunkText(text)
-        currentChunkIndex = 0
+        val result = chunkTextWithBoundaries(text)
+        textChunks = result.first
+        _chunkBoundaries.value = result.second
+        _chunkCursor = 0
+        _currentChunkFlow.value = 0
         _isPlaying.value = true
 
         playbackJob = CoroutineScope(Dispatchers.Default).launch {
             for (index in textChunks.indices) {
                 if (!isActive || isPaused) break
-                currentChunkIndex = index
+                _chunkCursor = index
+                _currentChunkFlow.value = index
                 val chunk = textChunks[index]
                 val directedText = addToneDirection(chunk)
                 generateAndPlayAudio(directedText)
@@ -111,9 +127,10 @@ class GeminiTtsController(private val apiKey: String) {
             isPaused = false
             _isPlaying.value = true
             playbackJob = CoroutineScope(Dispatchers.Default).launch {
-                for (index in currentChunkIndex until textChunks.size) {
+                for (index in _chunkCursor until textChunks.size) {
                     if (!isActive || isPaused) break
-                    currentChunkIndex = index
+                    _chunkCursor = index
+                    _currentChunkFlow.value = index
                     val directed = addToneDirection(textChunks[index])
                     generateAndPlayAudio(directed)
                 }
@@ -123,14 +140,16 @@ class GeminiTtsController(private val apiKey: String) {
     }
 
     fun skipForward() {
-        if (currentChunkIndex < textChunks.size - 1) {
+        if (_chunkCursor < textChunks.size - 1) {
             stopInternal()
-            currentChunkIndex++
+            _chunkCursor++
+            _currentChunkFlow.value = _chunkCursor
             CoroutineScope(Dispatchers.Default).launch {
                 _isPlaying.value = true
-                for (index in currentChunkIndex until textChunks.size) {
+                for (index in _chunkCursor until textChunks.size) {
                     if (isPaused) break
-                    currentChunkIndex = index
+                    _chunkCursor = index
+                    _currentChunkFlow.value = index
                     generateAndPlayAudio(addToneDirection(textChunks[index]))
                 }
                 _isPlaying.value = false
@@ -139,14 +158,16 @@ class GeminiTtsController(private val apiKey: String) {
     }
 
     fun skipBack() {
-        if (currentChunkIndex > 0) {
+        if (_chunkCursor > 0) {
             stopInternal()
-            currentChunkIndex = maxOf(0, currentChunkIndex - 1)
+            _chunkCursor = maxOf(0, _chunkCursor - 1)
+            _currentChunkFlow.value = _chunkCursor
             CoroutineScope(Dispatchers.Default).launch {
                 _isPlaying.value = true
-                for (index in currentChunkIndex until textChunks.size) {
+                for (index in _chunkCursor until textChunks.size) {
                     if (isPaused) break
-                    currentChunkIndex = index
+                    _chunkCursor = index
+                    _currentChunkFlow.value = index
                     generateAndPlayAudio(addToneDirection(textChunks[index]))
                 }
                 _isPlaying.value = false
@@ -157,7 +178,8 @@ class GeminiTtsController(private val apiKey: String) {
     fun stop() {
         stopInternal()
         textChunks = emptyList()
-        currentChunkIndex = 0
+        _chunkCursor = 0
+        _currentChunkFlow.value = 0
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -172,25 +194,38 @@ class GeminiTtsController(private val apiKey: String) {
 
     /**
      * Split text into paragraph-aware chunks of ~1000 words.
-     * Never cuts mid-sentence, always breaks on a paragraph boundary.
+     * Returns a Pair of (chunks, chunkBoundaries) where boundaries[i] is the
+     * index of the first paragraph (in the flat list) that belongs to chunk i.
      */
-    private fun chunkText(text: String): List<String> {
+    private fun chunkTextWithBoundaries(text: String): Pair<List<String>, List<Int>> {
         val paragraphs = text.split("\n\n").filter { it.isNotBlank() }
         val chunks = mutableListOf<String>()
+        val boundaries = mutableListOf<Int>() // paragraph index where each chunk starts
         val currentChunk = StringBuilder()
+        var chunkStartParagraphIndex = 0
+        var currentParagraphCount = 0
 
-        for (para in paragraphs) {
+        for ((paraIdx, para) in paragraphs.withIndex()) {
             val wordCount = currentChunk.toString().split("\\s+".toRegex()).size
             if (wordCount + para.split("\\s+".toRegex()).size > 1000 && currentChunk.isNotEmpty()) {
                 chunks.add(currentChunk.toString().trim())
+                boundaries.add(chunkStartParagraphIndex)
+                chunkStartParagraphIndex = paraIdx
                 currentChunk.clear()
+                currentParagraphCount = 0
             }
             currentChunk.append(para).append("\n\n")
+            currentParagraphCount++
         }
         if (currentChunk.isNotEmpty()) {
             chunks.add(currentChunk.toString().trim())
+            boundaries.add(chunkStartParagraphIndex)
         }
-        return chunks.ifEmpty { listOf(text) }
+        return if (chunks.isEmpty()) {
+            Pair(listOf(text), listOf(0))
+        } else {
+            Pair(chunks, boundaries)
+        }
     }
 
     /**
@@ -293,8 +328,54 @@ class GeminiTtsController(private val apiKey: String) {
      * Platform-specific audio playback — implemented in androidMain / iosMain expect/actual.
      */
     internal suspend fun playAudioBytes(base64AudioData: String) {
-        // Implemented via expect/actual in platform-specific source sets
-        platformPlayAudio(base64AudioData)
+        val pcmBytes = base64AudioData.decodeBase64Bytes()
+        platformPlayAudio(convertPcmToWav(pcmBytes))
+    }
+
+    private fun convertPcmToWav(pcmBytes: ByteArray, sampleRate: Int = 24_000): ByteArray {
+        val totalDataLen = pcmBytes.size + 36
+        val byteRate = sampleRate * 16 * 1 / 8
+        val header = ByteArray(44)
+
+        header[0] = 'R'.code.toByte()
+        header[1] = 'I'.code.toByte()
+        header[2] = 'F'.code.toByte()
+        header[3] = 'F'.code.toByte()
+        header[4] = (totalDataLen and 0xff).toByte()
+        header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+        header[6] = ((totalDataLen shr 16) and 0xff).toByte()
+        header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+        header[8] = 'W'.code.toByte()
+        header[9] = 'A'.code.toByte()
+        header[10] = 'V'.code.toByte()
+        header[11] = 'E'.code.toByte()
+        header[12] = 'f'.code.toByte()
+        header[13] = 'm'.code.toByte()
+        header[14] = 't'.code.toByte()
+        header[15] = ' '.code.toByte()
+        header[16] = 16
+        header[20] = 1
+        header[22] = 1
+        header[24] = (sampleRate and 0xff).toByte()
+        header[25] = ((sampleRate shr 8) and 0xff).toByte()
+        header[26] = ((sampleRate shr 16) and 0xff).toByte()
+        header[27] = ((sampleRate shr 24) and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte()
+        header[29] = ((byteRate shr 8) and 0xff).toByte()
+        header[30] = ((byteRate shr 16) and 0xff).toByte()
+        header[31] = ((byteRate shr 24) and 0xff).toByte()
+        header[32] = 2
+        header[34] = 16
+        header[36] = 'd'.code.toByte()
+        header[37] = 'a'.code.toByte()
+        header[38] = 't'.code.toByte()
+        header[39] = 'a'.code.toByte()
+        header[40] = (pcmBytes.size and 0xff).toByte()
+        header[41] = ((pcmBytes.size shr 8) and 0xff).toByte()
+        header[42] = ((pcmBytes.size shr 16) and 0xff).toByte()
+        header[43] = ((pcmBytes.size shr 24) and 0xff).toByte()
+
+        return header + pcmBytes
     }
 }
 
@@ -303,4 +384,4 @@ class GeminiTtsController(private val apiKey: String) {
  * Android: uses MediaPlayer / AudioTrack
  * iOS: uses AVAudioPlayer
  */
-expect suspend fun platformPlayAudio(base64AudioData: String)
+expect suspend fun platformPlayAudio(audioBytes: ByteArray)

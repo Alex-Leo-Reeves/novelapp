@@ -41,7 +41,8 @@ fun AnimeDetailScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
     onPlayEpisode: (streamUrl: String, episodeTitle: String) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    requireAuth: (() -> Unit) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var episodes by remember { mutableStateOf<List<AnimeEpisode>>(emptyList()) }
@@ -324,7 +325,7 @@ fun AnimeDetailScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "No episodes found on GogoAnime/Hianime",
+                                "No episodes found on Anineko/AnimePahe",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = currentTheme.subTextColor()
                             )
@@ -345,59 +346,65 @@ fun AnimeDetailScreen(
                         isDownloading = isDownloading,
                         currentTheme = currentTheme,
                         onPlayClick = {
-                            scope.launch {
-                                extractingEpisode = episode.episodeNumber
-                                val streamUrl = repository.extractStreamUrl(episode.url)
-                                extractingEpisode = null
-                                if (streamUrl != null) {
-                                    onPlayEpisode(
-                                        streamUrl,
-                                        "${anime.displayTitle} – EP ${episode.episodeNumber}"
-                                    )
-                                } else {
-                                    snackMessage = "Stream unavailable for Episode ${episode.episodeNumber}. Try again later."
+                            requireAuth {
+                                if (extractingEpisode != episode.episodeNumber) {
+                                    scope.launch {
+                                        extractingEpisode = episode.episodeNumber
+                                        val streamUrl = repository.extractStreamUrl(episode.url)
+                                        extractingEpisode = null
+                                        if (streamUrl != null) {
+                                            onPlayEpisode(
+                                                streamUrl,
+                                                "${anime.displayTitle} – EP ${episode.episodeNumber}"
+                                            )
+                                        } else {
+                                            snackMessage = "Stream unavailable for Episode ${episode.episodeNumber}. Try again later."
+                                        }
+                                    }
                                 }
                             }
                         },
                         onDownloadClick = {
-                            if (isDownloaded) {
-                                downloadRepo.deleteEpisode(anime.id, episode.episodeNumber)
-                                if (downloadRepo.getEpisodesFor(anime.id).isEmpty()) {
-                                    downloadRepo.deleteItem(anime.id)
-                                }
-                                refreshTrigger++
-                            } else {
-                                downloadingEpisodes = downloadingEpisodes + episode.episodeNumber
-                                scope.launch {
-                                    try {
-                                        downloadRepo.addItem(
-                                            DownloadedItem(
-                                                id = anime.id,
-                                                title = anime.displayTitle,
-                                                coverUrl = anime.coverUrl,
-                                                type = "ANIME",
-                                                sourceName = anime.sourceName
-                                            )
-                                        )
-                                        val streamUrl = repository.extractStreamUrl(episode.url)
-                                        if (streamUrl != null) {
-                                            downloadRepo.addEpisode(
-                                                DownloadedEpisode(
-                                                    parentId = anime.id,
-                                                    episodeNumber = episode.episodeNumber,
-                                                    episodeTitle = episode.title,
-                                                    localFilePath = streamUrl,
-                                                    fileSizeBytes = 240_000_000L
+                            requireAuth {
+                                if (isDownloaded) {
+                                    downloadRepo.deleteEpisode(anime.id, episode.episodeNumber)
+                                    if (downloadRepo.getEpisodesFor(anime.id).isEmpty()) {
+                                        downloadRepo.deleteItem(anime.id)
+                                    }
+                                    refreshTrigger++
+                                } else {
+                                    downloadingEpisodes = downloadingEpisodes + episode.episodeNumber
+                                    scope.launch {
+                                        try {
+                                            downloadRepo.addItem(
+                                                DownloadedItem(
+                                                    id = anime.id,
+                                                    title = anime.displayTitle,
+                                                    coverUrl = anime.coverUrl,
+                                                    type = "ANIME",
+                                                    sourceName = anime.sourceName
                                                 )
                                             )
-                                        } else {
-                                            snackMessage = "Failed to extract stream for offline saving."
+                                            val streamUrl = repository.extractStreamUrl(episode.url)
+                                            if (streamUrl != null) {
+                                                downloadRepo.addEpisode(
+                                                    DownloadedEpisode(
+                                                        parentId = anime.id,
+                                                        episodeNumber = episode.episodeNumber,
+                                                        episodeTitle = episode.title,
+                                                        localFilePath = streamUrl,
+                                                        fileSizeBytes = 240_000_000L
+                                                    )
+                                                )
+                                            } else {
+                                                snackMessage = "Failed to extract stream for offline saving."
+                                            }
+                                        } catch (e: Exception) {
+                                            // ignore
+                                        } finally {
+                                            downloadingEpisodes = downloadingEpisodes - episode.episodeNumber
+                                            refreshTrigger++
                                         }
-                                    } catch (e: Exception) {
-                                        // ignore
-                                    } finally {
-                                        downloadingEpisodes = downloadingEpisodes - episode.episodeNumber
-                                        refreshTrigger++
                                     }
                                 }
                             }
@@ -462,7 +469,7 @@ private fun EpisodeRow(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "GogoAnime • Tap to stream",
+                        text = "Anineko / AnimePahe • Tap to stream",
                         style = MaterialTheme.typography.labelSmall,
                         color = currentTheme.subTextColor()
                     )

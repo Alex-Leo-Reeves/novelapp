@@ -16,11 +16,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -48,6 +53,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.AppTheme
+import com.alexleoreeves.novelapp.data.LocalDownloadRepository
+import com.alexleoreeves.novelapp.data.ReadHistoryItem
+import com.alexleoreeves.novelapp.data.WatchHistoryItem
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.DeveloperContact
 import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
@@ -88,7 +96,13 @@ private sealed class UpdateState {
 fun YouScreen(
     account: SavedUserAccount,
     currentTheme: AppTheme,
+    downloadRepo: LocalDownloadRepository,
     linkOpener: ExternalLinkOpener,
+    onPlayEpisode: (localPath: String, title: String) -> Unit,
+    onReadMangaChapter: (localPath: String, title: String) -> Unit,
+    onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
+    onResumeRead: (ReadHistoryItem) -> Unit,
+    onResumeWatch: (WatchHistoryItem) -> Unit,
     onSignOut: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -100,6 +114,7 @@ fun YouScreen(
         }
     }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
+    var showDownloads by remember { mutableStateOf(false) }
 
     suspend fun checkForUpdates() {
         updateState = UpdateState.Checking
@@ -121,6 +136,18 @@ fun YouScreen(
 
     DisposableEffect(Unit) {
         onDispose { client.close() }
+    }
+
+    if (showDownloads) {
+        DownloadsScreen(
+            currentTheme = currentTheme,
+            downloadRepo = downloadRepo,
+            onPlayEpisode = onPlayEpisode,
+            onReadMangaChapter = onReadMangaChapter,
+            onReadNovelChapter = onReadNovelChapter,
+            onRootBack = { showDownloads = false }
+        )
+        return
     }
 
     Column(
@@ -160,6 +187,41 @@ fun YouScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             ProfileCard(account = account, currentTheme = currentTheme)
+
+            SectionTitle("Downloads", currentTheme)
+            DownloadsEntryCard(
+                downloadRepo = downloadRepo,
+                currentTheme = currentTheme,
+                onOpen = { showDownloads = true }
+            )
+
+            SectionTitle("Continue watching", currentTheme)
+            HistoryList(
+                items = downloadRepo.getWatchHistory().take(5),
+                emptyText = "No watch history yet.",
+                currentTheme = currentTheme,
+                row = { item ->
+                    WatchHistoryCard(
+                        item = item,
+                        currentTheme = currentTheme,
+                        onClick = { onResumeWatch(item) }
+                    )
+                }
+            )
+
+            SectionTitle("Continue reading", currentTheme)
+            HistoryList(
+                items = downloadRepo.getReadHistory().take(5),
+                emptyText = "No read history yet.",
+                currentTheme = currentTheme,
+                row = { item ->
+                    ReadHistoryCard(
+                        item = item,
+                        currentTheme = currentTheme,
+                        onClick = { onResumeRead(item) }
+                    )
+                }
+            )
 
             SectionTitle("Contact Mike", currentTheme)
             ContactCard(
@@ -213,6 +275,169 @@ fun YouScreen(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun DownloadsEntryCard(
+    downloadRepo: LocalDownloadRepository,
+    currentTheme: AppTheme,
+    onOpen: () -> Unit
+) {
+    val animeCount = downloadRepo.getAnimeItems().size
+    val mangaCount = downloadRepo.getMangaItems().size
+    val novelCount = downloadRepo.getNovelItems().size
+
+    Card(
+        onClick = onOpen,
+        colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Download,
+                contentDescription = null,
+                tint = currentTheme.accentColor(),
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Offline library",
+                    color = currentTheme.textColor(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "$animeCount anime · $mangaCount manga · $novelCount novels",
+                    color = currentTheme.subTextColor(),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = currentTheme.subTextColor())
+        }
+    }
+}
+
+@Composable
+private fun <T> HistoryList(
+    items: List<T>,
+    emptyText: String,
+    currentTheme: AppTheme,
+    row: @Composable (T) -> Unit
+) {
+    if (items.isEmpty()) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor().copy(alpha = 0.55f)),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.History, null, tint = currentTheme.subTextColor())
+                Text(emptyText, color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items.forEach { row(it) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReadHistoryCard(
+    item: ReadHistoryItem,
+    currentTheme: AppTheme,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (item.isManga) Icons.Default.MenuBook else Icons.Default.AutoStories,
+                contentDescription = null,
+                tint = currentTheme.accentColor()
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.title,
+                    color = currentTheme.textColor(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    item.chapterTitle,
+                    color = currentTheme.subTextColor(),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = currentTheme.subTextColor())
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WatchHistoryCard(
+    item: WatchHistoryItem,
+    currentTheme: AppTheme,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.PlayCircle, contentDescription = null, tint = Color(0xFFFF5722))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.title,
+                    color = currentTheme.textColor(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    item.episodeTitle,
+                    color = currentTheme.subTextColor(),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = currentTheme.subTextColor())
         }
     }
 }

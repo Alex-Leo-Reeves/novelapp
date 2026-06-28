@@ -19,7 +19,10 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UniversalReadScreen(currentTheme: AppTheme) {
+fun UniversalReadScreen(
+    currentTheme: AppTheme,
+    requireAuth: (() -> Unit) -> Unit
+) {
     val scope = rememberCoroutineScope()
     val ttsController = remember { GeminiTtsController(BuildKonfig.GEMINI_API_KEY) }
     val isPlaying = ttsController.isPlaying.collectAsState()
@@ -165,11 +168,13 @@ fun UniversalReadScreen(currentTheme: AppTheme) {
 
                     Button(
                         onClick = {
-                            if (pastedText.isNotEmpty()) {
-                                scope.launch {
-                                    isReading = true
-                                    ttsController.readText(pastedText)
-                                    isReading = false
+                            requireAuth {
+                                if (pastedText.isNotEmpty()) {
+                                    scope.launch {
+                                        isReading = true
+                                        ttsController.readText(pastedText)
+                                        isReading = false
+                                    }
                                 }
                             }
                         },
@@ -225,10 +230,12 @@ fun UniversalReadScreen(currentTheme: AppTheme) {
 
                     Button(
                         onClick = {
-                            scope.launch {
-                                isReading = true
-                                ttsController.readText("Reading content from: $urlInput")
-                                isReading = false
+                            requireAuth {
+                                scope.launch {
+                                    isReading = true
+                                    ttsController.readText("Reading content from: $urlInput")
+                                    isReading = false
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -280,7 +287,11 @@ fun UniversalReadScreen(currentTheme: AppTheme) {
                 ) {
                     Spacer(Modifier.height(24.dp))
                     IconButton(
-                        onClick = { showFilePicker = true },
+                        onClick = {
+                            requireAuth {
+                                showFilePicker = true
+                            }
+                        },
                         modifier = Modifier
                             .size(100.dp)
                             .background(currentTheme.cardColor(), RoundedCornerShape(16.dp))
@@ -309,11 +320,13 @@ fun UniversalReadScreen(currentTheme: AppTheme) {
 
                     Button(
                         onClick = {
-                            if (importedFileContent.isNotEmpty()) {
-                                scope.launch {
-                                    isReading = true
-                                    ttsController.readText(importedFileContent)
-                                    isReading = false
+                            requireAuth {
+                                if (importedFileContent.isNotEmpty()) {
+                                    scope.launch {
+                                        isReading = true
+                                        ttsController.readText(importedFileContent)
+                                        isReading = false
+                                    }
                                 }
                             }
                         },
