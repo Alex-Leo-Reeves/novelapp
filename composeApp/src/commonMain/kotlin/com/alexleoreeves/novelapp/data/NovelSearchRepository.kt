@@ -29,6 +29,11 @@ class NovelSearchRepository(
         install(HttpRedirect) {
             checkHttpMethod = false
         }
+        install(HttpTimeout) {
+            connectTimeoutMillis = 10_000
+            requestTimeoutMillis = 20_000
+            socketTimeoutMillis = 20_000
+        }
         defaultRequest {
             header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
             header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,application/json,*/*;q=0.8")
@@ -121,6 +126,36 @@ class NovelSearchRepository(
         (allNovels + allManga + allAnime).distinctBy { it.title.lowercase().trim() }
     }
 
+    suspend fun searchNovels(query: String): List<UnifiedSearchResult> = coroutineScope {
+        sources.map { source ->
+            async {
+                try { source.search(query) }
+                catch (e: Exception) {
+                    println("[Novel Search] ${source.sourceName} failed silently: ${e.message}")
+                    emptyList()
+                }
+            }
+        }.awaitAll()
+            .flatten()
+            .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+            .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+    }
+
+    suspend fun searchManga(query: String): List<UnifiedSearchResult> = coroutineScope {
+        mangaSources.map { source ->
+            async {
+                try { source.searchManga(query) }
+                catch (e: Exception) {
+                    println("[Manga Search] ${source.sourceName} failed silently: ${e.message}")
+                    emptyList()
+                }
+            }
+        }.awaitAll()
+            .flatten()
+            .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+            .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Popular / Trending — Fetch home screen content for all three tabs
     // ─────────────────────────────────────────────────────────────────────────
@@ -195,12 +230,13 @@ class NovelSearchRepository(
      * Fetch episode list for a given anime title.
      * Tries Anineko first, falls back to AnimePahe.
      */
-    suspend fun fetchEpisodes(animeTitleQuery: String): List<AnimeEpisode> = coroutineScope {
+    suspend fun fetchEpisodes(animeTitleQuery: String, episodeCount: Int = 0): List<AnimeEpisode> = coroutineScope {
         val anineko = async { aninekoScraper.fetchEpisodes(animeTitleQuery) }
         val animePahe = async { animePaheScraper.fetchEpisodes(animeTitleQuery) }
-        (anineko.await() + animePahe.await())
+        val episodes = (anineko.await() + animePahe.await())
             .distinctBy { it.url }
             .sortedByDescending { it.episodeNumber }
+        episodes.ifEmpty { aninekoScraper.fallbackEpisodes(animeTitleQuery, episodeCount) }
     }
 
     /**

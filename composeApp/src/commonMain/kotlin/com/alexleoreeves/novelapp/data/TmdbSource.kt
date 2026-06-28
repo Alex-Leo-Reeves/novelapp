@@ -209,7 +209,8 @@ class TmdbSource(
             genre = genreText,
             synopsis = this["overview"]?.jsonPrimitive?.contentOrNull.orEmpty(),
             isVideo = true,
-            mediaKind = category.name
+            mediaKind = category.name,
+            url = "https://www.themoviedb.org/$mediaType/$rawId/watch"
         )
     }
 

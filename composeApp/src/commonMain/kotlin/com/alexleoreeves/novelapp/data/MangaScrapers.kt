@@ -33,11 +33,17 @@ class MangaDexSource(
     override val sourceName = "MangaDex"
     private var accessToken: String? = null
     private var tokenExpiryTime = 0L
+    private val hasUsableAuth =
+        clientId.isNotBlank() && clientSecret.isNotBlank() &&
+            username.isNotBlank() && password.isNotBlank() &&
+            !clientId.startsWith("mock_", ignoreCase = true) &&
+            !clientSecret.startsWith("mock_", ignoreCase = true)
 
     /**
      * Checks if current token is expired, if so updates it via OAuth password flow.
      */
     private suspend fun ensureAuthenticated() {
+        if (!hasUsableAuth) return
         val now = currentTimeMillis()
         if (accessToken != null && now < tokenExpiryTime) return
 
@@ -68,6 +74,7 @@ class MangaDexSource(
         ensureAuthenticated()
         return try {
             val response = httpClient.get("https://api.mangadex.org/manga") {
+                accept(ContentType.Application.Json)
                 parameter("title", query)
                 parameter("limit", 15)
                 parameter("includes[]", "cover_art")
@@ -82,8 +89,16 @@ class MangaDexSource(
                 val obj = item.jsonObject
                 val mangaId = obj["id"]?.jsonPrimitive?.content ?: ""
                 val titleObj = obj["attributes"]?.jsonObject?.get("title")?.jsonObject
-                val title = titleObj?.values?.firstOrNull()?.jsonPrimitive?.content
-                    ?: titleObj?.get("en")?.jsonPrimitive?.content ?: "Unknown Title"
+                val title = titleObj?.get("en")?.jsonPrimitive?.contentOrNull
+                    ?: titleObj?.values?.firstOrNull()?.jsonPrimitive?.contentOrNull
+                    ?: "Unknown Title"
+                val tags = obj["attributes"]?.jsonObject?.get("tags")?.jsonArray
+                    ?.mapNotNull { tag ->
+                        tag.jsonObject["attributes"]?.jsonObject
+                            ?.get("name")?.jsonObject
+                            ?.get("en")?.jsonPrimitive?.contentOrNull
+                    }
+                    .orEmpty()
 
                 // Extract cover filename from relationships
                 val coverFileName = obj["relationships"]?.jsonArray?.firstOrNull {
@@ -101,7 +116,7 @@ class MangaDexSource(
                     detailPageUrl = "mangadex://$mangaId",
                     sourceName = sourceName,
                     isManga = true,
-                    genre = obj["attributes"]?.jsonObject?.get("originalLanguage")?.jsonPrimitive?.content ?: "Manga"
+                    genre = tags.take(3).joinToString(", ").ifBlank { "Manga" }
                 )
             }
         } catch (e: Exception) {
@@ -115,6 +130,7 @@ class MangaDexSource(
         val mangaId = mangaUrl.removePrefix("mangadex://")
         return try {
             val response = httpClient.get("https://api.mangadex.org/manga/$mangaId/feed") {
+                accept(ContentType.Application.Json)
                 parameter("limit", 100)
                 parameter("translatedLanguage[]", "en")
                 parameter("order[chapter]", "asc")
@@ -148,6 +164,7 @@ class MangaDexSource(
         val chapterId = chapterUrl.removePrefix("mangadex-chapter://")
         return try {
             val response = httpClient.get("https://api.mangadex.org/at-home/server/$chapterId") {
+                accept(ContentType.Application.Json)
                 if (accessToken != null) {
                     header("Authorization", "Bearer $accessToken")
                 }
@@ -191,31 +208,29 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
     override suspend fun searchManga(query: String): List<UnifiedSearchResult> {
         return try {
             val base = liveBase()
-            // WeebCentral search: GET /search?keyword=...
-            val html = httpClient.get("$base/search") {
-                parameter("keyword", query)
+            val html = httpClient.submitForm(
+                url = "$base/search/simple?location=main",
+                formParameters = Parameters.build { append("text", query) }
+            ) {
                 header("User-Agent", UA)
                 header("Referer", base)
+                header("HX-Request", "true")
             }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
-            // WeebCentral lists results as <article> or <li> wrappers containing
-            // an anchor whose href contains /series/.
-            // The broad multi-selector covers both the current and any light redesign.
-            doc.select("article, li.result, div.series-item, section.grid > div")
-                .filter { it.select("a[href*=/series/]").isNotEmpty() }
+            doc.select("a[href*=/series/]")
                 .mapNotNull { el ->
-                    val link = el.select("a[href*=/series/]").firstOrNull()
+                    val href  = el.attr("href")
+                    val title = el.select(".line-clamp-2, .title, strong").firstOrNull()?.text()
+                        ?.ifBlank { el.attr("title") }
+                        ?.ifBlank { el.text() }
+                        ?.decodeHtmlEntitiesLite()
                         ?: return@mapNotNull null
-                    val href  = link.attr("href")
-                    val title = el.select("h2, h3, strong, .title, .name").firstOrNull()?.text()
-                        ?.ifBlank { link.attr("title") }
-                        ?.ifBlank { link.text() }
-                        ?: return@mapNotNull null
-                    val cover = el.select("img[data-src], img[src]").firstOrNull()?.let {
-                        it.attr("data-src").ifBlank { it.attr("src") }
+                    val cover = el.select("source[srcset], img[data-src], img[src]").firstOrNull()?.let {
+                        it.attr("srcset").ifBlank { it.attr("data-src") }.ifBlank { it.attr("src") }
                     }.orEmpty()
-                    if (title.isBlank() || href.isBlank()) return@mapNotNull null
+                    if (title.isBlank() || title.isNavigationTitle() || href.isBlank()) return@mapNotNull null
                     UnifiedSearchResult(
                         id   = href,
                         title = title,
@@ -241,6 +256,7 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
                 header("User-Agent", UA)
                 header("Referer", base)
             }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
             // WeebCentral chapter list: anchors whose href contains /chapters/
@@ -259,10 +275,17 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
                         .firstOrNull()?.text()
                         ?.ifBlank { el.text().trim() }
                         ?: el.text().trim()
+                    val chapterNumber = Regex("""Chapter\s+(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
+                        .find(rawTitle)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toDoubleOrNull()
+                        ?.toInt()
+                        ?: (idx + 1)
                     MangaChapter(
-                        title = rawTitle.ifBlank { "Chapter ${idx + 1}" },
+                        title = rawTitle.decodeHtmlEntitiesLite().ifBlank { "Chapter ${idx + 1}" },
                         url   = absoluteMangaUrl(base, el.attr("href")),
-                        chapterNumber = idx + 1
+                        chapterNumber = chapterNumber
                     )
                 }
         } catch (e: Exception) {
@@ -280,6 +303,25 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
                 header("User-Agent", UA)
                 header("Referer", base)
             }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
+
+            Regex("""hx-get="([^"]+/images[^"]*)"""")
+                .find(html)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.let { imagesPath ->
+                    val imagesHtml = httpClient.get(absoluteMangaUrl(base, imagesPath.replace("&amp;", "&") + "&reading_style=long_strip")) {
+                        header("User-Agent", UA)
+                        header("Referer", effectiveUrl)
+                        header("HX-Request", "true")
+                    }.bodyAsText()
+                    val imageDoc = Ksoup.parse(imagesHtml)
+                    val pages = imageDoc.select("img[src]")
+                        .map { absoluteMangaUrl(base, it.attr("src")) }
+                        .filter { it.isNotBlank() && !it.contains("broken_image", ignoreCase = true) }
+                        .distinct()
+                    if (pages.isNotEmpty()) return pages
+                }
 
             val doc = Ksoup.parse(html)
             // Strategy 1: direct img tags in the reader container
@@ -340,6 +382,7 @@ class MangaFireScraper(private val httpClient: HttpClient) : MangaScraper {
                 header("User-Agent", userAgent)
                 header("Referer", "$base/")
             }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
             val cards = doc.select("div.original div.inner, .item, .unit, .manga, .poster")

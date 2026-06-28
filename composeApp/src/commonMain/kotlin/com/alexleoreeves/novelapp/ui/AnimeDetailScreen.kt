@@ -57,7 +57,10 @@ fun AnimeDetailScreen(
     // Load episodes on mount
     LaunchedEffect(anime.id) {
         isLoadingEpisodes = true
-        episodes = repository.fetchEpisodes(anime.titleRomaji.ifEmpty { anime.titleEnglish })
+        episodes = repository.fetchEpisodes(
+            animeTitleQuery = anime.titleRomaji.ifEmpty { anime.titleEnglish },
+            episodeCount = anime.episodeCount
+        )
         isLoadingEpisodes = false
     }
 
@@ -325,7 +328,7 @@ fun AnimeDetailScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "No episodes found on Anineko/AnimePahe",
+                                "No episodes found from the current stream sources",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = currentTheme.subTextColor()
                             )

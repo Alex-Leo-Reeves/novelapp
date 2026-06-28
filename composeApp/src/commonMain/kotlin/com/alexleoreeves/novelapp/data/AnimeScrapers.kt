@@ -4,6 +4,7 @@ import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.http.*
+import com.fleeksoft.ksoup.Ksoup
 import kotlinx.serialization.json.*
 
 private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -199,42 +200,81 @@ class AninekoScraper(private val client: HttpClient) {
      */
     suspend fun fetchEpisodes(animeTitleQuery: String, maxEpisodes: Int = 24): List<AnimeEpisode> {
         return runCatching {
-            val BASE_URL = liveBaseUrl()
-            val searchUrl = "$BASE_URL/search.html"
+            val baseUrl = liveBaseUrl()
 
-            // 1. Search for the anime series page
-            val searchHtml: String = client.get(searchUrl) {
+            val searchHtml: String = client.get("$baseUrl/browser") {
                 parameter("keyword", animeTitleQuery)
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
+            if (searchHtml.isBlockedOrErrorPage()) return@runCatching emptyList()
 
-            // 2. Extract the series slug from first result
-            val slugRegex = Regex("""href="/category/([^"]+)"""")
-            val slug = slugRegex.find(searchHtml)?.groupValues?.get(1) ?: return@runCatching emptyList()
+            val searchDoc = Ksoup.parse(searchHtml)
+            val bestMatch = searchDoc.select("article.nv-anime-card a[href*=/watch/], a.nv-anime-thumb[href*=/watch/], h3.nv-anime-title a[href*=/watch/]")
+                .mapNotNull { link ->
+                    val href = link.attr("href")
+                    val title = link.attr("title")
+                        .ifBlank { link.select("img").firstOrNull()?.attr("alt").orEmpty() }
+                        .ifBlank { link.text() }
+                        .decodeHtmlEntitiesLite()
+                    if (href.isBlank() || title.isBlank()) null else title to href
+                }
+                .distinctBy { it.second }
+                .sortedWith(
+                    compareByDescending<Pair<String, String>> { it.first.equals(animeTitleQuery, ignoreCase = true) }
+                        .thenByDescending { it.first.contains(animeTitleQuery, ignoreCase = true) }
+                )
+                .firstOrNull()
+                ?: return@runCatching emptyList()
 
-            // 3. Fetch series page to find episode range
-            val seriesHtml: String = client.get("$BASE_URL/category/$slug") {
+            val seriesUrl = toAbsoluteAnimeUrl(baseUrl, bestMatch.second)
+            val seriesHtml: String = client.get(seriesUrl) {
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
+            if (seriesHtml.isBlockedOrErrorPage()) return@runCatching emptyList()
 
-            // Extract episode count
-            val epEndRegex = Regex("""id="episode_page"[\s\S]*?<a[\s\S]*?ep_end\s*=\s*"(\d+)"""")
-            val totalEpisodes = epEndRegex.find(seriesHtml)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-            // 4. Build episode list (limit to last N episodes to avoid massive lists)
-            val start = maxOf(1, totalEpisodes - maxEpisodes + 1)
-            (start..totalEpisodes).map { ep ->
-                AnimeEpisode(
-                    episodeNumber = ep,
-                    title = "Episode $ep",
-                    url = "$BASE_URL/$slug-episode-$ep",
-                    thumbnail = ""
-                )
-            }.reversed() // Newest first
+            val seriesDoc = Ksoup.parse(seriesHtml)
+            seriesDoc.select("a.nv-info-episode-main[href*=/ep-], a.nv-episode-item[href*=/ep-], a[href*=/watch/][href*=/ep-]")
+                .mapNotNull { link ->
+                    val href = link.attr("href")
+                    val title = link.select("strong").firstOrNull()?.text()
+                        ?.ifBlank { link.text() }
+                        ?.decodeHtmlEntitiesLite()
+                        ?: link.text().decodeHtmlEntitiesLite()
+                    val episodeNumber = Regex("""(?:Episode\s*|/ep-)(\d+)""", RegexOption.IGNORE_CASE)
+                        .find("$title $href")
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toIntOrNull()
+                        ?: return@mapNotNull null
+                    AnimeEpisode(
+                        episodeNumber = episodeNumber,
+                        title = title.ifBlank { "Episode $episodeNumber" },
+                        url = toAbsoluteAnimeUrl(baseUrl, href),
+                        thumbnail = ""
+                    )
+                }
+                .distinctBy { it.url }
+                .sortedByDescending { it.episodeNumber }
+                .take(maxEpisodes)
         }.getOrElse { e ->
             println("[Anineko] Error fetching episodes for '$animeTitleQuery': ${e.message}")
             emptyList()
         }
+    }
+
+    fun fallbackEpisodes(animeTitleQuery: String, episodeCount: Int, maxEpisodes: Int = 24): List<AnimeEpisode> {
+        if (episodeCount <= 0) return emptyList()
+        val baseUrl = FALLBACK_URL
+        val slug = animeTitleQuery.slugifyAnimeTitle()
+        val start = maxOf(1, episodeCount - maxEpisodes + 1)
+        return (start..episodeCount).map { ep ->
+                AnimeEpisode(
+                    episodeNumber = ep,
+                    title = "Episode $ep",
+                    url = "$baseUrl/watch/$slug/ep-$ep",
+                    thumbnail = ""
+                )
+            }.reversed()
     }
 
     /**
@@ -250,11 +290,23 @@ class AninekoScraper(private val client: HttpClient) {
             val html: String = client.get(effectiveUrl) {
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
+            if (html.isBlockedOrErrorPage()) return@runCatching null
 
             // Strategy 1: Look for a direct m3u8 link
             val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
+            val mp4Regex = Regex("""https?://[^\s"']+\.mp4[^\s"']*""")
             val directM3u8 = m3u8Regex.find(html)?.value
             if (directM3u8 != null) return@runCatching directM3u8
+            mp4Regex.find(html)?.value?.let { return@runCatching it }
+
+            Regex("""data-video="([^"]+)"""")
+                .findAll(html)
+                .map { it.groupValues[1].decodeHtmlEntitiesLite() }
+                .filter { it.startsWith("http") }
+                .forEach { providerUrl ->
+                    val stream = extractProviderStream(providerUrl, effectiveUrl)
+                    if (stream != null) return@runCatching stream
+                }
 
             // Strategy 2: Find the embedded iframe server URL
             val iframeRegex = Regex("""<iframe[^>]+src="([^"]+)"""")
@@ -270,6 +322,7 @@ class AninekoScraper(private val client: HttpClient) {
                     header("Referer", effectiveUrl)
                 }.body()
                 return@runCatching m3u8Regex.find(iframeHtml)?.value
+                    ?: mp4Regex.find(iframeHtml)?.value
             }
 
             null
@@ -278,6 +331,20 @@ class AninekoScraper(private val client: HttpClient) {
             null
         }
     }
+
+    private suspend fun extractProviderStream(providerUrl: String, referer: String): String? = runCatching {
+        val html: String = client.get(providerUrl) {
+            BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
+            header("Referer", referer)
+        }.body()
+        if (html.isBlockedOrErrorPage()) return@runCatching null
+        Regex("""https?://[^\s"']+\.m3u8[^\s"']*""").find(html)?.value
+            ?: Regex("""https?://[^\s"']+\.mp4[^\s"']*""").find(html)?.value
+            ?: Regex("""(?:const|var)\s+src\s*=\s*["']([^"']+)["']""")
+                .find(html)
+                ?.groupValues
+                ?.getOrNull(1)
+    }.getOrNull()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,6 +370,7 @@ class AnimePaheScraper(private val client: HttpClient) {
                 parameter("q", animeTitleQuery)
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
+            if (searchResponse.isBlockedOrErrorPage()) return@runCatching emptyList()
 
             val searchJson = json.parseToJsonElement(searchResponse).jsonObject
             val first = searchJson["data"]?.jsonArray?.firstOrNull()?.jsonObject
@@ -318,6 +386,7 @@ class AnimePaheScraper(private val client: HttpClient) {
                 parameter("page", 1)
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
+            if (releaseResponse.isBlockedOrErrorPage()) return@runCatching emptyList()
 
             val releaseJson = json.parseToJsonElement(releaseResponse).jsonObject
             val data = releaseJson["data"]?.jsonArray ?: return@runCatching emptyList()
@@ -343,6 +412,7 @@ class AnimePaheScraper(private val client: HttpClient) {
             val html: String = client.get(episodePageUrl) {
                 BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             }.body()
+            if (html.isBlockedOrErrorPage()) return@runCatching null
             val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
             val mp4Regex = Regex("""https?://[^\s"']+\.mp4[^\s"']*""")
             m3u8Regex.find(html)?.value
@@ -351,3 +421,13 @@ class AnimePaheScraper(private val client: HttpClient) {
         }.getOrNull()
     }
 }
+
+private fun toAbsoluteAnimeUrl(baseUrl: String, href: String): String {
+    if (href.startsWith("http://") || href.startsWith("https://")) return href
+    return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
+}
+
+private fun String.slugifyAnimeTitle(): String =
+    lowercase()
+        .replace(Regex("""[^a-z0-9]+"""), "-")
+        .trim('-')
