@@ -5,11 +5,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,31 +21,93 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.alexleoreeves.novelapp.data.AppTheme
-import com.alexleoreeves.novelapp.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import com.alexleoreeves.novelapp.ui.theme.cardColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
+import com.alexleoreeves.novelapp.ui.theme.accentColor
+import com.alexleoreeves.novelapp.platform.platformHttpClient
+import kotlinx.coroutines.launch
 
 @Composable
 fun MediaDetailScreen(
     item: UnifiedSearchResult,
     currentTheme: AppTheme,
-    onOpenWatchOptions: (String) -> Unit,
+    onPlayStream: (streamUrl: String, title: String) -> Unit,
     onBack: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    val httpClient = remember { platformHttpClient() }
+    val tmdbScraper = remember { TMDBMovieScraper(httpClient) }
+    val dramaScraper = remember { DramaCoolScraper(httpClient) }
+    val cartoonScraper = remember { KimCartoonScraper(httpClient) }
+
+    val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+    val mediaType = parts.getOrNull(0) ?: "movie"
+    val tmdbId = parts.getOrNull(1) ?: ""
+
+    var episodesList by remember { mutableStateOf<List<MediaEpisode>>(emptyList()) }
+    var isLoadingEpisodes by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf("") }
+
+    LaunchedEffect(item.detailPageUrl) {
+        isLoadingEpisodes = true
+        episodesList = when {
+            item.detailPageUrl.startsWith("tmdb://") -> {
+                if (mediaType == "tv") {
+                    tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
+                } else {
+                    emptyList()
+                }
+            }
+            item.detailPageUrl.contains("dramacool") -> {
+                dramaScraper.fetchEpisodes(item.detailPageUrl)
+            }
+            item.detailPageUrl.contains("kimcartoon") -> {
+                cartoonScraper.fetchEpisodes(item.detailPageUrl)
+            }
+            else -> emptyList()
+        }
+        isLoadingEpisodes = false
+    }
+
+    val playEpisode: (MediaEpisode) -> Unit = { ep ->
+        scope.launch {
+            statusText = "Resolving stream link..."
+            val playUrl = when {
+                item.detailPageUrl.startsWith("tmdb://") -> {
+                    val urlParts = ep.url.split(":")
+                    val tvId = urlParts.getOrNull(1) ?: tmdbId
+                    val s = urlParts.getOrNull(2) ?: "1"
+                    val e = urlParts.getOrNull(3) ?: "1"
+                    "https://vidsrc.to/embed/tv/$tvId/$s/$e"
+                }
+                item.detailPageUrl.contains("dramacool") -> {
+                    dramaScraper.extractStreamUrl(ep.url) ?: ep.url
+                }
+                item.detailPageUrl.contains("kimcartoon") -> {
+                    cartoonScraper.extractStreamUrl(ep.url) ?: ep.url
+                }
+                else -> ep.url
+            }
+            statusText = ""
+            onPlayStream(playUrl, "${item.title} - ${ep.title}")
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
             .verticalScroll(rememberScrollState())
+            .padding(bottom = 60.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(420.dp)
+                .height(360.dp)
         ) {
             AsyncImage(
                 model = item.coverUrl,
@@ -104,7 +168,7 @@ fun MediaDetailScreen(
             if (item.genre.isNotBlank()) {
                 Text(
                     item.genre,
-                    color = currentTheme.subTextColor(),
+                    color = currentTheme.accentColor(),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -118,20 +182,91 @@ fun MediaDetailScreen(
                 Text(
                     item.synopsis.ifBlank { "Synopsis unavailable." },
                     color = currentTheme.textColor(),
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(16.dp)
                 )
             }
 
-            if (item.url.startsWith("http")) {
+            if (statusText.isNotEmpty()) {
+                Text(
+                    text = statusText,
+                    color = currentTheme.accentColor(),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            // Movie: Single Play button
+            if (item.detailPageUrl.startsWith("tmdb://") && mediaType == "movie") {
                 Button(
-                    onClick = { onOpenWatchOptions(item.url) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    onClick = {
+                        val playUrl = "https://vidsrc.to/embed/movie/$tmdbId"
+                        onPlayStream(playUrl, item.title)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())
                 ) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = null)
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Watch options")
+                    Text("Watch Movie Now", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                // TV / Episodic: List of episodes
+                Text(
+                    text = "Episodes",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = currentTheme.textColor(),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
+
+                if (isLoadingEpisodes) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = currentTheme.accentColor())
+                    }
+                } else if (episodesList.isEmpty()) {
+                    Text(
+                        "No episodes found for this show.",
+                        color = currentTheme.subTextColor(),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    episodesList.forEach { ep ->
+                        Card(
+                            onClick = { playEpisode(ep) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "Play",
+                                    tint = currentTheme.accentColor(),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = ep.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = currentTheme.textColor()
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

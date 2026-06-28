@@ -2,9 +2,10 @@ package com.alexleoreeves.novelapp.data
 
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.SavedUserAccount
-import io.ktor.client.HttpClient
+import com.alexleoreeves.novelapp.platform.platformHttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.*
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
@@ -17,9 +18,14 @@ import kotlinx.serialization.json.Json
 class AuthApi(
     private val baseUrl: String = AppReleaseConfig.API_BASE_URL
 ) {
-    private val client = HttpClient {
+    private val client = platformHttpClient {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
+        }
+        install(HttpTimeout) {
+            connectTimeoutMillis = 10_000
+            requestTimeoutMillis = 20_000
+            socketTimeoutMillis = 20_000
         }
     }
 

@@ -129,19 +129,33 @@ class MangaDexSource(
         ensureAuthenticated()
         val mangaId = mangaUrl.removePrefix("mangadex://")
         return try {
-            val response = httpClient.get("https://api.mangadex.org/manga/$mangaId/feed") {
-                accept(ContentType.Application.Json)
-                parameter("limit", 100)
-                parameter("translatedLanguage[]", "en")
-                parameter("order[chapter]", "asc")
-                if (accessToken != null) {
-                    header("Authorization", "Bearer $accessToken")
-                }
-            }.bodyAsText()
+            val chapters = mutableListOf<JsonElement>()
+            var offset = 0
+            var total = Int.MAX_VALUE
+            var pageSize: Int
 
-            val json = Json.parseToJsonElement(response).jsonObject
-            val data = json["data"]?.jsonArray ?: return emptyList()
-            data.mapIndexed { idx, item ->
+            do {
+                val response = httpClient.get("https://api.mangadex.org/manga/$mangaId/feed") {
+                    accept(ContentType.Application.Json)
+                    parameter("limit", 100)
+                    parameter("offset", offset)
+                    parameter("translatedLanguage[]", "en")
+                    parameter("order[volume]", "asc")
+                    parameter("order[chapter]", "asc")
+                    if (accessToken != null) {
+                        header("Authorization", "Bearer $accessToken")
+                    }
+                }.bodyAsText()
+
+                val json = Json.parseToJsonElement(response).jsonObject
+                val page = json["data"]?.jsonArray ?: JsonArray(emptyList())
+                pageSize = page.size
+                total = json["total"]?.jsonPrimitive?.intOrNull ?: (offset + page.size)
+                chapters.addAll(page)
+                offset += page.size
+            } while (pageSize == 100 && offset < total)
+
+            chapters.mapIndexed { idx, item ->
                 val obj = item.jsonObject
                 val chapterId = obj["id"]?.jsonPrimitive?.content ?: ""
                 val attr = obj["attributes"]?.jsonObject
@@ -153,7 +167,7 @@ class MangaDexSource(
                     url = "mangadex-chapter://$chapterId",
                     chapterNumber = chapterNum
                 )
-            }
+            }.normalizedMangaChapterOrder()
         } catch (e: Exception) {
             emptyList()
         }
@@ -252,16 +266,36 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
     override suspend fun fetchMangaChapters(mangaUrl: String): List<MangaChapter> {
         return try {
             val base = liveBase()
-            val html = httpClient.get(mangaUrl) {
+            val effectiveUrl = rewriteUrlOrigin(mangaUrl, base)
+            val html = httpClient.get(effectiveUrl) {
                 header("User-Agent", UA)
                 header("Referer", base)
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
+            val fullListPath = doc.select("[hx-get*=\"/chapters/\"], [hx-get*=\"chapter\"]")
+                .firstOrNull()
+                ?.attr("hx-get")
+                ?.ifBlank { null }
+                ?: Regex("""hx-get=["']([^"']*chapter[^"']*)["']""", RegexOption.IGNORE_CASE)
+                    .find(html)
+                    ?.groupValues
+                    ?.getOrNull(1)
+            val chaptersHtml = if (!fullListPath.isNullOrBlank()) {
+                httpClient.get(absoluteMangaUrl(base, fullListPath.replace("&amp;", "&"))) {
+                    header("User-Agent", UA)
+                    header("Referer", effectiveUrl)
+                    header("HX-Request", "true")
+                }.bodyAsText().takeIf { !it.isBlockedOrErrorPage() }.orEmpty()
+            } else {
+                ""
+            }
+            val chapterDoc = Ksoup.parse(if (chaptersHtml.isNotBlank()) "$html\n$chaptersHtml" else html)
+
             // WeebCentral chapter list: anchors whose href contains /chapters/
             // Fallback selectors catch common list/table patterns.
-            doc.select(
+            chapterDoc.select(
                 "a[href*=/chapters/], " +
                 ".chapter-list a[href], " +
                 "ul.chapters a[href], " +
@@ -269,25 +303,19 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
             )
                 .filter { it.attr("href").isNotBlank() }
                 .distinctBy { it.attr("href") }
-                .reversed()   // oldest first → numbered ascending
                 .mapIndexed { idx, el ->
                     val rawTitle = el.select("span, strong, .chapter-title, .title")
                         .firstOrNull()?.text()
                         ?.ifBlank { el.text().trim() }
                         ?: el.text().trim()
-                    val chapterNumber = Regex("""Chapter\s+(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
-                        .find(rawTitle)
-                        ?.groupValues
-                        ?.getOrNull(1)
-                        ?.toDoubleOrNull()
-                        ?.toInt()
-                        ?: (idx + 1)
+                    val href = absoluteMangaUrl(base, el.attr("href"))
+                    val chapterNumber = chapterSortNumber(rawTitle, href, fallbackIndex = idx).toInt()
                     MangaChapter(
                         title = rawTitle.decodeHtmlEntitiesLite().ifBlank { "Chapter ${idx + 1}" },
-                        url   = absoluteMangaUrl(base, el.attr("href")),
+                        url   = href,
                         chapterNumber = chapterNumber
                     )
-                }
+                }.normalizedMangaChapterOrder()
         } catch (e: Exception) {
             println("[WeebCentral] Chapter fetch failed: ${e.message}")
             emptyList()
@@ -422,14 +450,14 @@ class MangaFireScraper(private val httpClient: HttpClient) : MangaScraper {
             doc.select("ul.chapters li a, .chapters a, a[href*=/read/], a[href*=chapter]")
                 .filter { it.attr("href").isNotBlank() }
                 .distinctBy { it.attr("href") }
-                .reversed()
                 .mapIndexed { idx, el ->
-                MangaChapter(
-                    title = el.text().trim().ifBlank { "Chapter ${idx + 1}" },
-                    url = absoluteMangaUrl(base, el.attr("href")),
-                    chapterNumber = idx + 1
-                )
-            }
+                    val href = absoluteMangaUrl(base, el.attr("href"))
+                    MangaChapter(
+                        title = el.text().trim().ifBlank { "Chapter ${idx + 1}" },
+                        url = href,
+                        chapterNumber = chapterSortNumber(el.text(), href, fallbackIndex = idx).toInt()
+                    )
+                }.normalizedMangaChapterOrder()
         } catch (e: Exception) {
             emptyList()
         }
@@ -507,12 +535,14 @@ class WebtoonScraper(private val httpClient: HttpClient) : MangaScraper {
                 .filter { it.attr("href").contains("episode_no=") }
                 .distinctBy { it.attr("href") }
                 .mapIndexed { index, el ->
+                    val href = absoluteMangaUrl(baseUrl, el.attr("href"))
+                    val title = el.select(".subj, .tx, .title").text().ifBlank { el.text().ifBlank { "Episode ${index + 1}" } }
                     MangaChapter(
-                        title = el.select(".subj, .tx, .title").text().ifBlank { el.text().ifBlank { "Episode ${index + 1}" } },
-                        url = absoluteMangaUrl(baseUrl, el.attr("href")),
-                        chapterNumber = index + 1
+                        title = title,
+                        url = href,
+                        chapterNumber = chapterSortNumber(title, href, fallbackIndex = index).toInt()
                     )
-                }
+                }.normalizedMangaChapterOrder()
         } catch (e: Exception) {
             emptyList()
         }

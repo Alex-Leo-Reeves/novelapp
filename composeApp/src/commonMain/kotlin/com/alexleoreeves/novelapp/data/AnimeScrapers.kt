@@ -201,6 +201,10 @@ class AninekoScraper(private val client: HttpClient) {
     suspend fun fetchEpisodes(animeTitleQuery: String, maxEpisodes: Int = 24): List<AnimeEpisode> {
         return runCatching {
             val baseUrl = liveBaseUrl()
+            val directSeriesUrl = toAbsoluteAnimeUrl(baseUrl, "/watch/${animeTitleQuery.slugifyAnimeTitle()}")
+            fetchEpisodesFromSeriesUrl(baseUrl, directSeriesUrl, maxEpisodes)
+                .takeIf { it.isNotEmpty() }
+                ?.let { return@runCatching it }
 
             val searchHtml: String = client.get("$baseUrl/browser") {
                 parameter("keyword", animeTitleQuery)
@@ -209,7 +213,7 @@ class AninekoScraper(private val client: HttpClient) {
             if (searchHtml.isBlockedOrErrorPage()) return@runCatching emptyList()
 
             val searchDoc = Ksoup.parse(searchHtml)
-            val bestMatch = searchDoc.select("article.nv-anime-card a[href*=/watch/], a.nv-anime-thumb[href*=/watch/], h3.nv-anime-title a[href*=/watch/]")
+            val searchCandidates = searchDoc.select("article.nv-anime-card a[href*=/watch/], a.nv-anime-thumb[href*=/watch/], h3.nv-anime-title a[href*=/watch/]")
                 .mapNotNull { link ->
                     val href = link.attr("href")
                     val title = link.attr("title")
@@ -220,46 +224,59 @@ class AninekoScraper(private val client: HttpClient) {
                 }
                 .distinctBy { it.second }
                 .sortedWith(
-                    compareByDescending<Pair<String, String>> { it.first.equals(animeTitleQuery, ignoreCase = true) }
-                        .thenByDescending { it.first.contains(animeTitleQuery, ignoreCase = true) }
+                    compareByDescending<Pair<String, String>> { animeTitleMatchScore(animeTitleQuery, it.first) }
+                        .thenBy { it.first.length }
                 )
-                .firstOrNull()
-                ?: return@runCatching emptyList()
+                .map { toAbsoluteAnimeUrl(baseUrl, it.second) }
 
-            val seriesUrl = toAbsoluteAnimeUrl(baseUrl, bestMatch.second)
-            val seriesHtml: String = client.get(seriesUrl) {
-                BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
-            }.body()
-            if (seriesHtml.isBlockedOrErrorPage()) return@runCatching emptyList()
-
-            val seriesDoc = Ksoup.parse(seriesHtml)
-            seriesDoc.select("a.nv-info-episode-main[href*=/ep-], a.nv-episode-item[href*=/ep-], a[href*=/watch/][href*=/ep-]")
-                .mapNotNull { link ->
-                    val href = link.attr("href")
-                    val title = link.select("strong").firstOrNull()?.text()
-                        ?.ifBlank { link.text() }
-                        ?.decodeHtmlEntitiesLite()
-                        ?: link.text().decodeHtmlEntitiesLite()
-                    val episodeNumber = Regex("""(?:Episode\s*|/ep-)(\d+)""", RegexOption.IGNORE_CASE)
-                        .find("$title $href")
-                        ?.groupValues
-                        ?.getOrNull(1)
-                        ?.toIntOrNull()
-                        ?: return@mapNotNull null
-                    AnimeEpisode(
-                        episodeNumber = episodeNumber,
-                        title = title.ifBlank { "Episode $episodeNumber" },
-                        url = toAbsoluteAnimeUrl(baseUrl, href),
-                        thumbnail = ""
-                    )
+            for (seriesUrl in searchCandidates) {
+                val episodes = fetchEpisodesFromSeriesUrl(baseUrl, seriesUrl, maxEpisodes)
+                if (episodes.isNotEmpty()) {
+                    return@runCatching episodes
                 }
-                .distinctBy { it.url }
-                .sortedByDescending { it.episodeNumber }
-                .take(maxEpisodes)
+            }
+
+            emptyList()
         }.getOrElse { e ->
             println("[Anineko] Error fetching episodes for '$animeTitleQuery': ${e.message}")
             emptyList()
         }
+    }
+
+    private suspend fun fetchEpisodesFromSeriesUrl(
+        baseUrl: String,
+        seriesUrl: String,
+        maxEpisodes: Int
+    ): List<AnimeEpisode> {
+        val seriesHtml: String = client.get(seriesUrl) {
+            BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
+        }.body()
+        if (seriesHtml.isBlockedOrErrorPage()) return emptyList()
+
+        val seriesDoc = Ksoup.parse(seriesHtml)
+        return seriesDoc.select("a.nv-info-episode-main[href*=/ep-], a.nv-episode-item[href*=/ep-], a[href*=/watch/][href*=/ep-]")
+            .mapNotNull { link ->
+                val href = link.attr("href")
+                val title = link.select("strong").firstOrNull()?.text()
+                    ?.ifBlank { link.text() }
+                    ?.decodeHtmlEntitiesLite()
+                    ?: link.text().decodeHtmlEntitiesLite()
+                val episodeNumber = Regex("""(?:Episode\s*|/ep-)(\d+)""", RegexOption.IGNORE_CASE)
+                    .find("$title $href")
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toIntOrNull()
+                    ?: return@mapNotNull null
+                AnimeEpisode(
+                    episodeNumber = episodeNumber,
+                    title = title.ifBlank { "Episode $episodeNumber" },
+                    url = toAbsoluteAnimeUrl(baseUrl, href),
+                    thumbnail = ""
+                )
+            }
+            .distinctBy { it.url }
+            .sortedByDescending { it.episodeNumber }
+            .take(maxEpisodes)
     }
 
     fun fallbackEpisodes(animeTitleQuery: String, episodeCount: Int, maxEpisodes: Int = 24): List<AnimeEpisode> {
@@ -303,9 +320,26 @@ class AninekoScraper(private val client: HttpClient) {
                 .findAll(html)
                 .map { it.groupValues[1].decodeHtmlEntitiesLite() }
                 .filter { it.startsWith("http") }
-                .forEach { providerUrl ->
-                    val stream = extractProviderStream(providerUrl, effectiveUrl)
-                    if (stream != null) return@runCatching stream
+                .toList()
+                .also { providerUrls ->
+                    providerUrls.forEach { providerUrl ->
+                        val stream = extractProviderStream(providerUrl, effectiveUrl)
+                        if (stream != null) return@runCatching stream
+                    }
+                    providerUrls.firstOrNull()?.let { return@runCatching it }
+                }
+
+            Regex("""data-video='([^']+)'""")
+                .findAll(html)
+                .map { it.groupValues[1].decodeHtmlEntitiesLite() }
+                .filter { it.startsWith("http") }
+                .toList()
+                .also { providerUrls ->
+                    providerUrls.forEach { providerUrl ->
+                        val stream = extractProviderStream(providerUrl, effectiveUrl)
+                        if (stream != null) return@runCatching stream
+                    }
+                    providerUrls.firstOrNull()?.let { return@runCatching it }
                 }
 
             // Strategy 2: Find the embedded iframe server URL
@@ -426,6 +460,33 @@ private fun toAbsoluteAnimeUrl(baseUrl: String, href: String): String {
     if (href.startsWith("http://") || href.startsWith("https://")) return href
     return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
 }
+
+private fun animeTitleMatchScore(query: String, title: String): Int {
+    val q = query.normalizedAnimeTitle()
+    val t = title.normalizedAnimeTitle()
+    if (q.isBlank() || t.isBlank()) return 0
+
+    val penalty = when {
+        Regex("""\b(movie|special|ova|ona|recap|season\s+\d+|part\s+\d+)\b""").containsMatchIn(t) -> 500
+        else -> 0
+    }
+
+    return when {
+        t == q -> 10_000
+        t.removeSuffix(" tv") == q -> 9_500
+        t.startsWith("$q season 1") -> 9_000
+        t.startsWith("$q ") -> 8_000 - penalty
+        t.contains(q) -> 5_000 - penalty
+        else -> 0
+    }
+}
+
+private fun String.normalizedAnimeTitle(): String =
+    lowercase()
+        .replace("&", "and")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""\s+"""), " ")
 
 private fun String.slugifyAnimeTitle(): String =
     lowercase()

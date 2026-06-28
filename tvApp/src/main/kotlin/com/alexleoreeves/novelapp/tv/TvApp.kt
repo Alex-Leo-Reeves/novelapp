@@ -55,6 +55,10 @@ data class TvMediaItem(
     val format: String = "ANIME" // ANIME, MANGA, NOVEL
 )
 
+private val TvHomeGridMinWidth = 190.dp
+private val TvEpisodeGridMinWidth = 150.dp
+private val TvPagePadding = PaddingValues(start = 32.dp, top = 28.dp, end = 32.dp, bottom = 32.dp)
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  TvApp — Root Layout
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,18 +140,42 @@ fun TvApp() {
                 )
                 currentSection == TvSection.ANIME -> TvMediaHomeScreen(
                     format = "ANIME",
-                    title = "🌸 Currently Airing Anime",
+                    title = "Currently Airing Anime",
                     onMediaSelected = { selectedMedia = it }
                 )
                 currentSection == TvSection.MANGA -> TvMediaHomeScreen(
                     format = "MANGA",
-                    title = "📚 Trending Manga",
+                    title = "Trending Manga",
                     onMediaSelected = { selectedMedia = it }
                 )
                 currentSection == TvSection.NOVELS -> TvMediaHomeScreen(
                     format = "NOVEL",
-                    title = "📖 Popular Light Novels",
+                    title = "Popular Light Novels",
                     onMediaSelected = { selectedMedia = it }
+                )
+                currentSection == TvSection.K_DRAMA -> TvTmdbHomeScreen(
+                    category = "K_DRAMA",
+                    title = "Trending K-Dramas",
+                    onPlayStream = { url, title ->
+                        animeStreamUrl = url
+                        animeTitle = title
+                    }
+                )
+                currentSection == TvSection.CARTOON -> TvTmdbHomeScreen(
+                    category = "CARTOON",
+                    title = "Popular Cartoons",
+                    onPlayStream = { url, title ->
+                        animeStreamUrl = url
+                        animeTitle = title
+                    }
+                )
+                currentSection == TvSection.MOVIES -> TvTmdbHomeScreen(
+                    category = "MOVIES",
+                    title = "Trending Movies",
+                    onPlayStream = { url, title ->
+                        animeStreamUrl = url
+                        animeTitle = title
+                    }
                 )
                 currentSection == TvSection.DOWNLOADS -> TvDownloadsScreen(
                     onPlayEpisode = { url, title ->
@@ -267,11 +295,14 @@ fun TvSplashScreen(onFinished: () -> Unit) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  TV Sidebar (OLED styled sidebar)
 // ─────────────────────────────────────────────────────────────────────────────
-enum class TvSection(val label: String, val icon: ImageVector) {
-    ANIME("Anime", Icons.Default.PlayCircle),
-    MANGA("Manga", Icons.Default.Collections),
-    NOVELS("Novels", Icons.Default.AutoStories),
-    DOWNLOADS("Downloads", Icons.Default.Download)
+enum class TvSection(val label: String, val icon: ImageVector, val group: String) {
+    ANIME("Anime", Icons.Default.PlayCircle, "Watch"),
+    K_DRAMA("K-Drama", Icons.Default.LiveTv, "Watch"),
+    CARTOON("Cartoon", Icons.Default.Animation, "Watch"),
+    MOVIES("Movies", Icons.Default.Movie, "Watch"),
+    MANGA("Manga", Icons.Default.Collections, "Read"),
+    NOVELS("Novels", Icons.Default.AutoStories, "Read"),
+    DOWNLOADS("Downloads", Icons.Default.Download, "Library")
 }
 
 @Composable
@@ -285,7 +316,11 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
             .padding(vertical = 24.dp, horizontal = 16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
             // App branding
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -309,47 +344,56 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
                 )
             }
 
-            TvSection.values().forEach { section ->
-                val selected = currentSection == section
-                val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                val isFocused by interactionSource.collectIsFocusedAsState()
-                val scale by animateFloatAsState(if (isFocused) 1.06f else 1.0f)
+            TvSection.values().groupBy { it.group }.forEach { (group, sections) ->
+                Text(
+                    group.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(0.34f),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 6.dp)
+                )
+                sections.forEach { section ->
+                    val selected = currentSection == section
+                    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val isFocused by interactionSource.collectIsFocusedAsState()
+                    val scale by animateFloatAsState(if (isFocused) 1.06f else 1.0f)
 
-                Surface(
-                    onClick = { onSectionChange(section) },
-                    shape = RoundedCornerShape(10.dp),
-                    color = when {
-                        selected -> Color(0xFF8B5CF6).copy(0.25f)
-                        isFocused -> Color.White.copy(0.08f)
-                        else -> Color.Transparent
-                    },
-                    border = if (isFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
-                    interactionSource = interactionSource,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Surface(
+                        onClick = { onSectionChange(section) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = when {
+                            selected -> Color(0xFF8B5CF6).copy(0.25f)
+                            isFocused -> Color.White.copy(0.08f)
+                            else -> Color.Transparent
+                        },
+                        border = if (isFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
+                        interactionSource = interactionSource,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
                     ) {
-                        Icon(
-                            section.icon,
-                            null,
-                            tint = if (selected || isFocused) Color(0xFF8B5CF6) else Color.White.copy(0.5f),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            section.label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (selected || isFocused) Color.White else Color.White.copy(0.5f),
-                            fontWeight = if (selected || isFocused) FontWeight.Bold else FontWeight.Normal
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                section.icon,
+                                null,
+                                tint = if (selected || isFocused) Color(0xFF8B5CF6) else Color.White.copy(0.5f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                section.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (selected || isFocused) Color.White else Color.White.copy(0.5f),
+                                fontWeight = if (selected || isFocused) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
                     }
                 }
             }
@@ -400,7 +444,7 @@ fun TvMediaHomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .padding(start = 28.dp, top = 28.dp, end = 28.dp)
+            .padding(TvPagePadding)
     ) {
         Text(
             title,
@@ -416,10 +460,10 @@ fun TvMediaHomeScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
+                columns = GridCells.Adaptive(TvHomeGridMinWidth),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 24.dp)
+                contentPadding = PaddingValues(bottom = 32.dp)
             ) {
                 items(itemsList) { media ->
                     TvMediaCard(media = media, onClick = { onMediaSelected(media) })
@@ -437,7 +481,7 @@ suspend fun fetchTvMediaItems(client: HttpClient, format: String): List<TvMediaI
         
         val gqlQuery = """
             query {
-              Page(page: 1, perPage: 16) {
+              Page(page: 1, perPage: 24) {
                 media(type: $queryType, $formatQuery $isAiring sort: POPULARITY_DESC) {
                   id
                   title { english romaji }
@@ -484,8 +528,265 @@ suspend fun fetchTvMediaItems(client: HttpClient, format: String): List<TvMediaI
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  TV TMDB Home Screen (K-Drama, Cartoons, Movies using TMDB API)
+// ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun TvMediaCard(media: TvMediaItem, onClick: () -> Unit) {
+fun TvTmdbHomeScreen(
+    category: String, // "K_DRAMA", "CARTOON", or "MOVIES"
+    title: String,
+    onPlayStream: (streamUrl: String, title: String) -> Unit
+) {
+    val tmdbApiKey = "15d2ea6d0dc1d247f33e5405d4b507cc"
+    val tmdbBase = "https://api.themoviedb.org/3"
+    val imgBase = "https://image.tmdb.org/t/p/w500"
+
+    val client = remember { HttpClient(OkHttp) {
+        install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; isLenient = true }) }
+    } }
+    var items by remember { mutableStateOf<List<TvTmdbItem>>(emptyList()) }
+    var selectedItem by remember { mutableStateOf<TvTmdbItem?>(null) }
+    var episodesList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var isLoadingEps by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(category) {
+        isLoading = true
+        items = fetchTmdbItemsForCategory(client, tmdbBase, imgBase, tmdbApiKey, category)
+        isLoading = false
+    }
+
+    if (selectedItem != null) {
+        val item = selectedItem!!
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .padding(28.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val isFocused by interactionSource.collectIsFocusedAsState()
+                    Surface(
+                        onClick = { selectedItem = null; episodesList = emptyList() },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isFocused) Color(0xFF1C1C2E) else Color.Transparent,
+                        border = if (isFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
+                        interactionSource = interactionSource
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            Text("Back", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Spacer(Modifier.width(20.dp))
+                    Column {
+                        Text(item.title, style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Black)
+                        Text(item.genres, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF8B5CF6))
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.width(200.dp)) {
+                        Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().aspectRatio(0.72f)) {
+                            AsyncImage(model = item.coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text(item.overview.take(200) + if (item.overview.length > 200) "..." else "", color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        if (item.mediaType == "movie") {
+                            val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                            val isFocused by interactionSource.collectIsFocusedAsState()
+                            Surface(
+                                onClick = {
+                                    val url = "https://vidsrc.to/embed/movie/${item.tmdbId}"
+                                    onPlayStream(url, item.title)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isFocused) Color(0xFF8B5CF6) else Color(0xFF1C1C2E),
+                                border = if (isFocused) BorderStroke(3.dp, Color(0xFF8B5CF6)) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                interactionSource = interactionSource,
+                                modifier = Modifier.fillMaxWidth().height(60.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 20.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                                    Text("▶  Watch Movie Now", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            Text("Episodes", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+                            if (isLoadingEps) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = Color(0xFF8B5CF6))
+                                }
+                            } else {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Adaptive(TvEpisodeGridMinWidth),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(episodesList.size) { idx ->
+                                        val (epTitle, epUrl) = episodesList[idx]
+                                        val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                        val isFocused by interactionSource.collectIsFocusedAsState()
+                                        Button(
+                                            onClick = { onPlayStream(epUrl, "${item.title} - $epTitle") },
+                                            interactionSource = interactionSource,
+                                            colors = ButtonDefaults.buttonColors(containerColor = if (isFocused) Color(0xFF8B5CF6) else Color(0xFF14141E)),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(epTitle, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxSize().background(Color.Black).padding(TvPagePadding)) {
+            Text(title, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 20.dp))
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF8B5CF6), modifier = Modifier.size(48.dp))
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(TvHomeGridMinWidth),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(bottom = 32.dp)
+                ) {
+                    items(items.size) { idx ->
+                        val item = items[idx]
+                        val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        val isFocused by interactionSource.collectIsFocusedAsState()
+                        val scale by animateFloatAsState(if (isFocused) 1.08f else 1f)
+                        Card(
+                            onClick = {
+                                selectedItem = item
+                                if (item.mediaType == "tv") {
+                                    scope.launch {
+                                        isLoadingEps = true
+                                        episodesList = fetchTmdbTvEpisodesList(client, tmdbBase, tmdbApiKey, item.tmdbId)
+                                        isLoadingEps = false
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = if (isFocused) Color(0xFF14141E) else Color(0xFF0C0C12)),
+                            border = if (isFocused) BorderStroke(3.dp, Color(0xFF8B5CF6)) else BorderStroke(1.dp, Color.White.copy(0.05f)),
+                            interactionSource = interactionSource,
+                            modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }
+                        ) {
+                            Column {
+                                AsyncImage(
+                                    model = item.coverUrl,
+                                    contentDescription = item.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                                )
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(item.title, style = MaterialTheme.typography.bodySmall, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(item.genres.take(30), style = MaterialTheme.typography.labelSmall, color = Color(0xFF8B5CF6), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class TvTmdbItem(
+    val tmdbId: String,
+    val title: String,
+    val coverUrl: String,
+    val overview: String,
+    val genres: String,
+    val mediaType: String // "movie" or "tv"
+)
+
+suspend fun fetchTmdbItemsForCategory(
+    client: HttpClient,
+    base: String,
+    imgBase: String,
+    apiKey: String,
+    category: String
+): List<TvTmdbItem> = try {
+    val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    val params = when (category) {
+        "K_DRAMA" -> "discover/tv?with_origin_country=KR&with_original_language=ko&sort_by=popularity.desc"
+        "CARTOON" -> "discover/tv?with_genres=16&without_original_language=ja&sort_by=popularity.desc"
+        "MOVIES" -> "discover/movie?sort_by=popularity.desc"
+        else -> "trending/movie/week"
+    }
+    val response: String = client.get("$base/$params&api_key=$apiKey&include_adult=false&page=1").body()
+    val root = json.parseToJsonElement(response).jsonObject
+    val results = root["results"]?.jsonArray ?: return emptyList()
+    val mediaType = if (category == "MOVIES") "movie" else "tv"
+    results.mapNotNull { el ->
+        val obj = el.jsonObject
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        val poster = obj["poster_path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        val overview = obj["overview"]?.jsonPrimitive?.contentOrNull ?: ""
+        TvTmdbItem(
+            tmdbId = id,
+            title = title,
+            coverUrl = "$imgBase$poster",
+            overview = overview,
+            genres = if (mediaType == "movie") "Movie" else "TV Series",
+            mediaType = mediaType
+        )
+    }
+} catch (e: Exception) { emptyList() }
+
+suspend fun fetchTmdbTvEpisodesList(
+    client: HttpClient,
+    base: String,
+    apiKey: String,
+    tvId: String
+): List<Pair<String, String>> = try {
+    val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    val response: String = client.get("$base/tv/$tvId?api_key=$apiKey").body()
+    val root = json.parseToJsonElement(response).jsonObject
+    val seasons = root["seasons"]?.jsonArray ?: return emptyList()
+    val result = mutableListOf<Pair<String, String>>()
+    seasons.forEach { s ->
+        val sObj = s.jsonObject
+        val seasonNum = sObj["season_number"]?.jsonPrimitive?.intOrNull ?: 0
+        val epCount = sObj["episode_count"]?.jsonPrimitive?.intOrNull ?: 0
+        if (seasonNum > 0) {
+            for (ep in 1..epCount) {
+                result.add(
+                    "S${seasonNum}E${ep}" to "https://vidsrc.to/embed/tv/$tvId/$seasonNum/$ep"
+                )
+            }
+        }
+    }
+    result
+} catch (e: Exception) { emptyList() }
+
+@Composable
+fun TvMediaCard(media: TvMediaItem, onClick: () -> Unit) {
+
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (isFocused) 1.08f else 1.0f)
@@ -686,7 +987,7 @@ fun TvDetailScreen(
                                     Text("No streamable episodes found on GogoAnime.", color = Color.White.copy(0.4f))
                                 } else {
                                     LazyVerticalGrid(
-                                        columns = GridCells.Fixed(3),
+                                        columns = GridCells.Adaptive(TvEpisodeGridMinWidth),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
@@ -721,7 +1022,7 @@ fun TvDetailScreen(
                             }
                             "MANGA" -> {
                                 LazyVerticalGrid(
-                                    columns = GridCells.Fixed(3),
+                                    columns = GridCells.Adaptive(TvEpisodeGridMinWidth),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
@@ -754,7 +1055,7 @@ fun TvDetailScreen(
                             }
                             "NOVEL" -> {
                                 LazyVerticalGrid(
-                                    columns = GridCells.Fixed(3),
+                                    columns = GridCells.Adaptive(TvEpisodeGridMinWidth),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
@@ -978,7 +1279,7 @@ fun TvDownloadsScreen(
         } else {
             // Render actual scanned directories
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Adaptive(TvEpisodeGridMinWidth),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1013,13 +1314,19 @@ fun TvDownloadsScreen(
 @Composable
 fun TvPlayerScreen(streamUrl: String, title: String, onBack: () -> Unit) {
     val context = LocalContext.current
+    val isWebEmbed = streamUrl.contains("vidsrc") || streamUrl.contains("embed") || streamUrl.contains("kisskh") || streamUrl.contains("dramacool") || streamUrl.contains("kimcartoon") || streamUrl.contains("flixhq")
+
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(streamUrl))
-            prepare(); playWhenReady = true
+        if (!isWebEmbed) {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(streamUrl))
+                prepare(); playWhenReady = true
+            }
+        } else {
+            null
         }
     }
-    DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
+    DisposableEffect(Unit) { onDispose { exoPlayer?.release() } }
 
     var showControls by remember { mutableStateOf(true) }
     LaunchedEffect(showControls) { if (showControls) { kotlinx.coroutines.delay(4500); showControls = false } }
@@ -1032,16 +1339,47 @@ fun TvPlayerScreen(streamUrl: String, title: String, onBack: () -> Unit) {
             .background(Color.Black)
             .clickable { showControls = !showControls }
     ) {
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = true // default TV controls
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+        if (isWebEmbed) {
+            AndroidView(
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            setSupportMultipleWindows(false)
+                        }
+                        webViewClient = object : android.webkit.WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): Boolean {
+                                val url = request?.url?.toString() ?: ""
+                                if (!url.contains("vidsrc") && !url.contains("kisskh") && !url.contains("dramacool") && !url.contains("kimcartoon") && !url.contains("flixhq") && !url.contains("themoviedb") && !url.contains("tmdb")) {
+                                    return true
+                                }
+                                return false
+                            }
+                        }
+                        loadUrl(streamUrl)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = true // default TV controls
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         AnimatedVisibility(showControls, enter = fadeIn(), exit = fadeOut()) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.45f))) {
                 IconButton(
