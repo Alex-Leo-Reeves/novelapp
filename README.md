@@ -17,7 +17,7 @@ This repository is an early application build. Android is the most complete targ
 - API-backed sign-in/create-account gate with saved auth session
 - You tab with account details, contact links, and update checking
 - Theme switching for reading modes
-- Gemini-powered narration controller
+- On-device Kokoro narration controller with curated voices
 - Android OCR support for manga text recognition through ML Kit
 - Shared KMP business/UI code with Android and iOS platform actuals
 
@@ -72,7 +72,6 @@ Example:
 ```properties
 sdk.dir=/path/to/Android/Sdk
 
-GEMINI_API_KEY=your_gemini_api_key
 RAPID_API_KEY=your_rapidapi_key
 RAPID_API_HOST=webnovel.p.rapidapi.com
 
@@ -96,6 +95,12 @@ cd novelapp
 ```
 
 Create `local.properties` with your SDK path and API credentials.
+
+Restore bundled Kokoro narration assets if they are missing:
+
+```bash
+scripts/download-kokoro-assets.sh
+```
 
 Build a debug APK:
 
@@ -307,7 +312,6 @@ Optional secrets:
 ```text
 IOS_EXPORT_METHOD=ad-hoc
 IOS_KEYCHAIN_PASSWORD
-GEMINI_API_KEY
 RAPID_API_KEY
 RAPID_API_HOST
 MANGADEX_CLIENT_ID

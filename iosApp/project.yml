@@ -18,6 +18,7 @@ targets:
       - path: iosApp
     resources:
       - path: Assets.xcassets
+      - path: ../kokoro-assets/kokoro
     info:
       path: Info.plist
     preBuildScripts:
@@ -34,7 +35,6 @@ targets:
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
-        GEMINI_API_KEY: mock_gemini_api_key
         INFOPLIST_FILE: Info.plist
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"

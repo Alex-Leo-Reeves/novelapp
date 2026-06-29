@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.alexleoreeves.novelapp.audio.GeminiTtsController
+import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.EmptyUserSessionStore
 import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
@@ -32,6 +32,7 @@ import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
@@ -46,17 +47,22 @@ fun App(
 ) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
+    var discoverContentTab by remember { mutableStateOf(ContentTab.NOVELS) }
+    var discoverSearchQuery by remember { mutableStateOf("") }
     var showSplash by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
     var account by remember { mutableStateOf<SavedUserAccount?>(null) }
     var isAuthChecked by remember { mutableStateOf(false) }
+    var isGuestSession by remember { mutableStateOf(false) }
     var isAuthSubmitting by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     // Shown as an overlay when a guest tries to use a gated action
     var showAuthSheet by remember { mutableStateOf(false) }
     var startupUpdateManifest by remember { mutableStateOf<AppUpdateManifest?>(null) }
     var isStartupUpdateDismissed by remember { mutableStateOf(false) }
+    var cloudSyncPulse by remember { mutableStateOf(0) }
+    var hasHydratedCloudState by remember { mutableStateOf(false) }
     val authApi = remember { AuthApi() }
 
     // App state
@@ -77,15 +83,19 @@ fun App(
 
     val repository = remember {
         NovelSearchRepository(
-            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )
     }
 
     val ttsController = remember {
-        GeminiTtsController(BuildKonfig.GEMINI_API_KEY)
+        KokoroNarrationController()
     }
+    val narrationSettings = ttsController.settings.collectAsState()
+    val isNarrationPlaying = ttsController.isPlaying.collectAsState()
+    val keepNarrationAlive by rememberUpdatedState(
+        narrationSettings.value.backgroundPlaybackEnabled && isNarrationPlaying.value
+    )
     val updateClient = remember {
         platformHttpClient {
             install(ContentNegotiation) {
@@ -95,12 +105,53 @@ fun App(
     }
 
     DisposableEffect(Unit) {
-        onDispose { updateClient.close() }
+        onDispose {
+            if (!keepNarrationAlive) {
+                ttsController.close()
+            }
+            updateClient.close()
+        }
+    }
+
+    fun mergeFavorites(remote: List<FavoriteNovel>) {
+        val merged = (favorites + remote)
+            .filter { it.id.isNotBlank() }
+            .groupBy { it.id }
+            .values
+            .mapNotNull { group -> group.maxByOrNull { it.addedAt } }
+            .sortedByDescending { it.addedAt }
+        favorites.clear()
+        favorites.addAll(merged)
+    }
+
+    suspend fun hydrateCloudState(token: String) {
+        runCatching { authApi.getUserState(token) }
+            .onSuccess { state ->
+                downloadRepo.mergeUserState(state)
+                mergeFavorites(state.favorites)
+            }
+        hasHydratedCloudState = true
+    }
+
+    fun queueCloudSync() {
+        if (account != null && hasHydratedCloudState) {
+            cloudSyncPulse += 1
+        }
+    }
+
+    LaunchedEffect(account?.authToken, cloudSyncPulse) {
+        val token = account?.authToken ?: return@LaunchedEffect
+        if (!hasHydratedCloudState || cloudSyncPulse == 0) return@LaunchedEffect
+        delay(1_200)
+        runCatching {
+            authApi.putUserState(token, downloadRepo.exportUserState(favorites.toList()))
+        }
     }
 
     LaunchedEffect(Unit) {
         val savedAccount = userSessionStore.loadAccount()
         if (savedAccount == null) {
+            isGuestSession = false
             isAuthChecked = true
             return@LaunchedEffect
         }
@@ -109,10 +160,15 @@ fun App(
             .onSuccess { verifiedAccount ->
                 userSessionStore.saveAccount(verifiedAccount)
                 account = verifiedAccount
+                isGuestSession = false
+                hydrateCloudState(verifiedAccount.authToken)
+                queueCloudSync()
             }
             .onFailure {
                 userSessionStore.clearAccount()
                 account = null
+                isGuestSession = false
+                hasHydratedCloudState = false
             }
         isAuthChecked = true
     }
@@ -144,12 +200,17 @@ fun App(
             return@NovelAppTheme
         }
 
-        if (account == null) {
+        if (account == null && !isGuestSession) {
             AuthScreen(
                 currentTheme = appTheme.value,
                 isSubmitting = isAuthSubmitting,
                 errorMessage = authError,
                 onClearError = { authError = null },
+                onDismiss = {
+                    authError = null
+                    isGuestSession = true
+                    currentTab.value = BottomTab.DISCOVER
+                },
                 onSignIn = { email, password ->
                     scope.launch {
                         isAuthSubmitting = true
@@ -158,7 +219,10 @@ fun App(
                             .onSuccess { signedIn ->
                                 userSessionStore.saveAccount(signedIn)
                                 account = signedIn
+                                isGuestSession = false
                                 showAuthSheet = false
+                                hydrateCloudState(signedIn.authToken)
+                                queueCloudSync()
                             }
                             .onFailure { authError = it.message ?: "Sign in failed." }
                         isAuthSubmitting = false
@@ -172,7 +236,10 @@ fun App(
                             .onSuccess { created ->
                                 userSessionStore.saveAccount(created)
                                 account = created
+                                isGuestSession = false
                                 showAuthSheet = false
+                                hydrateCloudState(created.authToken)
+                                queueCloudSync()
                             }
                             .onFailure { authError = it.message ?: "Account creation failed." }
                         isAuthSubmitting = false
@@ -249,6 +316,7 @@ fun App(
                                     positionMs = positionMs
                                 )
                             )
+                            queueCloudSync()
                         },
                         onBack = { animeStreamUrl.value = null }
                     )
@@ -280,6 +348,7 @@ fun App(
                             chapterTitle = selectedChapterTitle.value,
                             sourceName = selectedSourceName.value,
                             currentTheme = appTheme.value,
+                            ttsController = ttsController,
                             initialPageIndex = downloadRepo.getReadProgress(selectedChapterUrl.value!!)?.positionIndex ?: 0,
                             onProgress = { pageIndex ->
                                 selectedNovel.value?.let { item ->
@@ -295,6 +364,7 @@ fun App(
                                             positionIndex = pageIndex
                                         )
                                     )
+                                    queueCloudSync()
                                 }
                             },
                             onBack = { selectedChapterUrl.value = null }
@@ -306,6 +376,7 @@ fun App(
                             chapterTitle = selectedChapterTitle.value,
                             sourceName = selectedSourceName.value,
                             currentTheme = appTheme.value,
+                            ttsController = ttsController,
                             onThemeChange = { appTheme.value = it },
                             initialParagraphIndex = downloadRepo.getReadProgress(selectedChapterUrl.value!!)?.positionIndex ?: 0,
                             onProgress = { paragraphIndex ->
@@ -322,6 +393,7 @@ fun App(
                                             positionIndex = paragraphIndex
                                         )
                                     )
+                                    queueCloudSync()
                                 }
                             },
                             onBack = { selectedChapterUrl.value = null }
@@ -364,6 +436,7 @@ fun App(
                                     addedAt = currentTimeMillis()
                                 )
                             )
+                            queueCloudSync()
                         },
                         onChapterSelected = { chapter ->
                             selectedNovelTitle.value = selectedNovel.value!!.title
@@ -383,6 +456,10 @@ fun App(
                             when (currentTab.value) {
                                 BottomTab.DISCOVER -> DiscoverHomeScreen(
                                     currentTheme = appTheme.value,
+                                    contentTab = discoverContentTab,
+                                    initialSearchQuery = discoverSearchQuery,
+                                    onContentTabChanged = { discoverContentTab = it },
+                                    onSearchQueryChanged = { discoverSearchQuery = it },
                                     onNovelSelected = { item ->
                                         if (item.isAnime && item.animeResult != null) {
                                             selectedAnime.value = item.animeResult
@@ -413,6 +490,7 @@ fun App(
                                 )
                                 BottomTab.READ -> UniversalReadScreen(
                                     currentTheme = appTheme.value,
+                                    ttsController = ttsController,
                                     requireAuth = requireAuth
                                 )
                                 BottomTab.YOU -> {
@@ -468,6 +546,8 @@ fun App(
                                                     }
                                                     userSessionStore.clearAccount()
                                                     account = null
+                                                    isGuestSession = true
+                                                    hasHydratedCloudState = false
                                                     currentTab.value = BottomTab.DISCOVER
                                                 }
                                             }
@@ -531,7 +611,11 @@ fun App(
                 isSubmitting = isAuthSubmitting,
                 errorMessage = authError,
                 onClearError = { authError = null },
-                onDismiss = { showAuthSheet = false },
+                onDismiss = {
+                    authError = null
+                    isGuestSession = true
+                    showAuthSheet = false
+                },
                 onSignIn = { email, password ->
                     scope.launch {
                         isAuthSubmitting = true
@@ -540,7 +624,10 @@ fun App(
                             .onSuccess { signedIn ->
                                 userSessionStore.saveAccount(signedIn)
                                 account = signedIn
+                                isGuestSession = false
                                 showAuthSheet = false
+                                hydrateCloudState(signedIn.authToken)
+                                queueCloudSync()
                             }
                             .onFailure { authError = it.message ?: "Sign in failed." }
                         isAuthSubmitting = false
@@ -554,7 +641,10 @@ fun App(
                             .onSuccess { created ->
                                 userSessionStore.saveAccount(created)
                                 account = created
+                                isGuestSession = false
                                 showAuthSheet = false
+                                hydrateCloudState(created.authToken)
+                                queueCloudSync()
                             }
                             .onFailure { authError = it.message ?: "Account creation failed." }
                         isAuthSubmitting = false

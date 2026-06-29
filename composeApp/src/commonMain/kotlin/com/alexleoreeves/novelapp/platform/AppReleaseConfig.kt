@@ -1,11 +1,12 @@
 package com.alexleoreeves.novelapp.platform
 
 object AppReleaseConfig {
-    const val CURRENT_VERSION_CODE = 7
-    const val CURRENT_VERSION_NAME = "1.6"
+    const val CURRENT_VERSION_CODE = 8
+    const val CURRENT_VERSION_NAME = "1.7"
     const val API_BASE_URL = "https://novelapp1.onrender.com/api"
     const val UPDATE_MANIFEST_URL = "https://novelapp1.onrender.com/app-version.json"
     const val DOWNLOAD_URL = "https://novelapp1.onrender.com/downloads/novelapp-android.apk"
+    const val KOKORO_MANIFEST_URL = "https://novelapp1.onrender.com/assets/kokoro/manifest.json"
 }
 
 object DeveloperContact {

@@ -43,7 +43,6 @@ fun NovelDetailScreen(
 
     val repository = remember {
         NovelSearchRepository(
-            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )

@@ -676,7 +676,7 @@ private fun DownloadedNovelChaptersScreen(
             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Default.Wifi, null, tint = currentTheme.accentColor(), modifier = Modifier.size(18.dp))
-                Text("AI voice narration requires an internet connection",
+                Text("On-device voice narration works after the Kokoro model is installed",
                     style = MaterialTheme.typography.labelMedium, color = currentTheme.accentColor())
             }
         }

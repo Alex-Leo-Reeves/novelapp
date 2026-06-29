@@ -1,9 +1,13 @@
 package com.alexleoreeves.novelapp.platform
 
 data class SavedUserAccount(
+    val id: String = "",
     val username: String,
     val email: String,
-    val authToken: String
+    val authToken: String,
+    val plan: String = "free",
+    val billingStatus: String = "none",
+    val createdAt: String = ""
 )
 
 interface UserSessionStore {

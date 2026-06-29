@@ -63,6 +63,32 @@ class AuthApi(
         }
     }
 
+    suspend fun getUserState(token: String): UserSyncState {
+        val response = client.get("$baseUrl/user/state") {
+            accept(ContentType.Application.Json)
+            bearerAuth(token)
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            throw IllegalStateException(rawBody.decodeAuthError() ?: "Could not load account history.")
+        }
+        return authJson.decodeFromString<UserStateResponse>(rawBody).state
+    }
+
+    suspend fun putUserState(token: String, state: UserSyncState): UserSyncState {
+        val response = client.put("$baseUrl/user/state") {
+            accept(ContentType.Application.Json)
+            contentType(ContentType.Application.Json)
+            bearerAuth(token)
+            setBody(UserStateRequest(state = state))
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            throw IllegalStateException(rawBody.decodeAuthError() ?: "Could not sync account history.")
+        }
+        return authJson.decodeFromString<UserStateResponse>(rawBody).state
+    }
+
     private suspend fun HttpResponse.toSavedUserAccount(existingToken: String? = null): SavedUserAccount {
         val rawBody = bodyAsText()
 
@@ -84,9 +110,13 @@ class AuthApi(
         }
 
         return SavedUserAccount(
+            id = payload.user.id,
             username = payload.user.username,
             email = payload.user.email,
-            authToken = token
+            authToken = token,
+            plan = payload.user.plan,
+            billingStatus = payload.user.billingStatus,
+            createdAt = payload.user.createdAt
         )
     }
 
@@ -120,11 +150,26 @@ private data class AuthResponse(
 
 @Serializable
 private data class AuthUserResponse(
+    val id: String = "",
     val username: String,
-    val email: String
+    val email: String,
+    val plan: String = "free",
+    val billingStatus: String = "none",
+    val createdAt: String = ""
 )
 
 @Serializable
 private data class AuthErrorResponse(
     val error: String
+)
+
+@Serializable
+private data class UserStateRequest(
+    val state: UserSyncState
+)
+
+@Serializable
+private data class UserStateResponse(
+    val user: AuthUserResponse,
+    val state: UserSyncState
 )

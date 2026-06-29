@@ -4,7 +4,6 @@ private fun envOrDefault(name: String, defaultValue: String): String =
     System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultValue
 
 actual object BuildKonfig {
-    actual val GEMINI_API_KEY: String = envOrDefault("GEMINI_API_KEY", "mock_gemini_api_key")
     actual val RAPID_API_KEY: String = envOrDefault("RAPID_API_KEY", "mock_rapid_api_key")
     actual val RAPID_API_HOST: String = envOrDefault("RAPID_API_HOST", "webnovel.p.rapidapi.com")
     actual val MANGADEX_CLIENT_ID: String = envOrDefault("MANGADEX_CLIENT_ID", "mock_client_id")

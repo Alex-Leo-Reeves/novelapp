@@ -19,6 +19,7 @@ jsoup = "1.18.3"
 ksoup = "0.2.1"
 jspecify = "1.0.0"
 pdfbox = "3.0.3"
+onnxruntime = "1.25.1"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
@@ -43,6 +44,8 @@ coil-network-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.re
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
+onnxruntime = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

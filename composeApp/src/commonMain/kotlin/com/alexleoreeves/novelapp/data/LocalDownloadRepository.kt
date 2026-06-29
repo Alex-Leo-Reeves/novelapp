@@ -126,6 +126,36 @@ class LocalDownloadRepository {
     fun getWatchProgress(streamUrl: String): WatchHistoryItem? =
         loadIndex().watchHistory.firstOrNull { it.streamUrl == streamUrl }
 
+    fun exportUserState(favorites: List<FavoriteNovel>): UserSyncState {
+        val idx = loadIndex()
+        return UserSyncState(
+            favorites = favorites.sortedByDescending { it.addedAt }.take(MAX_FAVORITES),
+            readHistory = idx.readHistory.sortedByDescending { it.updatedAt }.take(MAX_HISTORY_ITEMS),
+            watchHistory = idx.watchHistory.sortedByDescending { it.updatedAt }.take(MAX_HISTORY_ITEMS),
+            updatedAt = currentTimeMillis()
+        )
+    }
+
+    fun mergeUserState(state: UserSyncState) {
+        val idx = loadIndex()
+        saveIndex(
+            idx.copy(
+                readHistory = mergeByLatest(
+                    local = idx.readHistory,
+                    remote = state.readHistory,
+                    key = { it.chapterUrl },
+                    updatedAt = { it.updatedAt }
+                ).take(MAX_HISTORY_ITEMS),
+                watchHistory = mergeByLatest(
+                    local = idx.watchHistory,
+                    remote = state.watchHistory,
+                    key = { it.streamUrl },
+                    updatedAt = { it.updatedAt }
+                ).take(MAX_HISTORY_ITEMS)
+            )
+        )
+    }
+
     fun recordReadProgress(item: ReadHistoryItem) {
         val idx = loadIndex()
         val updated = item.copy(
@@ -156,5 +186,20 @@ class LocalDownloadRepository {
 
     private companion object {
         const val MAX_HISTORY_ITEMS = 40
+        const val MAX_FAVORITES = 250
     }
+}
+
+private fun <T> mergeByLatest(
+    local: List<T>,
+    remote: List<T>,
+    key: (T) -> String,
+    updatedAt: (T) -> Long
+): List<T> {
+    return (local + remote)
+        .filter { key(it).isNotBlank() }
+        .groupBy(key)
+        .values
+        .mapNotNull { group -> group.maxByOrNull(updatedAt) }
+        .sortedByDescending(updatedAt)
 }

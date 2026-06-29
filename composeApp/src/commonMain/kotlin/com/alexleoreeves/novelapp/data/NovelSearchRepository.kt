@@ -8,6 +8,8 @@ import io.ktor.client.request.*
 import io.ktor.serialization.kotlinx.json.*
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 
 /**
@@ -16,10 +18,12 @@ import kotlinx.serialization.json.Json
  * Individual source failures are isolated and never crash the whole search.
  */
 class NovelSearchRepository(
-    geminiApiKey: String,
     rapidApiKey: String,
     rapidApiHost: String
 ) {
+    private val sourceSemaphore = Semaphore(3)
+    private val feedCache = mutableMapOf<String, List<UnifiedSearchResult>>()
+
     val httpClient = platformHttpClient {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
@@ -49,6 +53,7 @@ class NovelSearchRepository(
         LightNovelPubSource(httpClient),
         BoxNovelSource(httpClient),
         WuxiaWorldSource(httpClient),
+        ReadNovelFullSource(httpClient),
         RoyalRoadSource(httpClient)
     )
 
@@ -122,7 +127,7 @@ class NovelSearchRepository(
         }
 
         val allNovels = (novelTasks.awaitAll().flatten() + knownNovelFallbacks(query))
-            .rankedNovelResults(query)
+            .balancedNovelResults(query)
         val allManga = mangaTasks.awaitAll().flatten()
         val allAnime = animeTask.await()
 
@@ -137,7 +142,9 @@ class NovelSearchRepository(
         val sourceResults = sources.map { source ->
             async {
                 try {
-                    val results = source.search(query)
+                    val results = sourceSemaphore.withPermit {
+                        withTimeoutOrNull(8_000) { source.search(query) }.orEmpty()
+                    }
                     println("[Novel Search] ${source.sourceName}: ${results.size} result(s) for \"$query\"")
                     results
                 }
@@ -148,16 +155,21 @@ class NovelSearchRepository(
             }
         }.awaitAll().flatten()
 
-        (sourceResults + knownNovelFallbacks(query))
+        sourceResults
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
-            .rankedNovelResults(query)
+            .balancedNovelResults(query)
+            .take(72)
     }
 
     suspend fun searchManga(query: String): List<UnifiedSearchResult> = coroutineScope {
         mangaSources.map { source ->
             async {
-                try { source.searchManga(query) }
+                try {
+                    sourceSemaphore.withPermit {
+                        withTimeoutOrNull(8_000) { source.searchManga(query) }.orEmpty()
+                    }
+                }
                 catch (e: Exception) {
                     println("[Manga Search] ${source.sourceName} failed silently: ${e.message}")
                     emptyList()
@@ -167,6 +179,7 @@ class NovelSearchRepository(
             .flatten()
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+            .take(72)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -175,7 +188,11 @@ class NovelSearchRepository(
     suspend fun fetchPopularAll(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
         val novelTasks = sources.map { source ->
             async {
-                try { source.fetchPopular(page) }
+                try {
+                    sourceSemaphore.withPermit {
+                        withTimeoutOrNull(8_000) { source.fetchPopular(page) }.orEmpty()
+                    }
+                }
                 catch (e: Exception) { emptyList() }
             }
         }
@@ -206,7 +223,7 @@ class NovelSearchRepository(
             } catch (e: Exception) { emptyList() }
         }
 
-        val novels = (novelTasks.awaitAll().flatten() + knownNovelFallbacks(""))
+        val novels = (novelTasks.awaitAll().flatten() + curatedPopularNovelSeeds())
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
             .rankedNovelResults("")
@@ -216,6 +233,50 @@ class NovelSearchRepository(
         (novels + mangas + animes)
             .distinctBy { it.title.lowercase().trim() }
             .filter { it.title.isNotEmpty() }
+    }
+
+    suspend fun fetchPopularNovels(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
+        cachedFeed("novels:$page") {
+            val novelTasks = sources.map { source ->
+                async {
+                    try {
+                        sourceSemaphore.withPermit {
+                            withTimeoutOrNull(8_000) { source.fetchPopular(page) }.orEmpty()
+                        }
+                    } catch (e: Exception) {
+                        println("[Novel Feed] ${source.sourceName} failed: ${e.message}")
+                        emptyList()
+                    }
+                }
+            }
+            (novelTasks.awaitAll().flatten() + curatedPopularNovelSeeds())
+                .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+                .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+                .rankedNovelResults("")
+                .take(48)
+        }
+    }
+
+    suspend fun fetchPopularManga(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
+        cachedFeed("manga:$page") {
+            val seed = listOf("solo", "one", "kingdom", "hero").getOrElse((page - 1).mod(4)) { "one" }
+            mangaSources.map { source ->
+                async {
+                    try {
+                        sourceSemaphore.withPermit {
+                            withTimeoutOrNull(8_000) { source.searchManga(seed) }.orEmpty()
+                        }
+                    } catch (e: Exception) {
+                        println("[Manga Feed] ${source.sourceName} failed: ${e.message}")
+                        emptyList()
+                    }
+                }
+            }.awaitAll()
+                .flatten()
+                .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+                .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+                .take(48)
+        }
     }
 
     /** Fetch currently airing anime for the Anime tab home feed */
@@ -242,6 +303,19 @@ class NovelSearchRepository(
     suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
         tmdbSource.searchVideo(category, query, page)
 
+    private suspend fun cachedFeed(
+        key: String,
+        loader: suspend () -> List<UnifiedSearchResult>
+    ): List<UnifiedSearchResult> {
+        feedCache[key]?.let { return it }
+        return loader().also { loaded ->
+            feedCache[key] = loaded
+            if (feedCache.size > 24) {
+                feedCache.keys.firstOrNull()?.let { feedCache.remove(it) }
+            }
+        }
+    }
+
     /**
      * Fetch episode list for a given anime title.
      * Tries Anineko first, falls back to AnimePahe.
@@ -251,6 +325,17 @@ class NovelSearchRepository(
         episodeCount: Int = 0,
         alternateQueries: List<String> = emptyList()
     ): List<AnimeEpisode> {
+        val normalizedAnimeTitle = animeTitleQuery.normalizedAnimeSearchTitle()
+        val knownSlug = knownAnimeSlugOverrides[normalizedAnimeTitle]
+            ?: knownAnimeSlugOverrides.entries.firstOrNull { (k, _) ->
+                normalizedAnimeTitle.contains(k) || k.contains(normalizedAnimeTitle)
+            }?.value
+
+        if (knownSlug != null) {
+            val episodes = aninekoScraper.fetchEpisodesBySlug(knownSlug, episodeCount)
+            if (episodes.isNotEmpty()) return episodes
+        }
+
         val queries = (listOf(animeTitleQuery) + alternateQueries)
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -268,21 +353,33 @@ class NovelSearchRepository(
             if (animePaheEpisodes.isNotEmpty()) return animePaheEpisodes
         }
 
-        return aninekoScraper.fallbackEpisodes(queries.firstOrNull().orEmpty(), episodeCount)
+        val effectiveEpCount = if (episodeCount > 0) episodeCount else 24
+        val baseTitle = queries.firstOrNull().orEmpty().ifBlank { animeTitleQuery }
+        val slugVariants = listOf(
+            baseTitle,
+            baseTitle.removeAnimeSeasonSuffix(),
+            "${baseTitle} tv",
+            "${baseTitle} dub"
+        ).distinct()
+        for (variant in slugVariants) {
+            val fb = aninekoScraper.fallbackEpisodes(variant, effectiveEpCount)
+            if (fb.isNotEmpty()) return fb
+        }
+
+        return aninekoScraper.fallbackEpisodes(baseTitle, effectiveEpCount)
     }
 
-    /**
-     * Extract a streaming .m3u8 URL for a specific episode page.
-     * Tries Anineko first, falls back to AnimePahe.
-     */
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
-        if (episodePageUrl.contains("animepahe", ignoreCase = true)) {
-            return animePaheScraper.extractStreamUrl(episodePageUrl)
+        val extracted = if (episodePageUrl.contains("animepahe", ignoreCase = true)) {
+            animePaheScraper.extractStreamUrl(episodePageUrl)
                 ?: aninekoScraper.extractStreamUrl(episodePageUrl)
+        } else {
+            aninekoScraper.extractStreamUrl(episodePageUrl)
+                ?: animePaheScraper.extractStreamUrl(episodePageUrl)
         }
-        return aninekoScraper.extractStreamUrl(episodePageUrl)
-            ?: animePaheScraper.extractStreamUrl(episodePageUrl)
+        return extracted ?: episodePageUrl
     }
+
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Novel / Manga helpers (unchanged from before)
@@ -320,12 +417,56 @@ private data class KnownNovelEntry(
 )
 
 private val knownNovelEntries = listOf(
+    // ── System / Game ────────────────────────────────────────────────────────
     KnownNovelEntry(
         title = "My Vampire System",
-        sourceName = "FreeWebNovel",
-        detailPageUrl = "https://freewebnovel.com/novel/my-vampire-system",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/my-vampire-system-v1.html",
         genre = "Fantasy, System, Action"
     ),
+    KnownNovelEntry(
+        title = "Solo Leveling",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/solo-leveling.html",
+        genre = "Action, Adventure, Fantasy"
+    ),
+    KnownNovelEntry(
+        title = "Omniscient Reader's Viewpoint",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/omniscient-readers-viewpoint.html",
+        genre = "Action, Fantasy, System"
+    ),
+    KnownNovelEntry(
+        title = "The Beginning After The End",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/the-beginning-after-the-end.html",
+        genre = "Fantasy, Isekai, Action"
+    ),
+    KnownNovelEntry(
+        title = "Reincarnation of the Suicidal Battle God",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/reincarnation-of-the-suicidal-battle-god.html",
+        genre = "Action, Fantasy"
+    ),
+    KnownNovelEntry(
+        title = "Return of the Mount Hua Sect",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/return-of-the-mount-hua-sect.html",
+        genre = "Martial Arts, Action"
+    ),
+    KnownNovelEntry(
+        title = "Shadow Slave",
+        sourceName = "RoyalRoad",
+        detailPageUrl = "https://www.royalroad.com/fiction/48105/shadow-slave",
+        genre = "Fantasy, Dark, Action"
+    ),
+    KnownNovelEntry(
+        title = "Dungeon Crawler Carl",
+        sourceName = "RoyalRoad",
+        detailPageUrl = "https://www.royalroad.com/fiction/29358/dungeon-crawler-carl",
+        genre = "LitRPG, Comedy, Action"
+    ),
+    // ── Xianxia / Wuxia / Xuanhuan ──────────────────────────────────────────
     KnownNovelEntry(
         title = "Renegade Immortal",
         sourceName = "Wuxiaworld",
@@ -344,18 +485,165 @@ private val knownNovelEntries = listOf(
         genre = "Xianxia, Comedy, Fantasy"
     ),
     KnownNovelEntry(
+        title = "I Shall Seal the Heavens",
+        sourceName = "Wuxiaworld",
+        detailPageUrl = "https://www.wuxiaworld.com/novel/i-shall-seal-the-heavens",
+        coverUrl = "https://cdn.wuxiaworld.com/images/covers/issth.webp",
+        author = "Er Gen",
+        genre = "Xianxia, Action, Adventure",
+        aliases = listOf("ISSTH")
+    ),
+    KnownNovelEntry(
+        title = "Pursuit of the Truth",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/pursuit-of-the-truth-v1.html",
+        coverUrl = "https://img.readnovelfull.com/thumb/t-300x439/Pursuit-of-the-Truth-ndUNFBDCxY.jpg",
+        author = "Er Gen",
+        genre = "Xianxia, Mystery, Tragedy",
+        aliases = listOf("Beseech the Devil", "PotT")
+    ),
+    KnownNovelEntry(
         title = "Martial Peak",
-        sourceName = "BoxNovel",
-        detailPageUrl = "https://boxnovel.com/novel/martial-peak/",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/martial-peak-v3.html",
         genre = "Martial Arts, Xuanhuan, Action"
     ),
+    KnownNovelEntry(
+        title = "Martial God Asura",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/martial-god-asura.html",
+        genre = "Martial Arts, Action, Xuanhuan"
+    ),
+    KnownNovelEntry(
+        title = "Emperor's Domination",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/emperor-s-domination.html",
+        genre = "Xuanhuan, Action"
+    ),
+    KnownNovelEntry(
+        title = "Against the Gods",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/against-the-gods.html",
+        genre = "Martial Arts, Xuanhuan, Romance"
+    ),
+    KnownNovelEntry(
+        title = "Tales of Demons and Gods",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/tales-of-demons-and-gods.html",
+        genre = "Xianxia, Fantasy, Action"
+    ),
+    // ── Isekai / Reincarnation ──────────────────────────────────────────────
+    KnownNovelEntry(
+        title = "Reincarnated as a Slime",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/that-time-i-got-reincarnated-as-a-slime",
+        genre = "Isekai, Fantasy, Action"
+    ),
+    KnownNovelEntry(
+        title = "Overlord",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/overlord",
+        genre = "Isekai, Dark Fantasy, Action"
+    ),
+    KnownNovelEntry(
+        title = "Mushoku Tensei: Jobless Reincarnation",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/mushoku-tensei-jobless-reincarnation",
+        genre = "Isekai, Fantasy, Adventure",
+        aliases = listOf("Mushoku Tensei")
+    ),
+    KnownNovelEntry(
+        title = "The Rising of the Shield Hero",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/the-rising-of-the-shield-hero",
+        genre = "Isekai, Action, Fantasy"
+    ),
+    KnownNovelEntry(
+        title = "Arifureta: From Commonplace to World's Strongest",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/arifureta-from-commonplace-to-worlds-strongest",
+        genre = "Isekai, Action, Fantasy"
+    ),
+    KnownNovelEntry(
+        title = "Sword Art Online",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/sword-art-online",
+        genre = "Isekai, Sci-Fi, Action"
+    ),
+    KnownNovelEntry(
+        title = "Re:Zero",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/rezero-starting-life-in-another-world",
+        genre = "Isekai, Dark Fantasy, Drama",
+        aliases = listOf("Re:Zero")
+    ),
+    KnownNovelEntry(
+        title = "No Game No Life",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/no-game-no-life",
+        genre = "Isekai, Game, Comedy"
+    ),
+    // ── Romance / Drama ─────────────────────────────────────────────────────
+    KnownNovelEntry(
+        title = "Under the Oak Tree",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/under-the-oak-tree.html",
+        genre = "Romance, Fantasy, Drama"
+    ),
+    KnownNovelEntry(
+        title = "The Villainess Reverses the Hourglass",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/the-villainess-reverses-the-hourglass.html",
+        genre = "Romance, Fantasy, Drama"
+    ),
+    KnownNovelEntry(
+        title = "I Am the Fated Villain",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/i-am-the-fated-villain.html",
+        genre = "Fantasy, Romance, Action"
+    ),
+    // ── Mystery / Thriller ──────────────────────────────────────────────────
     KnownNovelEntry(
         title = "Lord of the Mysteries",
         sourceName = "LightNovelPub",
         detailPageUrl = "https://lightnovelpub.me/book/lord-of-the-mysteries",
         genre = "Mystery, Fantasy, Supernatural"
+    ),
+    KnownNovelEntry(
+        title = "The Grandmaster of Demonic Cultivation",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/the-grandmaster-of-demonic-cultivation",
+        genre = "Xianxia, Mystery, BL",
+        aliases = listOf("Mo Dao Zu Shi", "MDZS")
+    ),
+    // ── Sci-Fi ───────────────────────────────────────────────────────────────
+    KnownNovelEntry(
+        title = "Infinite Dendrogram",
+        sourceName = "LightNovelPub",
+        detailPageUrl = "https://lightnovelpub.me/book/infinite-dendrogram",
+        genre = "LitRPG, Sci-Fi, Action"
+    ),
+    KnownNovelEntry(
+        title = "All the Gallant Men",
+        sourceName = "RoyalRoad",
+        detailPageUrl = "https://www.royalroad.com/fiction/11193/mother-of-learning",
+        genre = "Fantasy, Time Loop, Mystery"
+    ),
+    // ── Horror / Dark ────────────────────────────────────────────────────────
+    KnownNovelEntry(
+        title = "The Tutorial is Too Hard",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/the-tutorial-is-too-hard.html",
+        genre = "Action, Fantasy, Dark"
+    ),
+    KnownNovelEntry(
+        title = "Warlock of the Magus World",
+        sourceName = "ReadNovelFull",
+        detailPageUrl = "https://readnovelfull.com/warlock-of-the-magus-world.html",
+        genre = "Dark Fantasy, Xuanhuan, Sci-Fi"
     )
 )
+
 
 private fun knownNovelFallbacks(query: String): List<UnifiedSearchResult> {
     val normalizedQuery = query.normalizeForNovelSearch()
@@ -372,6 +660,9 @@ private fun knownNovelFallbacks(query: String): List<UnifiedSearchResult> {
         }
         .map { it.toResult() }
 }
+
+private fun curatedPopularNovelSeeds(): List<UnifiedSearchResult> =
+    knownNovelEntries.map { it.toResult() }
 
 private fun KnownNovelEntry.toResult(): UnifiedSearchResult =
     UnifiedSearchResult(
@@ -392,16 +683,33 @@ private fun List<UnifiedSearchResult>.rankedNovelResults(query: String): List<Un
             .thenBy { it.sourceName.lowercase() }
     )
 
+private fun List<UnifiedSearchResult>.balancedNovelResults(query: String): List<UnifiedSearchResult> {
+    val ranked = rankedNovelResults(query)
+    val nonRoyalRoad = ranked.filter { it.sourceName != "RoyalRoad" }
+    val royalRoad = ranked.filter { it.sourceName == "RoyalRoad" }
+    if (nonRoyalRoad.isEmpty()) return royalRoad.take(30)
+
+    val royalRoadLimit = if (query.normalizeForNovelSearch().hasTranslatedNovelIntent()) {
+        minOf(2, royalRoad.size)
+    } else {
+        minOf(6, maxOf(2, nonRoyalRoad.size / 3 + 1))
+    }
+    return (nonRoyalRoad + royalRoad.take(royalRoadLimit))
+        .rankedNovelResults(query)
+        .take(40)
+}
+
 private fun UnifiedSearchResult.novelSearchScore(query: String): Int {
     val q = query.normalizeForNovelSearch()
     val title = title.normalizeForNovelSearch()
     val sourceBoost = when (sourceName.lowercase()) {
         "webnovel api" -> 900
         "wuxiaworld" -> 850
-        "freewebnovel" -> 800
-        "lightnovelpub" -> 750
-        "boxnovel" -> 700
-        "royalroad" -> 250
+        "readnovelfull" -> 850
+        "freewebnovel" -> 820
+        "lightnovelpub" -> 790
+        "boxnovel" -> 760
+        "royalroad" -> 50
         else -> 400
     }
     val titleScore = when {
@@ -412,13 +720,60 @@ private fun UnifiedSearchResult.novelSearchScore(query: String): Int {
         q.split(" ").filter { it.length > 2 }.all { title.contains(it) } -> 3_500
         else -> 0
     }
-    val knownWebNovelIntent = listOf("vampire", "system", "renegade", "immortal", "will eternal", "martial", "mysteries", "xianxia", "wuxia", "xuanhuan")
-        .any { q.contains(it) }
-    val intentBoost = if (knownWebNovelIntent && sourceName != "RoyalRoad") 450 else 0
-    return titleScore + sourceBoost + intentBoost
+    val knownWebNovelIntent = q.hasTranslatedNovelIntent()
+    val intentBoost = if (knownWebNovelIntent && sourceName != "RoyalRoad") 650 else 0
+    val royalRoadPenalty = if (sourceName == "RoyalRoad" && knownWebNovelIntent) 800 else 0
+    return titleScore + sourceBoost + intentBoost - royalRoadPenalty
 }
 
 private fun String.normalizeForNovelSearch(): String =
     lowercase()
         .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+
+private fun String.hasTranslatedNovelIntent(): Boolean =
+    listOf(
+        "vampire",
+        "system",
+        "renegade",
+        "immortal",
+        "will eternal",
+        "martial",
+        "mysteries",
+        "pursuit",
+        "truth",
+        "heaven",
+        "seal",
+        "dao",
+        "demon",
+        "devil",
+        "emperor",
+        "cultivation",
+        "xianxia",
+        "wuxia",
+        "xuanhuan"
+    ).any { contains(it) }
+
+private val knownAnimeSlugOverrides = mapOf(
+    "dragon ball" to "dragon-ball",
+    "dragon ball z" to "dragon-ball-z",
+    "dragon ball super" to "dragon-ball-super",
+    "my hero academia" to "boku-no-hero-academia",
+    "boku no hero academia" to "boku-no-hero-academia",
+    "solo leveling" to "ore-dake-level-up-na-ken",
+    "jujutsu kaisen" to "jujutsu-kaisen-tv",
+    "one piece" to "one-piece"
+)
+
+private fun String.normalizedAnimeSearchTitle(): String =
+    lowercase()
+        .replace("&", "and")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""\s+"""), " ")
+
+private fun String.removeAnimeSeasonSuffix(): String =
+    normalizedAnimeSearchTitle()
+        .replace(Regex("""\b(season\s+\d+|\d+(st|nd|rd|th)\s+season|s\d+|part\s+\d+|cour\s+\d+|movie|special|ova|ona|recap|dub|sub)\b"""), "")
+        .replace(Regex("""\s+"""), " ")
         .trim()

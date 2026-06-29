@@ -295,6 +295,23 @@ class AninekoScraper(private val client: HttpClient) {
     }
 
     /**
+     * Directly fetch episodes for a known-good Anineko slug (e.g. "my-hero-academia").
+     * Skips the DDG search, goes straight to the series page.
+     */
+    suspend fun fetchEpisodesBySlug(slug: String, maxEpisodes: Int = 300): List<AnimeEpisode> {
+        return runCatching {
+            val baseUrl = liveBaseUrl()
+            val seriesUrl = "$baseUrl/watch/$slug"
+            fetchEpisodesFromSeriesUrl(baseUrl, seriesUrl, maxEpisodes)
+        }.getOrElse { e ->
+            println("[Anineko] fetchEpisodesBySlug error for '$slug': ${e.message}")
+            emptyList()
+        }
+    }
+
+
+
+    /**
      * Scrapes an Anineko episode page and extracts the .m3u8 HLS stream URL.
      * The live domain is resolved via DDG before any network call.
      */

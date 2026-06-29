@@ -71,33 +71,35 @@ private fun ContentTab.tabAccent(currentTheme: AppTheme): Color = when (this) {
 fun DiscoverHomeScreen(
     currentTheme: AppTheme,
     contentTab: ContentTab = ContentTab.NOVELS,
+    initialSearchQuery: String = "",
     isDesktop: Boolean = false,
+    onContentTabChanged: (ContentTab) -> Unit = {},
+    onSearchQueryChanged: (String) -> Unit = {},
     onNovelSelected: (UnifiedSearchResult) -> Unit
 ) {
     val repository = remember {
         NovelSearchRepository(
-            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )
     }
 
     // ── State ──────────────────────────────────────────────────────────────
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf(initialSearchQuery) }
     var activeTab by remember { mutableStateOf(contentTab) }
     var selectedCategory by remember { mutableStateOf(NovelCategory.ALL) }
     var selectedMangaGenre by remember { mutableStateOf("All") }
     var selectedAnimeGenre by remember { mutableStateOf("All") }
     var isSearching by remember { mutableStateOf(false) }
 
-    var popularItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    var popularItemsByTab by remember { mutableStateOf<Map<ContentTab, List<UnifiedSearchResult>>>(emptyMap()) }
     var airingAnime by remember { mutableStateOf<List<AnimeResult>>(emptyList()) }
     var animeSearchResults by remember { mutableStateOf<List<AnimeResult>>(emptyList()) }
     var videoItemsByTab by remember { mutableStateOf<Map<ContentTab, List<UnifiedSearchResult>>>(emptyMap()) }
     var videoSearchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var searchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var isLoadingPopular by remember { mutableStateOf(true) }
-    var isLoadingAnime by remember { mutableStateOf(true) }
+    var isLoadingPopular by remember { mutableStateOf(false) }
+    var isLoadingAnime by remember { mutableStateOf(false) }
     var isLoadingVideo by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
     var showTopArea by remember { mutableStateOf(true) }
@@ -111,11 +113,14 @@ fun DiscoverHomeScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(contentTab) {
-        searchQuery = ""
-        searchResults = emptyList()
-        animeSearchResults = emptyList()
-        videoSearchResults = emptyList()
-        isSearching = false
+        if (activeTab != contentTab) {
+            searchQuery = ""
+            onSearchQueryChanged("")
+            searchResults = emptyList()
+            animeSearchResults = emptyList()
+            videoSearchResults = emptyList()
+            isSearching = false
+        }
         activeTab = contentTab
         selectedCategory = NovelCategory.ALL
         selectedMangaGenre = "All"
@@ -124,6 +129,7 @@ fun DiscoverHomeScreen(
     }
 
     LaunchedEffect(activeTab) {
+        onContentTabChanged(activeTab)
         gridState.scrollToItem(0)
         showTopArea = true
         pullDistance = 0f
@@ -148,11 +154,20 @@ fun DiscoverHomeScreen(
             }
     }
 
-    // ── Initial popular content load ───────────────────────────────────────
-    LaunchedEffect(Unit) {
-        isLoadingPopular = true
-        popularItems = repository.fetchPopularAll(page = 1)
-        isLoadingPopular = false
+    // ── Lazy popular content load for the active tab only ──────────────────
+    LaunchedEffect(activeTab) {
+        if (activeTab == ContentTab.NOVELS && popularItemsByTab[ContentTab.NOVELS].isNullOrEmpty()) {
+            isLoadingPopular = true
+            val loaded = repository.fetchPopularNovels(page = pageByTab[ContentTab.NOVELS] ?: 1)
+            popularItemsByTab = popularItemsByTab + (ContentTab.NOVELS to loaded)
+            isLoadingPopular = false
+        }
+        if (activeTab == ContentTab.MANGA && popularItemsByTab[ContentTab.MANGA].isNullOrEmpty()) {
+            isLoadingPopular = true
+            val loaded = repository.fetchPopularManga(page = pageByTab[ContentTab.MANGA] ?: 1)
+            popularItemsByTab = popularItemsByTab + (ContentTab.MANGA to loaded)
+            isLoadingPopular = false
+        }
     }
 
     // ── Anime tab content load ─────────────────────────────────────────────
@@ -176,12 +191,13 @@ fun DiscoverHomeScreen(
     }
 
     // ── Filter popular content by active tab ───────────────────────────────
-    val filteredPopular by remember(popularItems, activeTab, selectedCategory, selectedMangaGenre) {
+    val activePopularItems = popularItemsByTab[activeTab].orEmpty()
+    val filteredPopular by remember(activePopularItems, activeTab, selectedCategory, selectedMangaGenre) {
         derivedStateOf {
             var list = when (activeTab) {
-                ContentTab.NOVELS -> popularItems.filter { !it.isManga && !it.isAnime }
-                ContentTab.MANGA -> popularItems.filter { it.isManga }
-                ContentTab.ANIME -> popularItems.filter { it.isAnime }
+                ContentTab.NOVELS -> activePopularItems.filter { !it.isManga && !it.isAnime }
+                ContentTab.MANGA -> activePopularItems.filter { it.isManga }
+                ContentTab.ANIME -> activePopularItems.filter { it.isAnime }
                 ContentTab.K_DRAMA,
                 ContentTab.CARTOON,
                 ContentTab.MOVIES -> emptyList()
@@ -287,7 +303,12 @@ fun DiscoverHomeScreen(
                         ContentTab.NOVELS,
                         ContentTab.MANGA -> {
                             isLoadingPopular = true
-                            popularItems = repository.fetchPopularAll(page = nextPage)
+                            val loaded = if (activeTab == ContentTab.NOVELS) {
+                                repository.fetchPopularNovels(page = nextPage)
+                            } else {
+                                repository.fetchPopularManga(page = nextPage)
+                            }
+                            popularItemsByTab = popularItemsByTab + (activeTab to loaded)
                             isLoadingPopular = false
                         }
                         ContentTab.ANIME -> {
@@ -377,7 +398,10 @@ fun DiscoverHomeScreen(
 
                     OutlinedTextField(
                         value = searchQuery,
-                        onValueChange = { searchQuery = it },
+                        onValueChange = {
+                            searchQuery = it
+                            onSearchQueryChanged(it)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = {
                             Text(
@@ -409,7 +433,12 @@ fun DiscoverHomeScreen(
                         },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
+                                IconButton(
+                                    onClick = {
+                                        searchQuery = ""
+                                        onSearchQueryChanged("")
+                                    }
+                                ) {
                                     Icon(Icons.Default.Close, null, tint = currentTheme.subTextColor())
                                 }
                             }
@@ -445,7 +474,12 @@ fun DiscoverHomeScreen(
                                     .widthIn(min = 104.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (selected) tabColor else Color.Transparent)
-                                    .clickable { activeTab = tab }
+                                    .clickable {
+                                        activeTab = tab
+                                        searchQuery = ""
+                                        onSearchQueryChanged("")
+                                        onContentTabChanged(tab)
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {

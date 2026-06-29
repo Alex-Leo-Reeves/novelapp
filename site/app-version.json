@@ -1,12 +1,13 @@
 {
-  "versionCode": 7,
-  "versionName": "1.6",
+  "versionCode": 8,
+  "versionName": "1.7",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Improved novel search coverage with Wuxiaworld fallback, source diagnostics, and better result ordering.",
-    "Added hide-on-scroll discovery controls, pull-to-refresh feeds, smaller Gemini narration chunks, and manga OCR scaling.",
-    "Improved anime title matching, stream/provider extraction, in-app embed playback, and mobile website layout."
+    "Fixed first-time Kokoro setup with visible download progress, retry, and resumable model installation.",
+    "Improved startup performance by lazy-loading Discover tabs and reducing heavy feed work.",
+    "Synced read history, watch history, and favorites to signed-in Render accounts.",
+    "Reworked manga OCR reading so it reads bubbles in order without jumping pages."
   ],
   "forceUpdate": false
 }

@@ -5,10 +5,10 @@ const path = require("path");
 const { URL } = require("url");
 
 const PORT = Number(process.env.PORT || 3000);
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "server-data");
+const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/data" : path.join(process.cwd(), "server-data"));
 const DATA_FILE = path.join(DATA_DIR, "auth.json");
 const SITE_DIR = path.join(process.cwd(), "site");
-const SESSION_DAYS = 30;
+const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = "sha256";
@@ -18,6 +18,7 @@ const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".onnx": "application/octet-stream",
   ".svg": "image/svg+xml",
   ".apk": "application/vnd.android.package-archive",
   ".ipa": "application/octet-stream",
@@ -50,8 +51,12 @@ function normalizeEmail(email) {
 
 function publicUser(user) {
   return {
+    id: user.id,
     username: user.username,
-    email: user.email
+    email: user.email,
+    plan: user.plan || "free",
+    billingStatus: user.billingStatus || "none",
+    createdAt: user.createdAt
   };
 }
 
@@ -130,7 +135,7 @@ function readBody(request) {
 
     request.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 64 * 1024) {
+      if (body.length > 512 * 1024) {
         request.destroy();
         reject(new Error("Request body is too large."));
       }
@@ -170,6 +175,14 @@ async function handleRegister(request, response) {
     email,
     passwordSalt: passwordRecord.salt,
     passwordHash: passwordRecord.hash,
+    plan: "free",
+    billingStatus: "none",
+    state: {
+      favorites: [],
+      readHistory: [],
+      watchHistory: [],
+      updatedAt: new Date().toISOString()
+    },
     createdAt: new Date().toISOString()
   };
   data.users.push(user);
@@ -211,6 +224,44 @@ function handleLogout(request, response) {
   return sendJson(response, 200, { ok: true });
 }
 
+function normalizeUserState(rawState) {
+  const state = rawState && typeof rawState === "object" ? rawState : {};
+  const now = new Date().toISOString();
+  return {
+    favorites: Array.isArray(state.favorites) ? state.favorites.slice(0, 250) : [],
+    readHistory: Array.isArray(state.readHistory) ? state.readHistory.slice(0, 100) : [],
+    watchHistory: Array.isArray(state.watchHistory) ? state.watchHistory.slice(0, 100) : [],
+    updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : now
+  };
+}
+
+function handleGetUserState(request, response) {
+  const data = readData();
+  const user = findSessionUser(data, getBearerToken(request));
+
+  if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+  user.state = normalizeUserState(user.state);
+  return sendJson(response, 200, {
+    user: publicUser(user),
+    state: user.state
+  });
+}
+
+async function handlePutUserState(request, response) {
+  const data = readData();
+  const user = findSessionUser(data, getBearerToken(request));
+
+  if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+  const body = await readBody(request);
+  user.state = normalizeUserState(body.state || body);
+  user.state.updatedAt = new Date().toISOString();
+  writeData(data);
+  return sendJson(response, 200, {
+    user: publicUser(user),
+    state: user.state
+  });
+}
+
 async function handleApi(request, response, pathname) {
   try {
     if (request.method === "POST" && pathname === "/api/auth/register") {
@@ -225,6 +276,12 @@ async function handleApi(request, response, pathname) {
     if (request.method === "POST" && pathname === "/api/auth/logout") {
       return handleLogout(request, response);
     }
+    if (request.method === "GET" && pathname === "/api/user/state") {
+      return handleGetUserState(request, response);
+    }
+    if (request.method === "PUT" && pathname === "/api/user/state") {
+      return await handlePutUserState(request, response);
+    }
 
     return sendError(response, 404, "API route not found.");
   } catch (error) {
@@ -233,6 +290,68 @@ async function handleApi(request, response, pathname) {
 }
 
 function serveStatic(request, response, pathname) {
+  if (pathname === "/assets/kokoro/model_quantized.onnx") {
+    const modelPath = path.join(process.cwd(), "kokoro-assets", "kokoro", "model_quantized.onnx");
+    if (fs.existsSync(modelPath) && fs.statSync(modelPath).isFile()) {
+      const stat = fs.statSync(modelPath);
+      const etag = `"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+      const commonHeaders = {
+        "content-type": "application/octet-stream",
+        "cache-control": "public, max-age=31536000, immutable",
+        "accept-ranges": "bytes",
+        "etag": etag
+      };
+
+      if (request.method === "HEAD") {
+        response.writeHead(200, {
+          ...commonHeaders,
+          "content-length": stat.size
+        });
+        response.end();
+        return;
+      }
+
+      const range = request.headers.range;
+      if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (!match) {
+          response.writeHead(416, {
+            ...commonHeaders,
+            "content-range": `bytes */${stat.size}`
+          });
+          response.end();
+          return;
+        }
+
+        const start = match[1] ? Number(match[1]) : 0;
+        const end = match[2] ? Number(match[2]) : stat.size - 1;
+        if (start >= stat.size || end >= stat.size || start > end) {
+          response.writeHead(416, {
+            ...commonHeaders,
+            "content-range": `bytes */${stat.size}`
+          });
+          response.end();
+          return;
+        }
+
+        response.writeHead(206, {
+          ...commonHeaders,
+          "content-length": end - start + 1,
+          "content-range": `bytes ${start}-${end}/${stat.size}`
+        });
+        fs.createReadStream(modelPath, { start, end }).pipe(response);
+        return;
+      }
+
+      response.writeHead(200, {
+        ...commonHeaders,
+        "content-length": stat.size
+      });
+      fs.createReadStream(modelPath).pipe(response);
+      return;
+    }
+  }
+
   const safePath = path
     .normalize(decodeURIComponent(pathname))
     .replace(/^(\.\.(\/|\\|$))+/, "");

@@ -6,7 +6,6 @@ package com.alexleoreeves.novelapp
  * On iOS: reads from compiled constants.
  */
 expect object BuildKonfig {
-    val GEMINI_API_KEY: String
     val RAPID_API_KEY: String
     val RAPID_API_HOST: String
     val MANGADEX_CLIENT_ID: String
