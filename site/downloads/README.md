@@ -1,6 +1,6 @@
 # NovelApp Downloads
 
-Place signed release builds here before deploying the site:
+Place release builds here before deploying the site:
 
 ```text
 site/downloads/novelapp-android.apk
@@ -21,7 +21,7 @@ The TV website download button points to:
 https://novelapp1.onrender.com/downloads/novelapp-tv.apk
 ```
 
-The iPhone website download button points to:
+The iPhone website download button points to the current unsigned IPA artifact:
 
 ```text
 https://novelapp1.onrender.com/downloads/novelapp-ios.ipa
