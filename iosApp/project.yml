@@ -6,8 +6,8 @@ options:
   xcodeVersion: "15.0"
 settings:
   base:
-    CURRENT_PROJECT_VERSION: 1
-    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: 8
+    MARKETING_VERSION: "1.7"
     SWIFT_VERSION: "5.0"
 targets:
   NovelApp:
@@ -18,7 +18,6 @@ targets:
       - path: iosApp
     resources:
       - path: Assets.xcassets
-      - path: ../kokoro-assets/kokoro
     info:
       path: Info.plist
     preBuildScripts:
@@ -34,6 +33,7 @@ targets:
         DEVELOPMENT_TEAM: ""
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
+          - "$(SRCROOT)/Vendor/$(CONFIGURATION)-$(SDK_NAME)"
           - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         INFOPLIST_FILE: Info.plist
         LD_RUNPATH_SEARCH_PATHS:
