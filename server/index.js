@@ -361,10 +361,16 @@ function serveStatic(request, response, pathname) {
     ? filePath
     : path.join(SITE_DIR, "index.html");
   const ext = path.extname(resolvedPath).toLowerCase();
+  const stat = fs.statSync(resolvedPath);
 
   response.writeHead(200, {
-    "content-type": MIME_TYPES[ext] || "application/octet-stream"
+    "content-type": MIME_TYPES[ext] || "application/octet-stream",
+    "content-length": stat.size
   });
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
   fs.createReadStream(resolvedPath).pipe(response);
 }
 
