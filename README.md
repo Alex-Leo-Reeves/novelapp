@@ -287,7 +287,8 @@ Generate the Xcode project on macOS:
 
 ```bash
 brew install xcodegen
-xcodegen generate --spec iosApp/project.yml --project iosApp/NovelApp.xcodeproj
+cd iosApp
+xcodegen generate --spec project.yml
 ```
 
 GitHub Actions workflow:
