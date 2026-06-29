@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.theme.*
+import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Downloads Root Screen — three type-cards: Anime / Manga / Novels
@@ -717,6 +718,9 @@ private fun formatFileSize(bytes: Long): String {
     return when {
         bytes == 0L -> "Unknown size"
         bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        else -> "${"%.1f".format(bytes / (1024f * 1024f))} MB"
+        else -> {
+            val tenths = (bytes / (1024f * 1024f) * 10f).roundToInt()
+            "${tenths / 10}.${tenths % 10} MB"
+        }
     }
 }
