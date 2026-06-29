@@ -483,7 +483,7 @@ private struct DownloadsView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "arrow.down.circle")
                         .font(.system(size: 42))
-                        .foregroundStyle(.accentMint)
+                        .foregroundStyle(Color.accentMint)
                     Text("Downloads")
                         .font(.title3.weight(.bold))
                     Text("Saved chapters and videos will appear here.")
@@ -570,7 +570,7 @@ private struct EmptyState: View {
         VStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 38))
-                .foregroundStyle(.accentMint)
+                .foregroundStyle(Color.accentMint)
             Text(error ?? "No results found")
                 .font(.headline)
                 .multilineTextAlignment(.center)
