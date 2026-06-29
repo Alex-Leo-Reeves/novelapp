@@ -1,6 +1,6 @@
 # NovelApp
 
-NovelApp is a Kotlin Multiplatform entertainment reader built with Compose Multiplatform. The app combines novel discovery, manga reading, anime playback, favorites, themed reading, and AI-assisted narration/OCR flows behind a shared Kotlin UI.
+NovelApp is a Kotlin Multiplatform entertainment reader. Android and desktop use Compose Multiplatform, while iOS uses a native SwiftUI shell backed by shared Kotlin logic. The app combines novel discovery, manga reading, anime playback, favorites, themed reading, and AI-assisted narration/OCR flows.
 
 ## Project Status
 
@@ -19,7 +19,7 @@ This repository is an early application build. Android is the most complete targ
 - Theme switching for reading modes
 - On-device Kokoro narration controller with curated voices
 - Android OCR support for manga text recognition through ML Kit
-- Shared KMP business/UI code with Android and iOS platform actuals
+- Shared KMP business logic with Android/Desktop Compose UI and native iOS SwiftUI
 
 ## Tech Stack
 
@@ -281,7 +281,7 @@ This app connects to third-party novel, manga, anime, and AI services. Selling a
 
 ## iOS Notes
 
-The iOS shell is located in `iosApp/`. The shared Kotlin framework is named `ComposeApp`, and the Xcode project is generated from `iosApp/project.yml` using XcodeGen.
+The iOS shell is located in `iosApp/`. Visible iOS screens are SwiftUI-only. Shared search, metadata, release, and configuration logic stays in Kotlin and is exposed to Swift through `NovelAppIosBridge` in the `ComposeApp` framework. The Xcode project is generated from `iosApp/project.yml` using XcodeGen.
 
 Generate the Xcode project on macOS:
 
@@ -318,12 +318,20 @@ MANGADEX_CLIENT_ID
 MANGADEX_CLIENT_SECRET
 MANGADEX_USERNAME
 MANGADEX_PASSWORD
+TMDB_API_KEY
+TMDB_READ_ACCESS_TOKEN
 ```
 
-For direct iPhone installation, the provisioning profile must include the iPhone UDID. The workflow publishes the signed output to:
+The workflow builds a vendored iPhone `ComposeApp.framework` before archiving, then publishes the signed output to:
 
 ```text
 site/downloads/novelapp-ios.ipa
+```
+
+For direct iPhone installation, the provisioning profile must include the iPhone UDID. GitHub Actions cannot install onto a USB iPhone plugged into your local computer because the runner is remote. After the workflow finishes, download the artifact or pull the published `site/downloads/novelapp-ios.ipa`, connect and trust the iPhone locally, then run:
+
+```bash
+scripts/install-ios-ipa-usb.sh site/downloads/novelapp-ios.ipa
 ```
 
 Current iOS native hardening items before calling the iPhone app production-ready:
