@@ -126,6 +126,7 @@ jobs:
         if: steps.signing.outputs.can_sign != 'true'
         run: |
           set -euo pipefail
+          mkdir -p build/ios
 
           xcodebuild \
             -project iosApp/NovelApp.xcodeproj \
@@ -133,6 +134,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             RAPID_API_KEY="${RAPID_API_KEY:-mock_rapid_api_key}" \
@@ -145,7 +147,34 @@ jobs:
             TMDB_READ_ACCESS_TOKEN="${TMDB_READ_ACCESS_TOKEN:-mock_tmdb_read_access_token}" \
             clean build
 
-          echo "::notice::Unsigned iOS compile passed. Add Apple signing secrets to export an installable IPA."
+      - name: Package unsigned IPA artifact
+        if: steps.signing.outputs.can_sign != 'true'
+        run: |
+          set -euo pipefail
+
+          APP_PATH="build/ios/DerivedData/Build/Products/Release-iphoneos/NovelApp.app"
+          IPA_PATH="build/ios/novelapp-ios-unsigned.ipa"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Unsigned app bundle was not found at $APP_PATH"
+            find build/ios/DerivedData/Build/Products -maxdepth 3 -type d -name "*.app" -print || true
+            exit 1
+          fi
+
+          rm -rf build/ios/unsigned-payload
+          mkdir -p build/ios/unsigned-payload/Payload
+          cp -R "$APP_PATH" build/ios/unsigned-payload/Payload/NovelApp.app
+          (cd build/ios/unsigned-payload && zip -qry "../novelapp-ios-unsigned.ipa" Payload)
+
+          echo "Unsigned IPA created at $IPA_PATH"
+          echo "::notice::Unsigned IPA artifact created. It is useful for inspection/testing, but an iPhone still needs a signed IPA to install normally."
+
+      - name: Upload unsigned IPA artifact
+        if: steps.signing.outputs.can_sign != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: novelapp-ios-unsigned-ipa
+          path: build/ios/novelapp-ios-unsigned.ipa
 
       - name: Archive iPhone app
         if: steps.signing.outputs.can_sign == 'true'
