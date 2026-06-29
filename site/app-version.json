@@ -1,13 +1,13 @@
 {
-  "versionCode": 8,
-  "versionName": "1.7",
+  "versionCode": 9,
+  "versionName": "1.8",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Fixed first-time Kokoro setup with visible download progress, retry, and resumable model installation.",
-    "Improved startup performance by lazy-loading Discover tabs and reducing heavy feed work.",
-    "Synced read history, watch history, and favorites to signed-in Render accounts.",
-    "Reworked manga OCR reading so it reads bubbles in order without jumping pages."
+    "Added cached chapter audio generation so Kokoro narration plays smoothly across full novel chapters.",
+    "Keeps downloaded-chapter narration audio locally while clearing temporary online chapter audio on app restart.",
+    "Preloads manga chapter pages into local cache before reading for smoother scrolling.",
+    "Added a pure dark manga reader option and iOS SwiftUI narration bridge."
   ],
   "forceUpdate": false
 }

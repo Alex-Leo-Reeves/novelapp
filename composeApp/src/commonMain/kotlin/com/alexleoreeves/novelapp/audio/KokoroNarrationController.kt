@@ -73,6 +73,10 @@ class KokoroNarrationController(
     private val audioCache = mutableMapOf<Int, Deferred<KokoroSynthesisResult>>()
     private var plannedTextKey: Int? = null
 
+    init {
+        clearTemporaryNarrationAudioCache()
+    }
+
     fun updateSettings(transform: (KokoroNarrationSettings) -> KokoroNarrationSettings) {
         _settings.value = transform(_settings.value)
         syncBackgroundService()
@@ -95,7 +99,11 @@ class KokoroNarrationController(
         sleepTimerMinutes.value = 0
     }
 
-    suspend fun readText(text: String) {
+    suspend fun readText(
+        text: String,
+        cacheKey: String? = null,
+        persistAudioCache: Boolean = false
+    ) {
         stopInternal(clearPlan = false)
         ensurePlan(text, resetCursor = true)
         _lastError.value = null
@@ -106,14 +114,28 @@ class KokoroNarrationController(
             return
         }
 
-        playbackJob = controllerScope.launch { playFromSegment(0) }
+        playbackJob = controllerScope.launch {
+            if (cacheKey.isNullOrBlank()) {
+                playFromSegment(0)
+            } else {
+                playCachedChapterAudio(cacheKey, persistAudioCache)
+            }
+        }
         playbackJob?.join()
     }
 
-    fun playText(text: String) {
+    fun playText(
+        text: String,
+        cacheKey: String? = null,
+        persistAudioCache: Boolean = false
+    ) {
         readJob?.cancel()
         readJob = controllerScope.launch {
-            readText(text)
+            readText(
+                text = text,
+                cacheKey = cacheKey,
+                persistAudioCache = persistAudioCache
+            )
         }
     }
 
@@ -280,6 +302,100 @@ class KokoroNarrationController(
                 stopAmbientCue()
                 updateNarrationForegroundService(enabled = false)
             }
+        }
+    }
+
+    private suspend fun playCachedChapterAudio(cacheKey: String, persistent: Boolean) {
+        val cachedPath = prepareChapterAudioFile(cacheKey, persistent)
+        if (cachedPath == null) {
+            playFromSegment(0)
+            return
+        }
+
+        _isPlaying.value = true
+        syncBackgroundService()
+        _lastError.value = null
+        try {
+            coroutineScope {
+                timelineJob = launch { runChapterTimeline(0) }
+                try {
+                    playKokoroAudioFile(cachedPath)
+                } finally {
+                    timelineJob?.cancelAndJoin()
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _lastError.value = e.message ?: "Cached chapter audio failed."
+            playFromSegment(currentSegmentCursor.coerceIn(0, segments.lastIndex))
+        } finally {
+            if (!isPaused) {
+                _isPlaying.value = false
+                _isBuffering.value = false
+                stopAmbientCue()
+                updateNarrationForegroundService(enabled = false)
+            }
+        }
+    }
+
+    private suspend fun prepareChapterAudioFile(cacheKey: String, persistent: Boolean): String? {
+        existingNarrationAudioCachePath(cacheKey, persistent)?.let { return it }
+        if (segments.isEmpty()) return null
+
+        _isBuffering.value = true
+        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+            phase = KokoroVoiceSetupPhase.Synthesizing,
+            message = "Creating chapter audio file for smooth playback."
+        )
+        return try {
+            val rendered = mutableListOf<KokoroSynthesisResult>()
+            for (index in segments.indices) {
+                if (!currentCoroutineContext().isActive) return null
+                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                    phase = KokoroVoiceSetupPhase.Synthesizing,
+                    downloadedBytes = index.toLong(),
+                    totalBytes = segments.size.toLong(),
+                    message = "Creating chapter audio ${index + 1} of ${segments.size}."
+                )
+                val result = prepareSegment(index).await()
+                if (result.audioBytes.isEmpty()) return null
+                rendered.add(result)
+            }
+
+            val chapterAudio = combineWavSegments(rendered) ?: return null
+            writeNarrationAudioCache(cacheKey, persistent, chapterAudio)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _lastError.value = e.message ?: "Could not create chapter audio file."
+            null
+        } finally {
+            _isBuffering.value = false
+        }
+    }
+
+    private suspend fun runChapterTimeline(startIndex: Int) {
+        for (index in startIndex until segments.size) {
+            if (!currentCoroutineContext().isActive || !_isPlaying.value || isPaused) break
+            val segment = segments[index]
+            currentSegmentCursor = index
+            currentMacroCursor = segment.macroIndex
+            _currentChunkFlow.value = segment.macroIndex
+            _currentParagraphIndex.value = segment.paragraphIndex
+            _currentWordIndex.value = segment.wordStartIndex
+            _currentSegment.value = segment
+            _playbackProgress.value = index.toProgressFraction()
+
+            if (_settings.value.ambienceEnabled) {
+                playAmbientCue(segment.ambientCue, _settings.value.ambienceVolume)
+            } else {
+                stopAmbientCue()
+            }
+
+            val duration = runCatching { prepareSegment(index).await().durationMs }
+                .getOrDefault(segment.wordCount.coerceAtLeast(1) * 330L)
+            runTimeline(segment, duration)
         }
     }
 
@@ -585,9 +701,13 @@ data class KokoroSynthesisResult(
 expect suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult
 expect suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest)
 expect suspend fun platformPlayAudio(audioBytes: ByteArray)
+expect suspend fun playKokoroAudioFile(filePath: String)
 expect fun stopKokoroAudio()
 expect fun pauseKokoroAudio()
 expect fun resumeKokoroAudio()
+expect fun clearTemporaryNarrationAudioCache()
+expect fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String?
+expect fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String?
 expect fun playAmbientCue(cue: AmbientCue?, volume: Float)
 expect fun pauseAmbientCue()
 expect fun resumeAmbientCue()
@@ -763,6 +883,69 @@ private fun wordTimingWeight(word: String): Float {
         else -> 0f
     }
     return 0.85f + (word.length.coerceAtMost(14) * 0.08f) + punctuation
+}
+
+private fun combineWavSegments(results: List<KokoroSynthesisResult>): ByteArray? {
+    val audioResults = results.filter { it.audioBytes.size > 44 && it.sampleRate > 0 }
+    if (audioResults.isEmpty()) return null
+    val sampleRate = audioResults.first().sampleRate
+    val pcmSize = audioResults.sumOf { (it.audioBytes.size - 44).coerceAtLeast(0) }
+    if (pcmSize <= 0) return null
+    val pcm = ByteArray(pcmSize)
+    var offset = 0
+    audioResults.forEach { result ->
+        val source = result.audioBytes
+        val length = (source.size - 44).coerceAtLeast(0)
+        if (length > 0) {
+            source.copyInto(pcm, destinationOffset = offset, startIndex = 44, endIndex = source.size)
+            offset += length
+        }
+    }
+    return pcm16MonoToWav(pcm, sampleRate)
+}
+
+private fun pcm16MonoToWav(pcmBytes: ByteArray, sampleRate: Int): ByteArray {
+    val byteRate = sampleRate * 2
+    val totalDataLen = pcmBytes.size + 36
+    val header = ByteArray(44)
+    header[0] = 'R'.code.toByte()
+    header[1] = 'I'.code.toByte()
+    header[2] = 'F'.code.toByte()
+    header[3] = 'F'.code.toByte()
+    header[4] = (totalDataLen and 0xff).toByte()
+    header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+    header[6] = ((totalDataLen shr 16) and 0xff).toByte()
+    header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+    header[8] = 'W'.code.toByte()
+    header[9] = 'A'.code.toByte()
+    header[10] = 'V'.code.toByte()
+    header[11] = 'E'.code.toByte()
+    header[12] = 'f'.code.toByte()
+    header[13] = 'm'.code.toByte()
+    header[14] = 't'.code.toByte()
+    header[15] = ' '.code.toByte()
+    header[16] = 16
+    header[20] = 1
+    header[22] = 1
+    header[24] = (sampleRate and 0xff).toByte()
+    header[25] = ((sampleRate shr 8) and 0xff).toByte()
+    header[26] = ((sampleRate shr 16) and 0xff).toByte()
+    header[27] = ((sampleRate shr 24) and 0xff).toByte()
+    header[28] = (byteRate and 0xff).toByte()
+    header[29] = ((byteRate shr 8) and 0xff).toByte()
+    header[30] = ((byteRate shr 16) and 0xff).toByte()
+    header[31] = ((byteRate shr 24) and 0xff).toByte()
+    header[32] = 2
+    header[34] = 16
+    header[36] = 'd'.code.toByte()
+    header[37] = 'a'.code.toByte()
+    header[38] = 't'.code.toByte()
+    header[39] = 'a'.code.toByte()
+    header[40] = (pcmBytes.size and 0xff).toByte()
+    header[41] = ((pcmBytes.size shr 8) and 0xff).toByte()
+    header[42] = ((pcmBytes.size shr 16) and 0xff).toByte()
+    header[43] = ((pcmBytes.size shr 24) and 0xff).toByte()
+    return header + pcmBytes
 }
 
 private val actionWords = listOf(

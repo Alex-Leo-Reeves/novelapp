@@ -63,6 +63,10 @@ fun MangaViewerScreen(
     var showOverlays by remember { mutableStateOf(true) }
     var scrollMode by remember { mutableStateOf(MangaScrollMode.WEBTOON) }
     var autoScrollEnabled by remember { mutableStateOf(true) }
+    var usePureDarkReader by remember { mutableStateOf(true) }
+    var preloadStatus by remember { mutableStateOf("Loading chapter pages...") }
+    var preloadCompleted by remember { mutableStateOf(0) }
+    var preloadTotal by remember { mutableStateOf(0) }
 
     // TTS and OCR Tracking
     var isOcrActive by remember { mutableStateOf(false) }
@@ -79,6 +83,11 @@ fun MangaViewerScreen(
     val lazyListState = rememberLazyListState()
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val density = LocalDensity.current
+    val readerBackground = if (usePureDarkReader) Color.Black else currentTheme.backgroundColor()
+
+    LaunchedEffect(Unit) {
+        clearTemporaryMangaPageCache()
+    }
 
     DisposableEffect(chapterUrl) {
         onDispose {
@@ -93,10 +102,34 @@ fun MangaViewerScreen(
     // Load pages on launch
     LaunchedEffect(chapterUrl) {
         isLoading = true
-        pages = if (sourceName == "local") {
+        preloadStatus = "Loading chapter pages..."
+        preloadCompleted = 0
+        preloadTotal = 0
+        val loadedPages = if (sourceName == "local") {
             chapterUrl.split(",")
         } else {
             repository.fetchMangaPages(chapterUrl, sourceName)
+        }
+        preloadTotal = loadedPages.size
+        preloadStatus = if (loadedPages.isEmpty()) {
+            "No manga pages found."
+        } else {
+            "Saving pages for smooth reading..."
+        }
+        pages = runCatching {
+            cacheMangaChapterPages(
+                chapterKey = "$sourceName:$mangaTitle:$chapterTitle:$chapterUrl",
+                pageUrls = loadedPages,
+                persistent = sourceName == "local",
+                onProgress = { completed, total ->
+                    preloadCompleted = completed
+                    preloadTotal = total
+                    preloadStatus = "Saving page ${completed.coerceAtMost(total)} of $total..."
+                }
+            )
+        }.getOrElse {
+            preloadStatus = "Using online pages; cache failed."
+            loadedPages
         }
         isLoading = false
         currentPageIndex = initialPageIndex.coerceAtLeast(0)
@@ -213,11 +246,28 @@ fun MangaViewerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black) // Manga reads best on pure black
+            .background(readerBackground)
     ) {
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = currentTheme.accentColor())
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = currentTheme.accentColor())
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        preloadStatus,
+                        color = Color.White.copy(alpha = 0.82f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (preloadTotal > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { (preloadCompleted.toFloat() / preloadTotal.toFloat()).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(0.62f),
+                            color = currentTheme.accentColor(),
+                            trackColor = Color.White.copy(alpha = 0.14f)
+                        )
+                    }
+                }
             }
         } else {
             // ── Reader Viewport ─────────────────────────────────────────────
@@ -241,7 +291,7 @@ fun MangaViewerScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color.Black)
+                                        .background(readerBackground)
                                         .onGloballyPositioned { coordinates ->
                                             pageSizes = pageSizes + (index to coordinates.size)
                                         }
@@ -479,6 +529,36 @@ fun MangaViewerScreen(
                             Switch(
                                 checked = skipEmptyOcrPages,
                                 onCheckedChange = { skipEmptyOcrPages = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = currentTheme.accentColor(),
+                                    checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                )
+                            )
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.DarkMode,
+                                null,
+                                tint = Color.White.copy(0.6f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Pure dark manga reader",
+                                color = Color.White.copy(0.75f),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Switch(
+                                checked = usePureDarkReader,
+                                onCheckedChange = { usePureDarkReader = it },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = currentTheme.accentColor(),
                                     checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)

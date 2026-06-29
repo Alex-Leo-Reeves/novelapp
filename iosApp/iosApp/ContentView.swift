@@ -33,6 +33,9 @@ private final class NovelAppViewModel: ObservableObject {
     @Published var page = 1
     @Published var developer = DeveloperProfile.fallback
     @Published var version = AppVersion.fallback
+    @Published var readText: String = ""
+    @Published var isNarrating = false
+    @Published var narrationMessage = "Kokoro narration is ready when you are."
 
     private let bridge = NovelAppIosBridge()
 
@@ -83,6 +86,34 @@ private final class NovelAppViewModel: ObservableObject {
         } else {
             search()
         }
+    }
+
+    func toggleNarration() {
+        if isNarrating {
+            bridge.stopNarration()
+            isNarrating = false
+            narrationMessage = "Narration stopped."
+            return
+        }
+        let text = readText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            narrationMessage = "Paste text first."
+            return
+        }
+        isNarrating = true
+        narrationMessage = "Preparing chapter audio..."
+        bridge.playNarration(text: text, cacheKey: "ios-swift-reader-\(text.hashValue)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            self?.refreshNarrationStatus()
+        }
+    }
+
+    func refreshNarrationStatus() {
+        guard let data = bridge.narrationStatusJson().data(using: .utf8),
+              let status = try? JSONDecoder().decode(NarrationStatus.self, from: data)
+        else { return }
+        isNarrating = status.isPlaying || status.isBuffering
+        narrationMessage = status.message.isEmpty ? (isNarrating ? "Reading..." : "Narration ready.") : status.message
     }
 
     private func apply(payloadJson: String, error: String?) {
@@ -382,28 +413,60 @@ private struct LibraryView: View {
         NavigationView {
             ZStack {
                 AppBackground()
-                List {
-                    Section("Recent") {
-                        ForEach(model.items.prefix(10)) { item in
-                            NavigationLink {
-                                DetailView(item: item)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Kokoro Reader")
+                                .font(.title3.weight(.bold))
+                            Text(model.narrationMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            TextEditor(text: $model.readText)
+                                .frame(minHeight: 180)
+                                .padding(8)
+                                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                                .scrollContentBackgroundCompat()
+
+                            Button {
+                                model.toggleNarration()
                             } label: {
-                                HStack(spacing: 12) {
-                                    PosterImage(urlString: item.coverUrl)
-                                        .frame(width: 44, height: 62)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.title)
-                                            .font(.body.weight(.semibold))
-                                            .lineLimit(1)
-                                        Text(item.sourceName)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                Label(model.isNarrating ? "Stop Reading" : "Play Narration", systemImage: model.isNarrating ? "stop.fill" : "play.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .disabled(model.readText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isNarrating)
+                        }
+                        .padding(14)
+                        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Recent")
+                                .font(.headline)
+                            ForEach(model.items.prefix(10)) { item in
+                                NavigationLink {
+                                    DetailView(item: item)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        PosterImage(urlString: item.coverUrl)
+                                            .frame(width: 44, height: 62)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.title)
+                                                .font(.body.weight(.semibold))
+                                                .lineLimit(1)
+                                            Text(item.sourceName)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
+                                .buttonStyle(.plain)
+                                Divider().background(Color.white.opacity(0.08))
                             }
                         }
                     }
+                    .padding(18)
                 }
             }
             .navigationTitle("Read")
@@ -625,12 +688,30 @@ private struct AppVersion: Codable {
     let downloadUrl: String
 
     static let fallback = AppVersion(
-        versionCode: 8,
-        versionName: "1.7",
+        versionCode: 9,
+        versionName: "1.8",
         apiBaseUrl: "https://novelapp1.onrender.com/api",
         updateManifestUrl: "https://novelapp1.onrender.com/app-version.json",
         downloadUrl: "https://novelapp1.onrender.com/downloads/novelapp-android.apk"
     )
+}
+
+private struct NarrationStatus: Codable {
+    let isPlaying: Bool
+    let isBuffering: Bool
+    let message: String
+    let progress: Float?
+}
+
+private extension View {
+    @ViewBuilder
+    func scrollContentBackgroundCompat() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollContentBackground(.hidden)
+        } else {
+            self
+        }
+    }
 }
 
 private extension Color {

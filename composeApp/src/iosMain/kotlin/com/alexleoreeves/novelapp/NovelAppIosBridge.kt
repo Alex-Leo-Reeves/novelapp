@@ -4,6 +4,7 @@ import com.alexleoreeves.novelapp.data.AnimeResult
 import com.alexleoreeves.novelapp.data.NovelSearchRepository
 import com.alexleoreeves.novelapp.data.UnifiedSearchResult
 import com.alexleoreeves.novelapp.data.VideoCategory
+import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.DeveloperContact
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +23,7 @@ class NovelAppIosBridge {
         rapidApiKey = BuildKonfig.RAPID_API_KEY,
         rapidApiHost = BuildKonfig.RAPID_API_HOST
     )
+    private val narrationController = KokoroNarrationController()
 
     fun loadHomeJson(
         tab: String,
@@ -99,7 +101,32 @@ class NovelAppIosBridge {
             )
         )
 
+    fun playNarration(text: String, cacheKey: String) {
+        narrationController.playText(
+            text = text,
+            cacheKey = cacheKey,
+            persistAudioCache = false
+        )
+    }
+
+    fun stopNarration() {
+        narrationController.stop()
+    }
+
+    fun narrationStatusJson(): String {
+        val status = narrationController.voiceSetupStatus.value
+        return json.encodeToString(
+            IosNarrationPayload(
+                isPlaying = narrationController.isPlaying.value,
+                isBuffering = narrationController.isBuffering.value,
+                message = status.userMessage,
+                progress = status.progressFraction
+            )
+        )
+    }
+
     fun close() {
+        narrationController.close()
         scope.cancel()
         repository.httpClient.close()
     }
@@ -140,6 +167,14 @@ private data class IosVersionPayload(
     val apiBaseUrl: String,
     val updateManifestUrl: String,
     val downloadUrl: String
+)
+
+@Serializable
+private data class IosNarrationPayload(
+    val isPlaying: Boolean,
+    val isBuffering: Boolean,
+    val message: String,
+    val progress: Float?
 )
 
 private fun UnifiedSearchResult.toIosItem(fallbackKind: String): IosContentItem {

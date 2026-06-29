@@ -63,6 +63,8 @@ fun ReaderScreen(
     var fontSize by remember { mutableStateOf(18f) }
     var showAmbientScreen by remember { mutableStateOf(false) }
     var autoScrollEnabled by remember { mutableStateOf(true) }
+    val isDownloadedChapter = sourceName == "local" || chapterUrl.endsWith(".txt", ignoreCase = true)
+    val narrationCacheKey = "$sourceName:$novelTitle:$chapterTitle:$chapterUrl"
     val isPlaying = ttsController.isPlaying.collectAsState()
     val ttsChunkIndex = ttsController.currentChunkIndex.collectAsState()
     val ttsChunkBoundaries = ttsController.chunkBoundaries.collectAsState()
@@ -105,14 +107,10 @@ fun ReaderScreen(
         }
     }
 
-    // Cleanup on leave
-    val keepNarrationInBackground by rememberUpdatedState(narrationSettings.value.backgroundPlaybackEnabled)
     DisposableEffect(chapterUrl) {
         onDispose {
             sleepDetector.stopMonitoring()
-            if (!keepNarrationInBackground) {
-                ttsController.stop()
-            }
+            ttsController.stop()
         }
     }
 
@@ -301,9 +299,7 @@ fun ReaderScreen(
                         ) {
                             IconButton(
                                 onClick = {
-                                    if (!narrationSettings.value.backgroundPlaybackEnabled) {
-                                        ttsController.stop()
-                                    }
+                                    ttsController.stop()
                                     onBack()
                                 }
                             ) {
@@ -455,7 +451,11 @@ fun ReaderScreen(
                                             if (hasPausedChunks) {
                                                 ttsController.resume()
                                             } else if (!isLoading && chapterText.isNotBlank()) {
-                                                ttsController.playText(chapterText)
+                                                ttsController.playText(
+                                                    text = chapterText,
+                                                    cacheKey = narrationCacheKey,
+                                                    persistAudioCache = isDownloadedChapter
+                                                )
                                             }
                                         }
                                     }
@@ -507,7 +507,11 @@ fun ReaderScreen(
                                         TextButton(
                                             onClick = {
                                                 if (!isLoading && chapterText.isNotBlank()) {
-                                                    ttsController.playText(chapterText)
+                                                    ttsController.playText(
+                                                        text = chapterText,
+                                                        cacheKey = narrationCacheKey,
+                                                        persistAudioCache = isDownloadedChapter
+                                                    )
                                                 }
                                             }
                                         ) {
