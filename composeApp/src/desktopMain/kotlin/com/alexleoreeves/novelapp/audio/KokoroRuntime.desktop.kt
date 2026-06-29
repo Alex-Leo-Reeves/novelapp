@@ -29,9 +29,9 @@ actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: Kokor
     }
 }
 
-actual fun stopKokoroAudio() = Unit
-actual fun pauseKokoroAudio() = Unit
-actual fun resumeKokoroAudio() = Unit
+actual fun stopKokoroAudio() = stopPlatformNarrationAudio()
+actual fun pauseKokoroAudio() = pausePlatformNarrationAudio()
+actual fun resumeKokoroAudio() = resumePlatformNarrationAudio()
 actual fun playAmbientCue(cue: AmbientCue?, volume: Float) = DesktopAmbientPlayer.play(cue, volume)
 actual fun pauseAmbientCue() = DesktopAmbientPlayer.pause()
 actual fun resumeAmbientCue() = DesktopAmbientPlayer.resume()

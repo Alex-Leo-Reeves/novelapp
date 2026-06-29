@@ -52,15 +52,17 @@ actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: Kokor
 }
 
 actual fun stopKokoroAudio() {
+    stopPlatformNarrationAudio()
     AndroidSystemTtsEngine.stop()
 }
 
 actual fun pauseKokoroAudio() {
+    pausePlatformNarrationAudio()
     AndroidSystemTtsEngine.stop()
 }
 
 actual fun resumeKokoroAudio() {
-    // The controller restarts from the active segment after pause.
+    resumePlatformNarrationAudio()
 }
 
 actual fun playAmbientCue(cue: AmbientCue?, volume: Float) {

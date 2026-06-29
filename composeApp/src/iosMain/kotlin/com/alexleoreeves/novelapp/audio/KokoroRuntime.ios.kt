@@ -1,6 +1,7 @@
 package com.alexleoreeves.novelapp.audio
 
 import platform.AVFAudio.AVAudioPlayer
+import platform.AVFAudio.AVSpeechBoundaryImmediate
 import kotlinx.coroutines.delay
 import platform.AVFAudio.AVSpeechSynthesisVoice
 import platform.AVFAudio.AVSpeechSynthesizer
@@ -24,7 +25,11 @@ actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): Koko
 }
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {
-    iosSpeechSynthesizer.stopSpeakingAtBoundary(0u)
+    if (result.audioBytes.isNotEmpty()) {
+        platformPlayAudio(result.audioBytes)
+        return
+    }
+    iosSpeechSynthesizer.stopSpeakingAtBoundary(AVSpeechBoundaryImmediate)
     val utterance = AVSpeechUtterance.speechUtteranceWithString(request.text)
     utterance.voice = AVSpeechSynthesisVoice.voiceWithLanguage(voiceLanguage(request.voiceId))
     utterance.rate = (0.48f * request.speed).coerceIn(0.32f, 0.62f)
@@ -34,14 +39,17 @@ actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: Kokor
 }
 
 actual fun stopKokoroAudio() {
-    iosSpeechSynthesizer.stopSpeakingAtBoundary(0u)
+    stopPlatformNarrationAudio()
+    iosSpeechSynthesizer.stopSpeakingAtBoundary(AVSpeechBoundaryImmediate)
 }
 
 actual fun pauseKokoroAudio() {
-    iosSpeechSynthesizer.pauseSpeakingAtBoundary(0u)
+    pausePlatformNarrationAudio()
+    iosSpeechSynthesizer.pauseSpeakingAtBoundary(AVSpeechBoundaryImmediate)
 }
 
 actual fun resumeKokoroAudio() {
+    resumePlatformNarrationAudio()
     iosSpeechSynthesizer.continueSpeaking()
 }
 
