@@ -52,6 +52,29 @@ fun MediaDetailScreen(
     var isLoadingEpisodes by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
 
+    var selectedServer by remember { mutableStateOf(0) } // 0: VidSrc CC, 1: Embed.su, 2: AutoEmbed, 3: 2Embed
+    val serverNames = listOf("Server 1 (VidSrc)", "Server 2 (EmbedSu)", "Server 3 (AutoEmbed)", "Server 4 (2Embed)")
+
+    val resolveMovieUrl: (String, Int) -> String = { id, server ->
+        when (server) {
+            0 -> "https://vidsrc.cc/v2/embed/movie/$id"
+            1 -> "https://embed.su/embed/movie/$id"
+            2 -> "https://autoembed.co/movie/tmdb/$id"
+            3 -> "https://2embed.cc/embed/$id"
+            else -> "https://vidsrc.cc/v2/embed/movie/$id"
+        }
+    }
+
+    val resolveTvUrl: (String, String, String, Int) -> String = { id, s, e, server ->
+        when (server) {
+            0 -> "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
+            1 -> "https://embed.su/embed/tv/$id/$s/$e"
+            2 -> "https://autoembed.co/tv/tmdb/$id-$s-$e"
+            3 -> "https://2embed.cc/embedtv/$id&s=$s&e=$e"
+            else -> "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
+        }
+    }
+
     LaunchedEffect(item.detailPageUrl) {
         isLoadingEpisodes = true
         episodesList = when {
@@ -82,7 +105,7 @@ fun MediaDetailScreen(
                     val tvId = urlParts.getOrNull(1) ?: tmdbId
                     val s = urlParts.getOrNull(2) ?: "1"
                     val e = urlParts.getOrNull(3) ?: "1"
-                    "https://vidsrc.to/embed/tv/$tvId/$s/$e"
+                    resolveTvUrl(tvId, s, e, selectedServer)
                 }
                 item.detailPageUrl.contains("dramacool") -> {
                     dramaScraper.extractStreamUrl(ep.url) ?: ep.url
@@ -187,6 +210,28 @@ fun MediaDetailScreen(
                 )
             }
 
+            // Server Selector
+            Column {
+                Text("Streaming Server", color = currentTheme.textColor(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    serverNames.forEachIndexed { idx, name ->
+                        FilterChip(
+                            selected = selectedServer == idx,
+                            onClick = { selectedServer = idx },
+                            label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = currentTheme.accentColor(),
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+                }
+            }
+
             if (statusText.isNotEmpty()) {
                 Text(
                     text = statusText,
@@ -199,7 +244,7 @@ fun MediaDetailScreen(
             if (item.detailPageUrl.startsWith("tmdb://") && mediaType == "movie") {
                 Button(
                     onClick = {
-                        val playUrl = "https://vidsrc.to/embed/movie/$tmdbId"
+                        val playUrl = resolveMovieUrl(tmdbId, selectedServer)
                         onPlayStream(playUrl, item.title)
                     },
                     modifier = Modifier
@@ -212,7 +257,8 @@ fun MediaDetailScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("Watch Movie Now", fontWeight = FontWeight.Bold)
                 }
-            } else {
+            }
+ else {
                 // TV / Episodic: List of episodes
                 Text(
                     text = "Episodes",

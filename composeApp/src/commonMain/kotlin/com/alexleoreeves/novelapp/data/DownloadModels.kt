@@ -72,3 +72,11 @@ data class DownloadIndex(
     val readHistory: List<ReadHistoryItem> = emptyList(),
     val watchHistory: List<WatchHistoryItem> = emptyList()
 )
+
+@Serializable
+data class UserSyncState(
+    val favorites: List<FavoriteNovel> = emptyList(),
+    val readHistory: List<ReadHistoryItem> = emptyList(),
+    val watchHistory: List<WatchHistoryItem> = emptyList(),
+    val updatedAt: Long = 0L
+)

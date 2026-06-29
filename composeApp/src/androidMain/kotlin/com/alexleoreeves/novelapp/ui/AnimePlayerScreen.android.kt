@@ -7,6 +7,9 @@ import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -30,9 +33,18 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.alexleoreeves.novelapp.data.AppTheme
+import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -44,6 +56,7 @@ import kotlinx.coroutines.launch
  *  - Subtitle track picker: Japanese (ja) / English (en) / Off
  *  - Seek bar with 10s skip forward/back
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 actual fun AnimePlayerScreen(
     streamUrl: String,
@@ -81,11 +94,32 @@ actual fun AnimePlayerScreen(
 
     val isDirectMedia = streamUrl.isDirectPlayableMediaUrl()
     val isWebEmbed = streamUrl.startsWith("http", ignoreCase = true) && !isDirectMedia
+    var retryKey by remember(streamUrl) { mutableStateOf(0) }
+    var playerError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    var isPlayerBuffering by remember(streamUrl, retryKey) { mutableStateOf(true) }
 
     // ── ExoPlayer setup ───────────────────────────────────────────────────
-    val exoPlayer = remember {
+    val exoPlayer = remember(streamUrl, retryKey) {
         if (!isWebEmbed || isDirectMedia) {
-            ExoPlayer.Builder(context).build().apply {
+            val cache = NovelAppVideoCache.get(context)
+            val dataSourceFactory = DefaultDataSource.Factory(context)
+            val cacheDataSourceFactory = CacheDataSource.Factory()
+                .setCache(cache)
+                .setUpstreamDataSourceFactory(dataSourceFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            val loadControl = DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    30_000,
+                    90_000,
+                    1_500,
+                    4_000
+                )
+                .build()
+            ExoPlayer.Builder(context)
+                .setLoadControl(loadControl)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+                .build()
+                .apply {
                 setMediaItem(MediaItem.fromUri(streamUrl))
                 prepare()
                 if (initialPositionMs > 0L) seekTo(initialPositionMs)
@@ -95,8 +129,29 @@ actual fun AnimePlayerScreen(
             null
         }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(exoPlayer) {
         onDispose { exoPlayer?.release() }
+    }
+
+    DisposableEffect(exoPlayer) {
+        val player = exoPlayer
+        if (player == null) {
+            onDispose { }
+        } else {
+            val listener = object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    isPlayerBuffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+                    if (playbackState == Player.STATE_READY) playerError = null
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    playerError = error.localizedMessage ?: "Stream failed to load."
+                    isPlayerBuffering = false
+                }
+            }
+            player.addListener(listener)
+            onDispose { player.removeListener(listener) }
+        }
     }
 
     // ── UI State ──────────────────────────────────────────────────────────
@@ -151,89 +206,148 @@ actual fun AnimePlayerScreen(
     }
 
     if (isWebEmbed) {
+        var webLoading by remember(streamUrl, retryKey) { mutableStateOf(true) }
+        var webError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+        val providerName = streamUrl.providerName()
+
+        LaunchedEffect(streamUrl, retryKey, webLoading) {
+            if (webLoading) {
+                delay(18_000)
+                if (webLoading) {
+                    webError = "$providerName is taking too long to respond. Try another provider or episode."
+                    webLoading = false
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            mediaPlaybackRequiresUserGesture = false
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
-                            setSupportMultipleWindows(false)
-                            javaScriptCanOpenWindowsAutomatically = true
-                            loadsImagesAutomatically = true
-                            allowContentAccess = true
-                            allowFileAccess = false
-                            userAgentString =
-                                "Mozilla/5.0 (Linux; Android 13; NovelApp) AppleWebKit/537.36 " +
-                                    "(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+            key(retryKey) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                databaseEnabled = true
+                                mediaPlaybackRequiresUserGesture = false
+                                useWideViewPort = true
+                                loadWithOverviewMode = true
+                                setSupportMultipleWindows(false)
+                                javaScriptCanOpenWindowsAutomatically = true
+                                loadsImagesAutomatically = true
+                                allowContentAccess = true
+                                allowFileAccess = false
+                                userAgentString =
+                                    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+                                        "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                }
+                            }
+                            CookieManager.getInstance().setAcceptCookie(true)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                             }
-                        }
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                        }
-                        webChromeClient = object : WebChromeClient() {
-                            private var customView: View? = null
-                            private var customViewCallback: CustomViewCallback? = null
+                            webChromeClient = object : WebChromeClient() {
+                                private var customView: View? = null
+                                private var customViewCallback: CustomViewCallback? = null
 
-                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                val decor = activity?.window?.decorView as? ViewGroup
-                                if (view == null || decor == null) {
-                                    callback?.onCustomViewHidden()
-                                    return
-                                }
-                                if (customView != null) {
-                                    callback?.onCustomViewHidden()
-                                    return
-                                }
-                                customView = view
-                                customViewCallback = callback
-                                decor.addView(
-                                    view,
-                                    ViewGroup.LayoutParams(
-                                        ViewGroup.LayoutParams.MATCH_PARENT,
-                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                    val decor = activity?.window?.decorView as? ViewGroup
+                                    if (view == null || decor == null) {
+                                        callback?.onCustomViewHidden()
+                                        return
+                                    }
+                                    if (customView != null) {
+                                        callback?.onCustomViewHidden()
+                                        return
+                                    }
+                                    customView = view
+                                    customViewCallback = callback
+                                    decor.addView(
+                                        view,
+                                        ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            ViewGroup.LayoutParams.MATCH_PARENT
+                                        )
                                     )
-                                )
-                            }
+                                }
 
-                            override fun onHideCustomView() {
-                                val decor = activity?.window?.decorView as? ViewGroup
-                                customView?.let { decor?.removeView(it) }
-                                customView = null
-                                customViewCallback?.onCustomViewHidden()
-                                customViewCallback = null
+                                override fun onHideCustomView() {
+                                    val decor = activity?.window?.decorView as? ViewGroup
+                                    customView?.let { decor?.removeView(it) }
+                                    customView = null
+                                    customViewCallback?.onCustomViewHidden()
+                                    customViewCallback = null
+                                }
                             }
-                        }
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: android.webkit.WebResourceRequest?
-                            ): Boolean {
-                                val url = request?.url?.toString() ?: ""
-                                return !url.isAllowedPlayerNavigation(streamUrl)
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                    webLoading = true
+                                    webError = null
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    webLoading = false
+                                }
+
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val url = request?.url?.toString() ?: ""
+                                    return !url.isAllowedPlayerNavigation(streamUrl)
+                                }
+
+                                override fun onReceivedError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    error: WebResourceError?
+                                ) {
+                                    if (request?.isForMainFrame == true) {
+                                        webLoading = false
+                                        webError = error?.description?.toString() ?: "Provider failed to load."
+                                    }
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    errorResponse: WebResourceResponse?
+                                ) {
+                                    if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) {
+                                        webLoading = false
+                                        webError = "$providerName returned ${errorResponse?.statusCode ?: "an error"}."
+                                    }
+                                }
                             }
-                        }
-                        loadUrl(
-                            streamUrl,
-                            mapOf(
-                                "Referer" to streamUrl.playerReferer(),
-                                "Origin" to streamUrl.playerOrigin()
+                            loadUrl(
+                                streamUrl,
+                                mapOf(
+                                    "Referer" to streamUrl.playerReferer(),
+                                    "Origin" to streamUrl.playerOrigin()
+                                )
                             )
-                        )
-                    }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            PlayerLoadingOverlay(
+                visible = webLoading || webError != null,
+                title = episodeTitle,
+                providerName = providerName,
+                message = webError ?: "Loading secure player...",
+                isError = webError != null,
+                onRetry = {
+                    webError = null
+                    webLoading = true
+                    retryKey++
                 },
-                modifier = Modifier.fillMaxSize()
+                onBack = onBack
             )
 
             IconButton(
@@ -269,6 +383,20 @@ actual fun AnimePlayerScreen(
                 }
             },
             modifier = Modifier.fillMaxSize()
+        )
+
+        PlayerLoadingOverlay(
+            visible = isPlayerBuffering || playerError != null,
+            title = episodeTitle,
+            providerName = "NovelApp player",
+            message = playerError ?: "Buffering ahead...",
+            isError = playerError != null,
+            onRetry = {
+                playerError = null
+                isPlayerBuffering = true
+                retryKey++
+            },
+            onBack = onBack
         )
 
         // ── Custom Overlay Controls ───────────────────────────────────────
@@ -590,22 +718,130 @@ private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
     if (requestedHost.isBlank()) return false
     if (requestedHost == initialHost || requestedHost.endsWith(".$initialHost")) return true
 
+    // Block obvious ad/tracker domains
+    val blockedDomains = listOf("doubleclick.net", "googleadservices.com", "pagead2", "popads", "popcash")
+    if (blockedDomains.any { requestedHost.contains(it) }) return false
+
+    // Allow all streaming, embed, and player domains
     return listOf(
-        "anineko.to",
-        "anizara.store",
-        "vivibebe.site",
-        "bibiemb.xyz",
-        "otakuhg.site",
-        "otakuvid.online",
-        "playmogo.com",
-        "kwik.",
-        "dood",
-        "vidsrc",
-        "vidlink",
-        "stream",
-        "embed",
-        "tmdb"
+        "anineko", "anizara", "vivibebe", "bibiemb", "otakuhg", "otakuvid", "playmogo",
+        "kwik", "dood", "vidsrc", "vidlink", "stream", "embed", "tmdb", "themoviedb",
+        "kisskh", "dramacool", "kimcartoon", "fastani", "vidplay", "filemoon",
+        "rapidvideo", "voe", "cloudflare", "jwpcdn", "jwplatform", "cdnjs",
+        "bootstrapcdn", "googleapis", "gstatic", "youtube", "ytimg",
+        "font", "ajax.googleapis", "static", "cdn", "player", "media",
+        "video", "m3u8", "hls", "mp4", "aniwatch", "zoro", "anime"
     ).any { requestedHost.contains(it) }
+}
+
+@Composable
+private fun PlayerLoadingOverlay(
+    visible: Boolean,
+    title: String,
+    providerName: String,
+    message: String,
+    isError: Boolean,
+    onRetry: () -> Unit,
+    onBack: () -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(),
+        exit = fadeOut()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.78f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 420.dp)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                if (isError) {
+                    Icon(
+                        Icons.Default.CloudOff,
+                        contentDescription = null,
+                        tint = Color(0xFFFF7A1A),
+                        modifier = Modifier.size(42.dp)
+                    )
+                } else {
+                    CircularProgressIndicator(color = Color(0xFFFF7A1A))
+                }
+                Text(
+                    title,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2
+                )
+                Text(
+                    providerName,
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Text(
+                    message,
+                    color = Color.White.copy(alpha = 0.82f),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = onBack,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    ) {
+                        Icon(Icons.Default.ArrowBack, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Back")
+                    }
+                    Button(
+                        onClick = onRetry,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A1A))
+                    ) {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Retry")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private object NovelAppVideoCache {
+    private var cache: SimpleCache? = null
+
+    fun get(context: android.content.Context): SimpleCache {
+        return cache ?: synchronized(this) {
+            cache ?: SimpleCache(
+                File(context.cacheDir, "video-cache"),
+                LeastRecentlyUsedCacheEvictor(512L * 1024L * 1024L),
+                StandaloneDatabaseProvider(context)
+            ).also { cache = it }
+        }
+    }
+}
+
+private fun String.providerName(): String {
+    val host = runCatching { Uri.parse(this).host.orEmpty() }.getOrDefault("")
+        .removePrefix("www.")
+    return when {
+        host.isBlank() -> "Embedded provider"
+        "anineko" in host -> "Anineko"
+        "animepahe" in host -> "AnimePahe"
+        "vidsrc" in host -> "VidSrc"
+        "embed" in host -> "Embed provider"
+        "dramacool" in host -> "DramaCool"
+        "kisskh" in host -> "KissKH"
+        "kimcartoon" in host -> "KimCartoon"
+        else -> host
+    }
 }
 
 private fun String.playerReferer(): String {

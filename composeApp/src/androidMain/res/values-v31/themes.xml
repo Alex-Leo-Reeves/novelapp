@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NovelApp" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#05070B</item>
+        <item name="android:colorAccent">#FF7A1A</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:navigationBarColor">#05070B</item>
+        <item name="android:statusBarColor">#05070B</item>
+        <item name="android:windowSplashScreenBackground">#05070B</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

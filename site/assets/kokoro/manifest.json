@@ -1,0 +1,10 @@
+{
+  "version": "kokoro-82m-v1",
+  "minimumAppVersionCode": 8,
+  "model": {
+    "fileName": "model_quantized.onnx",
+    "url": "https://novelapp1.onrender.com/assets/kokoro/model_quantized.onnx",
+    "sizeBytes": 92361116,
+    "sha256": "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478"
+  }
+}

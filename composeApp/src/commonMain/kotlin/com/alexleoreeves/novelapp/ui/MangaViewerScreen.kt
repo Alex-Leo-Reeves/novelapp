@@ -25,12 +25,14 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.BuildKonfig
-import com.alexleoreeves.novelapp.audio.GeminiTtsController
+import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.audio.MangaOcrReader
 import com.alexleoreeves.novelapp.audio.OcrTextPanel
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.theme.*
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -42,6 +44,7 @@ fun MangaViewerScreen(
     chapterTitle: String,
     sourceName: String,
     currentTheme: AppTheme,
+    ttsController: KokoroNarrationController,
     initialPageIndex: Int = 0,
     onProgress: (Int) -> Unit = {},
     onBack: () -> Unit
@@ -49,12 +52,10 @@ fun MangaViewerScreen(
     val scope = rememberCoroutineScope()
     val repository = remember {
         NovelSearchRepository(
-            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )
     }
-    val ttsController = remember { GeminiTtsController(BuildKonfig.GEMINI_API_KEY) }
     val ocrReader = remember { MangaOcrReader() }
 
     var pages by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -68,12 +69,26 @@ fun MangaViewerScreen(
     var ocrPanels by remember { mutableStateOf<List<OcrTextPanel>>(emptyList()) }
     var activeBubbleIndex by remember { mutableStateOf(-1) }
     var currentPageIndex by remember { mutableStateOf(0) }
+    var ocrReadingPageIndex by remember { mutableStateOf(-1) }
     var pageSizes by remember { mutableStateOf<Map<Int, IntSize>>(emptyMap()) }
+    var ocrStatus by remember { mutableStateOf("Panel reader idle") }
+    var skipEmptyOcrPages by remember { mutableStateOf(false) }
+    var ocrReaderJob by remember { mutableStateOf<Job?>(null) }
 
     // Scroll states
     val lazyListState = rememberLazyListState()
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val density = LocalDensity.current
+
+    DisposableEffect(chapterUrl) {
+        onDispose {
+            ocrReaderJob?.cancel()
+            isOcrActive = false
+            activeBubbleIndex = -1
+            ocrReadingPageIndex = -1
+            ttsController.stop()
+        }
+    }
 
     // Load pages on launch
     LaunchedEffect(chapterUrl) {
@@ -116,64 +131,82 @@ fun MangaViewerScreen(
         onProgress(currentPageIndex.coerceAtLeast(0))
     }
 
-    // AI Panel Reader Auto-Scroll & Read loop
-    LaunchedEffect(isOcrActive, currentPageIndex) {
-        if (isOcrActive && pages.isNotEmpty()) {
-            val pageUrl = pages[currentPageIndex]
-            ocrPanels = ocrReader.recognizeTextFromUrl(pageUrl)
-            if (ocrPanels.isNotEmpty()) {
-                activeBubbleIndex = 0
-            } else {
-                // No text bubbles on page, proceed to next page automatically
-                delay(2000)
-                if (autoScrollEnabled && currentPageIndex < pages.size - 1) {
-                    if (scrollMode == MangaScrollMode.WEBTOON) {
-                        lazyListState.animateScrollToItem(currentPageIndex + 1)
-                    } else {
-                        pagerState.animateScrollToPage(currentPageIndex + 1)
-                    }
-                } else {
-                    isOcrActive = false
-                }
-            }
+    LaunchedEffect(isOcrActive) {
+        if (!isOcrActive) {
+            ocrReaderJob?.cancel()
+            ocrReaderJob = null
+            activeBubbleIndex = -1
+            ocrReadingPageIndex = -1
+            ocrPanels = emptyList()
+            ttsController.stop()
+            return@LaunchedEffect
         }
-    }
+        if (pages.isEmpty()) {
+            isOcrActive = false
+            ocrStatus = "No manga pages loaded."
+            return@LaunchedEffect
+        }
 
-    // Read active speech bubble, then advance only after audio finishes.
-    LaunchedEffect(activeBubbleIndex, currentPageIndex, ocrPanels) {
-        if (isOcrActive && activeBubbleIndex in ocrPanels.indices) {
-            val panel = ocrPanels[activeBubbleIndex]
-            
-            // Auto-scroll the view to center on speech bubble coordinates
-            if (scrollMode == MangaScrollMode.WEBTOON) {
-                val pageSize = pageSizes[currentPageIndex]
-                val scaleY = if (pageSize != null && panel.imageHeight > 0) {
-                    pageSize.height.toFloat() / panel.imageHeight.toFloat()
-                } else {
-                    1f
+        ocrReaderJob?.cancel()
+        ocrReaderJob = scope.launch {
+            var pageIndex = currentPageIndex.coerceIn(0, pages.lastIndex)
+            while (currentCoroutineContext().isActive && isOcrActive && pageIndex in pages.indices) {
+                ocrReadingPageIndex = pageIndex
+                activeBubbleIndex = -1
+                ocrStatus = "Scanning page ${pageIndex + 1}..."
+                val panels = ocrReader.recognizeTextFromUrl(pages[pageIndex])
+                    .filter { it.text.isNotBlank() }
+                    .sortedWith(compareBy<OcrTextPanel> { it.bounds.top }.thenBy { it.bounds.left })
+                ocrPanels = panels
+
+                if (panels.isEmpty()) {
+                    ocrStatus = "No readable text found on page ${pageIndex + 1}."
+                    if (skipEmptyOcrPages && autoScrollEnabled && pageIndex < pages.lastIndex) {
+                        pageIndex += 1
+                        if (scrollMode == MangaScrollMode.WEBTOON) {
+                            lazyListState.animateScrollToItem(pageIndex)
+                        } else {
+                            pagerState.animateScrollToPage(pageIndex)
+                        }
+                        continue
+                    }
+                    break
                 }
-                val targetY = (panel.bounds.top * scaleY).roundToInt()
-                lazyListState.animateScrollToItem(currentPageIndex, (targetY - 120).coerceAtLeast(0))
-            }
 
-            // Play narration
-            ttsController.readText(panel.text)
-            if (!isOcrActive) return@LaunchedEffect
-            if (activeBubbleIndex in 0 until ocrPanels.lastIndex) {
-                activeBubbleIndex++
-            } else {
-                if (autoScrollEnabled && currentPageIndex < pages.size - 1) {
-                    currentPageIndex++
+                panels.forEachIndexed { bubbleIndex, panel ->
+                    if (!currentCoroutineContext().isActive || !isOcrActive) return@launch
+                    activeBubbleIndex = bubbleIndex
+                    ocrStatus = "Reading bubble ${bubbleIndex + 1} of ${panels.size} on page ${pageIndex + 1}"
+
                     if (scrollMode == MangaScrollMode.WEBTOON) {
-                        lazyListState.animateScrollToItem(currentPageIndex)
+                        val pageSize = pageSizes[pageIndex]
+                        val scaleY = if (pageSize != null && panel.imageHeight > 0) {
+                            pageSize.height.toFloat() / panel.imageHeight.toFloat()
+                        } else {
+                            1f
+                        }
+                        val targetY = (panel.bounds.top * scaleY).roundToInt()
+                        lazyListState.animateScrollToItem(pageIndex, (targetY - 120).coerceAtLeast(0))
+                    }
+
+                    ttsController.readText(panel.text)
+                }
+
+                if (autoScrollEnabled && pageIndex < pages.lastIndex) {
+                    pageIndex += 1
+                    if (scrollMode == MangaScrollMode.WEBTOON) {
+                        lazyListState.animateScrollToItem(pageIndex)
                     } else {
-                        pagerState.animateScrollToPage(currentPageIndex)
+                        pagerState.animateScrollToPage(pageIndex)
                     }
                 } else {
-                    isOcrActive = false
-                    activeBubbleIndex = -1
+                    ocrStatus = "Panel reader finished."
+                    break
                 }
             }
+            isOcrActive = false
+            activeBubbleIndex = -1
+            ocrReadingPageIndex = -1
         }
     }
 
@@ -389,7 +422,7 @@ fun MangaViewerScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    "Auto-scroll and voice-act speech bubbles",
+                                    if (isOcrActive) ocrStatus else "Auto-scroll and voice-act speech bubbles",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.White.copy(0.5f)
                                 )
@@ -399,8 +432,11 @@ fun MangaViewerScreen(
                                 onClick = {
                                     isOcrActive = !isOcrActive
                                     if (!isOcrActive) {
+                                        ocrReaderJob?.cancel()
                                         ttsController.stop()
                                         activeBubbleIndex = -1
+                                        ocrReadingPageIndex = -1
+                                        ocrStatus = "Panel reader stopped."
                                     }
                                 },
                                 modifier = Modifier
@@ -421,6 +457,36 @@ fun MangaViewerScreen(
                         }
 
                         Spacer(Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.SkipNext,
+                                null,
+                                tint = Color.White.copy(0.6f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Skip empty OCR pages",
+                                color = Color.White.copy(0.75f),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Switch(
+                                checked = skipEmptyOcrPages,
+                                onCheckedChange = { skipEmptyOcrPages = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = currentTheme.accentColor(),
+                                    checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                )
+                            )
+                        }
+
+                        Spacer(Modifier.height(8.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),

@@ -15,16 +15,23 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.*
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.BuildKonfig
-import com.alexleoreeves.novelapp.audio.GeminiTtsController
+import com.alexleoreeves.novelapp.audio.KokoroNarrationController
+import com.alexleoreeves.novelapp.audio.KokoroVoiceSetupPhase
+import com.alexleoreeves.novelapp.audio.VoiceMode
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.sensor.SleepDetector
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun ReaderScreen(
@@ -33,6 +40,7 @@ fun ReaderScreen(
     chapterTitle: String,
     sourceName: String,
     currentTheme: AppTheme,
+    ttsController: KokoroNarrationController,
     onThemeChange: (AppTheme) -> Unit,
     initialParagraphIndex: Int = 0,
     onProgress: (Int) -> Unit = {},
@@ -41,13 +49,9 @@ fun ReaderScreen(
     val scope = rememberCoroutineScope()
     val repository = remember {
         NovelSearchRepository(
-            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )
-    }
-    val ttsController = remember {
-        GeminiTtsController(BuildKonfig.GEMINI_API_KEY)
     }
     val sleepDetector = remember { SleepDetector() }
 
@@ -62,8 +66,16 @@ fun ReaderScreen(
     val isPlaying = ttsController.isPlaying.collectAsState()
     val ttsChunkIndex = ttsController.currentChunkIndex.collectAsState()
     val ttsChunkBoundaries = ttsController.chunkBoundaries.collectAsState()
+    val ttsParagraphIndex = ttsController.currentParagraphIndex.collectAsState()
+    val ttsWordIndex = ttsController.currentWordIndex.collectAsState()
+    val playbackProgress = ttsController.playbackProgress.collectAsState()
+    val isBuffering = ttsController.isBuffering.collectAsState()
+    val voiceSetupStatus = ttsController.voiceSetupStatus.collectAsState()
+    val narrationSettings = ttsController.settings.collectAsState()
     val ttsError = ttsController.lastError.collectAsState()
     val lazyListState = rememberLazyListState()
+    var isSeekingNarration by remember { mutableStateOf(false) }
+    var seekProgress by remember { mutableStateOf(0f) }
     val paragraphs by remember(chapterText, isLoading) {
         derivedStateOf {
             if (isLoading || chapterText.startsWith("Loading")) {
@@ -87,10 +99,20 @@ fun ReaderScreen(
         }
     }
 
+    LaunchedEffect(playbackProgress.value, isSeekingNarration) {
+        if (!isSeekingNarration) {
+            seekProgress = playbackProgress.value
+        }
+    }
+
     // Cleanup on leave
-    DisposableEffect(Unit) {
+    val keepNarrationInBackground by rememberUpdatedState(narrationSettings.value.backgroundPlaybackEnabled)
+    DisposableEffect(chapterUrl) {
         onDispose {
             sleepDetector.stopMonitoring()
+            if (!keepNarrationInBackground) {
+                ttsController.stop()
+            }
         }
     }
 
@@ -117,11 +139,10 @@ fun ReaderScreen(
         }
     }
 
-    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsChunkIndex.value, ttsChunkBoundaries.value, paragraphs.size) {
+    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, ttsWordIndex.value, paragraphs.size) {
         if (!isPlaying.value || !autoScrollEnabled || paragraphs.isEmpty()) return@LaunchedEffect
-        val boundaries = ttsChunkBoundaries.value
-        val chunkIdx = ttsChunkIndex.value
-        val paragraphIndex = boundaries.getOrNull(chunkIdx) ?: return@LaunchedEffect
+        val paragraphIndex = ttsParagraphIndex.value.takeIf { it >= 0 } ?: return@LaunchedEffect
+        if (ttsWordIndex.value > 0 && ttsWordIndex.value % 8 != 0) return@LaunchedEffect
         val listIndex = (paragraphIndex + 2).coerceIn(0, paragraphs.size + 1)
         lazyListState.animateScrollToItem(listIndex)
         onProgress(paragraphIndex)
@@ -196,19 +217,16 @@ fun ReaderScreen(
                         }
                     }
                     itemsIndexed(paragraphs) { index, paragraph ->
-                        // Derive which paragraph the TTS cursor is currently narrating
-                        val boundaries = ttsChunkBoundaries.value
-                        val chunkIdx = ttsChunkIndex.value
-                        val highlightedPara = if (boundaries.isNotEmpty() && chunkIdx < boundaries.size)
-                            boundaries[chunkIdx]
-                        else -1
+                        val highlightedPara = ttsParagraphIndex.value
                         val isHighlighted = isPlaying.value && index == highlightedPara
+
+                        val highlightedWordIndex: Int = if (isHighlighted) ttsWordIndex.value else -1
 
                         val highlightColor by animateColorAsState(
                             targetValue = if (isHighlighted)
-                                currentTheme.accentColor().copy(alpha = 0.18f)
+                                currentTheme.accentColor().copy(alpha = 0.10f)
                             else Color.Transparent,
-                            animationSpec = tween(durationMillis = 400),
+                            animationSpec = tween(durationMillis = 300),
                             label = "paragraphHighlight"
                         )
 
@@ -219,18 +237,35 @@ fun ReaderScreen(
                                 .background(highlightColor)
                                 .padding(horizontal = if (isHighlighted) 8.dp else 0.dp)
                         ) {
-                            Text(
-                                text = paragraph,
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Serif,
-                                    fontSize = fontSize.sp,
-                                    lineHeight = (fontSize * 1.6f).sp,
-                                    color = selectedTextColor
-                                ),
-                                modifier = Modifier.padding(bottom = 18.dp)
-                            )
+                            if (isHighlighted && highlightedWordIndex >= 0) {
+                                // Word-by-word highlight using AnnotatedString
+                                val words = paragraph.split(Regex("(?<=\\s)|(?=\\s)"))
+                                val annotated = buildAnnotatedString(words, highlightedWordIndex, selectedTextColor, currentTheme.accentColor())
+                                Text(
+                                    text = annotated,
+                                    style = TextStyle(
+                                        fontFamily = FontFamily.Serif,
+                                        fontSize = fontSize.sp,
+                                        lineHeight = (fontSize * 1.6f).sp,
+                                        color = selectedTextColor
+                                    ),
+                                    modifier = Modifier.padding(bottom = 18.dp)
+                                )
+                            } else {
+                                Text(
+                                    text = paragraph,
+                                    style = TextStyle(
+                                        fontFamily = FontFamily.Serif,
+                                        fontSize = fontSize.sp,
+                                        lineHeight = (fontSize * 1.6f).sp,
+                                        color = selectedTextColor
+                                    ),
+                                    modifier = Modifier.padding(bottom = 18.dp)
+                                )
+                            }
                         }
                     }
+
                     if (!isLoading && paragraphs.isEmpty()) {
                         item {
                             Text(
@@ -264,7 +299,14 @@ fun ReaderScreen(
                                 .padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = onBack) {
+                            IconButton(
+                                onClick = {
+                                    if (!narrationSettings.value.backgroundPlaybackEnabled) {
+                                        ttsController.stop()
+                                    }
+                                    onBack()
+                                }
+                            ) {
                                 Icon(Icons.Default.ArrowBack, "Back",
                                     tint = currentTheme.textColor())
                             }
@@ -326,6 +368,46 @@ fun ReaderScreen(
                                     modifier = Modifier.size(22.dp))
                             }
 
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp, bottom = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "Listening position",
+                                        color = currentTheme.subTextColor(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                    Text(
+                                        "${(seekProgress * 100).roundToInt()}%",
+                                        color = currentTheme.subTextColor(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                                Slider(
+                                    value = seekProgress.coerceIn(0f, 1f),
+                                    onValueChange = { value ->
+                                        isSeekingNarration = true
+                                        seekProgress = value
+                                    },
+                                    onValueChangeFinished = {
+                                        ttsController.seekToProgress(seekProgress)
+                                        isSeekingNarration = false
+                                    },
+                                    valueRange = 0f..1f,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = currentTheme.accentColor(),
+                                        activeTrackColor = currentTheme.accentColor(),
+                                        inactiveTrackColor = currentTheme.subTextColor().copy(alpha = 0.25f)
+                                    )
+                                )
+                            }
+
                             // Theme switcher + TTS speaker
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -365,25 +447,73 @@ fun ReaderScreen(
                                         if (isPlaying.value) {
                                             ttsController.pause()
                                         } else {
+                                            ttsController.updateSettings {
+                                                it.copy(backgroundTitle = novelTitle, backgroundSubtitle = chapterTitle)
+                                            }
                                             val hasPausedChunks = ttsChunkBoundaries.value.isNotEmpty() &&
                                                 ttsChunkIndex.value < ttsChunkBoundaries.value.lastIndex
                                             if (hasPausedChunks) {
                                                 ttsController.resume()
-                                            } else {
-                                                scope.launch {
-                                                    ttsController.readText(chapterText)
-                                                }
+                                            } else if (!isLoading && chapterText.isNotBlank()) {
+                                                ttsController.playText(chapterText)
                                             }
                                         }
                                     }
                                 ) {
                                     Icon(
-                                        if (isPlaying.value) Icons.Default.PauseCircle
+                                        if (isBuffering.value) Icons.Default.GraphicEq
+                                        else if (isPlaying.value) Icons.Default.PauseCircle
                                         else Icons.Default.PlayCircle,
                                         contentDescription = "Play/Pause narration",
                                         tint = currentTheme.accentColor(),
                                         modifier = Modifier.size(36.dp)
                                     )
+                                }
+                            }
+
+                            val setupStatus = voiceSetupStatus.value
+                            if (isBuffering.value || setupStatus.shouldShow) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    val percent = setupStatus.progressFraction
+                                    Text(
+                                        text = buildString {
+                                            append(setupStatus.userMessage.ifBlank { "Preparing voice." })
+                                            if (percent != null) {
+                                                append(" ")
+                                                append((percent * 100f).roundToInt())
+                                                append("%")
+                                            }
+                                        },
+                                        color = currentTheme.subTextColor(),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    LinearProgressIndicator(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.72f)
+                                            .height(3.dp)
+                                            .padding(top = 6.dp),
+                                        color = currentTheme.accentColor(),
+                                        trackColor = currentTheme.cardColor().copy(alpha = 0.5f)
+                                    )
+                                    if (
+                                        setupStatus.phase == KokoroVoiceSetupPhase.Error ||
+                                        setupStatus.phase == KokoroVoiceSetupPhase.Fallback
+                                    ) {
+                                        TextButton(
+                                            onClick = {
+                                                if (!isLoading && chapterText.isNotBlank()) {
+                                                    ttsController.playText(chapterText)
+                                                }
+                                            }
+                                        ) {
+                                            Text("Retry voice setup", color = currentTheme.accentColor())
+                                        }
+                                    }
                                 }
                             }
 
@@ -425,6 +555,175 @@ fun ReaderScreen(
                                         checkedThumbColor = currentTheme.accentColor(),
                                         checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
                                     )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.LibraryMusic,
+                                    contentDescription = null,
+                                    tint = currentTheme.subTextColor(),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Background play",
+                                    color = currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Switch(
+                                    checked = narrationSettings.value.backgroundPlaybackEnabled,
+                                    onCheckedChange = { enabled ->
+                                        ttsController.updateSettings {
+                                            it.copy(
+                                                backgroundPlaybackEnabled = enabled,
+                                                backgroundTitle = novelTitle,
+                                                backgroundSubtitle = chapterTitle
+                                            )
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = currentTheme.accentColor(),
+                                        checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                    )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.RecordVoiceOver,
+                                    contentDescription = null,
+                                    tint = currentTheme.subTextColor(),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Dynamic voices",
+                                    color = currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Switch(
+                                    checked = narrationSettings.value.voiceMode == VoiceMode.Dynamic,
+                                    onCheckedChange = { enabled ->
+                                        ttsController.updateSettings {
+                                            it.copy(voiceMode = if (enabled) VoiceMode.Dynamic else VoiceMode.NarratorOnly)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = currentTheme.accentColor(),
+                                        checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                    )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.VolumeUp,
+                                    null,
+                                    tint = currentTheme.subTextColor(),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Slider(
+                                    value = narrationSettings.value.narratorVolume,
+                                    onValueChange = { value ->
+                                        ttsController.updateSettings {
+                                            it.copy(narratorVolume = value.coerceIn(0.25f, 1f))
+                                        }
+                                    },
+                                    valueRange = 0.25f..1f,
+                                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = currentTheme.accentColor(),
+                                        activeTrackColor = currentTheme.accentColor()
+                                    )
+                                )
+                                Text(
+                                    "${(narrationSettings.value.narratorVolume * 100).roundToInt()}%",
+                                    color = currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.width(42.dp)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.GraphicEq,
+                                    contentDescription = null,
+                                    tint = currentTheme.subTextColor(),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Atmosphere",
+                                    color = currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Switch(
+                                    checked = narrationSettings.value.ambienceEnabled,
+                                    onCheckedChange = { enabled ->
+                                        ttsController.updateSettings { it.copy(ambienceEnabled = enabled) }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = currentTheme.accentColor(),
+                                        checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
+                                    )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.SurroundSound,
+                                    null,
+                                    tint = currentTheme.subTextColor(),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Slider(
+                                    value = narrationSettings.value.ambienceVolume,
+                                    onValueChange = { value ->
+                                        ttsController.updateSettings {
+                                            it.copy(ambienceVolume = value.coerceIn(0f, 0.7f))
+                                        }
+                                    },
+                                    valueRange = 0f..0.7f,
+                                    enabled = narrationSettings.value.ambienceEnabled,
+                                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = currentTheme.accentColor(),
+                                        activeTrackColor = currentTheme.accentColor()
+                                    )
+                                )
+                                Text(
+                                    "${(narrationSettings.value.ambienceVolume * 100).roundToInt()}%",
+                                    color = currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.width(42.dp)
                                 )
                             }
 
@@ -549,4 +848,38 @@ private fun String.splitReaderSentenceBlocks(maxChars: Int): List<String> {
     }
     if (current.isNotEmpty()) blocks.add(current.toString().trim())
     return blocks
+}
+
+private fun buildAnnotatedString(
+    words: List<String>,
+    highlightedIndex: Int,
+    defaultColor: Color,
+    accentColor: Color
+): AnnotatedString {
+    return buildAnnotatedString {
+        var wordCount = 0
+        for (token in words) {
+            val isWord = token.trim().isNotEmpty()
+            if (isWord) {
+                if (wordCount == highlightedIndex) {
+                    withStyle(
+                        SpanStyle(
+                            color = accentColor,
+                            fontWeight = FontWeight.Bold,
+                            background = accentColor.copy(alpha = 0.25f)
+                        )
+                    ) {
+                        append(token)
+                    }
+                } else {
+                    withStyle(SpanStyle(color = defaultColor)) {
+                        append(token)
+                    }
+                }
+                wordCount++
+            } else {
+                append(token)
+            }
+        }
+    }
 }

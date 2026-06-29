@@ -11,26 +11,26 @@ import androidx.compose.ui.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
-import com.alexleoreeves.novelapp.BuildKonfig
-import com.alexleoreeves.novelapp.audio.GeminiTtsController
+import com.alexleoreeves.novelapp.audio.KokoroNarrationController
+import com.alexleoreeves.novelapp.audio.KokoroVoiceSetupPhase
 import com.alexleoreeves.novelapp.data.AppTheme
 import com.alexleoreeves.novelapp.ui.theme.*
-import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UniversalReadScreen(
     currentTheme: AppTheme,
+    ttsController: KokoroNarrationController,
     requireAuth: (() -> Unit) -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-    val ttsController = remember { GeminiTtsController(BuildKonfig.GEMINI_API_KEY) }
     val isPlaying = ttsController.isPlaying.collectAsState()
+    val isBuffering = ttsController.isBuffering.collectAsState()
+    val voiceSetupStatus = ttsController.voiceSetupStatus.collectAsState()
 
     var pastedText by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
     var activeTab by remember { mutableStateOf(0) }
-    var isReading by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -124,6 +124,57 @@ fun UniversalReadScreen(
             onDismiss = { showFilePicker = false }
         )
 
+        val setupStatus = voiceSetupStatus.value
+        if (isBuffering.value || setupStatus.shouldShow) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(currentTheme.surfaceColor())
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                val percent = setupStatus.progressFraction
+                Text(
+                    text = buildString {
+                        append(setupStatus.userMessage.ifBlank { "Preparing voice." })
+                        if (percent != null) {
+                            append(" ")
+                            append((percent * 100f).roundToInt())
+                            append("%")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = currentTheme.subTextColor()
+                )
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth(0.72f)
+                        .height(3.dp)
+                        .padding(top = 6.dp),
+                    color = currentTheme.accentColor(),
+                    trackColor = currentTheme.cardColor().copy(alpha = 0.5f)
+                )
+                if (
+                    setupStatus.phase == KokoroVoiceSetupPhase.Error ||
+                    setupStatus.phase == KokoroVoiceSetupPhase.Fallback
+                ) {
+                    TextButton(
+                        onClick = {
+                            val text = when {
+                                activeTab == 0 && pastedText.isNotBlank() -> pastedText
+                                activeTab == 1 && urlInput.isNotBlank() -> "Reading content from: $urlInput"
+                                activeTab == 2 && importedFileContent.isNotBlank() -> importedFileContent
+                                else -> ""
+                            }
+                            if (text.isNotBlank()) ttsController.playText(text)
+                        }
+                    ) {
+                        Text("Retry voice setup", color = currentTheme.accentColor())
+                    }
+                }
+            }
+        }
+
         // Content
         when (activeTab) {
             0 -> {
@@ -169,12 +220,10 @@ fun UniversalReadScreen(
                     Button(
                         onClick = {
                             requireAuth {
-                                if (pastedText.isNotEmpty()) {
-                                    scope.launch {
-                                        isReading = true
-                                        ttsController.readText(pastedText)
-                                        isReading = false
-                                    }
+                                if (isPlaying.value) {
+                                    ttsController.stop()
+                                } else if (pastedText.isNotEmpty()) {
+                                    ttsController.playText(pastedText)
                                 }
                             }
                         },
@@ -183,16 +232,20 @@ fun UniversalReadScreen(
                             containerColor = currentTheme.accentColor()
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        enabled = pastedText.isNotEmpty() && !isPlaying.value
+                        enabled = pastedText.isNotEmpty() || isPlaying.value
                     ) {
                         Icon(
-                            if (isPlaying.value) Icons.Default.StopCircle else Icons.Default.PlayCircle,
+                            if (isBuffering.value) Icons.Default.GraphicEq
+                            else if (isPlaying.value) Icons.Default.StopCircle
+                            else Icons.Default.PlayCircle,
                             null,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (isPlaying.value) "Stop Reading" else "Start Reading",
+                            if (isBuffering.value) "Preparing Voice"
+                            else if (isPlaying.value) "Stop Reading"
+                            else "Start Reading",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -231,10 +284,10 @@ fun UniversalReadScreen(
                     Button(
                         onClick = {
                             requireAuth {
-                                scope.launch {
-                                    isReading = true
-                                    ttsController.readText("Reading content from: $urlInput")
-                                    isReading = false
+                                if (isPlaying.value) {
+                                    ttsController.stop()
+                                } else {
+                                    ttsController.playText("Reading content from: $urlInput")
                                 }
                             }
                         },
@@ -243,12 +296,16 @@ fun UniversalReadScreen(
                             containerColor = currentTheme.accentColor()
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        enabled = urlInput.isNotEmpty() && urlInput.startsWith("http")
+                        enabled = isPlaying.value || (urlInput.isNotEmpty() && urlInput.startsWith("http"))
                     ) {
-                        Icon(Icons.Default.Download, null, modifier = Modifier.size(22.dp))
+                        Icon(
+                            if (isPlaying.value) Icons.Default.StopCircle else Icons.Default.Download,
+                            null,
+                            modifier = Modifier.size(22.dp)
+                        )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "Fetch & Read",
+                            if (isPlaying.value) "Stop Reading" else "Fetch & Read",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -321,12 +378,10 @@ fun UniversalReadScreen(
                     Button(
                         onClick = {
                             requireAuth {
-                                if (importedFileContent.isNotEmpty()) {
-                                    scope.launch {
-                                        isReading = true
-                                        ttsController.readText(importedFileContent)
-                                        isReading = false
-                                    }
+                                if (isPlaying.value) {
+                                    ttsController.stop()
+                                } else if (importedFileContent.isNotEmpty()) {
+                                    ttsController.playText(importedFileContent)
                                 }
                             }
                         },
@@ -335,16 +390,20 @@ fun UniversalReadScreen(
                             containerColor = currentTheme.accentColor()
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        enabled = importedFileContent.isNotEmpty() && !isPlaying.value
+                        enabled = importedFileContent.isNotEmpty() || isPlaying.value
                     ) {
                         Icon(
-                            if (isPlaying.value) Icons.Default.StopCircle else Icons.Default.PlayCircle,
+                            if (isBuffering.value) Icons.Default.GraphicEq
+                            else if (isPlaying.value) Icons.Default.StopCircle
+                            else Icons.Default.PlayCircle,
                             null,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (isPlaying.value) "Stop Reading" else "Start Reading",
+                            if (isBuffering.value) "Preparing Voice"
+                            else if (isPlaying.value) "Stop Reading"
+                            else "Start Reading",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold
                         )

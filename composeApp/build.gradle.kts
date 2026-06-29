@@ -64,6 +64,8 @@ kotlin {
             implementation("androidx.media3:media3-exoplayer:1.3.1")
             implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
             implementation("androidx.media3:media3-ui:1.3.1")
+            implementation("androidx.media3:media3-datasource:1.3.1")
+            implementation(libs.onnxruntime.android)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -95,8 +97,10 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.ktor.client.cio)
                 implementation(libs.jspecify)
+                implementation(libs.onnxruntime)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
             }
+            resources.srcDir(rootProject.file("kokoro-assets"))
         }
     }
 }
@@ -114,8 +118,11 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 8
+        versionName = "1.7"
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
     packaging {
         resources {
@@ -153,6 +160,7 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    sourceSets["main"].assets.srcDir(rootProject.file("kokoro-assets-lite"))
 }
 
 room {

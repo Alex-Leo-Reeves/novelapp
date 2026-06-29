@@ -8,12 +8,12 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Android implementation: plays WAV audio bytes from Gemini
- * and plays it via MediaPlayer, suspending until playback completes.
+ * Android implementation: plays generated WAV audio bytes via MediaPlayer,
+ * suspending until playback completes.
  */
 actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     try {
-        val tempFile = File.createTempFile("gemini_audio", ".wav")
+        val tempFile = File.createTempFile("kokoro_audio", ".wav")
         FileOutputStream(tempFile).use { it.write(audioBytes) }
 
         suspendCancellableCoroutine { cont ->

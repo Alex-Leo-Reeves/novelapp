@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
-import com.alexleoreeves.novelapp.audio.GeminiTtsController
+import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.theme.*
@@ -44,12 +44,15 @@ fun DesktopApp() {
 
     val repository = remember {
         NovelSearchRepository(
-            geminiApiKey = BuildKonfig.GEMINI_API_KEY,
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )
     }
-    val ttsController = remember { GeminiTtsController(BuildKonfig.GEMINI_API_KEY) }
+    val ttsController = remember { KokoroNarrationController() }
+
+    DisposableEffect(Unit) {
+        onDispose { ttsController.close() }
+    }
 
     NovelAppTheme(appTheme = appTheme.value) {
         // Splash
@@ -79,6 +82,7 @@ fun DesktopApp() {
                         chapterTitle = selectedChapterTitle.value,
                         sourceName = selectedSourceName.value,
                         currentTheme = appTheme.value,
+                        ttsController = ttsController,
                         initialPageIndex = 0,
                         onProgress = {},
                         onBack = { selectedChapterUrl.value = null }
@@ -90,6 +94,7 @@ fun DesktopApp() {
                         chapterTitle = selectedChapterTitle.value,
                         sourceName = selectedSourceName.value,
                         currentTheme = appTheme.value,
+                        ttsController = ttsController,
                         onThemeChange = { appTheme.value = it },
                         initialParagraphIndex = 0,
                         onProgress = {},
@@ -185,6 +190,7 @@ fun DesktopApp() {
                         )
                         DesktopSection.READ -> UniversalReadScreen(
                             currentTheme = appTheme.value,
+                            ttsController = ttsController,
                             requireAuth = desktopRequireAuth
                         )
                         DesktopSection.DOWNLOADS -> DownloadsScreen(
@@ -209,7 +215,7 @@ fun DesktopApp() {
 private fun DesktopSidebar(
     currentSection: DesktopSection,
     currentTheme: AppTheme,
-    ttsController: GeminiTtsController,
+    ttsController: KokoroNarrationController,
     onSectionChange: (DesktopSection) -> Unit,
     onThemeChange: (AppTheme) -> Unit
 ) {

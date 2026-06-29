@@ -10,7 +10,6 @@ private fun infoString(name: String, defaultValue: String): String {
 }
 
 actual object BuildKonfig {
-    actual val GEMINI_API_KEY: String = infoString("GEMINI_API_KEY", "mock_gemini_api_key")
     actual val RAPID_API_KEY: String = infoString("RAPID_API_KEY", "mock_rapid_api_key")
     actual val RAPID_API_HOST: String = infoString("RAPID_API_HOST", "webnovel.p.rapidapi.com")
     actual val MANGADEX_CLIENT_ID: String = infoString("MANGADEX_CLIENT_ID", "mock_client_id")
