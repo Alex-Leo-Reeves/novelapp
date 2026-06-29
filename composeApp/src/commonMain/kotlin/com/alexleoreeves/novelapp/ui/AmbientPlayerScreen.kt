@@ -16,8 +16,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.unit.*
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import kotlinx.coroutines.delay
-import java.util.Calendar
 import kotlin.math.*
 
 @Composable
@@ -40,10 +40,10 @@ fun AmbientPlayerScreen(
 
     LaunchedEffect(Unit) {
         while (true) {
-            val cal = Calendar.getInstance()
-            hour = cal.get(Calendar.HOUR)
-            minute = cal.get(Calendar.MINUTE)
-            second = cal.get(Calendar.SECOND)
+            val totalSeconds = ((currentTimeMillis() / 1000L) % 86_400L).toInt()
+            hour = (totalSeconds / 3_600) % 12
+            minute = (totalSeconds / 60) % 60
+            second = totalSeconds % 60
             delay(1000)
         }
     }
@@ -195,7 +195,7 @@ private fun DrawScope.drawAnalogClock(hour: Int, minute: Int, second: Int) {
 
     // Hour markers
     for (i in 0 until 12) {
-        val angle = Math.toRadians((i * 30 - 90).toDouble())
+        val angle = (i * 30 - 90).toDouble().degreesToRadians()
         val outer = radius - 4.dp.toPx()
         val inner = radius - 10.dp.toPx()
         drawLine(
@@ -207,7 +207,7 @@ private fun DrawScope.drawAnalogClock(hour: Int, minute: Int, second: Int) {
     }
 
     // Hour hand
-    val hourAngle = Math.toRadians(((hour % 12 + minute / 60.0) * 30 - 90))
+    val hourAngle = ((hour % 12 + minute / 60.0) * 30 - 90).degreesToRadians()
     val hourLen = radius * 0.5f
     drawLine(
         color = white, strokeWidth = 3.dp.toPx(),
@@ -217,7 +217,7 @@ private fun DrawScope.drawAnalogClock(hour: Int, minute: Int, second: Int) {
     )
 
     // Minute hand
-    val minuteAngle = Math.toRadians((minute * 6 - 90).toDouble())
+    val minuteAngle = (minute * 6 - 90).toDouble().degreesToRadians()
     val minuteLen = radius * 0.72f
     drawLine(
         color = white, strokeWidth = 2.dp.toPx(),
@@ -227,7 +227,7 @@ private fun DrawScope.drawAnalogClock(hour: Int, minute: Int, second: Int) {
     )
 
     // Second hand
-    val secondAngle = Math.toRadians((second * 6 - 90).toDouble())
+    val secondAngle = (second * 6 - 90).toDouble().degreesToRadians()
     val secondLen = radius * 0.82f
     drawLine(
         color = Color(0xFFAB6BEB), strokeWidth = 1.dp.toPx(),
@@ -239,3 +239,5 @@ private fun DrawScope.drawAnalogClock(hour: Int, minute: Int, second: Int) {
     // Center dot
     drawCircle(color = white, radius = 4.dp.toPx())
 }
+
+private fun Double.degreesToRadians(): Double = this * PI / 180.0

@@ -1,7 +1,8 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.alexleoreeves.novelapp.audio
 
 import platform.AVFAudio.AVAudioPlayer
-import platform.AVFAudio.AVSpeechBoundaryImmediate
 import kotlinx.coroutines.delay
 import platform.AVFAudio.AVSpeechSynthesisVoice
 import platform.AVFAudio.AVSpeechSynthesizer
@@ -12,10 +13,11 @@ import platform.Foundation.NSURL
 private val iosSpeechSynthesizer = AVSpeechSynthesizer()
 private var iosAmbientPlayer: AVAudioPlayer? = null
 private var iosAmbientCue: AmbientCue? = null
+private const val SPEECH_BOUNDARY_IMMEDIATE = 0L
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult {
     val words = request.text.split(Regex("""\s+""")).count { it.isNotBlank() }
-    val durationMs = ((words * 430L) / request.speed.coerceAtLeast(0.5f)).coerceAtLeast(400L)
+    val durationMs = ((words * 430f) / request.speed.coerceAtLeast(0.5f)).toLong().coerceAtLeast(400L)
     return KokoroSynthesisResult(
         audioBytes = ByteArray(0),
         durationMs = durationMs,
@@ -29,7 +31,7 @@ actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: Kokor
         platformPlayAudio(result.audioBytes)
         return
     }
-    iosSpeechSynthesizer.stopSpeakingAtBoundary(AVSpeechBoundaryImmediate)
+    iosSpeechSynthesizer.stopSpeakingAtBoundary(SPEECH_BOUNDARY_IMMEDIATE)
     val utterance = AVSpeechUtterance.speechUtteranceWithString(request.text)
     utterance.voice = AVSpeechSynthesisVoice.voiceWithLanguage(voiceLanguage(request.voiceId))
     utterance.rate = (0.48f * request.speed).coerceIn(0.32f, 0.62f)
@@ -40,12 +42,12 @@ actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: Kokor
 
 actual fun stopKokoroAudio() {
     stopPlatformNarrationAudio()
-    iosSpeechSynthesizer.stopSpeakingAtBoundary(AVSpeechBoundaryImmediate)
+    iosSpeechSynthesizer.stopSpeakingAtBoundary(SPEECH_BOUNDARY_IMMEDIATE)
 }
 
 actual fun pauseKokoroAudio() {
     pausePlatformNarrationAudio()
-    iosSpeechSynthesizer.pauseSpeakingAtBoundary(AVSpeechBoundaryImmediate)
+    iosSpeechSynthesizer.pauseSpeakingAtBoundary(SPEECH_BOUNDARY_IMMEDIATE)
 }
 
 actual fun resumeKokoroAudio() {

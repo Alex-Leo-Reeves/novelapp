@@ -4,7 +4,7 @@ package com.alexleoreeves.novelapp.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import platform.Foundation.NSCacheDirectory
+import platform.Foundation.NSCachesDirectory
 import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
@@ -53,7 +53,7 @@ private fun documentsDirectory(): String =
         ?: ""
 
 private fun cachesDirectory(): String =
-    (NSSearchPathForDirectoriesInDomains(NSCacheDirectory, NSUserDomainMask, true).firstOrNull() as? String)
+    (NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, true).firstOrNull() as? String)
         ?: ""
 
 private fun ensureDirectory(path: String) {
