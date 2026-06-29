@@ -14,7 +14,7 @@ import platform.Foundation.NSURL
 private val iosSpeechSynthesizer = AVSpeechSynthesizer()
 private var iosAmbientPlayer: AVAudioPlayer? = null
 private var iosAmbientCue: AmbientCue? = null
-private val speechBoundaryImmediate: AVSpeechBoundary = AVSpeechBoundary(0)
+private val speechBoundaryImmediate: AVSpeechBoundary = AVSpeechBoundary.AVSpeechBoundaryImmediate
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult {
     val words = request.text.split(Regex("""\s+""")).count { it.isNotBlank() }
