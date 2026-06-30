@@ -1,8 +1,8 @@
-name: NovelApp
+name: AnimeNovelManga
 options:
   bundleIdPrefix: com.alexleoreeves
   deploymentTarget:
-    iOS: "15.0"
+    iOS: "16.0"
   xcodeVersion: "15.0"
 settings:
   base:
@@ -10,55 +10,33 @@ settings:
     MARKETING_VERSION: "1.8"
     SWIFT_VERSION: "5.0"
 targets:
-  NovelApp:
+  AnimeNovelManga:
     type: application
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "16.0"
     sources:
       - path: iosApp
       - path: Assets.xcassets
       - path: LaunchScreen.storyboard
     info:
       path: Info.plist
-    preBuildScripts:
-      - name: Build ComposeApp Framework
-        basedOnDependencyAnalysis: false
-        script: |
-          cd "$SRCROOT/.."
-          ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: ""
         TARGETED_DEVICE_FAMILY: "1,2"
-        FRAMEWORK_SEARCH_PATHS:
-          - "$(inherited)"
-          - "$(SRCROOT)/Vendor/$(CONFIGURATION)-$(SDK_NAME)"
-          - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         INFOPLIST_FILE: Info.plist
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
-        MANGADEX_CLIENT_ID: mock_client_id
-        MANGADEX_CLIENT_SECRET: mock_client_secret
-        MANGADEX_PASSWORD: mock_pass
-        MANGADEX_USERNAME: mock_user
-        TMDB_API_KEY: mock_tmdb_api_key
-        TMDB_READ_ACCESS_TOKEN: mock_tmdb_read_access_token
-        OTHER_LDFLAGS:
-          - "$(inherited)"
-          - "-framework"
-          - "ComposeApp"
         PRODUCT_BUNDLE_IDENTIFIER: com.alexleoreeves.novelapp.ios
-        PRODUCT_NAME: NovelApp
-        RAPID_API_HOST: webnovel.p.rapidapi.com
-        RAPID_API_KEY: mock_rapid_api_key
+        PRODUCT_NAME: AnimeNovelManga
 schemes:
-  NovelApp:
+  AnimeNovelManga:
     build:
       targets:
-        NovelApp: all
+        AnimeNovelManga: all
     run:
       config: Debug
     archive:

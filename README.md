@@ -281,7 +281,7 @@ This app connects to third-party novel, manga, anime, and AI services. Selling a
 
 ## iOS Notes
 
-The iOS shell is located in `iosApp/`. Visible iOS screens are SwiftUI-only. Shared search, metadata, release, and configuration logic stays in Kotlin and is exposed to Swift through `NovelAppIosBridge` in the `ComposeApp` framework. The Xcode project is generated from `iosApp/project.yml` using XcodeGen.
+The iOS app is located in `iosApp/`. It is now a native SwiftUI app named `Anime/Novel/Manga - All in One`; it does not link the Kotlin `ComposeApp` framework. iPhone auth, content browsing, chapter loading, playback routing, favorites, history sync, narration fallback, manga OCR, and reader controls talk directly to the Render backend and native iOS frameworks.
 
 Generate the Xcode project on macOS:
 
@@ -313,17 +313,9 @@ Optional secrets:
 ```text
 IOS_EXPORT_METHOD=ad-hoc
 IOS_KEYCHAIN_PASSWORD
-RAPID_API_KEY
-RAPID_API_HOST
-MANGADEX_CLIENT_ID
-MANGADEX_CLIENT_SECRET
-MANGADEX_USERNAME
-MANGADEX_PASSWORD
-TMDB_API_KEY
-TMDB_READ_ACCESS_TOKEN
 ```
 
-The workflow builds a vendored iPhone `ComposeApp.framework` before archiving, then publishes the signed output to:
+The workflow builds the native Swift iPhone target and publishes the signed output to:
 
 ```text
 site/downloads/novelapp-ios.ipa
@@ -337,11 +329,10 @@ scripts/install-ios-ipa-usb.sh site/downloads/novelapp-ios.ipa
 
 Current iOS native hardening items before calling the iPhone app production-ready:
 
-- Replace the iOS anime player placeholder with AVPlayer playback
-- Replace the iOS universal file picker placeholder with UIDocumentPicker
-- Replace iOS narration playback placeholder with AVFoundation audio playback
-- Replace iOS manga OCR placeholder with Vision/Core ML OCR
-- Replace iOS sleep detection placeholder with CoreMotion behavior
+- Replace the temporary Render fallback catalog with fully licensed production content APIs
+- Complete native Kokoro ONNX speech synthesis after model installation; Apple on-device TTS remains the safe fallback
+- Test background narration, OCR, AVPlayer, and WKWebView playback on physical iPhones
+- Add crash reporting only after privacy policy updates are ready
 
 Before a production iOS release, replace mock iOS secrets with secure configuration, test on a physical iPhone, and prepare App Store/TestFlight privacy and review details.
 

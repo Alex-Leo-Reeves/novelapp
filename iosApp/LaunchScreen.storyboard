@@ -27,7 +27,7 @@
                                 <fontDescription key="fontDescription" type="system" weight="bold" pointSize="52"/>
                                 <color key="textColor" white="0.0" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                             </label>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="NovelApp" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="LaunchTitle">
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Anime/Novel/Manga" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="LaunchTitle">
                                 <rect key="frame" x="0.0" y="456" width="393" height="34"/>
                                 <fontDescription key="fontDescription" type="system" weight="bold" pointSize="28"/>
                                 <color key="textColor" red="0.49019607843137253" green="0.94901960784313721" blue="0.72941176470588232" alpha="1" colorSpace="calibratedRGB"/>

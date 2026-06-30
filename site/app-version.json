@@ -4,10 +4,10 @@
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Added cached chapter audio generation so Kokoro narration plays smoothly across full novel chapters.",
-    "Keeps downloaded-chapter narration audio locally while clearing temporary online chapter audio on app restart.",
-    "Preloads manga chapter pages into local cache before reading for smoother scrolling.",
-    "Added a pure dark manga reader option and iOS SwiftUI narration bridge."
+    "Rebuilt the iPhone app as native SwiftUI with full-screen readers and native auth.",
+    "Added Render content APIs for iOS novels, manga, anime, K-drama, cartoons, and movies.",
+    "Added Swift reader controls with highlighting, progress slider, background narration option, and manga OCR reading.",
+    "Kept Android version 1.8 manifest compatibility while publishing the updated iPhone download."
   ],
   "forceUpdate": false
 }
