@@ -163,6 +163,22 @@ jobs:
           name: novelapp-ios-unsigned-ipa
           path: build/ios/novelapp-ios-unsigned.ipa
 
+      - name: Publish unsigned IPA to Render site folder
+        if: steps.signing.outputs.can_sign != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p site/downloads
+          cp build/ios/novelapp-ios-unsigned.ipa site/downloads/novelapp-ios.ipa
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/downloads/novelapp-ios.ipa
+          if git diff --cached --quiet; then
+            echo "No unsigned iOS IPA change to commit."
+          else
+            git commit -m "Publish unsigned iOS release [skip ci]"
+            git push
+          fi
+
       - name: Archive iPhone app
         if: steps.signing.outputs.can_sign == 'true'
         run: |
