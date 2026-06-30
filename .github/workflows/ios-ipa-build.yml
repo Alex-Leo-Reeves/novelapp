@@ -61,10 +61,15 @@ jobs:
 
       - name: Download ONNX Runtime iOS Framework
         run: |
-          wget -qO onnxruntime.zip https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-ios-1.17.1.zip
-          unzip -q onnxruntime.zip
-          mv onnxruntime-ios/onnxruntime.xcframework iosApp/onnxruntime.xcframework
-          rm -rf onnxruntime.zip onnxruntime-ios
+          cat << 'EOF' > Podfile
+          platform :ios, '16.0'
+          target 'Dummy' do
+            pod 'onnxruntime-c', '1.17.1'
+          end
+          EOF
+          pod install
+          mv Pods/onnxruntime-c/onnxruntime.xcframework iosApp/onnxruntime.xcframework
+          rm -rf Podfile Podfile.lock Pods
 
       - name: Generate Xcode project
         run: cd iosApp && xcodegen generate --spec project.yml
