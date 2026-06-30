@@ -11,6 +11,8 @@ data class AppUpdateManifest(
     val versionCode: Int = AppReleaseConfig.CURRENT_VERSION_CODE,
     val versionName: String = AppReleaseConfig.CURRENT_VERSION_NAME,
     val apkUrl: String = AppReleaseConfig.DOWNLOAD_URL,
+    val apkSha256: String = "",
+    val apkBytes: Long = 0L,
     val releaseNotes: List<String> = emptyList(),
     val forceUpdate: Boolean = false
 ) {

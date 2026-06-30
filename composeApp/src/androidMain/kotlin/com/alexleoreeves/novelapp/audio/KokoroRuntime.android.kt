@@ -7,7 +7,6 @@ import android.speech.tts.UtteranceProgressListener
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -17,18 +16,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
-import org.json.JSONObject
-import java.io.FileOutputStream
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.IO) {
@@ -36,18 +31,16 @@ actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): Koko
             .getOrElse { error ->
                 println("[Kokoro] Android ONNX unavailable for segment ${request.segmentIndex}: ${error.message}")
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Fallback,
-                    message = "Kokoro setup failed, using Android speech: ${error.message ?: "unknown error"}"
+                    phase = KokoroVoiceSetupPhase.Error,
+                    message = "Kokoro setup failed: ${error.message ?: "unknown error"}"
                 )
-                AndroidSystemTtsEngine.estimate(request)
+                throw error
             }
     }
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {
     if (result.audioBytes.isNotEmpty()) {
         platformPlayAudio(result.audioBytes)
-    } else {
-        AndroidSystemTtsEngine.speak(request)
     }
 }
 
@@ -402,9 +395,14 @@ private object AndroidKokoroEngine {
             phase = KokoroVoiceSetupPhase.Checking,
             message = "Checking Kokoro voice model on this device."
         )
-        val manifest = fetchManifest()
-        if (!modelFile.exists() || modelFile.length() != manifest.sizeBytes || !modelFile.matchesSha256(manifest.sha256)) {
-            downloadModel(targetDir, manifest, modelFile)
+        if (!modelFile.exists() || modelFile.length() == 0L) {
+            KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                phase = KokoroVoiceSetupPhase.Installing,
+                message = "Installing bundled Kokoro voice model."
+            )
+            context.assets.open("$ASSET_ROOT/model_quantized.onnx").use { input ->
+                modelFile.outputStream().use { output -> input.copyTo(output) }
+            }
         }
         val required = listOf(
             "voices/af_heart.bin",
@@ -432,136 +430,6 @@ private object AndroidKokoroEngine {
         return targetDir
     }
 
-    private fun fetchManifest(): KokoroModelManifest {
-        val connection = (URL(AppReleaseConfig.KOKORO_MANIFEST_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 12_000
-            readTimeout = 20_000
-            requestMethod = "GET"
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json")
-        }
-        return try {
-            if (connection.responseCode !in 200..299) {
-                error("model manifest returned HTTP ${connection.responseCode}")
-            }
-            val raw = connection.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(raw)
-            val model = json.getJSONObject("model")
-            KokoroModelManifest(
-                version = json.optString("version", "kokoro-82m-v1"),
-                url = model.getString("url"),
-                sizeBytes = model.getLong("sizeBytes"),
-                sha256 = model.getString("sha256").lowercase()
-            )
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun downloadModel(targetDir: File, manifest: KokoroModelManifest, modelFile: File) {
-        modelFile.parentFile?.mkdirs()
-        val tempFile = File(targetDir, "${manifest.version}-${modelFile.name}.download")
-        var attempt = 0
-        var lastError: Throwable? = null
-        while (attempt < 3) {
-            attempt++
-            runCatching {
-                val existingBytes = tempFile.takeIf { it.exists() }?.length()?.coerceAtMost(manifest.sizeBytes) ?: 0L
-                val connection = (URL(manifest.url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 20_000
-                    readTimeout = 90_000
-                    instanceFollowRedirects = true
-                    if (existingBytes > 0L) {
-                        setRequestProperty("Range", "bytes=$existingBytes-")
-                    }
-                }
-                try {
-                    val responseCode = connection.responseCode
-                    val appending = existingBytes > 0L && responseCode == HttpURLConnection.HTTP_PARTIAL
-                    if (responseCode !in listOf(HttpURLConnection.HTTP_OK, HttpURLConnection.HTTP_PARTIAL)) {
-                        error("model download returned HTTP $responseCode")
-                    }
-                    if (existingBytes > 0L && !appending) {
-                        tempFile.delete()
-                    }
-                    val startingBytes = if (appending) existingBytes else 0L
-                    KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                        phase = KokoroVoiceSetupPhase.Downloading,
-                        downloadedBytes = startingBytes,
-                        totalBytes = manifest.sizeBytes,
-                        message = "Downloading Kokoro voice model. This only happens once."
-                    )
-                    connection.inputStream.use { input ->
-                        FileOutputStream(tempFile, appending).use { output ->
-                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 4)
-                            var downloaded = startingBytes
-                            while (true) {
-                                val read = input.read(buffer)
-                                if (read < 0) break
-                                output.write(buffer, 0, read)
-                                downloaded += read
-                                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                                    phase = KokoroVoiceSetupPhase.Downloading,
-                                    downloadedBytes = downloaded.coerceAtMost(manifest.sizeBytes),
-                                    totalBytes = manifest.sizeBytes,
-                                    message = "Downloading Kokoro voice model. This only happens once."
-                                )
-                            }
-                        }
-                    }
-                } finally {
-                    connection.disconnect()
-                }
-
-                if (tempFile.length() != manifest.sizeBytes) {
-                    error("Downloaded Kokoro model is ${tempFile.length()} bytes, expected ${manifest.sizeBytes}.")
-                }
-                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Installing,
-                    downloadedBytes = tempFile.length(),
-                    totalBytes = manifest.sizeBytes,
-                    message = "Verifying Kokoro voice model."
-                )
-                if (!tempFile.matchesSha256(manifest.sha256)) {
-                    tempFile.delete()
-                    error("Downloaded Kokoro model checksum did not match.")
-                }
-                if (modelFile.exists()) modelFile.delete()
-                if (!tempFile.renameTo(modelFile)) {
-                    tempFile.copyTo(modelFile, overwrite = true)
-                    tempFile.delete()
-                }
-                return
-            }.onFailure { error ->
-                lastError = error
-                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Error,
-                    downloadedBytes = tempFile.takeIf { it.exists() }?.length() ?: 0L,
-                    totalBytes = manifest.sizeBytes,
-                    message = "Kokoro download attempt $attempt failed: ${error.message ?: "unknown error"}"
-                )
-                Thread.sleep(700L * attempt)
-            }
-        }
-        error("Kokoro model download failed: ${lastError?.message ?: "unknown error"}")
-    }
-
-    private fun File.matchesSha256(expected: String): Boolean =
-        runCatching { sha256() == expected.lowercase() }.getOrDefault(false)
-
-    private fun File.sha256(): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        inputStream().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 4)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
     private fun voiceStyle(assetDir: File, voiceId: String, tokenCount: Int): FloatArray {
         val voice = voiceCache.getOrPut(voiceId) {
             val file = File(assetDir, "voices/$voiceId.bin")
@@ -577,10 +445,3 @@ private object AndroidKokoroEngine {
         return voice.copyOfRange(frame * 256, frame * 256 + 256)
     }
 }
-
-private data class KokoroModelManifest(
-    val version: String,
-    val url: String,
-    val sizeBytes: Long,
-    val sha256: String
-)

@@ -65,12 +65,20 @@ data class WatchHistoryItem(
 )
 
 @Serializable
+data class SearchHistoryItem(
+    val tab: String,
+    val query: String,
+    val updatedAt: Long = 0L
+)
+
+@Serializable
 data class DownloadIndex(
     val items: List<DownloadedItem> = emptyList(),
     val episodes: List<DownloadedEpisode> = emptyList(),
     val chapters: List<DownloadedChapter> = emptyList(),
     val readHistory: List<ReadHistoryItem> = emptyList(),
-    val watchHistory: List<WatchHistoryItem> = emptyList()
+    val watchHistory: List<WatchHistoryItem> = emptyList(),
+    val searchHistory: List<SearchHistoryItem> = emptyList()
 )
 
 @Serializable
@@ -78,5 +86,6 @@ data class UserSyncState(
     val favorites: List<FavoriteNovel> = emptyList(),
     val readHistory: List<ReadHistoryItem> = emptyList(),
     val watchHistory: List<WatchHistoryItem> = emptyList(),
+    val searchHistory: List<SearchHistoryItem> = emptyList(),
     val updatedAt: Long = 0L
 )

@@ -172,7 +172,7 @@ fun MovieDetailScreen(
                 ) {
                     Button(
                         onClick = {
-                            val playUrl = "https://vidsrc.to/embed/movie/$tmdbId"
+                            val playUrl = "https://vidlink.pro/movie/$tmdbId"
                             onPlayEpisode(playUrl, media.title)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()),
@@ -215,11 +215,10 @@ fun MovieDetailScreen(
                             episodesList.forEach { ep ->
                                 Card(
                                     onClick = {
-                                        // Format: https://vidsrc.to/embed/tv/{tmdb_id}/{season}/{episode}
                                         val parts = ep.url.split(":")
                                         val s = parts.getOrNull(2) ?: "1"
                                         val e = parts.getOrNull(3) ?: "1"
-                                        val playUrl = "https://vidsrc.to/embed/tv/$tmdbId/$s/$e"
+                                        val playUrl = "https://vidlink.pro/tv/$tmdbId/$s/$e"
                                         onPlayEpisode(playUrl, "${media.title} - ${ep.title}")
                                     },
                                     shape = RoundedCornerShape(10.dp),

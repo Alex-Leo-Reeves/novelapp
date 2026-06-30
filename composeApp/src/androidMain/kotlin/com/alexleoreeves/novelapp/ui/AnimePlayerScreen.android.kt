@@ -36,6 +36,7 @@ import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -102,7 +103,11 @@ actual fun AnimePlayerScreen(
     val exoPlayer = remember(streamUrl, retryKey) {
         if (!isWebEmbed || isDirectMedia) {
             val cache = NovelAppVideoCache.get(context)
-            val dataSourceFactory = DefaultDataSource.Factory(context)
+            val requestHeaders = streamUrl.playerHeaders()
+            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(PLAYER_USER_AGENT)
+                .setDefaultRequestProperties(requestHeaders)
+            val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
             val cacheDataSourceFactory = CacheDataSource.Factory()
                 .setCache(cache)
                 .setUpstreamDataSourceFactory(dataSourceFactory)
@@ -242,9 +247,7 @@ actual fun AnimePlayerScreen(
                                 loadsImagesAutomatically = true
                                 allowContentAccess = true
                                 allowFileAccess = false
-                                userAgentString =
-                                    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
-                                        "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                                userAgentString = PLAYER_USER_AGENT
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 }
@@ -325,10 +328,7 @@ actual fun AnimePlayerScreen(
                             }
                             loadUrl(
                                 streamUrl,
-                                mapOf(
-                                    "Referer" to streamUrl.playerReferer(),
-                                    "Origin" to streamUrl.playerOrigin()
-                                )
+                                streamUrl.playerHeaders()
                             )
                         }
                     },
@@ -725,7 +725,7 @@ private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
     // Allow all streaming, embed, and player domains
     return listOf(
         "anineko", "anizara", "vivibebe", "bibiemb", "otakuhg", "otakuvid", "playmogo",
-        "kwik", "dood", "vidsrc", "vidlink", "stream", "embed", "tmdb", "themoviedb",
+        "kwik", "dood", "vidsrc", "vidlink", "autoembed", "stream", "embed", "tmdb", "themoviedb",
         "kisskh", "dramacool", "kimcartoon", "fastani", "vidplay", "filemoon",
         "rapidvideo", "voe", "cloudflare", "jwpcdn", "jwplatform", "cdnjs",
         "bootstrapcdn", "googleapis", "gstatic", "youtube", "ytimg",
@@ -835,6 +835,8 @@ private fun String.providerName(): String {
         host.isBlank() -> "Embedded provider"
         "anineko" in host -> "Anineko"
         "animepahe" in host -> "AnimePahe"
+        "vidlink" in host -> "VidLink"
+        "autoembed" in host -> "AutoEmbed"
         "vidsrc" in host -> "VidSrc"
         "embed" in host -> "Embed provider"
         "dramacool" in host -> "DramaCool"
@@ -847,13 +849,26 @@ private fun String.providerName(): String {
 private fun String.playerReferer(): String {
     val uri = runCatching { Uri.parse(this) }.getOrNull()
     val scheme = uri?.scheme ?: "https"
-    val host = uri?.host ?: return "https://vidsrc.to/"
+    val host = uri?.host ?: return "https://vidlink.pro/"
     return "$scheme://$host/"
 }
 
 private fun String.playerOrigin(): String {
     val uri = runCatching { Uri.parse(this) }.getOrNull()
     val scheme = uri?.scheme ?: "https"
-    val host = uri?.host ?: return "https://vidsrc.to"
+    val host = uri?.host ?: return "https://vidlink.pro"
     return "$scheme://$host"
 }
+
+private fun String.playerHeaders(): Map<String, String> =
+    mapOf(
+        "User-Agent" to PLAYER_USER_AGENT,
+        "Referer" to playerReferer(),
+        "Origin" to playerOrigin(),
+        "Accept" to "*/*",
+        "Accept-Language" to "en-US,en;q=0.9"
+    )
+
+private const val PLAYER_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
