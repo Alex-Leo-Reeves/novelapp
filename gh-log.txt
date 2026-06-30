@@ -1,0 +1,17 @@
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	﻿2026-06-30T11:15:26.6552980Z ##[group]Run wget -qO onnxruntime.zip https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-ios-1.17.1.zip
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6553920Z ^[[36;1mwget -qO onnxruntime.zip https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-ios-1.17.1.zip^[[0m
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6554510Z ^[[36;1munzip -q onnxruntime.zip^[[0m
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6555080Z ^[[36;1mmv onnxruntime-ios/onnxruntime.xcframework iosApp/onnxruntime.xcframework^[[0m
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6555570Z ^[[36;1mrm -rf onnxruntime.zip onnxruntime-ios^[[0m
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6595300Z shell: /bin/bash -e {0}
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6595680Z env:
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6596000Z   IOS_BUNDLE_ID: 
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6596330Z   IOS_CERTIFICATE_P12_BASE64: 
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6596680Z   IOS_CERTIFICATE_PASSWORD: 
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6596990Z   IOS_EXPORT_METHOD: ad-hoc
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6597310Z   IOS_PROVISIONING_PROFILE_BASE64: 
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6597670Z   IOS_PROVISIONING_PROFILE_NAME: 
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6598020Z   IOS_TEAM_ID: 
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6598490Z   KEYCHAIN_PASSWORD: 952B4E15-BAA0-43F7-B8FE-B0C16CC3B341
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:26.6598990Z ##[endgroup]
+Build signed iPhone IPA	Download ONNX Runtime iOS Framework	2026-06-30T11:15:27.1637440Z ##[error]Process completed with exit code 8.
