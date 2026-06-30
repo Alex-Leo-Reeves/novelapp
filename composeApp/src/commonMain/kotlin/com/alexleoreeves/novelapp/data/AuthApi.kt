@@ -70,7 +70,7 @@ class AuthApi(
         }
         val rawBody = response.bodyAsText()
         if (response.status != HttpStatusCode.OK) {
-            throw IllegalStateException(rawBody.decodeAuthError() ?: "Could not load account history.")
+            throw AuthApiException(rawBody.decodeAuthError() ?: "Could not load account history.", response.status.value)
         }
         return authJson.decodeFromString<UserStateResponse>(rawBody).state
     }
@@ -84,7 +84,7 @@ class AuthApi(
         }
         val rawBody = response.bodyAsText()
         if (response.status != HttpStatusCode.OK) {
-            throw IllegalStateException(rawBody.decodeAuthError() ?: "Could not sync account history.")
+            throw AuthApiException(rawBody.decodeAuthError() ?: "Could not sync account history.", response.status.value)
         }
         return authJson.decodeFromString<UserStateResponse>(rawBody).state
     }
@@ -94,7 +94,7 @@ class AuthApi(
 
         if (status != HttpStatusCode.OK && status != HttpStatusCode.Created) {
             val error = rawBody.decodeAuthError()
-            throw IllegalStateException(error ?: "Authentication failed.")
+            throw AuthApiException(error ?: "Authentication failed.", status.value)
         }
 
         if (rawBody.isBlank()) {
@@ -132,6 +132,11 @@ class AuthApi(
         takeIf { it.isNotBlank() }
             ?.let { raw -> runCatching { authJson.decodeFromString<AuthErrorResponse>(raw).error }.getOrNull() }
 }
+
+class AuthApiException(
+    message: String,
+    val statusCode: Int
+) : IllegalStateException(message)
 
 private val authJson = Json { ignoreUnknownKeys = true; isLenient = true }
 

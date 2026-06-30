@@ -63,6 +63,7 @@ fun App(
     var isStartupUpdateDismissed by remember { mutableStateOf(false) }
     var cloudSyncPulse by remember { mutableStateOf(0) }
     var hasHydratedCloudState by remember { mutableStateOf(false) }
+    var searchHistoryPulse by remember { mutableStateOf(0) }
     val authApi = remember { AuthApi() }
 
     // App state
@@ -103,6 +104,7 @@ fun App(
             }
         }
     }
+    val updateProgress by AppUpdateProgressBus.state.collectAsState()
 
     DisposableEffect(Unit) {
         onDispose {
@@ -145,6 +147,10 @@ fun App(
         delay(1_200)
         runCatching {
             authApi.putUserState(token, downloadRepo.exportUserState(favorites.toList()))
+        }.onSuccess { state ->
+            downloadRepo.mergeUserState(state)
+            mergeFavorites(state.favorites)
+            searchHistoryPulse += 1
         }
     }
 
@@ -165,10 +171,17 @@ fun App(
                 queueCloudSync()
             }
             .onFailure {
-                userSessionStore.clearAccount()
-                account = null
-                isGuestSession = false
-                hasHydratedCloudState = false
+                if ((it as? AuthApiException)?.statusCode in listOf(401, 403)) {
+                    userSessionStore.clearAccount()
+                    account = null
+                    isGuestSession = false
+                    hasHydratedCloudState = false
+                } else {
+                    account = savedAccount
+                    isGuestSession = false
+                    hasHydratedCloudState = true
+                    authError = "Saved account kept offline; sync will retry when the service responds."
+                }
             }
         isAuthChecked = true
     }
@@ -458,8 +471,16 @@ fun App(
                                     currentTheme = appTheme.value,
                                     contentTab = discoverContentTab,
                                     initialSearchQuery = discoverSearchQuery,
+                                    recentSearches = remember(discoverContentTab, searchHistoryPulse) {
+                                        downloadRepo.getSearchHistory(discoverContentTab.name).map { it.query }
+                                    },
                                     onContentTabChanged = { discoverContentTab = it },
                                     onSearchQueryChanged = { discoverSearchQuery = it },
+                                    onSearchCommitted = { tab, query ->
+                                        downloadRepo.recordSearchQuery(tab.name, query)
+                                        searchHistoryPulse += 1
+                                        queueCloudSync()
+                                    },
                                     onNovelSelected = { item ->
                                         if (item.isAnime && item.animeResult != null) {
                                             selectedAnime.value = item.animeResult
@@ -486,7 +507,10 @@ fun App(
                                             )
                                         }
                                     },
-                                    onRemoveFavorite = { fav -> favorites.remove(fav) }
+                                    onRemoveFavorite = { fav ->
+                                        favorites.remove(fav)
+                                        queueCloudSync()
+                                    }
                                 )
                                 BottomTab.READ -> UniversalReadScreen(
                                     currentTheme = appTheme.value,
@@ -654,7 +678,62 @@ fun App(
         }
 
         val startupUpdate = startupUpdateManifest
-        if (startupUpdate != null && !isStartupUpdateDismissed && !showAuthSheet) {
+        if (updateProgress.isActive) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (updateProgress.canDismiss) AppUpdateProgressBus.clear()
+                },
+                icon = {
+                    Icon(
+                        if (updateProgress.isError) Icons.Default.ErrorOutline else Icons.Default.Download,
+                        contentDescription = null,
+                        tint = appTheme.value.accentColor()
+                    )
+                },
+                title = {
+                    Text(
+                        when (updateProgress.phase) {
+                            AppUpdatePhase.Downloading -> "Downloading update"
+                            AppUpdatePhase.Verifying -> "Verifying update"
+                            AppUpdatePhase.ReadyToInstall -> "Preparing install"
+                            AppUpdatePhase.Installing -> "Finish install"
+                            AppUpdatePhase.Error -> "Update failed"
+                            AppUpdatePhase.Idle -> "Update"
+                        }
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(updateProgress.message.ifBlank { "Preparing update..." })
+                        val fraction = updateProgress.fraction
+                        if (fraction != null) {
+                            LinearProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = appTheme.value.accentColor()
+                            )
+                            Text(
+                                "${(fraction * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = appTheme.value.subTextColor()
+                            )
+                        } else if (!updateProgress.canDismiss) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = appTheme.value.accentColor()
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (updateProgress.canDismiss) {
+                        Button(onClick = { AppUpdateProgressBus.clear() }) {
+                            Text(if (updateProgress.phase == AppUpdatePhase.Installing) "Done" else "Close")
+                        }
+                    }
+                }
+            )
+        } else if (startupUpdate != null && !isStartupUpdateDismissed && !showAuthSheet) {
             AlertDialog(
                 onDismissRequest = {
                     if (!startupUpdate.forceUpdate) {

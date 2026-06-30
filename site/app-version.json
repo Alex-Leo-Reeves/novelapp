@@ -1,13 +1,15 @@
 {
-  "versionCode": 9,
-  "versionName": "1.8",
-  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "versionCode": 10,
+  "versionName": "1.9",
+  "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/android-v1.9/novelapp-android.apk",
+  "apkBytes": 130284408,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Rebuilt the iPhone app as native SwiftUI with full-screen readers and native auth.",
-    "Added Render content APIs for iOS novels, manga, anime, K-drama, cartoons, and movies.",
-    "Added Swift reader controls with highlighting, progress slider, background narration option, and manga OCR reading.",
-    "Kept Android version 1.8 manifest compatibility while publishing the updated iPhone download."
+    "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
+    "Bundled Kokoro ONNX in the app and removed the model download loop/fallback-to-system-TTS path.",
+    "Improved manga reading so pages display immediately while chapter caching continues in the background.",
+    "Switched movie, cartoon, and K-drama playback toward VidLink, AutoEmbed, VidSrc.me, and optional OMSS-backed sources."
   ],
-  "forceUpdate": false
+  "forceUpdate": false,
+  "apkSha256": "5d6d445befb863d4040422dd3701beb32f3511d4670bf9c7093a62b70d9534b3"
 }

@@ -306,7 +306,7 @@ class KokoroNarrationController(
     }
 
     private suspend fun playCachedChapterAudio(cacheKey: String, persistent: Boolean) {
-        val cachedPath = prepareChapterAudioFile(cacheKey, persistent)
+        val cachedPath = existingNarrationAudioCachePath(cacheKey, persistent)
         if (cachedPath == null) {
             playFromSegment(0)
             return
@@ -422,8 +422,8 @@ class KokoroNarrationController(
                         )
                     } else {
                         KokoroVoiceSetupStatus(
-                            phase = KokoroVoiceSetupPhase.Fallback,
-                            message = "Using Android on-device speech while Kokoro is unavailable."
+                            phase = KokoroVoiceSetupPhase.Error,
+                            message = "Kokoro voice is unavailable. Check the bundled model and try again."
                         )
                     }
                 }
@@ -587,11 +587,11 @@ data class KokoroVoiceSetupStatus(
         get() = message ?: when (phase) {
             KokoroVoiceSetupPhase.Idle -> ""
             KokoroVoiceSetupPhase.Checking -> "Checking Kokoro voice setup."
-            KokoroVoiceSetupPhase.Downloading -> "Downloading Kokoro voice model. This only happens once."
+            KokoroVoiceSetupPhase.Downloading -> "Preparing Kokoro voice model."
             KokoroVoiceSetupPhase.Installing -> "Installing Kokoro voice model."
             KokoroVoiceSetupPhase.Synthesizing -> "Preparing voice."
             KokoroVoiceSetupPhase.Ready -> "Kokoro voice is ready."
-            KokoroVoiceSetupPhase.Fallback -> "Using Android on-device speech while Kokoro is unavailable."
+            KokoroVoiceSetupPhase.Fallback -> "Kokoro voice is unavailable."
             KokoroVoiceSetupPhase.Error -> "Kokoro voice setup failed."
         }
 }

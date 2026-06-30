@@ -8,6 +8,7 @@ const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/data" : path.join(process.cwd(), "server-data"));
 const DATA_FILE = path.join(DATA_DIR, "auth.json");
 const SITE_DIR = path.join(process.cwd(), "site");
+const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || "");
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
@@ -25,6 +26,10 @@ const MIME_TYPES = {
   ".msi": "application/octet-stream",
   ".txt": "text/plain; charset=utf-8"
 };
+
+function cleanBaseUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
 
 function ensureDataFile() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -469,17 +474,78 @@ function syntheticMangaPages(chapterUrl) {
   });
 }
 
-function watchRoute(kind, title, detailUrl) {
+function embedProviders(mediaType, id, season = "1", episode = "1") {
+  const movie = mediaType === "movie";
+  return [
+    {
+      provider: "VidLink",
+      url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
+    },
+    {
+      provider: "AutoEmbed",
+      url: movie ? `https://player.autoembed.cc/movie/${id}` : `https://player.autoembed.cc/tv/${id}/${season}/${episode}`
+    },
+    {
+      provider: "VidSrc.me",
+      url: movie
+        ? `https://vidsrc.me/embed/movie?tmdb=${id}`
+        : `https://vidsrc.me/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+    }
+  ];
+}
+
+async function omssRoute(mediaType, id, season, episode, title) {
+  if (!OMSS_BASE_URL || typeof fetch !== "function") return null;
+
+  const endpoint = mediaType === "movie"
+    ? `${OMSS_BASE_URL}/v1/movies/${encodeURIComponent(id)}?platform=web`
+    : `${OMSS_BASE_URL}/v1/tv/${encodeURIComponent(id)}/seasons/${encodeURIComponent(season)}/episodes/${encodeURIComponent(episode)}?platform=web`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const result = await fetch(endpoint, {
+      headers: { accept: "application/json" },
+      signal: controller.signal
+    });
+    if (!result.ok) return null;
+    const body = await result.json();
+    const source = Array.isArray(body.sources)
+      ? body.sources.find((item) => item && item.url && item.streamable !== false) || body.sources.find((item) => item && item.url)
+      : null;
+    if (!source) return null;
+    const sourceUrl = String(source.url);
+    const direct = /\.(m3u8|mp4|mpd)(\?|$)/i.test(sourceUrl) || ["hls", "dash", "mp4"].includes(String(source.type || "").toLowerCase());
+    return {
+      route: direct ? "direct" : "embed",
+      url: sourceUrl,
+      provider: source.provider?.name || source.provider?.id || "OMSS",
+      title: title || "Watch",
+      diagnostics: Array.isArray(body.diagnostics) ? body.diagnostics : []
+    };
+  } catch (error) {
+    console.warn("[content] OMSS provider failed:", error.message || error);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function watchRoute(kind, title, detailUrl) {
   const normalizedKind = normalizeContentType(kind);
   const tmdbMatch = /^tmdb:\/\/([^/]+)\/(\d+)/.exec(String(detailUrl || ""));
   if (tmdbMatch) {
     const mediaType = tmdbMatch[1] === "movie" || normalizedKind === "movies" ? "movie" : "tv";
     const id = tmdbMatch[2];
+    const omss = await omssRoute(mediaType, id, "1", "1", title);
+    if (omss) return omss;
+    const [primary, ...fallbacks] = embedProviders(mediaType, id);
     return {
       route: "embed",
-      url: mediaType === "movie" ? `https://vidsrc.to/embed/movie/${id}` : `https://vidsrc.to/embed/tv/${id}/1/1`,
-      provider: "VidSrc",
-      title: title || "Watch"
+      url: primary.url,
+      provider: primary.provider,
+      title: title || "Watch",
+      fallbackProviders: fallbacks
     };
   }
   if (/^https?:\/\//i.test(String(detailUrl || ""))) {
@@ -513,6 +579,14 @@ async function handleContentApi(request, response, pathname, url) {
       const page = Math.max(1, Number(url.searchParams.get("page") || 1));
       return sendApiData(response, 200, { items: await contentSearch(type, query, page) });
     }
+    if (request.method === "GET" && pathname === "/api/content/providers") {
+      return sendApiData(response, 200, {
+        omss: {
+          enabled: Boolean(OMSS_BASE_URL)
+        },
+        embeds: embedProviders("movie", "{tmdb_id}").map((provider) => provider.provider)
+      });
+    }
     if (request.method === "POST" && pathname === "/api/content/chapters") {
       const body = await readBody(request);
       return sendApiData(response, 200, { chapters: syntheticChapters(body.kind, body.detailUrl, body.title) });
@@ -527,7 +601,7 @@ async function handleContentApi(request, response, pathname, url) {
     }
     if (request.method === "POST" && pathname === "/api/content/watch-route") {
       const body = await readBody(request);
-      return sendApiData(response, 200, watchRoute(body.kind, body.title, body.detailUrl));
+      return sendApiData(response, 200, await watchRoute(body.kind, body.title, body.detailUrl));
     }
     return sendApiError(response, 404, "Content API route not found.");
   } catch (error) {
@@ -618,7 +692,69 @@ function normalizeUserState(rawState) {
     favorites: Array.isArray(state.favorites) ? state.favorites.slice(0, 250) : [],
     readHistory: Array.isArray(state.readHistory) ? state.readHistory.slice(0, 100) : [],
     watchHistory: Array.isArray(state.watchHistory) ? state.watchHistory.slice(0, 100) : [],
+    searchHistory: Array.isArray(state.searchHistory) ? state.searchHistory.slice(0, 60) : [],
     updatedAt
+  };
+}
+
+function itemTime(item, fallback = 0) {
+  if (!item || typeof item !== "object") return fallback;
+  const raw = item.updatedAt ?? item.addedAt ?? item.timestamp ?? fallback;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string") return Date.parse(raw) || fallback;
+  return fallback;
+}
+
+function mergeByKey(existing, incoming, keyFn, limit, fallbackTime = Date.now()) {
+  const map = new Map();
+  for (const item of [...existing, ...incoming]) {
+    if (!item || typeof item !== "object") continue;
+    const key = keyFn(item);
+    if (!key) continue;
+    const previous = map.get(key);
+    if (!previous || itemTime(item, fallbackTime) >= itemTime(previous, 0)) {
+      map.set(key, item);
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => itemTime(b, 0) - itemTime(a, 0))
+    .slice(0, limit);
+}
+
+function mergeUserState(existingState, incomingState) {
+  const existing = normalizeUserState(existingState);
+  const incoming = normalizeUserState(incomingState);
+  const now = Date.now();
+  return {
+    favorites: mergeByKey(
+      existing.favorites,
+      incoming.favorites,
+      (item) => String(item.id || item.detailPageUrl || item.detailUrl || "").trim(),
+      250,
+      now
+    ),
+    readHistory: mergeByKey(
+      existing.readHistory,
+      incoming.readHistory,
+      (item) => String(item.chapterUrl || `${item.parentId || ""}:${item.chapterTitle || ""}`).trim(),
+      100,
+      now
+    ),
+    watchHistory: mergeByKey(
+      existing.watchHistory,
+      incoming.watchHistory,
+      (item) => String(item.streamUrl || `${item.parentId || ""}:${item.episodeNumber || ""}`).trim(),
+      100,
+      now
+    ),
+    searchHistory: mergeByKey(
+      existing.searchHistory,
+      incoming.searchHistory,
+      (item) => `${String(item.tab || item.kind || "").trim().toLowerCase()}:${String(item.query || "").trim().toLowerCase()}`,
+      60,
+      now
+    ),
+    updatedAt: now
   };
 }
 
@@ -640,8 +776,7 @@ async function handlePutUserState(request, response) {
 
   if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
   const body = await readBody(request);
-  user.state = normalizeUserState(body.state || body);
-  user.state.updatedAt = Date.now();
+  user.state = mergeUserState(user.state, body.state || body);
   writeData(data);
   return sendJson(response, 200, {
     user: publicUser(user),
@@ -772,9 +907,8 @@ const server = http.createServer((request, response) => {
     return sendJson(response, 200, { ok: true });
   }
 
-  // Kokoro manifest — lets the iOS app discover the model URL and size without
-  // needing to hard-code them. Returns a minimal manifest even when the model
-  // file is not present so the iOS installer can fall back to Apple TTS.
+  // Kokoro manifest — kept for older builds that still download the ONNX model.
+  // Current mobile builds bundle Kokoro in the app package.
   if (url.pathname === "/assets/kokoro/manifest.json") {
     const modelPath = path.join(process.cwd(), "kokoro-assets", "kokoro", "model_quantized.onnx");
     const modelExists = fs.existsSync(modelPath) && fs.statSync(modelPath).isFile();

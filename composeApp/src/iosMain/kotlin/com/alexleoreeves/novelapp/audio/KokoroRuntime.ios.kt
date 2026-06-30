@@ -2,7 +2,6 @@
 
 package com.alexleoreeves.novelapp.audio
 
-import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.COpaquePointerVar
@@ -36,16 +35,8 @@ import onnxruntime.NovelOrtRun
 import onnxruntime.NovelOrtSetIntraOpNumThreads
 import onnxruntime.NovelOrtSetSessionGraphOptimizationLevel
 import platform.AVFAudio.AVAudioPlayer
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import platform.AVFAudio.AVSpeechBoundary
-import platform.AVFAudio.AVSpeechSynthesisVoice
-import platform.AVFAudio.AVSpeechSynthesizer
-import platform.AVFAudio.AVSpeechUtterance
 import platform.Foundation.NSData
 import platform.Foundation.NSBundle
 import platform.Foundation.NSDocumentDirectory
@@ -55,32 +46,25 @@ import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.dataWithBytes
 import platform.Foundation.dataWithContentsOfFile
-import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.writeToFile
 import platform.posix.memcpy
 import kotlin.math.max
 
 
-private val iosSpeechSynthesizer = AVSpeechSynthesizer()
 private var iosAmbientPlayer: AVAudioPlayer? = null
 private var iosAmbientCue: AmbientCue? = null
-private val speechBoundaryImmediate: AVSpeechBoundary = AVSpeechBoundary.AVSpeechBoundaryImmediate
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.Default) {
-        try {
-            IosKokoroEngine.synthesize(request)
-        } catch (e: Exception) {
-            println("Kokoro iOS ONNX Engine failed: ${e.message}")
-            val words = request.text.split(Regex("""\s+""")).count { it.isNotBlank() }
-            val durationMs = ((words * 430f) / request.speed.coerceAtLeast(0.5f)).toLong().coerceAtLeast(400L)
-            KokoroSynthesisResult(
-                audioBytes = ByteArray(0), // Trigger Apple TTS fallback on failure
-                durationMs = durationMs,
-                sampleRate = 24_000,
-                engineName = "iOS Apple TTS Fallback"
-            )
-        }
+        runCatching { IosKokoroEngine.synthesize(request) }
+            .onFailure { error ->
+                println("Kokoro iOS ONNX Engine failed: ${error.message}")
+                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                    phase = KokoroVoiceSetupPhase.Error,
+                    message = "Kokoro setup failed: ${error.message ?: "unknown error"}"
+                )
+            }
+            .getOrThrow()
     }
 
 
@@ -89,28 +73,18 @@ actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: Kokor
         platformPlayAudio(result.audioBytes)
         return
     }
-    iosSpeechSynthesizer.stopSpeakingAtBoundary(speechBoundaryImmediate)
-    val utterance = AVSpeechUtterance.speechUtteranceWithString(request.text)
-    utterance.voice = AVSpeechSynthesisVoice.voiceWithLanguage(voiceLanguage(request.voiceId))
-    utterance.rate = (0.48f * request.speed).coerceIn(0.32f, 0.62f)
-    utterance.volume = request.narratorVolume.coerceIn(0f, 1f)
-    iosSpeechSynthesizer.speakUtterance(utterance)
-    delay(result.durationMs)
 }
 
 actual fun stopKokoroAudio() {
     stopPlatformNarrationAudio()
-    iosSpeechSynthesizer.stopSpeakingAtBoundary(speechBoundaryImmediate)
 }
 
 actual fun pauseKokoroAudio() {
     pausePlatformNarrationAudio()
-    iosSpeechSynthesizer.pauseSpeakingAtBoundary(speechBoundaryImmediate)
 }
 
 actual fun resumeKokoroAudio() {
     resumePlatformNarrationAudio()
-    iosSpeechSynthesizer.continueSpeaking()
 }
 
 actual fun playAmbientCue(cue: AmbientCue?, volume: Float) {
@@ -154,12 +128,6 @@ actual fun stopAmbientCue() {
     iosAmbientPlayer = null
     iosAmbientCue = null
 }
-
-private fun voiceLanguage(voiceId: String): String =
-    when {
-        voiceId.startsWith("bf_") || voiceId.startsWith("bm_") -> "en-GB"
-        else -> "en-US"
-    }
 
 private object IosKokoroEngine {
     private const val SAMPLE_RATE = 24_000
@@ -351,10 +319,17 @@ private object IosKokoroEngine {
             phase = KokoroVoiceSetupPhase.Checking,
             message = "Checking Kokoro voice model on this device."
         )
-        val manifest = fetchManifest()
+        val bundledModel = readBundledAsset(MODEL_NAME)
+            ?: error("Bundled Kokoro ONNX model is missing from the iOS app.")
         val existingSize = fileSize(modelPath)
-        if (existingSize != manifest.sizeBytes || existingSize <= 0L) {
-            downloadModel(manifest, modelPath)
+        if (existingSize != bundledModel.size.toLong() || existingSize <= 0L) {
+            KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                phase = KokoroVoiceSetupPhase.Installing,
+                downloadedBytes = bundledModel.size.toLong(),
+                totalBytes = bundledModel.size.toLong(),
+                message = "Installing bundled Kokoro voice model."
+            )
+            writeBytes(modelPath, bundledModel)
             session?.let {
                 NovelOrtReleaseSession(it)
                 session = null
@@ -363,44 +338,10 @@ private object IosKokoroEngine {
         KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
             phase = KokoroVoiceSetupPhase.Ready,
             downloadedBytes = fileSize(modelPath).coerceAtLeast(0L),
-            totalBytes = manifest.sizeBytes,
+            totalBytes = bundledModel.size.toLong(),
             message = "Kokoro voice is ready on this device."
         )
         return targetDir
-    }
-
-    private fun fetchManifest(): KokoroModelManifest {
-        val raw = downloadBytes(AppReleaseConfig.KOKORO_MANIFEST_URL)
-            .decodeToString()
-        val json = Json.parseToJsonElement(raw).jsonObject
-        val model = json["model"]?.jsonObject ?: error("Kokoro manifest is missing model information.")
-        return KokoroModelManifest(
-            version = json["version"]?.jsonPrimitive?.content ?: "kokoro-82m-v1",
-            url = model["url"]?.jsonPrimitive?.content ?: error("Kokoro manifest is missing model URL."),
-            sizeBytes = model["sizeBytes"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
-            sha256 = model["sha256"]?.jsonPrimitive?.content?.lowercase().orEmpty()
-        )
-    }
-
-    private fun downloadModel(manifest: KokoroModelManifest, modelPath: String) {
-        require(manifest.sizeBytes > 0L) { "Kokoro manifest does not include a valid model size." }
-        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-            phase = KokoroVoiceSetupPhase.Downloading,
-            downloadedBytes = 0L,
-            totalBytes = manifest.sizeBytes,
-            message = "Downloading Kokoro voice model. This only happens once."
-        )
-        val bytes = downloadBytes(manifest.url)
-        if (bytes.size.toLong() != manifest.sizeBytes) {
-            error("Downloaded Kokoro model is ${bytes.size} bytes, expected ${manifest.sizeBytes}.")
-        }
-        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-            phase = KokoroVoiceSetupPhase.Installing,
-            downloadedBytes = bytes.size.toLong(),
-            totalBytes = manifest.sizeBytes,
-            message = "Installing Kokoro voice model."
-        )
-        writeBytes(modelPath, bytes)
     }
 
     private fun voiceStyle(voiceId: String, tokenCount: Int): FloatArray {
@@ -428,13 +369,6 @@ private object IosKokoroEngine {
         return NSData.dataWithContentsOfFile(path)?.toByteArray()
     }
 
-    private fun downloadBytes(url: String): ByteArray {
-        val nsUrl = NSURL.URLWithString(url) ?: error("Invalid URL: $url")
-        val data = NSData.dataWithContentsOfURL(nsUrl)
-            ?: error("Unable to download $url")
-        return data.toByteArray()
-    }
-
     private fun writeBytes(path: String, bytes: ByteArray) {
         ensureDirectory(path.substringBeforeLast("/"))
         val data = bytes.toNSData() ?: error("Unable to create NSData for $path")
@@ -446,13 +380,6 @@ private object IosKokoroEngine {
     private fun fileSize(path: String): Long =
         NSData.dataWithContentsOfFile(path)?.length?.toLong() ?: -1L
 }
-
-private data class KokoroModelManifest(
-    val version: String,
-    val url: String,
-    val sizeBytes: Long,
-    val sha256: String
-)
 
 private fun NSData.toByteArray(): ByteArray {
     val length = this.length.toInt()

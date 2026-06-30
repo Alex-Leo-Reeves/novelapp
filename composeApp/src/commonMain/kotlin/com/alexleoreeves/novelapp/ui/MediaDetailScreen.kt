@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -52,26 +53,30 @@ fun MediaDetailScreen(
     var isLoadingEpisodes by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
 
-    var selectedServer by remember { mutableStateOf(0) } // 0: VidSrc CC, 1: Embed.su, 2: AutoEmbed, 3: 2Embed
-    val serverNames = listOf("Server 1 (VidSrc)", "Server 2 (EmbedSu)", "Server 3 (AutoEmbed)", "Server 4 (2Embed)")
+    var selectedServer by remember { mutableStateOf(0) }
+    val serverNames = listOf("VidLink", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
 
     val resolveMovieUrl: (String, Int) -> String = { id, server ->
         when (server) {
-            0 -> "https://vidsrc.cc/v2/embed/movie/$id"
-            1 -> "https://embed.su/embed/movie/$id"
-            2 -> "https://autoembed.co/movie/tmdb/$id"
-            3 -> "https://2embed.cc/embed/$id"
-            else -> "https://vidsrc.cc/v2/embed/movie/$id"
+            0 -> "https://vidlink.pro/movie/$id"
+            1 -> "https://player.autoembed.cc/movie/$id"
+            2 -> "https://vidsrc.me/embed/movie?tmdb=$id"
+            3 -> "https://embed.su/embed/movie/$id"
+            4 -> "https://vidsrc.cc/v2/embed/movie/$id"
+            5 -> "https://2embed.cc/embed/$id"
+            else -> "https://vidlink.pro/movie/$id"
         }
     }
 
     val resolveTvUrl: (String, String, String, Int) -> String = { id, s, e, server ->
         when (server) {
-            0 -> "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
-            1 -> "https://embed.su/embed/tv/$id/$s/$e"
-            2 -> "https://autoembed.co/tv/tmdb/$id-$s-$e"
-            3 -> "https://2embed.cc/embedtv/$id&s=$s&e=$e"
-            else -> "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
+            0 -> "https://vidlink.pro/tv/$id/$s/$e"
+            1 -> "https://player.autoembed.cc/tv/$id/$s/$e"
+            2 -> "https://vidsrc.me/embed/tv?tmdb=$id&season=$s&episode=$e"
+            3 -> "https://embed.su/embed/tv/$id/$s/$e"
+            4 -> "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
+            5 -> "https://2embed.cc/embedtv/$id&s=$s&e=$e"
+            else -> "https://vidlink.pro/tv/$id/$s/$e"
         }
     }
 
@@ -217,6 +222,7 @@ fun MediaDetailScreen(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                 ) {
                     serverNames.forEachIndexed { idx, name ->
                         FilterChip(

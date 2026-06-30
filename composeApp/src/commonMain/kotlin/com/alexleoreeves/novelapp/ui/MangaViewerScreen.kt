@@ -114,25 +114,34 @@ fun MangaViewerScreen(
         preloadStatus = if (loadedPages.isEmpty()) {
             "No manga pages found."
         } else {
-            "Saving pages for smooth reading..."
+            "Caching pages for smooth reading..."
         }
-        pages = runCatching {
-            cacheMangaChapterPages(
-                chapterKey = "$sourceName:$mangaTitle:$chapterTitle:$chapterUrl",
-                pageUrls = loadedPages,
-                persistent = sourceName == "local",
-                onProgress = { completed, total ->
-                    preloadCompleted = completed
-                    preloadTotal = total
-                    preloadStatus = "Saving page ${completed.coerceAtMost(total)} of $total..."
-                }
-            )
-        }.getOrElse {
-            preloadStatus = "Using online pages; cache failed."
-            loadedPages
-        }
+        pages = loadedPages
         isLoading = false
         currentPageIndex = initialPageIndex.coerceAtLeast(0)
+        if (loadedPages.isNotEmpty() && sourceName != "local") {
+            scope.launch {
+                runCatching {
+                    cacheMangaChapterPages(
+                        chapterKey = "$sourceName:$mangaTitle:$chapterTitle:$chapterUrl",
+                        pageUrls = loadedPages,
+                        persistent = false,
+                        onProgress = { completed, total ->
+                            preloadCompleted = completed.coerceAtMost(total)
+                            preloadTotal = total
+                            preloadStatus = "Caching page ${completed.coerceAtMost(total)} of $total..."
+                        }
+                    )
+                }.onSuccess { cachedPages ->
+                    if (cachedPages.size == pages.size) {
+                        pages = cachedPages
+                        preloadStatus = "Chapter cached for this session."
+                    }
+                }.onFailure {
+                    preloadStatus = "Using online pages; cache failed."
+                }
+            }
+        }
     }
 
     LaunchedEffect(isLoading, pages.size, initialPageIndex, scrollMode) {
@@ -374,6 +383,38 @@ fun MangaViewerScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = preloadTotal > 0 && preloadCompleted in 1 until preloadTotal,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 72.dp)
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.74f),
+                    shape = RoundedCornerShape(22.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            progress = { (preloadCompleted.toFloat() / preloadTotal.toFloat()).coerceIn(0f, 1f) },
+                            color = currentTheme.accentColor(),
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            preloadStatus,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
             }

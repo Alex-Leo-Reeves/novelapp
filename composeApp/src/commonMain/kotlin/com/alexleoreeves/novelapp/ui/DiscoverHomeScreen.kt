@@ -72,9 +72,11 @@ fun DiscoverHomeScreen(
     currentTheme: AppTheme,
     contentTab: ContentTab = ContentTab.NOVELS,
     initialSearchQuery: String = "",
+    recentSearches: List<String> = emptyList(),
     isDesktop: Boolean = false,
     onContentTabChanged: (ContentTab) -> Unit = {},
     onSearchQueryChanged: (String) -> Unit = {},
+    onSearchCommitted: (ContentTab, String) -> Unit = { _, _ -> },
     onNovelSelected: (UnifiedSearchResult) -> Unit
 ) {
     val repository = remember {
@@ -250,6 +252,7 @@ fun DiscoverHomeScreen(
             ContentTab.ANIME -> {
                 animeSearchResults = repository.searchAnime(q)
                 isSearching = false
+                onSearchCommitted(tab, q)
             }
             ContentTab.K_DRAMA,
             ContentTab.CARTOON,
@@ -257,6 +260,7 @@ fun DiscoverHomeScreen(
                 val category = tab.videoCategory()
                 videoSearchResults = if (category != null) repository.searchVideo(category, q) else emptyList()
                 isSearching = false
+                onSearchCommitted(tab, q)
             }
             else -> {
                 searchResults = when (tab) {
@@ -265,6 +269,7 @@ fun DiscoverHomeScreen(
                     else -> emptyList()
                 }
                 isSearching = false
+                onSearchCommitted(tab, q)
             }
         }
     }
@@ -457,6 +462,48 @@ fun DiscoverHomeScreen(
                     )
 
                     Spacer(Modifier.height(14.dp))
+
+                    AnimatedVisibility(visible = recentSearches.isNotEmpty()) {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = 10.dp)
+                        ) {
+                            items(recentSearches.take(3)) { query ->
+                                AssistChip(
+                                    onClick = {
+                                        searchQuery = query
+                                        onSearchQueryChanged(query)
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.History,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = tabAccent
+                                        )
+                                    },
+                                    label = {
+                                        Text(
+                                            query,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = currentTheme.cardColor(),
+                                        labelColor = currentTheme.textColor()
+                                    ),
+                                    border = AssistChipDefaults.assistChipBorder(
+                                        enabled = true,
+                                        borderColor = tabAccent.copy(alpha = 0.35f)
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
 
                     // Swipeable tab rail
                     LazyRow(

@@ -10,6 +10,18 @@ import WebKit
 private let appTitle = "Anime/Novel/Manga - All in One"
 private let apiBaseURL = URL(string: "https://novelapp1.onrender.com/api")!
 private let kokoroManifestURL = URL(string: "https://novelapp1.onrender.com/assets/kokoro/manifest.json")!
+private let playerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+private func playerHeaders(for url: URL) -> [String: String] {
+    let origin = "\(url.scheme ?? "https")://\(url.host ?? "vidlink.pro")"
+    return [
+        "User-Agent": playerUserAgent,
+        "Referer": "\(origin)/",
+        "Origin": origin,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9"
+    ]
+}
 
 struct ContentView: View {
     @StateObject private var app = AppModel()
@@ -1037,7 +1049,9 @@ private struct MediaRouteView: View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
             if route.route == "direct", let url = URL(string: route.url) {
-                VideoPlayer(player: AVPlayer(url: url))
+                VideoPlayer(player: AVPlayer(playerItem: AVPlayerItem(asset: AVURLAsset(url: url, options: [
+                    "AVURLAssetHTTPHeaderFieldsKey": playerHeaders(for: url)
+                ]))))
                     .ignoresSafeArea()
             } else if route.route == "embed", let url = URL(string: route.url) {
                 WebShell(url: url, isLoading: $isLoading)
@@ -1668,9 +1682,14 @@ private struct WebShell: UIViewRepresentable {
         configuration.websiteDataStore = .default()
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
+        view.customUserAgent = playerUserAgent
         view.scrollView.backgroundColor = .black
         view.isOpaque = false
-        view.load(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        playerHeaders(for: url).forEach { key, value in
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        view.load(request)
         return view
     }
 

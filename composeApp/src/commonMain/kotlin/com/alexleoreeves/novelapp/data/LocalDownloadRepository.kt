@@ -126,12 +126,24 @@ class LocalDownloadRepository {
     fun getWatchProgress(streamUrl: String): WatchHistoryItem? =
         loadIndex().watchHistory.firstOrNull { it.streamUrl == streamUrl }
 
+    fun getSearchHistory(tab: String): List<SearchHistoryItem> {
+        val normalizedTab = tab.trim().uppercase()
+        return loadIndex().searchHistory
+            .filter { it.tab.equals(normalizedTab, ignoreCase = true) && it.query.isNotBlank() }
+            .sortedByDescending { it.updatedAt }
+            .take(MAX_SEARCH_HISTORY_PER_TAB)
+    }
+
     fun exportUserState(favorites: List<FavoriteNovel>): UserSyncState {
         val idx = loadIndex()
         return UserSyncState(
             favorites = favorites.sortedByDescending { it.addedAt }.take(MAX_FAVORITES),
             readHistory = idx.readHistory.sortedByDescending { it.updatedAt }.take(MAX_HISTORY_ITEMS),
             watchHistory = idx.watchHistory.sortedByDescending { it.updatedAt }.take(MAX_HISTORY_ITEMS),
+            searchHistory = idx.searchHistory
+                .filter { it.query.isNotBlank() }
+                .sortedByDescending { it.updatedAt }
+                .take(MAX_SEARCH_HISTORY_TOTAL),
             updatedAt = currentTimeMillis()
         )
     }
@@ -151,7 +163,13 @@ class LocalDownloadRepository {
                     remote = state.watchHistory,
                     key = { it.streamUrl },
                     updatedAt = { it.updatedAt }
-                ).take(MAX_HISTORY_ITEMS)
+                ).take(MAX_HISTORY_ITEMS),
+                searchHistory = mergeByLatest(
+                    local = idx.searchHistory,
+                    remote = state.searchHistory,
+                    key = { "${it.tab.uppercase()}:${it.query.trim().lowercase()}" },
+                    updatedAt = { it.updatedAt }
+                ).take(MAX_SEARCH_HISTORY_TOTAL)
             )
         )
     }
@@ -184,9 +202,35 @@ class LocalDownloadRepository {
         )
     }
 
+    fun recordSearchQuery(tab: String, query: String) {
+        val cleanQuery = query.trim()
+        if (cleanQuery.length < 2) return
+        val cleanTab = tab.trim().uppercase().ifBlank { "NOVELS" }
+        val idx = loadIndex()
+        val updated = SearchHistoryItem(
+            tab = cleanTab,
+            query = cleanQuery,
+            updatedAt = currentTimeMillis()
+        )
+        val merged = mergeByLatest(
+            local = listOf(updated),
+            remote = idx.searchHistory,
+            key = { "${it.tab.uppercase()}:${it.query.trim().lowercase()}" },
+            updatedAt = { it.updatedAt }
+        )
+        val trimmed = merged
+            .groupBy { it.tab.uppercase() }
+            .flatMap { (_, entries) -> entries.take(MAX_SEARCH_HISTORY_PER_TAB) }
+            .sortedByDescending { it.updatedAt }
+            .take(MAX_SEARCH_HISTORY_TOTAL)
+        saveIndex(idx.copy(searchHistory = trimmed))
+    }
+
     private companion object {
         const val MAX_HISTORY_ITEMS = 40
         const val MAX_FAVORITES = 250
+        const val MAX_SEARCH_HISTORY_PER_TAB = 3
+        const val MAX_SEARCH_HISTORY_TOTAL = 60
     }
 }
 
