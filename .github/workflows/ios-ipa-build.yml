@@ -2,6 +2,20 @@ name: iOS IPA Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/ios-ipa-build.yml"
+      - "build.gradle.kts"
+      - "composeApp/**"
+      - "gradle/**"
+      - "gradle.properties"
+      - "gradlew"
+      - "iosApp/**"
+      - "kokoro-assets/**"
+      - "local.defaults.properties"
+      - "settings.gradle.kts"
 
 permissions:
   contents: write

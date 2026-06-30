@@ -166,7 +166,7 @@ android {
     buildFeatures {
         buildConfig = true
     }
-    sourceSets["main"].assets.srcDir(rootProject.file("kokoro-assets-lite"))
+    sourceSets["main"].assets.srcDir(rootProject.file("kokoro-assets-android"))
 }
 
 room {

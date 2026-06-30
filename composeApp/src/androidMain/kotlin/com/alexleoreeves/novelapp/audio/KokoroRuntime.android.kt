@@ -21,6 +21,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
 import java.util.UUID
+import java.util.zip.GZIPInputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
@@ -400,8 +401,11 @@ private object AndroidKokoroEngine {
                 phase = KokoroVoiceSetupPhase.Installing,
                 message = "Installing bundled Kokoro voice model."
             )
-            context.assets.open("$ASSET_ROOT/model_quantized.onnx").use { input ->
-                modelFile.outputStream().use { output -> input.copyTo(output) }
+            // Keep the bundled gzip under a neutral extension: Android strips .gz from asset names.
+            context.assets.open("$ASSET_ROOT/model_quantized.onnx.pack").use { compressed ->
+                GZIPInputStream(compressed).use { input ->
+                    modelFile.outputStream().use { output -> input.copyTo(output) }
+                }
             }
         }
         val required = listOf(

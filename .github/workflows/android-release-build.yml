@@ -1,0 +1,163 @@
+name: Android APK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/android-release-build.yml"
+      - "build.gradle.kts"
+      - "composeApp/**"
+      - "gradle/**"
+      - "gradle.properties"
+      - "gradlew"
+      - "kokoro-assets-android/**"
+      - "local.defaults.properties"
+      - "settings.gradle.kts"
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    name: Build signed Android APK
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
+      RAPID_API_HOST: ${{ secrets.RAPID_API_HOST }}
+      MANGADEX_CLIENT_ID: ${{ secrets.MANGADEX_CLIENT_ID }}
+      MANGADEX_CLIENT_SECRET: ${{ secrets.MANGADEX_CLIENT_SECRET }}
+      MANGADEX_USERNAME: ${{ secrets.MANGADEX_USERNAME }}
+      MANGADEX_PASSWORD: ${{ secrets.MANGADEX_PASSWORD }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check release signing secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            ANDROID_RELEASE_KEYSTORE_BASE64 \
+            ANDROID_RELEASE_STORE_PASSWORD \
+            ANDROID_RELEASE_KEY_ALIAS \
+            ANDROID_RELEASE_KEY_PASSWORD
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required to build an installable update signed with the existing Android key."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Prepare signing config
+        run: |
+          set -euo pipefail
+          mkdir -p keystores
+          echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > keystores/novelapp-release.jks
+          cat > local.properties <<EOF
+          sdk.dir=$ANDROID_HOME
+          RELEASE_STORE_FILE=keystores/novelapp-release.jks
+          RELEASE_STORE_PASSWORD=$ANDROID_RELEASE_STORE_PASSWORD
+          RELEASE_KEY_ALIAS=$ANDROID_RELEASE_KEY_ALIAS
+          RELEASE_KEY_PASSWORD=$ANDROID_RELEASE_KEY_PASSWORD
+          GEMINI_API_KEY=$GEMINI_API_KEY
+          RAPID_API_KEY=$RAPID_API_KEY
+          RAPID_API_HOST=$RAPID_API_HOST
+          MANGADEX_CLIENT_ID=$MANGADEX_CLIENT_ID
+          MANGADEX_CLIENT_SECRET=$MANGADEX_CLIENT_SECRET
+          MANGADEX_USERNAME=$MANGADEX_USERNAME
+          MANGADEX_PASSWORD=$MANGADEX_PASSWORD
+          EOF
+
+      - name: Build release APK
+        run: ./gradlew --no-daemon :composeApp:assembleRelease --stacktrace
+
+      - name: Collect APK metadata
+        id: apk
+        run: |
+          set -euo pipefail
+          APK_PATH="composeApp/build/outputs/apk/release/composeApp-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::Release APK was not produced."
+            exit 1
+          fi
+          BYTES="$(stat -c%s "$APK_PATH")"
+          SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "bytes=$BYTES" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "Release APK bytes: $BYTES"
+          echo "Release APK sha256: $SHA256"
+          unzip -l "$APK_PATH" | grep 'assets/kokoro/model_quantized' || true
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: novelapp-android-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release asset
+        if: github.ref_name == 'main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="android-v1.9"
+          ASSET="novelapp-android.apk"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Android v1.9" \
+              --notes "Android v1.9 with account sync hardening, bundled Kokoro ONNX, improved manga caching, and updated media providers."
+          fi
+          gh release upload "$TAG" "${{ steps.apk.outputs.path }}#$ASSET" --clobber
+
+      - name: Update Android manifest metadata
+        if: github.ref_name == 'main'
+        env:
+          APK_BYTES: ${{ steps.apk.outputs.bytes }}
+          APK_SHA256: ${{ steps.apk.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'site/app-version.json';
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+          manifest.apkUrl = 'https://github.com/Alex-Leo-Reeves/novelapp/releases/download/android-v1.9/novelapp-android.apk';
+          manifest.apkBytes = Number(process.env.APK_BYTES);
+          manifest.apkSha256 = process.env.APK_SHA256;
+          fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+
+      - name: Publish manifest metadata
+        if: github.ref_name == 'main'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/app-version.json
+          if git diff --cached --quiet; then
+            echo "No Android manifest metadata changes to publish."
+          else
+            git commit -m "Publish Android release metadata [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
