@@ -40,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.AppTheme
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.ObjCSignatureOverride
+import kotlinx.cinterop.readValue
 import kotlinx.coroutines.delay
 import platform.CoreGraphics.CGRectZero
 import platform.Foundation.NSMutableURLRequest
@@ -213,18 +215,22 @@ private class PlayerNavigationDelegate(
     private val onFinished: () -> Unit,
     private val onFailed: (String) -> Unit
 ) : NSObject(), WKNavigationDelegateProtocol {
+    @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didStartProvisionalNavigation: WKNavigation?) {
         onStarted()
     }
 
+    @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didFinishNavigation: WKNavigation?) {
         onFinished()
     }
 
+    @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didFailNavigation: WKNavigation?, withError: platform.Foundation.NSError) {
         onFailed(withError.localizedDescription)
     }
 
+    @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didFailProvisionalNavigation: WKNavigation?, withError: platform.Foundation.NSError) {
         onFailed(withError.localizedDescription)
     }
@@ -234,7 +240,7 @@ private fun String.toPlayerRequest(): NSMutableURLRequest {
     val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidlink.pro")!!
     return NSMutableURLRequest.requestWithURL(url).apply {
         playerHeaders().forEach { (key, value) ->
-            setValue(value, forHTTPHeaderField = key)
+            this.setValue(value, forHTTPHeaderField = key)
         }
     }
 }
