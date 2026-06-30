@@ -59,17 +59,27 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Set up JDK for Kotlin/Native
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Bootstrap Xcode project for CocoaPods
+        run: cd iosApp && xcodegen generate --spec project.yml
+
       - name: Download ONNX Runtime iOS Framework
         run: |
           cat << 'EOF' > Podfile
           platform :ios, '16.0'
-          target 'Dummy' do
+          project 'iosApp/AnimeNovelManga.xcodeproj'
+          target 'AnimeNovelManga' do
             pod 'onnxruntime-c', '1.17.1'
           end
           EOF
           pod install
           mv Pods/onnxruntime-c/onnxruntime.xcframework iosApp/onnxruntime.xcframework
-          rm -rf Podfile Podfile.lock Pods
+          rm -rf Podfile Podfile.lock Pods AnimeNovelManga.xcworkspace
 
       - name: Generate Xcode project
         run: cd iosApp && xcodegen generate --spec project.yml
