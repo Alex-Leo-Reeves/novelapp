@@ -48,6 +48,12 @@ kotlin {
             baseName = "ComposeApp"
             isStatic = true
         }
+        iosTarget.compilations.getByName("main") {
+            cinterops.create("onnxruntime") {
+                defFile(project.file("src/nativeInterop/cinterop/onnxruntime.def"))
+                includeDirs(project.file("src/nativeInterop/cinterop/onnxruntime_headers"))
+            }
+        }
     }
 
     sourceSets {

@@ -1,0 +1,3 @@
+headers = onnxruntime_c_api.h
+compilerOpts = -Isrc/nativeInterop/cinterop/onnxruntime_headers
+package = onnxruntime

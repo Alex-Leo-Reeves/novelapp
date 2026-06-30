@@ -18,6 +18,9 @@ targets:
       - path: iosApp
       - path: Assets.xcassets
       - path: LaunchScreen.storyboard
+    dependencies:
+      - framework: onnxruntime.xcframework
+        embed: true
     info:
       path: Info.plist
     settings:
