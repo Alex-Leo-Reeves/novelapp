@@ -18,9 +18,6 @@ targets:
       - path: iosApp
       - path: Assets.xcassets
       - path: LaunchScreen.storyboard
-    dependencies:
-      - framework: onnxruntime.xcframework
-        embed: true
     info:
       path: Info.plist
     settings:
@@ -30,11 +27,26 @@ targets:
         DEVELOPMENT_TEAM: ""
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_FILE: Info.plist
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)"
+          - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
         PRODUCT_BUNDLE_IDENTIFIER: com.alexleoreeves.novelapp.ios
         PRODUCT_NAME: AnimeNovelManga
+    preBuildScripts:
+      - name: Build ComposeApp Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
+    dependencies:
+      - framework: ../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/ComposeApp.framework
+        embed: true
+      - framework: onnxruntime.xcframework
+        embed: true
 schemes:
   AnimeNovelManga:
     build:

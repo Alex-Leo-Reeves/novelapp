@@ -790,7 +790,7 @@ private fun String.htmlToPlainText(): String =
     Ksoup.parse(this.decodeHtmlEntitiesLite()).text().decodeHtmlEntitiesLite()
 
 private fun String.extractWuxiaWorldChapterPrefix(): String {
-    val firstSlug = Regex(""""firstChapter":\{.*?"slug":"([^"]+)"""", RegexOption.DOT_MATCHES_ALL)
+    val firstSlug = Regex(""""firstChapter":\{[\s\S]*?"slug":"([^"]+)"""")
         .find(this)
         ?.groupValues
         ?.getOrNull(1)
@@ -809,7 +809,7 @@ private fun String.extractWuxiaWorldChapterPrefix(): String {
 }
 
 private fun String.extractWuxiaWorldLatestChapter(): Int {
-    val latest = Regex(""""latestChapter":\{.*?"number":\{"units":(\d+)""", RegexOption.DOT_MATCHES_ALL)
+    val latest = Regex(""""latestChapter":\{[\s\S]*?"number":\{"units":(\d+)""")
         .find(this)
         ?.groupValues
         ?.getOrNull(1)
