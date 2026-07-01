@@ -190,18 +190,19 @@ jobs:
         if: steps.signing.outputs.can_sign != 'true'
         run: |
           set -euo pipefail
-          mkdir -p site/downloads
-          cp build/ios/novelapp-ios-unsigned.ipa site/downloads/novelapp-ios.ipa
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore .
+          git fetch origin "${{ github.ref_name }}"
+          git merge --ff-only "origin/${{ github.ref_name }}"
+          mkdir -p site/downloads
+          cp build/ios/novelapp-ios-unsigned.ipa site/downloads/novelapp-ios.ipa
           git add site/downloads/novelapp-ios.ipa
           if git diff --cached --quiet; then
             echo "No unsigned iOS IPA change to commit."
           else
             git commit -m "Publish unsigned iOS release [skip ci]"
-            git fetch origin "${{ github.ref_name }}"
-            git rebase "origin/${{ github.ref_name }}"
-            git push
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
 
       - name: Archive iPhone app
@@ -271,12 +272,15 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore .
+          git fetch origin "${{ github.ref_name }}"
+          git merge --ff-only "origin/${{ github.ref_name }}"
+          mkdir -p site/downloads
+          cp build/ios/export/*.ipa site/downloads/novelapp-ios.ipa
           git add site/downloads/novelapp-ios.ipa
           if git diff --cached --quiet; then
             echo "No iOS IPA change to commit."
           else
             git commit -m "Publish iOS release [skip ci]"
-            git fetch origin "${{ github.ref_name }}"
-            git rebase "origin/${{ github.ref_name }}"
-            git push
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
