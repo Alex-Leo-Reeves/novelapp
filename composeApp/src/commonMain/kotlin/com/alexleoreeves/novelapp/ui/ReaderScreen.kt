@@ -130,16 +130,6 @@ fun ReaderScreen(
         isLoading = false
     }
 
-    LaunchedEffect(isLoading, chapterText, narrationCacheKey, isDownloadedChapter) {
-        if (!isLoading && chapterText.isNotBlank() && !chapterText.startsWith("Loading")) {
-            ttsController.prepareChapterAudio(
-                text = chapterText,
-                cacheKey = narrationCacheKey,
-                persistAudioCache = isDownloadedChapter
-            )
-        }
-    }
-
     LaunchedEffect(isLoading, initialParagraphIndex, paragraphs.size) {
         if (!isLoading && paragraphs.isNotEmpty() && initialParagraphIndex > 0) {
             lazyListState.scrollToItem((initialParagraphIndex + 1).coerceAtMost(paragraphs.size))

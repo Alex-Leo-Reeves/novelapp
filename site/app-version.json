@@ -1,16 +1,18 @@
 {
-  "versionCode": 13,
-  "versionName": "1.12",
+  "versionCode": 14,
+  "versionName": "1.13",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
   "apkBytes": 67282920,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
     "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
-    "Kokoro narration now prepares a continuous chapter audio cache before playback and keeps pause/resume on the cached file.",
+    "Kokoro narration now starts immediately when no cached chapter audio exists and keeps existing cached audio available when present.",
+    "Fixed Kokoro model resume at 100% so HTTP 416 responses verify and install the completed download instead of failing.",
+    "Stopped automatic full-chapter audio creation from blocking the reader; narration now starts immediately if no cached chapter audio exists.",
     "Manga chapters now cache their pages before the reader opens so scrolling does not fight network image loading.",
     "Anime playback now prioritizes Anineko/AnimePahe direct streams and blocks YouTube/trailer fallbacks from opening as playback.",
     "K-drama and cartoon source results now prefer source stream extraction instead of broken generic embed providers."
   ],
   "forceUpdate": false,
-  "apkSha256": "5a033e01808ca0f20bd9ff5321fd9bf0d600b35ccf93ab5ac409f83448c19525"
+  "apkSha256": "b5e986c48f5067ae4f99c2a5679119ad90173701744079675ca2e1cc77e32aec"
 }
