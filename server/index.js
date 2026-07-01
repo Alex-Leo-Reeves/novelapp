@@ -3,6 +3,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { URL } = require("url");
+const swiftNovelScrapers = require("./swift-novel-scrapers");
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/data" : path.join(process.cwd(), "server-data"));
@@ -459,19 +460,20 @@ function contentItem({ id, title, subtitle = "", coverUrl = "", detailUrl = "", 
 
 const KNOWN_NOVELS = [
   ["my-vampire-system", "My Vampire System", "JKSManga", "WebNovel", "A weak student gains a vampire system and must survive school, war, and monsters."],
-  ["renegade-immortal", "Renegade Immortal", "Er Gen", "WuxiaWorld", "Wang Lin walks a ruthless path through cultivation, revenge, and immortality."],
-  ["pursuit-of-truth", "Pursuit of Truth", "Er Gen", "WuxiaWorld", "Su Ming searches for identity and truth in a world of ancient power."],
-  ["a-will-eternal", "A Will Eternal", "Er Gen", "WuxiaWorld", "Bai Xiaochun wants to live forever and somehow keeps changing the world around him."],
+  ["renegade-immortal", "Renegade Immortal", "Er Gen", "Wuxiaworld", "Wang Lin walks a ruthless path through cultivation, revenge, and immortality.", "https://www.wuxiaworld.com/novel/renegade-immortal"],
+  ["pursuit-of-truth", "Pursuit of Truth", "Er Gen", "Wuxiaworld", "Su Ming searches for identity and truth in a world of ancient power.", "https://www.wuxiaworld.com/novel/pursuit-of-the-truth"],
+  ["a-will-eternal", "A Will Eternal", "Er Gen", "Wuxiaworld", "Bai Xiaochun wants to live forever and somehow keeps changing the world around him.", "https://www.wuxiaworld.com/novel/a-will-eternal"],
   ["lord-of-the-mysteries", "Lord of the Mysteries", "Cuttlefish That Loves Diving", "WebNovel", "A Victorian mystery of potions, gods, secret orders, and madness."],
   ["shadow-slave", "Shadow Slave", "Guiltythree", "WebNovel", "Sunny survives nightmare worlds while carrying a dangerous shadow bond."],
   ["omniscient-readers-viewpoint", "Omniscient Reader's Viewpoint", "Sing Shong", "WebNovel", "A reader becomes the only person who knows how the apocalypse story ends."],
   ["martial-peak", "Martial Peak", "Momo", "BoxNovel", "Yang Kai rises through martial worlds in a long cultivation journey."],
-  ["coiling-dragon", "Coiling Dragon", "I Eat Tomatoes", "WuxiaWorld", "Linley trains from noble heir to world-shaking warrior and mage."],
-  ["the-beginning-after-the-end", "The Beginning After The End", "TurtleMe", "Tapas", "A reincarnated king grows up in a magical world with new bonds and old burdens."]
+  ["coiling-dragon", "Coiling Dragon", "I Eat Tomatoes", "Wuxiaworld", "Linley trains from noble heir to world-shaking warrior and mage.", "https://www.wuxiaworld.com/novel/coiling-dragon-preview"],
+  ["the-beginning-after-the-end", "The Beginning After The End", "TurtleMe", "Tapas", "A reincarnated king grows up in a magical world with new bonds and old burdens."],
+  ["mother-of-learning", "Mother of Learning", "nobody103", "RoyalRoad", "A time-loop fantasy about a young mage uncovering a dangerous conspiracy.", "https://www.royalroad.com/fiction/21220/mother-of-learning"]
 ];
 
 const KNOWN_MANGA = [
-  ["solo-leveling", "Solo Leveling", "Chugong", "MangaDex", "The weakest hunter becomes the only player of a hidden leveling system.", "https://uploads.mangadex.org/covers/32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e/cover.jpg"],
+  ["solo-leveling", "Solo Leveling", "Chugong", "MangaDex", "The weakest hunter becomes the only player of a hidden leveling system.", "https://uploads.mangadex.org/covers/32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e/cover.jpg", "mangadex:32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e"],
   ["one-piece", "One Piece", "Eiichiro Oda", "MangaDex", "Luffy sails with his crew to find the One Piece.", ""],
   ["jujutsu-kaisen", "Jujutsu Kaisen", "Gege Akutami", "MangaDex", "Curses, sorcerers, and the dangerous vessel of Sukuna.", ""],
   ["chainsaw-man", "Chainsaw Man", "Tatsuki Fujimoto", "MangaDex", "Denji becomes Chainsaw Man and enters a brutal devil-hunting world.", ""]
@@ -509,7 +511,7 @@ function fixtureItems(type, query = "") {
           subtitle: item[2],
           sourceName: item[3],
           kind: "novel",
-          detailUrl: `novel://${item[0]}`,
+          detailUrl: item[5] || `novel://${item[0]}`,
           synopsis: item[4],
           coverUrl: `https://dummyimage.com/600x840/111827/42d6b5.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
         });
@@ -521,7 +523,7 @@ function fixtureItems(type, query = "") {
           subtitle: item[2],
           sourceName: item[3],
           kind: "manga",
-          detailUrl: `manga://${item[0]}`,
+          detailUrl: item[6] || `manga://${item[0]}`,
           synopsis: item[4],
           coverUrl: item[5] || `https://dummyimage.com/600x840/111827/e84d8a.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
         });
@@ -596,9 +598,52 @@ async function tmdbItems(type, query, page = 1) {
   }));
 }
 
+async function tmdbBestMatch(type, title) {
+  const query = String(title || "").trim();
+  if (!query) return null;
+  const items = await tmdbItems(type, query, 1).catch(() => []);
+  return items.find((item) => /^tmdb:\/\//.test(item.detailUrl)) || null;
+}
+
+async function wikidataTmdbMatch(type, title) {
+  const query = String(title || "").trim();
+  if (!query) return null;
+  const normalizedType = normalizeContentType(type);
+  const mediaType = normalizedType === "movies" ? "movie" : "tv";
+  const property = mediaType === "movie" ? "P4947" : "P4983";
+  const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=5&origin=*`;
+  const search = await fetchWithTimeout(searchUrl, {
+    headers: { "user-agent": "NovelApp/1.0 content resolver", accept: "application/json" }
+  }, 9000).catch(() => null);
+  const candidates = (search?.search || []).filter((item) => item.id);
+  for (const candidate of candidates) {
+    const entityUrl = `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(candidate.id)}.json`;
+    const entityPayload = await fetchWithTimeout(entityUrl, {
+      headers: { "user-agent": "NovelApp/1.0 content resolver", accept: "application/json" }
+    }, 9000).catch(() => null);
+    const entity = entityPayload?.entities?.[candidate.id];
+    const claim = entity?.claims?.[property]?.find((item) => item?.mainsnak?.datavalue?.value);
+    const id = String(claim?.mainsnak?.datavalue?.value || "").trim();
+    if (/^\d+$/.test(id)) {
+      return contentItem({
+        id: `wikidata_tmdb_${mediaType}_${id}`,
+        title: candidate.label || query,
+        subtitle: "Wikidata TMDB",
+        detailUrl: `tmdb://${mediaType}/${id}`,
+        sourceName: "Wikidata",
+        kind: mediaType === "movie" ? "movie" : normalizedType,
+        synopsis: candidate.description || ""
+      });
+    }
+  }
+  return null;
+}
+
 async function mangadexItems(query, page = 1) {
-  if (!query) return fixtureItems("manga");
-  const url = `https://api.mangadex.org/manga?limit=24&offset=${(page - 1) * 24}&title=${encodeURIComponent(query)}&includes[]=cover_art&availableTranslatedLanguage[]=en&order[relevance]=desc`;
+  const title = String(query || "").trim();
+  const order = title ? "order[relevance]=desc" : "order[followedCount]=desc";
+  const titleParam = title ? `&title=${encodeURIComponent(title)}` : "";
+  const url = `https://api.mangadex.org/manga?limit=24&offset=${(page - 1) * 24}${titleParam}&includes[]=cover_art&availableTranslatedLanguage[]=en&${order}`;
   const payload = await fetchWithTimeout(url);
   return (payload.data || []).map((item) => {
     const title = item.attributes?.title?.en || Object.values(item.attributes?.title || {})[0] || "Untitled manga";
@@ -617,17 +662,58 @@ async function mangadexItems(query, page = 1) {
   });
 }
 
+async function mangadexChapters(detailUrl, page = 1) {
+  const id = String(detailUrl || "").startsWith("mangadex:")
+    ? String(detailUrl).replace("mangadex:", "")
+    : "";
+  if (!id) return [];
+  const limit = 100;
+  const offset = (Math.max(1, Number(page) || 1) - 1) * limit;
+  const url = `https://api.mangadex.org/manga/${encodeURIComponent(id)}/feed?limit=${limit}&offset=${offset}&translatedLanguage[]=en&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`;
+  const payload = await fetchWithTimeout(url);
+  return (payload.data || []).filter((item) => !item.attributes?.externalUrl).map((item, index) => {
+    const attributes = item.attributes || {};
+    const chapterNumber = Number.parseInt(String(attributes.chapter || ""), 10) || (offset + index + 1);
+    const title = attributes.title
+      ? `Chapter ${attributes.chapter || chapterNumber} - ${attributes.title}`
+      : `Chapter ${attributes.chapter || chapterNumber}`;
+    return {
+      title,
+      url: `mangadex-chapter://${item.id}`,
+      chapterNumber
+    };
+  });
+}
+
+async function mangadexPages(chapterUrl) {
+  const chapterId = String(chapterUrl || "").replace("mangadex-chapter://", "");
+  if (!chapterId || chapterId === chapterUrl) return [];
+  const payload = await fetchWithTimeout(`https://api.mangadex.org/at-home/server/${encodeURIComponent(chapterId)}`);
+  const baseUrl = payload.baseUrl;
+  const chapter = payload.chapter || {};
+  const hash = chapter.hash || "";
+  const pages = Array.isArray(chapter.dataSaver) && chapter.dataSaver.length
+    ? chapter.dataSaver
+    : chapter.data || [];
+  if (!baseUrl || !hash || !pages.length) return [];
+  return pages.map((page) => `${baseUrl}/data-saver/${hash}/${page}`);
+}
+
 async function contentHome(type, page = 1) {
   const normalizedType = normalizeContentType(type);
   if (normalizedType === "anime") {
     return anilistItems("", page).catch(() => fixtureItems("anime"));
   }
-  if (normalizedType === "manga") return fixtureItems("manga");
+  if (normalizedType === "manga") {
+    const live = await mangadexItems("", page).catch(() => []);
+    return live.length ? live : fixtureItems("manga");
+  }
   if (["kdrama", "cartoon", "movies"].includes(normalizedType)) {
     const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
     return tmdb.length ? tmdb : fixtureItems(normalizedType);
   }
-  return fixtureItems("novels");
+  const live = await swiftNovelScrapers.popularNovels(page).catch(() => []);
+  return live.length ? live : fixtureItems("novels");
 }
 
 async function contentSearch(type, query, page = 1) {
@@ -644,7 +730,29 @@ async function contentSearch(type, query, page = 1) {
     const live = await tmdbItems(normalizedType, query, page).catch(() => []);
     return live.length ? live : fixtureItems(normalizedType, query);
   }
-  return fixtureItems("novels", query);
+  const live = await swiftNovelScrapers.searchNovels(query, page).catch(() => []);
+  return live.length ? live : fixtureItems("novels", query);
+}
+
+async function contentChapters(kind, detailUrl, title, sourceName) {
+  if (normalizeContentType(kind) === "novels" || normalizeContentType(kind) === "novel") {
+    const live = await swiftNovelScrapers.novelChapters({ detailUrl, sourceName }).catch(() => []);
+    return live;
+  }
+  if (normalizeContentType(kind) === "manga") {
+    const live = await mangadexChapters(detailUrl).catch(() => []);
+    return live;
+  }
+  return syntheticChapters(kind, detailUrl, title);
+}
+
+async function contentChapterText(chapterUrl, title, sourceName) {
+  const live = await swiftNovelScrapers.novelChapterText({ chapterUrl, sourceName }).catch(() => "");
+  if (live && live.trim().length > 200) return live;
+  if (String(chapterUrl || "").startsWith("novel-chapter://")) {
+    return "Real chapter text is unavailable for this source right now. Try another result from Wuxiaworld or RoyalRoad.";
+  }
+  return "This chapter is unavailable from the provider right now. It may be locked, moved, or blocked by the source.";
 }
 
 function syntheticChapters(kind, detailUrl, title = "") {
@@ -807,38 +915,57 @@ async function omssRoute(mediaType, id, season, episode, title) {
 }
 
 async function watchRoute(kind, title, detailUrl) {
-  const normalizedKind = normalizeContentType(kind);
-  const tmdbMatch = /^tmdb:\/\/([^/]+)\/(\d+)/.exec(String(detailUrl || ""));
-  if (tmdbMatch) {
-    const mediaType = tmdbMatch[1] === "movie" || normalizedKind === "movies" ? "movie" : "tv";
-    const id = tmdbMatch[2];
-    const omss = await omssRoute(mediaType, id, "1", "1", title);
-    if (omss) return omss;
-    const [primary, ...fallbacks] = embedProviders(mediaType, id);
-    return {
-      route: "embed",
-      url: primary.url,
-      provider: primary.provider,
-      title: title || "Watch",
-      fallbackProviders: fallbacks
-    };
-  }
-  if (/^https?:\/\//i.test(String(detailUrl || ""))) {
-    const direct = /\.(m3u8|mp4|mpd)(\?|$)/i.test(detailUrl);
-    return {
-      route: direct ? "direct" : "embed",
-      url: detailUrl,
-      provider: direct ? "Direct" : "Web",
-      title: title || "Watch"
-    };
-  }
-  return {
+  const routes = await watchRoutes(kind, title, detailUrl);
+  return routes[0] || {
     route: "unavailable",
     url: "",
     provider: "",
     title: title || "Unavailable",
     message: "No playable provider was available for this title."
   };
+}
+
+async function watchRoutes(kind, title, detailUrl) {
+  const normalizedKind = normalizeContentType(kind);
+  let resolvedDetailUrl = String(detailUrl || "");
+  if (/^anilist:/i.test(resolvedDetailUrl) || !resolvedDetailUrl) {
+    const tmdbType = normalizedKind === "movies" ? "movies" : normalizedKind;
+    const match = await tmdbBestMatch(tmdbType, title)
+      || await wikidataTmdbMatch(tmdbType, title);
+    if (match?.detailUrl) resolvedDetailUrl = match.detailUrl;
+  }
+
+  const tmdbMatch = /^tmdb:\/\/([^/]+)\/(\d+)/.exec(resolvedDetailUrl);
+  if (tmdbMatch) {
+    const mediaType = tmdbMatch[1] === "movie" || normalizedKind === "movies" ? "movie" : "tv";
+    const id = tmdbMatch[2];
+    const routes = [];
+    const omss = await omssRoute(mediaType, id, "1", "1", title);
+    if (omss) routes.push(omss);
+    routes.push(...embedProviders(mediaType, id).map((provider) => ({
+      route: "embed",
+      url: provider.url,
+      provider: provider.provider,
+      title: title || "Watch"
+    })));
+    return routes;
+  }
+  if (/^https?:\/\//i.test(resolvedDetailUrl)) {
+    const direct = /\.(m3u8|mp4|mpd)(\?|$)/i.test(resolvedDetailUrl);
+    return [{
+      route: direct ? "direct" : "embed",
+      url: resolvedDetailUrl,
+      provider: direct ? "Direct" : "Web",
+      title: title || "Watch"
+    }];
+  }
+  return [{
+    route: "unavailable",
+    url: "",
+    provider: "",
+    title: title || "Unavailable",
+    message: "No playable provider was available. Add TMDB credentials or OMSS on the backend for this title."
+  }];
 }
 
 async function handleContentApi(request, response, pathname, url) {
@@ -864,19 +991,28 @@ async function handleContentApi(request, response, pathname, url) {
     }
     if (request.method === "POST" && pathname === "/api/content/chapters") {
       const body = await readBody(request);
-      return sendApiData(response, 200, { chapters: syntheticChapters(body.kind, body.detailUrl, body.title) });
+      return sendApiData(response, 200, {
+        chapters: await contentChapters(body.kind, body.detailUrl, body.title, body.sourceName)
+      });
     }
     if (request.method === "POST" && pathname === "/api/content/chapter-text") {
       const body = await readBody(request);
-      return sendApiData(response, 200, { text: syntheticChapterText(body.chapterUrl, body.title) });
+      return sendApiData(response, 200, {
+        text: await contentChapterText(body.chapterUrl, body.title, body.sourceName)
+      });
     }
     if (request.method === "POST" && pathname === "/api/content/manga-pages") {
       const body = await readBody(request);
-      return sendApiData(response, 200, { pages: syntheticMangaPages(body.chapterUrl) });
+      const live = await mangadexPages(body.chapterUrl).catch(() => []);
+      return sendApiData(response, 200, { pages: live });
     }
     if (request.method === "POST" && pathname === "/api/content/watch-route") {
       const body = await readBody(request);
       return sendApiData(response, 200, await watchRoute(body.kind, body.title, body.detailUrl));
+    }
+    if (request.method === "POST" && pathname === "/api/content/watch-routes") {
+      const body = await readBody(request);
+      return sendApiData(response, 200, { routes: await watchRoutes(body.kind, body.title, body.detailUrl) });
     }
     return sendApiError(response, 404, "Content API route not found.");
   } catch (error) {
