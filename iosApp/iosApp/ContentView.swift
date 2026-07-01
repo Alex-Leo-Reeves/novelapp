@@ -1145,6 +1145,8 @@ private struct MediaRouteView: View {
     @Environment(\.dismiss) private var dismiss
     let route: WatchRoute
     @State private var isLoading = true
+    @State private var loadMessage = "Opening secure player"
+    @State private var webError: String?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -1155,15 +1157,33 @@ private struct MediaRouteView: View {
                 ]))))
                     .ignoresSafeArea()
             } else if route.route == "embed", let url = URL(string: route.url) {
-                WebShell(url: url, isLoading: $isLoading)
+                WebShell(url: url, isLoading: $isLoading, loadMessage: $loadMessage, errorMessage: $webError)
                     .ignoresSafeArea()
-                if isLoading {
-                    BrandedLoadingView(title: "Loading \(route.provider)", subtitle: route.title)
+                if isLoading || webError != nil {
+                    BrandedLoadingView(
+                        title: webError == nil ? "Loading \(route.provider)" : "\(route.provider) did not open",
+                        subtitle: webError ?? loadMessage
+                    )
                 }
             } else {
                 EmptyState(message: route.message ?? "Provider unavailable.")
                     .padding()
             }
+            VStack {
+                Spacer()
+                HStack(spacing: 8) {
+                    Image(systemName: route.route == "direct" ? "play.circle.fill" : "globe")
+                    Text(route.provider)
+                    Text(route.title).lineLimit(1).foregroundColor(.secondary)
+                    Spacer()
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.black.opacity(0.72))
+                .foregroundColor(.white)
+            }
+            .ignoresSafeArea(edges: .bottom)
             Button {
                 dismiss()
             } label: {
@@ -1172,6 +1192,12 @@ private struct MediaRouteView: View {
                     .padding(14)
             }
             .foregroundColor(.white)
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            if isLoading && route.route == "embed" {
+                loadMessage = "Provider is taking longer than usual. Network, ads, or the host may be delaying playback."
+            }
         }
     }
 }
@@ -1833,8 +1859,12 @@ private struct SecureFieldRow: View {
 private struct WebShell: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
+    @Binding var loadMessage: String
+    @Binding var errorMessage: String?
 
-    func makeCoordinator() -> Coordinator { Coordinator(isLoading: $isLoading) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isLoading: $isLoading, loadMessage: $loadMessage, errorMessage: $errorMessage)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -1858,17 +1888,34 @@ private struct WebShell: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding var isLoading: Bool
+        @Binding var loadMessage: String
+        @Binding var errorMessage: String?
 
-        init(isLoading: Binding<Bool>) {
+        init(isLoading: Binding<Bool>, loadMessage: Binding<String>, errorMessage: Binding<String?>) {
             _isLoading = isLoading
+            _loadMessage = loadMessage
+            _errorMessage = errorMessage
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            isLoading = true
+            errorMessage = nil
+            loadMessage = "Connecting to \(webView.url?.host ?? "provider")"
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isLoading = false
+            loadMessage = "Player loaded"
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             isLoading = false
+            errorMessage = error.localizedDescription
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            isLoading = false
+            errorMessage = error.localizedDescription
         }
     }
 }
