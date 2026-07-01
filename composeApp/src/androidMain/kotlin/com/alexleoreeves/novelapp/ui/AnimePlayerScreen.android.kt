@@ -3,17 +3,7 @@ package com.alexleoreeves.novelapp.ui
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.net.Uri
-import android.os.Build
-import android.view.View
 import android.view.ViewGroup
-import android.webkit.CookieManager
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -96,14 +86,17 @@ actual fun AnimePlayerScreen(
     }
 
     val isDirectMedia = streamUrl.isDirectPlayableMediaUrl()
-    val isWebEmbed = streamUrl.startsWith("http", ignoreCase = true) && !isDirectMedia
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
-    var playerError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
-    var isPlayerBuffering by remember(streamUrl, retryKey) { mutableStateOf(true) }
+    var playerError by remember(streamUrl, retryKey) {
+        mutableStateOf<String?>(
+            if (isDirectMedia) null else "This episode did not resolve to a direct playable stream."
+        )
+    }
+    var isPlayerBuffering by remember(streamUrl, retryKey) { mutableStateOf(isDirectMedia) }
 
     // ── ExoPlayer setup ───────────────────────────────────────────────────
     val exoPlayer = remember(streamUrl, retryKey) {
-        if (!isWebEmbed || isDirectMedia) {
+        if (isDirectMedia) {
             val cache = NovelAppVideoCache.get(context)
             val requestHeaders = streamUrl.playerHeaders()
             val httpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -217,147 +210,20 @@ actual fun AnimePlayerScreen(
         }
     }
 
-    if (isWebEmbed) {
-        var webLoading by remember(streamUrl, retryKey) { mutableStateOf(true) }
-        var webError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
-        val providerName = streamUrl.providerName()
-
-        LaunchedEffect(streamUrl, retryKey, previewLimitMs) {
-            val limit = previewLimitMs ?: return@LaunchedEffect
-            delay(limit)
-            onPreviewFinished()
-        }
-
-        LaunchedEffect(streamUrl, retryKey, webLoading) {
-            if (webLoading) {
-                delay(18_000)
-                if (webLoading) {
-                    webError = "$providerName is taking too long to respond. Try another provider or episode."
-                    webLoading = false
-                }
-            }
-        }
-
+    if (!isDirectMedia) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            key(retryKey) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                useWideViewPort = true
-                                loadWithOverviewMode = true
-                                setSupportMultipleWindows(false)
-                                javaScriptCanOpenWindowsAutomatically = true
-                                loadsImagesAutomatically = true
-                                allowContentAccess = true
-                                allowFileAccess = false
-                                userAgentString = PLAYER_USER_AGENT
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                }
-                            }
-                            CookieManager.getInstance().setAcceptCookie(true)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                            }
-                            webChromeClient = object : WebChromeClient() {
-                                private var customView: View? = null
-                                private var customViewCallback: CustomViewCallback? = null
-
-                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                    val decor = activity?.window?.decorView as? ViewGroup
-                                    if (view == null || decor == null) {
-                                        callback?.onCustomViewHidden()
-                                        return
-                                    }
-                                    if (customView != null) {
-                                        callback?.onCustomViewHidden()
-                                        return
-                                    }
-                                    customView = view
-                                    customViewCallback = callback
-                                    decor.addView(
-                                        view,
-                                        ViewGroup.LayoutParams(
-                                            ViewGroup.LayoutParams.MATCH_PARENT,
-                                            ViewGroup.LayoutParams.MATCH_PARENT
-                                        )
-                                    )
-                                }
-
-                                override fun onHideCustomView() {
-                                    val decor = activity?.window?.decorView as? ViewGroup
-                                    customView?.let { decor?.removeView(it) }
-                                    customView = null
-                                    customViewCallback?.onCustomViewHidden()
-                                    customViewCallback = null
-                                }
-                            }
-                            webViewClient = object : WebViewClient() {
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                    webLoading = true
-                                    webError = null
-                                }
-
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    webLoading = false
-                                }
-
-                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                    val url = request?.url?.toString() ?: ""
-                                    return !url.isAllowedPlayerNavigation(streamUrl)
-                                }
-
-                                override fun onReceivedError(
-                                    view: WebView?,
-                                    request: WebResourceRequest?,
-                                    error: WebResourceError?
-                                ) {
-                                    if (request?.isForMainFrame == true) {
-                                        webLoading = false
-                                        webError = error?.description?.toString() ?: "Provider failed to load."
-                                    }
-                                }
-
-                                override fun onReceivedHttpError(
-                                    view: WebView?,
-                                    request: WebResourceRequest?,
-                                    errorResponse: WebResourceResponse?
-                                ) {
-                                    if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) {
-                                        webLoading = false
-                                        webError = "$providerName returned ${errorResponse?.statusCode ?: "an error"}."
-                                    }
-                                }
-                            }
-                            loadUrl(
-                                streamUrl,
-                                streamUrl.playerHeaders()
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
             PlayerLoadingOverlay(
-                visible = webLoading || webError != null,
+                visible = true,
                 title = episodeTitle,
-                providerName = providerName,
-                message = webError ?: "Loading secure player...",
-                isError = webError != null,
+                providerName = streamUrl.providerName(),
+                message = playerError ?: "This episode is not a direct stream.",
+                isError = true,
                 onRetry = {
-                    webError = null
-                    webLoading = true
+                    playerError = "This episode still did not resolve to a direct playable stream."
                     retryKey++
                 },
                 onBack = onBack
@@ -719,32 +585,6 @@ private fun String.isDirectPlayableMediaUrl(): Boolean {
         clean.endsWith(".mkv") ||
         clean.endsWith(".mov") ||
         !startsWith("http", ignoreCase = true)
-}
-
-private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
-    if (isBlank()) return false
-    if (startsWith("about:", ignoreCase = true) || startsWith("data:", ignoreCase = true) || startsWith("blob:", ignoreCase = true)) {
-        return true
-    }
-    val requestedHost = runCatching { Uri.parse(this).host.orEmpty().lowercase() }.getOrDefault("")
-    val initialHost = runCatching { Uri.parse(initialUrl).host.orEmpty().lowercase() }.getOrDefault("")
-    if (requestedHost.isBlank()) return false
-    if (requestedHost == initialHost || requestedHost.endsWith(".$initialHost")) return true
-
-    // Block obvious ad/tracker domains
-    val blockedDomains = listOf("doubleclick.net", "googleadservices.com", "pagead2", "popads", "popcash")
-    if (blockedDomains.any { requestedHost.contains(it) }) return false
-
-    // Allow all streaming, embed, and player domains
-    return listOf(
-        "anineko", "anizara", "vivibebe", "bibiemb", "otakuhg", "otakuvid", "playmogo",
-        "kwik", "dood", "vidsrc", "vidlink", "autoembed", "stream", "embed", "tmdb", "themoviedb",
-        "kisskh", "dramacool", "kimcartoon", "fastani", "vidplay", "filemoon",
-        "rapidvideo", "voe", "cloudflare", "jwpcdn", "jwplatform", "cdnjs",
-        "bootstrapcdn", "googleapis", "gstatic",
-        "font", "ajax.googleapis", "static", "cdn", "player", "media",
-        "video", "m3u8", "hls", "mp4", "aniwatch", "zoro", "anime"
-    ).any { requestedHost.contains(it) }
 }
 
 @Composable

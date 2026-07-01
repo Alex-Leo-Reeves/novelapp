@@ -338,13 +338,14 @@ class NovelSearchRepository(
         alternateQueries: List<String> = emptyList()
     ): List<AnimeEpisode> {
         val normalizedAnimeTitle = animeTitleQuery.normalizedAnimeSearchTitle()
+        val maxEpisodes = episodeCount.takeIf { it > 0 } ?: 300
         val knownSlug = knownAnimeSlugOverrides[normalizedAnimeTitle]
             ?: knownAnimeSlugOverrides.entries.firstOrNull { (k, _) ->
                 normalizedAnimeTitle.contains(k) || k.contains(normalizedAnimeTitle)
             }?.value
 
         if (knownSlug != null) {
-            val episodes = aninekoScraper.fetchEpisodesBySlug(knownSlug, episodeCount)
+            val episodes = aninekoScraper.fetchEpisodesBySlug(knownSlug, maxEpisodes)
             if (episodes.isNotEmpty()) return episodes
         }
 
@@ -354,7 +355,7 @@ class NovelSearchRepository(
             .distinctBy { it.lowercase() }
 
         for (query in queries) {
-            val aninekoEpisodes = aninekoScraper.fetchEpisodes(query)
+            val aninekoEpisodes = aninekoScraper.fetchEpisodes(query, maxEpisodes)
                 .distinctBy { it.url }
                 .sortedByDescending { it.episodeNumber }
             if (aninekoEpisodes.isNotEmpty()) return aninekoEpisodes
@@ -365,20 +366,51 @@ class NovelSearchRepository(
             if (animePaheEpisodes.isNotEmpty()) return animePaheEpisodes
         }
 
-        val effectiveEpCount = if (episodeCount > 0) episodeCount else 24
-        val baseTitle = queries.firstOrNull().orEmpty().ifBlank { animeTitleQuery }
-        val slugVariants = listOf(
-            baseTitle,
-            baseTitle.removeAnimeSeasonSuffix(),
-            "${baseTitle} tv",
-            "${baseTitle} dub"
-        ).distinct()
-        for (variant in slugVariants) {
-            val fb = aninekoScraper.fallbackEpisodes(variant, effectiveEpCount)
-            if (fb.isNotEmpty()) return fb
-        }
+        return emptyList()
+    }
 
-        return aninekoScraper.fallbackEpisodes(baseTitle, effectiveEpCount)
+    suspend fun fetchEpisodesFromAnimeProvider(
+        provider: String,
+        animeTitleQuery: String,
+        episodeCount: Int = 0,
+        alternateQueries: List<String> = emptyList()
+    ): List<AnimeEpisode> {
+        val normalizedProvider = provider.lowercase()
+        if (normalizedProvider == "auto") {
+            return fetchEpisodes(animeTitleQuery, episodeCount, alternateQueries)
+        }
+        val queries = (listOf(animeTitleQuery) + alternateQueries)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+        val maxEpisodes = episodeCount.takeIf { it > 0 } ?: 300
+        return when (normalizedProvider) {
+            "anineko" -> {
+                val normalizedAnimeTitle = animeTitleQuery.normalizedAnimeSearchTitle()
+                val knownSlug = knownAnimeSlugOverrides[normalizedAnimeTitle]
+                    ?: knownAnimeSlugOverrides.entries.firstOrNull { (k, _) ->
+                        normalizedAnimeTitle.contains(k) || k.contains(normalizedAnimeTitle)
+                    }?.value
+                knownSlug?.let { slug ->
+                    aninekoScraper.fetchEpisodesBySlug(slug, maxEpisodes)
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { return it }
+                }
+                queries.firstNotNullOfOrNull { query ->
+                    aninekoScraper.fetchEpisodes(query, maxEpisodes)
+                        .distinctBy { it.url }
+                        .sortedByDescending { it.episodeNumber }
+                        .takeIf { it.isNotEmpty() }
+                }.orEmpty()
+            }
+            "animepahe" -> queries.firstNotNullOfOrNull { query ->
+                animePaheScraper.fetchEpisodes(query)
+                    .distinctBy { it.url }
+                    .sortedByDescending { it.episodeNumber }
+                    .takeIf { it.isNotEmpty() }
+            }.orEmpty()
+            else -> fetchEpisodes(animeTitleQuery, episodeCount, alternateQueries)
+        }
     }
 
     suspend fun extractStreamUrl(episodePageUrl: String): String? {

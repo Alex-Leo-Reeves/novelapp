@@ -20,8 +20,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
+import com.alexleoreeves.novelapp.platform.platformHttpClient
 import com.alexleoreeves.novelapp.ui.theme.*
+import io.ktor.client.request.get
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * AnimeDetailScreen — Shows anime info, episode list, and triggers episode playback.
@@ -45,17 +54,23 @@ fun AnimeDetailScreen(
     requireAuth: (() -> Unit) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val httpClient = remember { platformHttpClient() }
+    val tmdbScraper = remember { TMDBMovieScraper(httpClient) }
     var episodes by remember { mutableStateOf<List<AnimeEpisode>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(true) }
     var extractingEpisode by remember { mutableStateOf<Int?>(null) }  // episode number being extracted
     var downloadingEpisodes by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var refreshTrigger by remember { mutableStateOf(0) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
+    var selectedServer by remember { mutableStateOf(0) }
+    var vidlinkTmdbId by remember(anime.id) { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val serverNames = listOf("Auto", "Anineko", "AnimePahe", "VidLink Pro")
+    val serverKeys = listOf("auto", "anineko", "animepahe", "vidlink")
 
     // Load episodes on mount
-    LaunchedEffect(anime.id) {
+    LaunchedEffect(anime.id, selectedServer) {
         isLoadingEpisodes = true
         val rawTitles = listOf(anime.displayTitle, anime.titleEnglish, anime.titleRomaji)
             .map { it.trim() }
@@ -69,12 +84,74 @@ fun AnimeDetailScreen(
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
-        episodes = repository.fetchEpisodes(
-            animeTitleQuery = titleQueries.firstOrNull() ?: anime.displayTitle,
-            alternateQueries = titleQueries.drop(1),
-            episodeCount = anime.episodeCount
-        )
+        val provider = serverKeys.getOrElse(selectedServer) { "auto" }
+        episodes = if (provider == "vidlink") {
+            val tmdbMatch = titleQueries.firstNotNullOfOrNull { query ->
+                tmdbScraper.search(query)
+                    .filter { it.type == "TVSHOW" }
+                    .sortedWith(
+                        compareByDescending<MediaResult> { it.title.normalizedAnimeMediaTitle() == query.normalizedAnimeMediaTitle() }
+                            .thenByDescending { it.title.normalizedAnimeMediaTitle().contains(query.normalizedAnimeMediaTitle()) }
+                    )
+                    .firstOrNull()
+            }
+            vidlinkTmdbId = tmdbMatch?.id.orEmpty()
+            if (vidlinkTmdbId.isNotBlank()) {
+                tmdbScraper.fetchTVSeasonsAndEpisodes(vidlinkTmdbId).map { episode ->
+                    AnimeEpisode(
+                        episodeNumber = episode.episodeNumber,
+                        title = episode.title,
+                        url = episode.url
+                    )
+                }
+            } else {
+                snackMessage = "VidLink Pro needs a TMDB TV match for this anime."
+                emptyList()
+            }
+        } else {
+            vidlinkTmdbId = ""
+            repository.fetchEpisodesFromAnimeProvider(
+                provider = provider,
+                animeTitleQuery = titleQueries.firstOrNull() ?: anime.displayTitle,
+                alternateQueries = titleQueries.drop(1),
+                episodeCount = anime.episodeCount
+            )
+        }
         isLoadingEpisodes = false
+    }
+
+    suspend fun resolveVidLinkAnimeEpisode(episode: AnimeEpisode): String? {
+        val parts = episode.url.split(":")
+        val tvId = parts.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: vidlinkTmdbId
+        val season = parts.getOrNull(2) ?: "1"
+        val ep = parts.getOrNull(3) ?: episode.episodeNumber.coerceAtLeast(1).toString()
+        if (tvId.isBlank()) {
+            snackMessage = "VidLink Pro could not match this anime to TMDB."
+            return null
+        }
+        return runCatching {
+            val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/content/stream") {
+                parameter("type", "tv")
+                parameter("id", tvId)
+                parameter("season", season)
+                parameter("episode", ep)
+                parameter("provider", "vidlink")
+            }.bodyAsText()
+            val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(raw).jsonObject
+            val data = root["data"]?.jsonObject
+            val route = data?.get("route")?.jsonPrimitive?.contentOrNull.orEmpty()
+            val stream = data?.get("url")?.jsonPrimitive?.contentOrNull.orEmpty()
+            val message = data?.get("message")?.jsonPrimitive?.contentOrNull
+            if (route == "direct" && stream.isDirectPlayableAnimeStreamUrl()) {
+                stream
+            } else {
+                snackMessage = message ?: "VidLink Pro did not return a direct playable stream for this episode."
+                null
+            }
+        }.getOrElse { error ->
+            snackMessage = "VidLink Pro failed: ${error.message ?: "network error"}"
+            null
+        }
     }
 
     // Show snack messages
@@ -299,6 +376,25 @@ fun AnimeDetailScreen(
                         )
                     }
                 }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                ) {
+                    serverNames.forEachIndexed { index, name ->
+                        FilterChip(
+                            selected = selectedServer == index,
+                            onClick = { selectedServer = index },
+                            label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = currentTheme.accentColor(),
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+                }
             }
 
             // ── Episodes List ─────────────────────────────────────────────
@@ -360,13 +456,18 @@ fun AnimeDetailScreen(
                         isExtracting = extractingEpisode == episode.episodeNumber,
                         isDownloaded = isDownloaded,
                         isDownloading = isDownloading,
+                        sourceLabel = serverNames.getOrElse(selectedServer) { "Auto" },
                         currentTheme = currentTheme,
                         onPlayClick = {
                             requireAuth {
                                 if (extractingEpisode != episode.episodeNumber) {
                                     scope.launch {
                                         extractingEpisode = episode.episodeNumber
-                                        val streamUrl = repository.extractStreamUrl(episode.url)
+                                        val streamUrl = if (serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink") {
+                                            resolveVidLinkAnimeEpisode(episode)
+                                        } else {
+                                            repository.extractStreamUrl(episode.url)
+                                        }
                                         extractingEpisode = null
                                         if (streamUrl != null) {
                                             onPlayEpisode(
@@ -401,7 +502,11 @@ fun AnimeDetailScreen(
                                                     sourceName = anime.sourceName
                                                 )
                                             )
-                                            val streamUrl = repository.extractStreamUrl(episode.url)
+                                            val streamUrl = if (serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink") {
+                                                resolveVidLinkAnimeEpisode(episode)
+                                            } else {
+                                                repository.extractStreamUrl(episode.url)
+                                            }
                                             if (streamUrl != null) {
                                                 downloadRepo.addEpisode(
                                                     DownloadedEpisode(
@@ -450,6 +555,7 @@ private fun EpisodeRow(
     isExtracting: Boolean,
     isDownloaded: Boolean,
     isDownloading: Boolean,
+    sourceLabel: String,
     currentTheme: AppTheme,
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit
@@ -495,7 +601,7 @@ private fun EpisodeRow(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Anineko / AnimePahe • Tap to stream",
+                        text = "$sourceLabel • Tap to stream",
                         style = MaterialTheme.typography.labelSmall,
                         color = currentTheme.subTextColor()
                     )
@@ -541,6 +647,22 @@ private fun EpisodeRow(
             }
         }
     }
+}
+
+private fun String.normalizedAnimeMediaTitle(): String =
+    lowercase()
+        .replace("&", "and")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""\s+"""), " ")
+
+private fun String.isDirectPlayableAnimeStreamUrl(): Boolean {
+    val clean = substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".m3u8") ||
+        clean.endsWith(".mp4") ||
+        clean.endsWith(".mpd") ||
+        clean.endsWith(".webm") ||
+        startsWith("file:", ignoreCase = true)
 }
 
 @Composable
