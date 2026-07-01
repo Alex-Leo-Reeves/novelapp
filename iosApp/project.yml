@@ -6,8 +6,8 @@ options:
   xcodeVersion: "15.0"
 settings:
   base:
-    CURRENT_PROJECT_VERSION: 10
-    MARKETING_VERSION: "1.9"
+    CURRENT_PROJECT_VERSION: 12
+    MARKETING_VERSION: "1.11"
     SWIFT_VERSION: "5.0"
 targets:
   AnimeNovelManga:
@@ -30,24 +30,12 @@ targets:
         DEVELOPMENT_TEAM: ""
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_FILE: Info.plist
-        FRAMEWORK_SEARCH_PATHS:
-          - "$(inherited)"
-          - "$(SRCROOT)"
-          - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
         PRODUCT_BUNDLE_IDENTIFIER: com.alexleoreeves.novelapp.ios
         PRODUCT_NAME: AnimeNovelManga
-    preBuildScripts:
-      - name: Build ComposeApp Framework
-        basedOnDependencyAnalysis: false
-        script: |
-          cd "$SRCROOT/.."
-          ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
     dependencies:
-      - framework: ../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/ComposeApp.framework
-        embed: true
       - framework: onnxruntime.xcframework
         embed: true
 schemes:
