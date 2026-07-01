@@ -72,6 +72,7 @@ class KokoroNarrationController(
     private var macroStartSegmentIndexes: List<Int> = emptyList()
     private val audioCache = mutableMapOf<Int, Deferred<KokoroSynthesisResult>>()
     private var plannedTextKey: Int? = null
+    private var isPlayingCachedChapterAudio = false
 
     init {
         clearTemporaryNarrationAudioCache()
@@ -150,23 +151,46 @@ class KokoroNarrationController(
         }
     }
 
+    fun prepareChapterAudio(
+        text: String,
+        cacheKey: String,
+        persistAudioCache: Boolean = false
+    ) {
+        if (text.isBlank() || cacheKey.isBlank()) return
+        controllerScope.launch {
+            ensurePlan(text, resetCursor = false)
+            prepareChapterAudioFile(cacheKey, persistAudioCache)
+        }
+    }
+
     fun pause() {
         isPaused = true
-        playbackJob?.cancel()
         timelineJob?.cancel()
         pauseKokoroAudio()
         pauseAmbientCue()
         _isPlaying.value = false
         updateNarrationForegroundService(enabled = false)
+        if (!isPlayingCachedChapterAudio) {
+            playbackJob?.cancel()
+        }
     }
 
     fun resume() {
         if (segments.isEmpty()) return
         isPaused = false
-        playbackJob?.cancel()
         resumeKokoroAudio()
         resumeAmbientCue()
-        playbackJob = controllerScope.launch { playFromSegment(currentSegmentCursor.coerceIn(0, segments.lastIndex)) }
+        _isPlaying.value = true
+        syncBackgroundService()
+        if (isPlayingCachedChapterAudio) {
+            timelineJob?.cancel()
+            timelineJob = controllerScope.launch {
+                runChapterTimeline(currentSegmentCursor.coerceIn(0, segments.lastIndex))
+            }
+        } else {
+            playbackJob?.cancel()
+            playbackJob = controllerScope.launch { playFromSegment(currentSegmentCursor.coerceIn(0, segments.lastIndex)) }
+        }
     }
 
     fun skipForward() {
@@ -222,6 +246,7 @@ class KokoroNarrationController(
         timelineJob?.cancel()
         stopKokoroAudio()
         stopAmbientCue()
+        isPlayingCachedChapterAudio = false
         _isPlaying.value = false
         _isBuffering.value = false
         _currentParagraphIndex.value = -1
@@ -316,6 +341,7 @@ class KokoroNarrationController(
         _isPlaying.value = true
         syncBackgroundService()
         _lastError.value = null
+        isPlayingCachedChapterAudio = true
         try {
             coroutineScope {
                 timelineJob = launch { runChapterTimeline(0) }
@@ -329,6 +355,7 @@ class KokoroNarrationController(
             throw e
         } catch (e: Exception) {
             _lastError.value = e.message ?: "Cached chapter audio failed."
+            isPlayingCachedChapterAudio = false
             playFromSegment(currentSegmentCursor.coerceIn(0, segments.lastIndex))
         } finally {
             if (!isPaused) {
@@ -337,6 +364,7 @@ class KokoroNarrationController(
                 stopAmbientCue()
                 updateNarrationForegroundService(enabled = false)
             }
+            isPlayingCachedChapterAudio = false
         }
     }
 

@@ -389,7 +389,7 @@ class NovelSearchRepository(
             aninekoScraper.extractStreamUrl(episodePageUrl)
                 ?: animePaheScraper.extractStreamUrl(episodePageUrl)
         }
-        return extracted ?: episodePageUrl
+        return extracted?.takeIf { it.isDirectPlayableAnimeStream() }
     }
 
 
@@ -416,6 +416,15 @@ class NovelSearchRepository(
         val scraper = mangaSources.find { it.sourceName == sourceName } ?: mangaSources.first()
         return try { scraper.fetchMangaPages(chapterUrl) } catch (e: Exception) { emptyList() }
     }
+}
+
+private fun String.isDirectPlayableAnimeStream(): Boolean {
+    val clean = substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".m3u8") ||
+        clean.endsWith(".mp4") ||
+        clean.endsWith(".mpd") ||
+        clean.endsWith(".webm") ||
+        startsWith("file:", ignoreCase = true)
 }
 
 private data class KnownNovelEntry(

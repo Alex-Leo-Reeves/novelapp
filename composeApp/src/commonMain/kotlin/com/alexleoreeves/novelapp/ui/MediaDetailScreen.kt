@@ -68,7 +68,7 @@ fun MediaDetailScreen(
     val serverNames = if (isTmdbDetail) {
         embedServerNames
     } else {
-        listOf("Source host", "Episode page") + embedServerNames
+        listOf("Source stream", "Source page")
     }
     val freeMoviePreviewMs = 20 * 60 * 1000L
     val freeEpisodeCount = remember(episodesList, isPremium) {
@@ -157,7 +157,14 @@ fun MediaDetailScreen(
                 }
                 isDramaCoolDetail -> {
                     when {
-                        selectedServer == 0 -> dramaScraper.extractStreamUrl(ep.url) ?: ep.url
+                        selectedServer == 0 -> {
+                            val extracted = dramaScraper.extractStreamUrl(ep.url)
+                            if (extracted == null) {
+                                statusText = "Could not extract a playable stream from the source. Try Source page."
+                                return@launch
+                            }
+                            extracted
+                        }
                         selectedServer == 1 -> ep.url
                         providerTmdbId.isNotBlank() -> {
                             val providerIndex = selectedServer - sourceServerOffset
@@ -175,7 +182,14 @@ fun MediaDetailScreen(
                 }
                 isKimCartoonDetail -> {
                     when {
-                        selectedServer == 0 -> cartoonScraper.extractStreamUrl(ep.url) ?: ep.url
+                        selectedServer == 0 -> {
+                            val extracted = cartoonScraper.extractStreamUrl(ep.url)
+                            if (extracted == null) {
+                                statusText = "Could not extract a playable stream from the source. Try Source page."
+                                return@launch
+                            }
+                            extracted
+                        }
                         selectedServer == 1 -> ep.url
                         providerTmdbId.isNotBlank() -> {
                             val providerIndex = selectedServer - sourceServerOffset

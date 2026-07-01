@@ -31,10 +31,17 @@ data class MediaEpisode(
 //  DramaCool Scraper
 // ─────────────────────────────────────────────────────────────────────────────
 class DramaCoolScraper(private val httpClient: HttpClient) {
-    private val baseUrl = "https://dramacool.bg"
+    private companion object {
+        private const val FALLBACK_URL = "https://dramacool.bg"
+        private const val BRAND_QUERY = "dramacool official"
+    }
+
+    private suspend fun liveBaseUrl(): String =
+        resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
 
     suspend fun search(query: String): List<MediaResult> {
         return try {
+            val baseUrl = liveBaseUrl()
             val html = httpClient.get("$baseUrl/search?keyword=${query.replace(" ", "+")}").bodyAsText()
             val doc = Ksoup.parse(html)
             doc.select("ul.list-episode-item li").map { el ->
@@ -58,7 +65,9 @@ class DramaCoolScraper(private val httpClient: HttpClient) {
 
     suspend fun fetchEpisodes(detailUrl: String): List<MediaEpisode> {
         return try {
-            val html = httpClient.get(detailUrl).bodyAsText()
+            val baseUrl = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(detailUrl, baseUrl)
+            val html = httpClient.get(effectiveUrl).bodyAsText()
             val doc = Ksoup.parse(html)
             doc.select("ul.list-episode-item li a").mapIndexed { index, el ->
                 val epUrl = el.attr("href")
@@ -76,17 +85,25 @@ class DramaCoolScraper(private val httpClient: HttpClient) {
 
     suspend fun extractStreamUrl(episodeUrl: String): String? {
         return try {
-            val html = httpClient.get(episodeUrl).bodyAsText()
+            val baseUrl = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(episodeUrl, baseUrl)
+            val html = httpClient.get(effectiveUrl).bodyAsText()
+            extractDirectVideoUrl(html)?.let { return it }
             val doc = Ksoup.parse(html)
             val iframeSrc = doc.select("iframe[src*=/embed/]").attr("src")
                 .ifEmpty { doc.select("iframe").attr("src") }
-            if (iframeSrc.isNotEmpty()) {
-                if (iframeSrc.startsWith("//")) "https:$iframeSrc" else iframeSrc
+            val iframeUrl = iframeSrc.toAbsoluteVideoUrl(effectiveUrl)
+                ?.takeUnless { it.isNonPlayableVideoProviderUrl() }
+            if (iframeUrl != null) {
+                val iframeHtml = httpClient.get(iframeUrl) {
+                    header("Referer", effectiveUrl)
+                }.bodyAsText()
+                extractDirectVideoUrl(iframeHtml) ?: iframeUrl
             } else {
-                episodeUrl
+                null
             }
         } catch (e: Exception) {
-            episodeUrl
+            null
         }
     }
 }
@@ -94,10 +111,17 @@ class DramaCoolScraper(private val httpClient: HttpClient) {
 //  KimCartoon Scraper
 // ─────────────────────────────────────────────────────────────────────────────
 class KimCartoonScraper(private val httpClient: HttpClient) {
-    private val baseUrl = "https://kimcartoon.li"
+    private companion object {
+        private const val FALLBACK_URL = "https://kimcartoon.li"
+        private const val BRAND_QUERY = "kimcartoon official"
+    }
+
+    private suspend fun liveBaseUrl(): String =
+        resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
 
     suspend fun search(query: String): List<MediaResult> {
         return try {
+            val baseUrl = liveBaseUrl()
             val html = httpClient.get("$baseUrl/Search/Cartoon?keyword=${query.replace(" ", "+")}").bodyAsText()
             val doc = Ksoup.parse(html)
             doc.select("div.list-cartoon div.item").map { el ->
@@ -121,7 +145,9 @@ class KimCartoonScraper(private val httpClient: HttpClient) {
 
     suspend fun fetchEpisodes(detailUrl: String): List<MediaEpisode> {
         return try {
-            val html = httpClient.get(detailUrl).bodyAsText()
+            val baseUrl = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(detailUrl, baseUrl)
+            val html = httpClient.get(effectiveUrl).bodyAsText()
             val doc = Ksoup.parse(html)
             doc.select("table.list h3 a").mapIndexed { index, el ->
                 val epUrl = el.attr("href")
@@ -138,18 +164,66 @@ class KimCartoonScraper(private val httpClient: HttpClient) {
 
     suspend fun extractStreamUrl(episodeUrl: String): String? {
         return try {
-            val html = httpClient.get(episodeUrl).bodyAsText()
+            val baseUrl = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(episodeUrl, baseUrl)
+            val html = httpClient.get(effectiveUrl).bodyAsText()
+            extractDirectVideoUrl(html)?.let { return it }
             val doc = Ksoup.parse(html)
             val playerIframe = doc.select("iframe#myContent, iframe[src*=embed]").attr("src")
-            if (playerIframe.isNotEmpty()) {
-                if (playerIframe.startsWith("//")) "https:$playerIframe" else playerIframe
+            val iframeUrl = playerIframe.toAbsoluteVideoUrl(effectiveUrl)
+                ?.takeUnless { it.isNonPlayableVideoProviderUrl() }
+            if (iframeUrl != null) {
+                val iframeHtml = httpClient.get(iframeUrl) {
+                    header("Referer", effectiveUrl)
+                }.bodyAsText()
+                extractDirectVideoUrl(iframeHtml) ?: iframeUrl
             } else {
-                episodeUrl
+                null
             }
         } catch (e: Exception) {
-            episodeUrl
+            null
         }
     }
+}
+
+private fun extractDirectVideoUrl(html: String): String? {
+    val cleaned = html
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+    val patterns = listOf(
+        Regex("""https?://[^\s"'<>]+\.m3u8[^\s"'<>]*""", RegexOption.IGNORE_CASE),
+        Regex("""https?://[^\s"'<>]+\.mp4[^\s"'<>]*""", RegexOption.IGNORE_CASE),
+        Regex("""["'](?:file|src|url)["']\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE),
+        Regex("""(?:file|src|url)\s*=\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE)
+    )
+    return patterns.firstNotNullOfOrNull { pattern ->
+        pattern.find(cleaned)?.let { match ->
+            match.groupValues.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: match.value.trim('"', '\'')
+        }
+    }?.takeUnless { it.isNonPlayableVideoProviderUrl() }
+}
+
+private fun String.toAbsoluteVideoUrl(baseUrl: String): String? {
+    val clean = trim()
+    if (clean.isBlank() || clean.startsWith("javascript:", ignoreCase = true)) return null
+    return when {
+        clean.startsWith("//") -> "https:$clean"
+        clean.startsWith("/") -> baseUrl.substringBefore("://")
+            .let { scheme -> "$scheme://${baseUrl.substringAfter("://").substringBefore("/")}$clean" }
+        clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true) -> clean
+        else -> null
+    }
+}
+
+private fun String.isNonPlayableVideoProviderUrl(): Boolean {
+    val lower = lowercase()
+    return "youtube.com" in lower ||
+        "youtu.be" in lower ||
+        "trailer" in lower ||
+        "doubleclick" in lower ||
+        "googleadservices" in lower ||
+        "popads" in lower ||
+        "popcash" in lower
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

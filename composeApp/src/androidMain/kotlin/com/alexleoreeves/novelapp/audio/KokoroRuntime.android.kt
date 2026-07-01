@@ -36,10 +36,17 @@ actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): Koko
             .getOrElse { error ->
                 println("[Kokoro] Android ONNX unavailable for segment ${request.segmentIndex}: ${error.message}")
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Error,
-                    message = "Kokoro setup failed: ${error.message ?: "unknown error"}"
+                    phase = KokoroVoiceSetupPhase.Fallback,
+                    message = "Kokoro is unavailable on this device. Creating smooth chapter audio with Android speech."
                 )
-                throw error
+                runCatching { AndroidSystemTtsEngine.synthesizeToFile(request) }
+                    .getOrElse { fallbackError ->
+                        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                            phase = KokoroVoiceSetupPhase.Error,
+                            message = "Voice setup failed: ${fallbackError.message ?: error.message ?: "unknown error"}"
+                        )
+                        throw fallbackError
+                    }
             }
     }
 
@@ -131,6 +138,75 @@ private object AndroidSystemTtsEngine {
         }
     }
 
+    suspend fun synthesizeToFile(request: KokoroSynthesisRequest): KokoroSynthesisResult {
+        val context = AppContextHolder.applicationContext
+            ?: error("Android app context is unavailable for generated speech.")
+        val engine = ensureReady(request)
+        val outputFile = File(
+            context.cacheDir,
+            "narration-audio-temp/android_tts_${request.segmentIndex}_${UUID.randomUUID()}.wav"
+        ).apply {
+            parentFile?.mkdirs()
+            delete()
+        }
+
+        withContext(Dispatchers.Main.immediate) {
+            engine.language = request.locale()
+            engine.setSpeechRate(request.speed.coerceIn(0.75f, 1.25f))
+            engine.setPitch(request.pitch())
+        }
+
+        suspendCancellableCoroutine { cont ->
+            val utteranceId = "novelapp-file-${UUID.randomUUID()}"
+            engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) = Unit
+
+                override fun onDone(doneId: String?) {
+                    if (doneId == utteranceId && cont.isActive) cont.resume(Unit)
+                }
+
+                @Deprecated("Deprecated in Android SDK")
+                override fun onError(errorId: String?) {
+                    if (errorId == utteranceId && cont.isActive) {
+                        cont.resumeWithException(IllegalStateException("Android speech engine could not create audio."))
+                    }
+                }
+
+                override fun onError(errorId: String?, errorCode: Int) {
+                    if (errorId == utteranceId && cont.isActive) {
+                        cont.resumeWithException(IllegalStateException("Android speech engine file error $errorCode."))
+                    }
+                }
+            })
+
+            val params = Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, request.narratorVolume.coerceIn(0f, 1f))
+            }
+            val result = engine.synthesizeToFile(request.text, params, outputFile, utteranceId)
+            if (result == TextToSpeech.ERROR && cont.isActive) {
+                cont.resumeWithException(IllegalStateException("Android speech engine cannot synthesize this audio."))
+            }
+            cont.invokeOnCancellation {
+                runCatching { engine.stop() }
+                outputFile.delete()
+            }
+        }
+
+        if (!outputFile.exists() || outputFile.length() <= 44L) {
+            outputFile.delete()
+            error("Android speech engine created an empty audio file.")
+        }
+        val bytes = outputFile.readBytes()
+        outputFile.delete()
+        val estimate = estimate(request)
+        return KokoroSynthesisResult(
+            audioBytes = bytes,
+            durationMs = estimate.durationMs,
+            sampleRate = bytes.wavSampleRateOr(24_000),
+            engineName = "Android generated speech fallback"
+        )
+    }
+
     fun stop() {
         runCatching { tts?.stop() }
     }
@@ -172,6 +248,16 @@ private object AndroidSystemTtsEngine {
             NarrationTone.Soft -> 1.02f
             else -> 1.0f
         }
+}
+
+private fun ByteArray.wavSampleRateOr(defaultValue: Int): Int {
+    if (size < 28) return defaultValue
+    return ((this[24].toInt() and 0xff)
+        or ((this[25].toInt() and 0xff) shl 8)
+        or ((this[26].toInt() and 0xff) shl 16)
+        or ((this[27].toInt() and 0xff) shl 24))
+        .takeIf { it > 0 }
+        ?: defaultValue
 }
 
 private object AndroidAmbientPlayer {
