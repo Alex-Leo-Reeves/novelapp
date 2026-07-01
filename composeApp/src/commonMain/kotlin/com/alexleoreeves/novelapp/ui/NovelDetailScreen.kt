@@ -40,6 +40,9 @@ fun NovelDetailScreen(
     var isLoadingChapters by remember { mutableStateOf(true) }
     var downloadingChapters by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var refreshTrigger by remember { mutableStateOf(0) } // force recomposition when downloads change
+    var chapterQuery by remember { mutableStateOf("") }
+    var newestFirst by remember { mutableStateOf(false) }
+    var selectedChapterChunk by remember { mutableStateOf(0) }
 
     val repository = remember {
         NovelSearchRepository(
@@ -63,6 +66,26 @@ fun NovelDetailScreen(
         }
         isLoadingChapters = false
     }
+
+    val orderedChapters = remember(chapters, newestFirst) {
+        if (newestFirst) chapters.asReversed() else chapters
+    }
+    val filteredChapters = remember(orderedChapters, chapterQuery) {
+        val query = chapterQuery.trim().lowercase()
+        if (query.isBlank()) {
+            orderedChapters
+        } else {
+            orderedChapters.filter { chapter ->
+                chapter.title.lowercase().contains(query) ||
+                    chapter.chapterNumber.toString().contains(query)
+            }
+        }
+    }
+    val chapterChunks = remember(filteredChapters, chapterQuery) {
+        if (chapterQuery.isBlank()) filteredChapters.chunked(100) else listOf(filteredChapters)
+    }
+    val activeChunkIndex = selectedChapterChunk.coerceIn(0, (chapterChunks.size - 1).coerceAtLeast(0))
+    val visibleChapters = chapterChunks.getOrElse(activeChunkIndex) { emptyList() }
 
     Column(
         modifier = Modifier
@@ -194,28 +217,138 @@ fun NovelDetailScreen(
             // Chapter list header
             item {
                 Padding(horizontal = 16.dp, vertical = 12.dp) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Chapters",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = currentTheme.textColor(),
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (!isLoadingChapters) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                "${chapters.size} chapters",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = currentTheme.subTextColor()
+                                "Chapters",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = currentTheme.textColor(),
+                                fontWeight = FontWeight.Bold
                             )
+                            if (!isLoadingChapters) {
+                                Text(
+                                    "${chapters.size} chapters",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = currentTheme.subTextColor()
+                                )
+                            }
+                        }
+                        if (!isLoadingChapters && chapters.isNotEmpty()) {
+                            OutlinedTextField(
+                                value = chapterQuery,
+                                onValueChange = {
+                                    chapterQuery = it
+                                    selectedChapterChunk = 0
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (chapterQuery.isNotBlank()) {
+                                        IconButton(onClick = { chapterQuery = ""; selectedChapterChunk = 0 }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear")
+                                        }
+                                    }
+                                },
+                                label = { Text("Search or jump by chapter number") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = currentTheme.accentColor(),
+                                    focusedTextColor = currentTheme.textColor(),
+                                    unfocusedTextColor = currentTheme.textColor(),
+                                    cursorColor = currentTheme.accentColor()
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AssistChip(
+                                    onClick = {
+                                        newestFirst = !newestFirst
+                                        selectedChapterChunk = 0
+                                    },
+                                    label = { Text(if (newestFirst) "Newest first" else "Oldest first") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (newestFirst) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        selectedChapterChunk = if (newestFirst) (chapterChunks.size - 1).coerceAtLeast(0) else 0
+                                    },
+                                    label = { Text("First") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        selectedChapterChunk = if (newestFirst) 0 else (chapterChunks.size - 1).coerceAtLeast(0)
+                                    },
+                                    label = { Text("Latest") }
+                                )
+                            }
+                            if (chapterChunks.size > 1) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    chapterChunks.forEachIndexed { index, chunk ->
+                                        val first = chunk.firstOrNull()?.chapterNumber ?: 0
+                                        val last = chunk.lastOrNull()?.chapterNumber ?: first
+                                        FilterChip(
+                                            selected = activeChunkIndex == index,
+                                            onClick = { selectedChapterChunk = index },
+                                            label = { Text("$first-$last") },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = currentTheme.accentColor(),
+                                                selectedLabelColor = Color.White
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            if (chapterQuery.isNotBlank()) {
+                                Text(
+                                    "${filteredChapters.size} matching chapters",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = currentTheme.subTextColor()
+                                )
+                            } else if (chapterChunks.size > 1) {
+                                Text(
+                                    "Showing ${visibleChapters.size} chapters in this range",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = currentTheme.subTextColor()
+                                )
+                            }
                         }
                     }
                 }
             }
 
+            if (!isLoadingChapters && chapters.isNotEmpty() && visibleChapters.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No chapters match that search.",
+                            color = currentTheme.subTextColor(),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
             if (isLoadingChapters) {
                 item {
                     Box(
@@ -238,8 +371,8 @@ fun NovelDetailScreen(
                         )
                     }
                 }
-            } else {
-                items(chapters) { chapter ->
+            } else if (visibleChapters.isNotEmpty()) {
+                items(visibleChapters) { chapter ->
                     // Read actual downloaded state
                     val isDownloaded = remember(refreshTrigger, chapter.chapterNumber) {
                         downloadRepo.isChapterDownloaded(novel.id, chapter.chapterNumber)

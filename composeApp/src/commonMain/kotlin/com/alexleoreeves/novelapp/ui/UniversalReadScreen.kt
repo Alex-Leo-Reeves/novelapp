@@ -14,7 +14,9 @@ import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.audio.KokoroVoiceSetupPhase
 import com.alexleoreeves.novelapp.data.AppTheme
+import com.alexleoreeves.novelapp.data.GroqTextCleaner
 import com.alexleoreeves.novelapp.ui.theme.*
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,6 +33,7 @@ fun UniversalReadScreen(
     var pastedText by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
     var activeTab by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -166,7 +169,11 @@ fun UniversalReadScreen(
                                 activeTab == 2 && importedFileContent.isNotBlank() -> importedFileContent
                                 else -> ""
                             }
-                            if (text.isNotBlank()) ttsController.playText(text)
+                            if (text.isNotBlank()) {
+                                scope.launch {
+                                    ttsController.playText(GroqTextCleaner.cleanForKokoro(text))
+                                }
+                            }
                         }
                     ) {
                         Text("Retry voice setup", color = currentTheme.accentColor())
@@ -223,7 +230,9 @@ fun UniversalReadScreen(
                                 if (isPlaying.value) {
                                     ttsController.stop()
                                 } else if (pastedText.isNotEmpty()) {
-                                    ttsController.playText(pastedText)
+                                    scope.launch {
+                                        ttsController.playText(GroqTextCleaner.cleanForKokoro(pastedText))
+                                    }
                                 }
                             }
                         },
@@ -287,7 +296,9 @@ fun UniversalReadScreen(
                                 if (isPlaying.value) {
                                     ttsController.stop()
                                 } else {
-                                    ttsController.playText("Reading content from: $urlInput")
+                                    scope.launch {
+                                        ttsController.playText(GroqTextCleaner.cleanForKokoro("Reading content from: $urlInput"))
+                                    }
                                 }
                             }
                         },
@@ -381,7 +392,9 @@ fun UniversalReadScreen(
                                 if (isPlaying.value) {
                                     ttsController.stop()
                                 } else if (importedFileContent.isNotEmpty()) {
-                                    ttsController.playText(importedFileContent)
+                                    scope.launch {
+                                        ttsController.playText(GroqTextCleaner.cleanForKokoro(importedFileContent))
+                                    }
                                 }
                             }
                         },

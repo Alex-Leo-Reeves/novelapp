@@ -9,10 +9,22 @@ const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/dat
 const DATA_FILE = path.join(DATA_DIR, "auth.json");
 const SITE_DIR = path.join(process.cwd(), "site");
 const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || "");
+const SUPABASE_URL = cleanBaseUrl(process.env.SUPABASE_URL || process.env.supabase_url || process.env.project_url || "");
+const SUPABASE_SECRET_KEY = String(process.env.SUPABASE_SECRET_KEY || process.env.supabase_secret_key || process.env.service_role_key || "").trim();
+const FLUTTERWAVE_SECRET_KEY = String(process.env.FLUTTERWAVE_SECRET_KEY || process.env.flutterwave_secret_key || "").trim();
+const FLUTTERWAVE_SECRET_HASH = String(process.env.FLUTTERWAVE_SECRET_HASH || process.env.flutterwave_secret_hash || "").trim();
+const PUBLIC_APP_URL = cleanBaseUrl(process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || "https://novelapp1.onrender.com");
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = "sha256";
+const PREMIUM_MONTHLY_NAIRA = 1000;
+const PREMIUM_SEED_EMAIL = "mike@mike.com";
+const PREMIUM_SEED_USERNAME = "mike";
+const PREMIUM_SEED_PASSWORD = "123456";
+const MOVIE_FREE_PREVIEW_MS = 20 * 60 * 1000;
+const EPISODIC_FREE_FRACTION = 0.2;
+let legacySupabaseMigrationDone = false;
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -50,6 +62,252 @@ function writeData(data) {
   fs.renameSync(tmpFile, DATA_FILE);
 }
 
+function supabaseEnabled() {
+  return Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
+}
+
+async function supabaseRequest(pathname, { method = "GET", body, prefer } = {}) {
+  const headers = {
+    apikey: SUPABASE_SECRET_KEY,
+    authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+    accept: "application/json"
+  };
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (prefer) headers.prefer = prefer;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Supabase ${method} ${pathname} failed (${response.status}): ${text || response.statusText}`);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+function dbUserToApp(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    passwordSalt: row.password_salt,
+    passwordHash: row.password_hash,
+    recoverySecretHash: row.recovery_secret_hash,
+    plan: row.plan || "free",
+    billingStatus: row.billing_status || "none",
+    paidUntil: row.paid_until || null,
+    createdAt: row.created_at
+  };
+}
+
+function appUserToDb(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    password_salt: user.passwordSalt,
+    password_hash: user.passwordHash,
+    recovery_secret_hash: user.recoverySecretHash || null,
+    plan: user.plan || "free",
+    billing_status: user.billingStatus || "none",
+    paid_until: user.paidUntil || null,
+    created_at: user.createdAt || new Date().toISOString()
+  };
+}
+
+async function findSupabaseUserByEmail(email) {
+  const rows = await supabaseRequest(`novel_users?email=eq.${encodeURIComponent(email)}&select=*`);
+  return dbUserToApp(rows?.[0]);
+}
+
+async function findSupabaseUserByRecoveryHash(recoverySecretHash) {
+  const rows = await supabaseRequest(`novel_users?recovery_secret_hash=eq.${encodeURIComponent(recoverySecretHash)}&select=*`);
+  return dbUserToApp(rows?.[0]);
+}
+
+async function findSupabaseUserById(id) {
+  const rows = await supabaseRequest(`novel_users?id=eq.${encodeURIComponent(id)}&select=*`);
+  return dbUserToApp(rows?.[0]);
+}
+
+async function insertSupabaseUser(user) {
+  const rows = await supabaseRequest("novel_users", {
+    method: "POST",
+    prefer: "return=representation",
+    body: appUserToDb(user)
+  });
+  await supabaseRequest("novel_user_states?on_conflict=user_id", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates",
+    body: {
+      user_id: user.id,
+      state: normalizeUserState(user.state),
+      updated_at: new Date().toISOString()
+    }
+  });
+  return dbUserToApp(rows?.[0]);
+}
+
+async function updateSupabaseUser(id, patch) {
+  const rows = await supabaseRequest(`novel_users?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    prefer: "return=representation",
+    body: patch
+  });
+  return dbUserToApp(rows?.[0]);
+}
+
+async function createSupabaseSession(userId) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const now = Date.now();
+  const expiresAt = new Date(now + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  await supabaseRequest("novel_sessions", {
+    method: "POST",
+    body: {
+      token_hash: tokenHash,
+      user_id: userId,
+      created_at: new Date(now).toISOString(),
+      expires_at: expiresAt
+    }
+  });
+  return token;
+}
+
+async function findSupabaseSessionUser(token) {
+  if (!token) return null;
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const rows = await supabaseRequest(
+    `novel_sessions?token_hash=eq.${encodeURIComponent(tokenHash)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=user_id`
+  );
+  const userId = rows?.[0]?.user_id;
+  return userId ? findSupabaseUserById(userId) : null;
+}
+
+async function removeSupabaseSession(token) {
+  if (!token) return;
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  await supabaseRequest(`novel_sessions?token_hash=eq.${encodeURIComponent(tokenHash)}`, { method: "DELETE" });
+}
+
+async function getSupabaseUserState(userId) {
+  const rows = await supabaseRequest(`novel_user_states?user_id=eq.${encodeURIComponent(userId)}&select=state`);
+  return normalizeUserState(rows?.[0]?.state);
+}
+
+async function putSupabaseUserState(userId, state) {
+  const merged = normalizeUserState(state);
+  await supabaseRequest("novel_user_states?on_conflict=user_id", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates",
+    body: {
+      user_id: userId,
+      state: merged,
+      updated_at: new Date().toISOString()
+    }
+  });
+  return merged;
+}
+
+function seedPremiumUserInFile(data) {
+  const email = PREMIUM_SEED_EMAIL;
+  const existing = data.users.find((user) => user.email === email);
+  if (existing) {
+    existing.username = existing.username || PREMIUM_SEED_USERNAME;
+    existing.plan = "premium";
+    existing.billingStatus = "active";
+    existing.paidUntil = null;
+    return existing;
+  }
+  const passwordRecord = hashPassword(PREMIUM_SEED_PASSWORD);
+  const user = {
+    id: crypto.randomUUID(),
+    username: PREMIUM_SEED_USERNAME,
+    email,
+    passwordSalt: passwordRecord.salt,
+    passwordHash: passwordRecord.hash,
+    recoverySecretHash: null,
+    plan: "premium",
+    billingStatus: "active",
+    paidUntil: null,
+    state: normalizeUserState({}),
+    createdAt: new Date().toISOString()
+  };
+  data.users.push(user);
+  return user;
+}
+
+async function ensurePremiumSeedUser() {
+  if (supabaseEnabled()) {
+    await migrateFileUsersToSupabase();
+    const existing = await findSupabaseUserByEmail(PREMIUM_SEED_EMAIL);
+    if (existing) {
+      if (!isPremiumUser(existing)) {
+        await updateSupabaseUser(existing.id, { plan: "premium", billing_status: "active", paid_until: null });
+      }
+      return;
+    }
+    const passwordRecord = hashPassword(PREMIUM_SEED_PASSWORD);
+    await insertSupabaseUser({
+      id: crypto.randomUUID(),
+      username: PREMIUM_SEED_USERNAME,
+      email: PREMIUM_SEED_EMAIL,
+      passwordSalt: passwordRecord.salt,
+      passwordHash: passwordRecord.hash,
+      recoverySecretHash: null,
+      plan: "premium",
+      billingStatus: "active",
+      paidUntil: null,
+      state: normalizeUserState({}),
+      createdAt: new Date().toISOString()
+    });
+    return;
+  }
+  const data = readData();
+  seedPremiumUserInFile(data);
+  writeData(data);
+}
+
+async function migrateFileUsersToSupabase() {
+  if (legacySupabaseMigrationDone) return;
+  if (!fs.existsSync(DATA_FILE)) {
+    legacySupabaseMigrationDone = true;
+    return;
+  }
+  const data = readData();
+  if (!Array.isArray(data.users) || data.users.length === 0) {
+    legacySupabaseMigrationDone = true;
+    return;
+  }
+  for (const fileUser of data.users) {
+    const email = normalizeEmail(fileUser.email);
+    if (!email) continue;
+    if (!fileUser.passwordSalt || !fileUser.passwordHash) continue;
+    const existing = await findSupabaseUserByEmail(email);
+    if (existing) {
+      const existingState = await getSupabaseUserState(existing.id);
+      await putSupabaseUserState(existing.id, mergeUserState(existingState, fileUser.state || {}));
+      continue;
+    }
+    await insertSupabaseUser({
+      id: fileUser.id || crypto.randomUUID(),
+      username: fileUser.username || email.split("@")[0] || "Reader",
+      email,
+      passwordSalt: fileUser.passwordSalt,
+      passwordHash: fileUser.passwordHash,
+      recoverySecretHash: fileUser.recoverySecretHash || null,
+      plan: fileUser.plan || "free",
+      billingStatus: fileUser.billingStatus || "none",
+      paidUntil: fileUser.paidUntil || null,
+      state: normalizeUserState(fileUser.state || {}),
+      createdAt: fileUser.createdAt || new Date().toISOString()
+    });
+  }
+  legacySupabaseMigrationDone = true;
+}
+
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
@@ -61,8 +319,18 @@ function publicUser(user) {
     email: user.email,
     plan: user.plan || "free",
     billingStatus: user.billingStatus || "none",
+    paidUntil: user.paidUntil || null,
     createdAt: user.createdAt
   };
+}
+
+function isPremiumUser(user) {
+  if (!user) return false;
+  if (user.email === PREMIUM_SEED_EMAIL) return true;
+  if ((user.plan || "free") !== "premium") return false;
+  if ((user.billingStatus || "none") !== "active") return false;
+  if (!user.paidUntil) return true;
+  return Date.parse(user.paidUntil) > Date.now();
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("base64")) {
@@ -71,6 +339,13 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString("base64")
     .toString("base64");
 
   return { salt, hash };
+}
+
+function hashRecoverySecret(secret) {
+  return crypto
+    .createHash("sha256")
+    .update(`novelapp-recovery-v1:${String(secret || "").trim().toLowerCase()}`)
+    .digest("hex");
 }
 
 function passwordMatches(password, salt, expectedHash) {
@@ -614,14 +889,48 @@ async function handleRegister(request, response) {
   const username = String(body.username || "").trim();
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
+  const recoverySecret = String(body.recoverySecret || body.secretKey || "").trim();
 
   if (username.length < 2) return sendError(response, 400, "Username must be at least 2 characters.");
   if (!email.includes("@") || !email.includes(".")) return sendError(response, 400, "Enter a valid email.");
   if (password.length < 6) return sendError(response, 400, "Password must be at least 6 characters.");
+  if (recoverySecret.length < 10) return sendError(response, 400, "Recovery secret must be at least 10 characters.");
+  const recoverySecretHash = hashRecoverySecret(recoverySecret);
+
+  await ensurePremiumSeedUser();
+
+  if (supabaseEnabled()) {
+    if (await findSupabaseUserByEmail(email)) {
+      return sendError(response, 409, "An account with this email already exists.");
+    }
+    if (await findSupabaseUserByRecoveryHash(recoverySecretHash)) {
+      return sendError(response, 409, "That recovery secret is already used. Choose another one.");
+    }
+    const passwordRecord = hashPassword(password);
+    const user = await insertSupabaseUser({
+      id: crypto.randomUUID(),
+      username,
+      email,
+      passwordSalt: passwordRecord.salt,
+      passwordHash: passwordRecord.hash,
+      recoverySecretHash,
+      plan: email === PREMIUM_SEED_EMAIL ? "premium" : "free",
+      billingStatus: email === PREMIUM_SEED_EMAIL ? "active" : "none",
+      paidUntil: null,
+      state: normalizeUserState({}),
+      createdAt: new Date().toISOString()
+    });
+    const token = await createSupabaseSession(user.id);
+    return sendJson(response, 201, { token, user: publicUser(user) });
+  }
 
   const data = readData();
+  seedPremiumUserInFile(data);
   if (data.users.some((user) => user.email === email)) {
     return sendError(response, 409, "An account with this email already exists.");
+  }
+  if (data.users.some((user) => user.recoverySecretHash === recoverySecretHash)) {
+    return sendError(response, 409, "That recovery secret is already used. Choose another one.");
   }
 
   const passwordRecord = hashPassword(password);
@@ -631,14 +940,11 @@ async function handleRegister(request, response) {
     email,
     passwordSalt: passwordRecord.salt,
     passwordHash: passwordRecord.hash,
-    plan: "free",
-    billingStatus: "none",
-    state: {
-      favorites: [],
-      readHistory: [],
-      watchHistory: [],
-      updatedAt: Date.now()
-    },
+    recoverySecretHash,
+    plan: email === PREMIUM_SEED_EMAIL ? "premium" : "free",
+    billingStatus: email === PREMIUM_SEED_EMAIL ? "active" : "none",
+    paidUntil: null,
+    state: normalizeUserState({}),
     createdAt: new Date().toISOString()
   };
   data.users.push(user);
@@ -652,7 +958,19 @@ async function handleLogin(request, response) {
   const body = await readBody(request);
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
+  await ensurePremiumSeedUser();
+
+  if (supabaseEnabled()) {
+    const user = await findSupabaseUserByEmail(email);
+    if (!user || !passwordMatches(password, user.passwordSalt, user.passwordHash)) {
+      return sendError(response, 401, "Email or password is incorrect.");
+    }
+    const token = await createSupabaseSession(user.id);
+    return sendJson(response, 200, { token, user: publicUser(user) });
+  }
+
   const data = readData();
+  seedPremiumUserInFile(data);
   const user = data.users.find((item) => item.email === email);
 
   if (!user || !passwordMatches(password, user.passwordSalt, user.passwordHash)) {
@@ -665,19 +983,334 @@ async function handleLogin(request, response) {
   return sendJson(response, 200, { token, user: publicUser(user) });
 }
 
-function handleMe(request, response) {
+async function handleMe(request, response) {
+  await ensurePremiumSeedUser();
+  if (supabaseEnabled()) {
+    const user = await findSupabaseSessionUser(getBearerToken(request));
+    if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+    return sendJson(response, 200, { user: publicUser(user) });
+  }
   const data = readData();
+  seedPremiumUserInFile(data);
   const user = findSessionUser(data, getBearerToken(request));
 
   if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
   return sendJson(response, 200, { user: publicUser(user) });
 }
 
-function handleLogout(request, response) {
+async function handleLogout(request, response) {
+  if (supabaseEnabled()) {
+    await removeSupabaseSession(getBearerToken(request));
+    return sendJson(response, 200, { ok: true });
+  }
   const data = readData();
   removeSession(data, getBearerToken(request));
   writeData(data);
   return sendJson(response, 200, { ok: true });
+}
+
+async function handleRecoverAccount(request, response) {
+  const body = await readBody(request);
+  const recoverySecret = String(body.recoverySecret || body.secretKey || "").trim();
+  if (recoverySecret.length < 10) return sendError(response, 400, "Recovery secret must be at least 10 characters.");
+  await ensurePremiumSeedUser();
+  const secretHash = hashRecoverySecret(recoverySecret);
+  const user = supabaseEnabled()
+    ? await findSupabaseUserByRecoveryHash(secretHash)
+    : (() => {
+        const data = readData();
+        seedPremiumUserInFile(data);
+        writeData(data);
+        return data.users.find((item) => item.recoverySecretHash === secretHash);
+      })();
+
+  if (!user) return sendError(response, 404, "No account matched that recovery secret.");
+  const token = supabaseEnabled()
+    ? await createSupabaseSession(user.id)
+    : (() => {
+        const data = readData();
+        seedPremiumUserInFile(data);
+        const active = data.users.find((item) => item.id === user.id);
+        const nextToken = createSession(data, active.id);
+        writeData(data);
+        return nextToken;
+      })();
+  return sendJson(response, 200, {
+    token,
+    user: publicUser(user),
+    message: "Account recovered. You are signed in; set a new password if you forgot the old one."
+  });
+}
+
+async function handleResetPassword(request, response) {
+  const token = getBearerToken(request);
+  const body = await readBody(request);
+  const password = String(body.password || "");
+  if (password.length < 6) return sendError(response, 400, "Password must be at least 6 characters.");
+  const passwordRecord = hashPassword(password);
+  if (supabaseEnabled()) {
+    const user = await findSupabaseSessionUser(token);
+    if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+    const updated = await updateSupabaseUser(user.id, {
+      password_salt: passwordRecord.salt,
+      password_hash: passwordRecord.hash
+    });
+    return sendJson(response, 200, { user: publicUser(updated) });
+  }
+  const data = readData();
+  const user = findSessionUser(data, token);
+  if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+  user.passwordSalt = passwordRecord.salt;
+  user.passwordHash = passwordRecord.hash;
+  writeData(data);
+  return sendJson(response, 200, { user: publicUser(user) });
+}
+
+async function requireApiUser(request, response) {
+  const token = getBearerToken(request);
+  const user = supabaseEnabled()
+    ? await findSupabaseSessionUser(token)
+    : findSessionUser(readData(), token);
+  if (!user) {
+    sendError(response, 401, "Session expired. Please sign in again.");
+    return null;
+  }
+  return user;
+}
+
+function subscriptionPayload(user) {
+  return {
+    user: publicUser(user),
+    premium: isPremiumUser(user),
+    monthlyFee: PREMIUM_MONTHLY_NAIRA,
+    currency: "NGN",
+    freePreview: {
+      episodicFraction: EPISODIC_FREE_FRACTION,
+      movieMs: MOVIE_FREE_PREVIEW_MS
+    }
+  };
+}
+
+async function handleBillingStatus(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  return sendJson(response, 200, subscriptionPayload(user));
+}
+
+async function flutterwaveRequest(pathname, { method = "GET", body } = {}) {
+  if (!FLUTTERWAVE_SECRET_KEY) {
+    throw new Error("Flutterwave is not configured on the server.");
+  }
+  const response = await fetch(`https://api.flutterwave.com/v3/${pathname.replace(/^\/+/, "")}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${FLUTTERWAVE_SECRET_KEY}`,
+      accept: "application/json",
+      "content-type": "application/json"
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(payload?.message || `Flutterwave request failed (${response.status}).`);
+  }
+  return payload;
+}
+
+function addOneMonth(date = new Date()) {
+  const next = new Date(date.getTime());
+  next.setMonth(next.getMonth() + 1);
+  return next.toISOString();
+}
+
+async function recordBillingEvent({ userId, txRef, transactionId, status, amount, currency, raw }) {
+  const event = {
+    user_id: userId || null,
+    provider: "flutterwave",
+    tx_ref: txRef || null,
+    transaction_id: transactionId ? String(transactionId) : null,
+    status: status || "unknown",
+    amount: Number(amount || 0),
+    currency: currency || "NGN",
+    raw: raw || {}
+  };
+  if (supabaseEnabled()) {
+    await supabaseRequest("novel_billing_events?on_conflict=tx_ref", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates",
+      body: event
+    });
+    return;
+  }
+  const data = readData();
+  data.billingEvents = Array.isArray(data.billingEvents) ? data.billingEvents : [];
+  const existingIndex = data.billingEvents.findIndex((item) => item.txRef && item.txRef === txRef);
+  const savedEvent = {
+    id: existingIndex >= 0 ? data.billingEvents[existingIndex].id : crypto.randomUUID(),
+    userId: userId || null,
+    txRef: txRef || null,
+    transactionId: transactionId ? String(transactionId) : null,
+    status: status || "unknown",
+    amount: Number(amount || 0),
+    currency: currency || "NGN",
+    raw: raw || {},
+    createdAt: existingIndex >= 0 ? data.billingEvents[existingIndex].createdAt : new Date().toISOString()
+  };
+  if (existingIndex >= 0) data.billingEvents[existingIndex] = savedEvent;
+  else data.billingEvents.push(savedEvent);
+  writeData(data);
+}
+
+async function markUserPremium(userId, payment) {
+  const paidUntil = addOneMonth();
+  if (supabaseEnabled()) {
+    const user = await updateSupabaseUser(userId, {
+      plan: "premium",
+      billing_status: "active",
+      paid_until: paidUntil
+    });
+    await recordBillingEvent({
+      userId,
+      txRef: payment.txRef,
+      transactionId: payment.transactionId,
+      status: payment.status,
+      amount: payment.amount,
+      currency: payment.currency,
+      raw: payment.raw
+    });
+    return user;
+  }
+  const data = readData();
+  const user = data.users.find((item) => item.id === userId);
+  if (!user) throw new Error("Account not found for this payment.");
+  user.plan = "premium";
+  user.billingStatus = "active";
+  user.paidUntil = paidUntil;
+  data.billingEvents = Array.isArray(data.billingEvents) ? data.billingEvents : [];
+  data.billingEvents.push({
+    id: crypto.randomUUID(),
+    userId,
+    txRef: payment.txRef || null,
+    transactionId: payment.transactionId ? String(payment.transactionId) : null,
+    status: payment.status,
+    amount: Number(payment.amount || 0),
+    currency: payment.currency || "NGN",
+    raw: payment.raw || {},
+    createdAt: new Date().toISOString()
+  });
+  writeData(data);
+  return user;
+}
+
+function extractCheckoutUserId(txRef) {
+  const match = /^novelapp-sub-([^-]+)-/.exec(String(txRef || ""));
+  return match?.[1] || null;
+}
+
+async function handleBillingCheckout(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  if (isPremiumUser(user)) return sendJson(response, 200, { ...subscriptionPayload(user), alreadyPremium: true });
+  const txRef = `novelapp-sub-${user.id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const payload = await flutterwaveRequest("payments", {
+    method: "POST",
+    body: {
+      tx_ref: txRef,
+      amount: PREMIUM_MONTHLY_NAIRA,
+      currency: "NGN",
+      redirect_url: `${PUBLIC_APP_URL}/billing-return.html`,
+      customer: {
+        email: user.email,
+        name: user.username
+      },
+      customizations: {
+        title: "NovelApp Premium",
+        description: "Monthly access to all movies, cartoons, and K-drama episodes"
+      },
+      meta: {
+        user_id: user.id,
+        plan: "premium_monthly"
+      }
+    }
+  });
+  const link = payload?.data?.link;
+  if (!link) throw new Error("Flutterwave did not return a checkout link.");
+  return sendJson(response, 200, {
+    link,
+    txRef,
+    amount: PREMIUM_MONTHLY_NAIRA,
+    currency: "NGN"
+  });
+}
+
+async function verifyFlutterwavePayment({ transactionId, txRef }) {
+  const payload = transactionId
+    ? await flutterwaveRequest(`transactions/${encodeURIComponent(transactionId)}/verify`)
+    : await flutterwaveRequest(`transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`);
+  const data = payload?.data || {};
+  const amount = Number(data.amount || 0);
+  const currency = String(data.currency || "").toUpperCase();
+  const status = String(data.status || "").toLowerCase();
+  const resolvedTxRef = data.tx_ref || txRef;
+  if (status !== "successful" || currency !== "NGN" || amount < PREMIUM_MONTHLY_NAIRA) {
+    await recordBillingEvent({
+      userId: extractCheckoutUserId(resolvedTxRef),
+      txRef: resolvedTxRef,
+      transactionId: data.id || transactionId,
+      status: data.status || status,
+      amount,
+      currency,
+      raw: payload
+    });
+    throw new Error("Payment was not successful for the monthly subscription.");
+  }
+  const userId = data.meta?.user_id || extractCheckoutUserId(resolvedTxRef);
+  if (!userId) throw new Error("Payment did not include an account id.");
+  return markUserPremium(userId, {
+    txRef: resolvedTxRef,
+    transactionId: data.id || transactionId,
+    status: data.status || status,
+    amount,
+    currency,
+    raw: payload
+  });
+}
+
+async function handleBillingVerify(request, response) {
+  const body = await readBody(request);
+  const transactionId = body.transactionId || body.transaction_id || body.id;
+  const txRef = body.txRef || body.tx_ref;
+  if (!transactionId && !txRef) return sendError(response, 400, "Payment reference is required.");
+  const user = await verifyFlutterwavePayment({ transactionId, txRef });
+  return sendJson(response, 200, subscriptionPayload(user));
+}
+
+async function handleFlutterwaveWebhook(request, response) {
+  if (FLUTTERWAVE_SECRET_HASH) {
+    const signature = String(request.headers["verif-hash"] || "");
+    if (signature !== FLUTTERWAVE_SECRET_HASH) {
+      return sendError(response, 401, "Invalid webhook signature.");
+    }
+  }
+  const payload = await readBody(request);
+  const data = payload?.data || payload;
+  const transactionId = data?.id || data?.transaction_id;
+  const txRef = data?.tx_ref;
+  if (transactionId || txRef) {
+    await verifyFlutterwavePayment({ transactionId, txRef }).catch(async (error) => {
+      await recordBillingEvent({
+        userId: data?.meta?.user_id || extractCheckoutUserId(txRef),
+        txRef,
+        transactionId,
+        status: data?.status || "failed",
+        amount: data?.amount,
+        currency: data?.currency,
+        raw: { payload, error: error.message }
+      });
+    });
+  }
+  return sendJson(response, 200, { received: true });
 }
 
 function normalizeUserState(rawState) {
@@ -758,7 +1391,13 @@ function mergeUserState(existingState, incomingState) {
   };
 }
 
-function handleGetUserState(request, response) {
+async function handleGetUserState(request, response) {
+  if (supabaseEnabled()) {
+    const user = await findSupabaseSessionUser(getBearerToken(request));
+    if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+    const state = await getSupabaseUserState(user.id);
+    return sendJson(response, 200, { user: publicUser(user), state });
+  }
   const data = readData();
   const user = findSessionUser(data, getBearerToken(request));
 
@@ -771,6 +1410,15 @@ function handleGetUserState(request, response) {
 }
 
 async function handlePutUserState(request, response) {
+  if (supabaseEnabled()) {
+    const user = await findSupabaseSessionUser(getBearerToken(request));
+    if (!user) return sendError(response, 401, "Session expired. Please sign in again.");
+    const body = await readBody(request);
+    const existing = await getSupabaseUserState(user.id);
+    const merged = mergeUserState(existing, body.state || body);
+    const state = await putSupabaseUserState(user.id, merged);
+    return sendJson(response, 200, { user: publicUser(user), state });
+  }
   const data = readData();
   const user = findSessionUser(data, getBearerToken(request));
 
@@ -797,13 +1445,31 @@ async function handleApi(request, response, pathname) {
       return await handleLogin(request, response);
     }
     if (request.method === "GET" && pathname === "/api/auth/me") {
-      return handleMe(request, response);
+      return await handleMe(request, response);
     }
     if (request.method === "POST" && pathname === "/api/auth/logout") {
-      return handleLogout(request, response);
+      return await handleLogout(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/auth/recover") {
+      return await handleRecoverAccount(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/auth/reset-password") {
+      return await handleResetPassword(request, response);
+    }
+    if (request.method === "GET" && pathname === "/api/billing/status") {
+      return await handleBillingStatus(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/billing/checkout") {
+      return await handleBillingCheckout(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/billing/verify") {
+      return await handleBillingVerify(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/billing/flutterwave-webhook") {
+      return await handleFlutterwaveWebhook(request, response);
     }
     if (request.method === "GET" && pathname === "/api/user/state") {
-      return handleGetUserState(request, response);
+      return await handleGetUserState(request, response);
     }
     if (request.method === "PUT" && pathname === "/api/user/state") {
       return await handlePutUserState(request, response);
@@ -907,8 +1573,7 @@ const server = http.createServer((request, response) => {
     return sendJson(response, 200, { ok: true });
   }
 
-  // Kokoro manifest — kept for older builds that still download the ONNX model.
-  // Current mobile builds bundle Kokoro in the app package.
+  // Kokoro manifest — mobile clients download the ONNX model once and cache it on device.
   if (url.pathname === "/assets/kokoro/manifest.json") {
     const modelPath = path.join(process.cwd(), "kokoro-assets", "kokoro", "model_quantized.onnx");
     const modelExists = fs.existsSync(modelPath) && fs.statSync(modelPath).isFile();
@@ -939,6 +1604,12 @@ const server = http.createServer((request, response) => {
 });
 
 ensureDataFile();
-server.listen(PORT, () => {
-  console.log(`NovelApp server listening on ${PORT}`);
-});
+ensurePremiumSeedUser()
+  .catch((error) => {
+    console.warn(`Premium seed account could not be prepared: ${error.message || error}`);
+  })
+  .finally(() => {
+    server.listen(PORT, () => {
+      console.log(`NovelApp server listening on ${PORT}`);
+    });
+  });

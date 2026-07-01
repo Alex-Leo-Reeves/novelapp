@@ -30,11 +30,11 @@ class AuthApi(
         }
     }
 
-    suspend fun register(username: String, email: String, password: String): SavedUserAccount {
+    suspend fun register(username: String, email: String, password: String, recoverySecret: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/register") {
             accept(ContentType.Application.Json)
             contentType(ContentType.Application.Json)
-            setBody(AuthRequest(username = username, email = email, password = password))
+            setBody(AuthRequest(username = username, email = email, password = password, recoverySecret = recoverySecret))
         }
         return response.toSavedUserAccount()
     }
@@ -46,6 +46,25 @@ class AuthApi(
             setBody(AuthRequest(email = email, password = password))
         }
         return response.toSavedUserAccount()
+    }
+
+    suspend fun recoverAccount(recoverySecret: String): SavedUserAccount {
+        val response = client.post("$baseUrl/auth/recover") {
+            accept(ContentType.Application.Json)
+            contentType(ContentType.Application.Json)
+            setBody(RecoveryRequest(recoverySecret = recoverySecret))
+        }
+        return response.toSavedUserAccount()
+    }
+
+    suspend fun resetPassword(token: String, password: String): SavedUserAccount {
+        val response = client.post("$baseUrl/auth/reset-password") {
+            accept(ContentType.Application.Json)
+            contentType(ContentType.Application.Json)
+            bearerAuth(token)
+            setBody(PasswordResetRequest(password = password))
+        }
+        return response.toSavedUserAccount(existingToken = token)
     }
 
     suspend fun me(token: String): SavedUserAccount {
@@ -89,6 +108,37 @@ class AuthApi(
         return authJson.decodeFromString<UserStateResponse>(rawBody).state
     }
 
+    suspend fun billingStatus(token: String): BillingStatus {
+        val response = client.get("$baseUrl/billing/status") {
+            accept(ContentType.Application.Json)
+            bearerAuth(token)
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            throw AuthApiException(rawBody.decodeAuthError() ?: "Could not load subscription.", response.status.value)
+        }
+        val payload = authJson.decodeFromString<BillingStatusResponse>(rawBody)
+        return BillingStatus(
+            account = payload.user.toAccount(token),
+            premium = payload.premium,
+            monthlyFee = payload.monthlyFee,
+            currency = payload.currency,
+            freePreview = payload.freePreview
+        )
+    }
+
+    suspend fun createBillingCheckout(token: String): BillingCheckout {
+        val response = client.post("$baseUrl/billing/checkout") {
+            accept(ContentType.Application.Json)
+            bearerAuth(token)
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            throw AuthApiException(rawBody.decodeAuthError() ?: "Could not start subscription checkout.", response.status.value)
+        }
+        return authJson.decodeFromString<BillingCheckout>(rawBody)
+    }
+
     private suspend fun HttpResponse.toSavedUserAccount(existingToken: String? = null): SavedUserAccount {
         val rawBody = bodyAsText()
 
@@ -109,15 +159,7 @@ class AuthApi(
             throw IllegalStateException("Authentication token was missing.")
         }
 
-        return SavedUserAccount(
-            id = payload.user.id,
-            username = payload.user.username,
-            email = payload.user.email,
-            authToken = token,
-            plan = payload.user.plan,
-            billingStatus = payload.user.billingStatus,
-            createdAt = payload.user.createdAt
-        )
+        return payload.user.toAccount(token)
     }
 
     private fun String.decodeAuthResponse(): AuthResponse =
@@ -133,6 +175,14 @@ class AuthApi(
             ?.let { raw -> runCatching { authJson.decodeFromString<AuthErrorResponse>(raw).error }.getOrNull() }
 }
 
+data class BillingStatus(
+    val account: SavedUserAccount,
+    val premium: Boolean,
+    val monthlyFee: Int,
+    val currency: String,
+    val freePreview: BillingPreview
+)
+
 class AuthApiException(
     message: String,
     val statusCode: Int
@@ -143,7 +193,18 @@ private val authJson = Json { ignoreUnknownKeys = true; isLenient = true }
 @Serializable
 private data class AuthRequest(
     val username: String? = null,
-    val email: String,
+    val email: String? = null,
+    val password: String,
+    val recoverySecret: String? = null
+)
+
+@Serializable
+private data class RecoveryRequest(
+    val recoverySecret: String
+)
+
+@Serializable
+private data class PasswordResetRequest(
     val password: String
 )
 
@@ -160,8 +221,21 @@ private data class AuthUserResponse(
     val email: String,
     val plan: String = "free",
     val billingStatus: String = "none",
+    val paidUntil: String? = null,
     val createdAt: String = ""
-)
+) {
+    fun toAccount(token: String): SavedUserAccount =
+        SavedUserAccount(
+            id = id,
+            username = username,
+            email = email,
+            authToken = token,
+            plan = plan,
+            billingStatus = billingStatus,
+            paidUntil = paidUntil,
+            createdAt = createdAt
+        )
+}
 
 @Serializable
 private data class AuthErrorResponse(
@@ -177,4 +251,29 @@ private data class UserStateRequest(
 private data class UserStateResponse(
     val user: AuthUserResponse,
     val state: UserSyncState
+)
+
+@Serializable
+data class BillingPreview(
+    val episodicFraction: Double = 0.2,
+    val movieMs: Long = 1_200_000L
+)
+
+@Serializable
+private data class BillingStatusResponse(
+    val user: AuthUserResponse,
+    val premium: Boolean = false,
+    val monthlyFee: Int = 1000,
+    val currency: String = "NGN",
+    val freePreview: BillingPreview = BillingPreview()
+)
+
+@Serializable
+data class BillingCheckout(
+    val link: String = "",
+    val txRef: String = "",
+    val amount: Int = 1000,
+    val currency: String = "NGN",
+    val alreadyPremium: Boolean = false,
+    val premium: Boolean = false
 )

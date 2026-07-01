@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,7 +60,8 @@ import com.alexleoreeves.novelapp.ui.theme.textColor
 
 enum class AuthMode(val label: String) {
     SIGN_IN("Sign in"),
-    CREATE_ACCOUNT("Create account")
+    CREATE_ACCOUNT("Create account"),
+    RECOVER("Recover")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,18 +72,34 @@ fun AuthScreen(
     errorMessage: String?,
     onClearError: () -> Unit,
     onSignIn: (email: String, password: String) -> Unit,
-    onCreateAccount: (username: String, email: String, password: String) -> Unit,
+    onCreateAccount: (username: String, email: String, password: String, recoverySecret: String) -> Unit,
+    onRecoverAccount: (recoverySecret: String, newPassword: String) -> Unit,
     onDismiss: (() -> Unit)? = null
 ) {
     var mode by remember { mutableStateOf(AuthMode.CREATE_ACCOUNT) }
     var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var recoverySecret by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
     fun validateAndSubmit() {
         localError = null
         onClearError()
+
+        if (mode == AuthMode.RECOVER) {
+            if (recoverySecret.trim().length < 10) {
+                localError = "Recovery secret must be at least 10 characters."
+                return
+            }
+            if (newPassword.length < 6) {
+                localError = "New password must be at least 6 characters."
+                return
+            }
+            onRecoverAccount(recoverySecret.trim(), newPassword)
+            return
+        }
 
         if (mode == AuthMode.CREATE_ACCOUNT && username.isBlank()) {
             localError = "Enter a username."
@@ -97,7 +115,11 @@ fun AuthScreen(
         }
 
         if (mode == AuthMode.CREATE_ACCOUNT) {
-            onCreateAccount(username.trim(), email.trim(), password)
+            if (recoverySecret.trim().length < 10) {
+                localError = "Recovery secret must be at least 10 characters."
+                return
+            }
+            onCreateAccount(username.trim(), email.trim(), password, recoverySecret.trim())
         } else {
             onSignIn(email.trim(), password)
         }
@@ -145,7 +167,7 @@ fun AuthScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    "Sign in or create an account to continue.",
+                    "Sign in, create an account, or recover one with your secret key.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = currentTheme.subTextColor(),
                     textAlign = TextAlign.Center
@@ -184,22 +206,52 @@ fun AuthScreen(
                     )
                 }
 
-                AuthTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = "Email",
-                    currentTheme = currentTheme,
-                    keyboardType = KeyboardType.Email
-                )
+                if (mode != AuthMode.RECOVER) {
+                    AuthTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = "Email",
+                        currentTheme = currentTheme,
+                        keyboardType = KeyboardType.Email
+                    )
 
-                AuthTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = "Password",
-                    currentTheme = currentTheme,
-                    keyboardType = KeyboardType.Password,
-                    isPassword = true
-                )
+                    AuthTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = "Password",
+                        currentTheme = currentTheme,
+                        keyboardType = KeyboardType.Password,
+                        isPassword = true
+                    )
+                }
+
+                if (mode == AuthMode.CREATE_ACCOUNT || mode == AuthMode.RECOVER) {
+                    AuthTextField(
+                        value = recoverySecret,
+                        onValueChange = { recoverySecret = it },
+                        label = "Recovery secret key",
+                        currentTheme = currentTheme,
+                        keyboardType = KeyboardType.Password,
+                        isPassword = true
+                    )
+                }
+
+                if (mode == AuthMode.RECOVER) {
+                    AuthTextField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = "New password",
+                        currentTheme = currentTheme,
+                        keyboardType = KeyboardType.Password,
+                        isPassword = true
+                    )
+                    Text(
+                        "Recovery signs you in and updates the password you enter here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = currentTheme.subTextColor(),
+                        textAlign = TextAlign.Center
+                    )
+                }
 
                 val shownError = localError ?: errorMessage
                 if (!shownError.isNullOrBlank()) {
@@ -239,6 +291,19 @@ fun AuthScreen(
                             color = currentTheme.accentColor(),
                             fontWeight = FontWeight.SemiBold
                         )
+                    }
+                }
+
+                if (mode == AuthMode.SIGN_IN) {
+                    TextButton(
+                        onClick = {
+                            mode = AuthMode.RECOVER
+                            localError = null
+                            onClearError()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Forgot password? Use recovery secret", color = currentTheme.accentColor())
                     }
                 }
 

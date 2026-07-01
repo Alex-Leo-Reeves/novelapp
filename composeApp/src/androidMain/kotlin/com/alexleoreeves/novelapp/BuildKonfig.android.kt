@@ -9,4 +9,5 @@ actual object BuildKonfig {
     actual val MANGADEX_PASSWORD: String = com.alexleoreeves.novelapp.BuildConfig.MANGADEX_PASSWORD
     actual val TMDB_API_KEY: String = com.alexleoreeves.novelapp.BuildConfig.TMDB_API_KEY
     actual val TMDB_READ_ACCESS_TOKEN: String = com.alexleoreeves.novelapp.BuildConfig.TMDB_READ_ACCESS_TOKEN
+    actual val GROQ_API_KEY: String = com.alexleoreeves.novelapp.BuildConfig.GROQ_API_KEY
 }

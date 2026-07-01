@@ -34,6 +34,10 @@ import onnxruntime.NovelOrtReleaseValue
 import onnxruntime.NovelOrtRun
 import onnxruntime.NovelOrtSetIntraOpNumThreads
 import onnxruntime.NovelOrtSetSessionGraphOptimizationLevel
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import platform.AVFAudio.AVAudioPlayer
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +50,7 @@ import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.dataWithBytes
 import platform.Foundation.dataWithContentsOfFile
+import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.writeToFile
 import platform.posix.memcpy
 import kotlin.math.max
@@ -319,17 +324,10 @@ private object IosKokoroEngine {
             phase = KokoroVoiceSetupPhase.Checking,
             message = "Checking Kokoro voice model on this device."
         )
-        val bundledModel = readBundledAsset(MODEL_NAME)
-            ?: error("Bundled Kokoro ONNX model is missing from the iOS app.")
+        val manifest = fetchManifest()
         val existingSize = fileSize(modelPath)
-        if (existingSize != bundledModel.size.toLong() || existingSize <= 0L) {
-            KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                phase = KokoroVoiceSetupPhase.Installing,
-                downloadedBytes = bundledModel.size.toLong(),
-                totalBytes = bundledModel.size.toLong(),
-                message = "Installing bundled Kokoro voice model."
-            )
-            writeBytes(modelPath, bundledModel)
+        if (existingSize != manifest.sizeBytes || existingSize <= 0L) {
+            downloadModel(manifest, modelPath)
             session?.let {
                 NovelOrtReleaseSession(it)
                 session = null
@@ -338,10 +336,43 @@ private object IosKokoroEngine {
         KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
             phase = KokoroVoiceSetupPhase.Ready,
             downloadedBytes = fileSize(modelPath).coerceAtLeast(0L),
-            totalBytes = bundledModel.size.toLong(),
+            totalBytes = manifest.sizeBytes,
             message = "Kokoro voice is ready on this device."
         )
         return targetDir
+    }
+
+    private fun fetchManifest(): KokoroModelManifest {
+        val raw = downloadBytes(AppReleaseConfig.KOKORO_MANIFEST_URL).decodeToString()
+        val json = Json.parseToJsonElement(raw).jsonObject
+        val model = json["model"]?.jsonObject ?: error("Kokoro manifest is missing model information.")
+        return KokoroModelManifest(
+            version = json["version"]?.jsonPrimitive?.content ?: "kokoro-82m-v1",
+            url = model["url"]?.jsonPrimitive?.content ?: error("Kokoro manifest is missing model URL."),
+            sizeBytes = model["sizeBytes"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+            sha256 = model["sha256"]?.jsonPrimitive?.content?.lowercase().orEmpty()
+        )
+    }
+
+    private fun downloadModel(manifest: KokoroModelManifest, modelPath: String) {
+        require(manifest.sizeBytes > 0L) { "Kokoro manifest does not include a valid model size." }
+        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+            phase = KokoroVoiceSetupPhase.Downloading,
+            downloadedBytes = 0L,
+            totalBytes = manifest.sizeBytes,
+            message = "Downloading Kokoro voice model. This only happens once."
+        )
+        val bytes = downloadBytes(manifest.url)
+        if (bytes.size.toLong() != manifest.sizeBytes) {
+            error("Downloaded Kokoro model is ${bytes.size} bytes, expected ${manifest.sizeBytes}.")
+        }
+        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+            phase = KokoroVoiceSetupPhase.Installing,
+            downloadedBytes = bytes.size.toLong(),
+            totalBytes = manifest.sizeBytes,
+            message = "Installing Kokoro voice model."
+        )
+        writeBytes(modelPath, bytes)
     }
 
     private fun voiceStyle(voiceId: String, tokenCount: Int): FloatArray {
@@ -369,6 +400,13 @@ private object IosKokoroEngine {
         return NSData.dataWithContentsOfFile(path)?.toByteArray()
     }
 
+    private fun downloadBytes(url: String): ByteArray {
+        val nsUrl = NSURL.URLWithString(url) ?: error("Invalid URL: $url")
+        val data = NSData.dataWithContentsOfURL(nsUrl)
+            ?: error("Unable to download $url")
+        return data.toByteArray()
+    }
+
     private fun writeBytes(path: String, bytes: ByteArray) {
         ensureDirectory(path.substringBeforeLast("/"))
         val data = bytes.toNSData() ?: error("Unable to create NSData for $path")
@@ -380,6 +418,13 @@ private object IosKokoroEngine {
     private fun fileSize(path: String): Long =
         NSData.dataWithContentsOfFile(path)?.length?.toLong() ?: -1L
 }
+
+private data class KokoroModelManifest(
+    val version: String,
+    val url: String,
+    val sizeBytes: Long,
+    val sha256: String
+)
 
 private fun NSData.toByteArray(): ByteArray {
     val length = this.length.toInt()

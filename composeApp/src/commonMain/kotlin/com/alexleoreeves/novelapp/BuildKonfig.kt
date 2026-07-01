@@ -14,4 +14,5 @@ expect object BuildKonfig {
     val MANGADEX_PASSWORD: String
     val TMDB_API_KEY: String
     val TMDB_READ_ACCESS_TOKEN: String
+    val GROQ_API_KEY: String
 }

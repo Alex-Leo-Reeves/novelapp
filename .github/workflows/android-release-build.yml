@@ -12,7 +12,7 @@ on:
       - "gradle/**"
       - "gradle.properties"
       - "gradlew"
-      - "kokoro-assets-android/**"
+      - "kokoro-assets-runtime/**"
       - "local.defaults.properties"
       - "settings.gradle.kts"
 
@@ -35,6 +35,8 @@ jobs:
       MANGADEX_CLIENT_SECRET: ${{ secrets.MANGADEX_CLIENT_SECRET }}
       MANGADEX_USERNAME: ${{ secrets.MANGADEX_USERNAME }}
       MANGADEX_PASSWORD: ${{ secrets.MANGADEX_PASSWORD }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_CLOUD_API_KEY: ${{ secrets.GROQ_CLOUD_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -87,12 +89,17 @@ jobs:
             MANGADEX_CLIENT_ID \
             MANGADEX_CLIENT_SECRET \
             MANGADEX_USERNAME \
-            MANGADEX_PASSWORD
+            MANGADEX_PASSWORD \
+            GROQ_API_KEY \
+            GROQ_CLOUD_API_KEY
           do
             if [ -n "${!name}" ]; then
               printf '%s=%s\n' "$name" "${!name}" >> local.properties
             fi
           done
+          if [ -z "${GROQ_API_KEY:-}" ] && [ -n "${GROQ_CLOUD_API_KEY:-}" ]; then
+            printf 'GROQ_API_KEY=%s\n' "$GROQ_CLOUD_API_KEY" >> local.properties
+          fi
 
       - name: Build release APK
         run: ./gradlew --no-daemon :composeApp:assembleRelease --stacktrace
@@ -128,12 +135,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="android-v1.9"
+          TAG="android-v1.10"
           ASSET="novelapp-android.apk"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
-              --title "Android v1.9" \
-              --notes "Android v1.9 with account sync hardening, bundled Kokoro ONNX, improved manga caching, and updated media providers."
+              --title "Android v1.10" \
+              --notes "Android v1.10 with Supabase account sync, Kokoro model download/cache, improved manga caching, and updated media providers."
           fi
           gh release upload "$TAG" "${{ steps.apk.outputs.path }}#$ASSET" --clobber
 
@@ -144,11 +151,13 @@ jobs:
           APK_SHA256: ${{ steps.apk.outputs.sha256 }}
         run: |
           set -euo pipefail
+          mkdir -p site/downloads
+          cp "${{ steps.apk.outputs.path }}" site/downloads/novelapp-android.apk
           node <<'NODE'
           const fs = require('fs');
           const path = 'site/app-version.json';
           const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
-          manifest.apkUrl = 'https://github.com/Alex-Leo-Reeves/novelapp/releases/download/android-v1.9/novelapp-android.apk';
+          manifest.apkUrl = 'https://novelapp1.onrender.com/downloads/novelapp-android.apk';
           manifest.apkBytes = Number(process.env.APK_BYTES);
           manifest.apkSha256 = process.env.APK_SHA256;
           fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -160,7 +169,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/app-version.json
+          git add site/app-version.json site/downloads/novelapp-android.apk
           if git diff --cached --quiet; then
             echo "No Android manifest metadata changes to publish."
           else

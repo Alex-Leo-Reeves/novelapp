@@ -65,6 +65,8 @@ actual fun AnimePlayerScreen(
     currentTheme: AppTheme,
     initialPositionMs: Long,
     onProgress: (Long) -> Unit,
+    previewLimitMs: Long?,
+    onPreviewFinished: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -178,6 +180,11 @@ actual fun AnimePlayerScreen(
         if (exoPlayer != null) {
             while (true) {
                 onProgress(exoPlayer.currentPosition)
+                if (previewLimitMs != null && exoPlayer.currentPosition >= previewLimitMs) {
+                    exoPlayer.pause()
+                    onPreviewFinished()
+                    break
+                }
                 delay(2500)
             }
         }
@@ -214,6 +221,12 @@ actual fun AnimePlayerScreen(
         var webLoading by remember(streamUrl, retryKey) { mutableStateOf(true) }
         var webError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
         val providerName = streamUrl.providerName()
+
+        LaunchedEffect(streamUrl, retryKey, previewLimitMs) {
+            val limit = previewLimitMs ?: return@LaunchedEffect
+            delay(limit)
+            onPreviewFinished()
+        }
 
         LaunchedEffect(streamUrl, retryKey, webLoading) {
             if (webLoading) {

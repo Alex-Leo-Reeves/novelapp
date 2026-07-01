@@ -387,6 +387,7 @@ private data class IosAccountPayload(
     val email: String,
     val plan: String,
     val billingStatus: String,
+    val paidUntil: String?,
     val createdAt: String
 )
 
@@ -483,6 +484,7 @@ private fun SavedUserAccount.toIosAccount(): IosAccountPayload =
         email = email,
         plan = plan,
         billingStatus = billingStatus,
+        paidUntil = paidUntil,
         createdAt = createdAt
     )
 

@@ -18,4 +18,5 @@ actual object BuildKonfig {
     actual val MANGADEX_PASSWORD: String = infoString("MANGADEX_PASSWORD", "mock_pass")
     actual val TMDB_API_KEY: String = infoString("TMDB_API_KEY", "mock_tmdb_api_key")
     actual val TMDB_READ_ACCESS_TOKEN: String = infoString("TMDB_READ_ACCESS_TOKEN", "mock_tmdb_read_access_token")
+    actual val GROQ_API_KEY: String = infoString("GROQ_API_KEY", infoString("GROQ_CLOUD_API_KEY", "mock_groq_api_key"))
 }

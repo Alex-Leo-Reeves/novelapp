@@ -117,11 +117,12 @@ fun ReaderScreen(
     // Load chapter text
     LaunchedEffect(chapterUrl) {
         isLoading = true
-        chapterText = if (sourceName == "local" || chapterUrl.endsWith(".txt")) {
+        val rawChapterText = if (sourceName == "local" || chapterUrl.endsWith(".txt")) {
             loadDownloadedText(chapterUrl)
         } else {
             repository.fetchChapterText(chapterUrl, sourceName)
         }
+        chapterText = GroqTextCleaner.cleanForKokoro(rawChapterText)
         isLoading = false
     }
 
