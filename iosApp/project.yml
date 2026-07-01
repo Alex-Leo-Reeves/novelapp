@@ -18,7 +18,7 @@ targets:
       - path: iosApp
       - path: Assets.xcassets
       - path: LaunchScreen.storyboard
-      - path: ../kokoro-assets-runtime/kokoro
+      - path: ../kokoro-assets/kokoro
         type: folder
         buildPhase: resources
     info:
