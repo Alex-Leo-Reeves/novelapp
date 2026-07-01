@@ -550,7 +550,11 @@ private object AndroidKokoroEngine {
         while (attempt < 3) {
             attempt++
             runCatching {
-                val existingBytes = tempFile.takeIf { it.exists() }?.length()?.coerceAtMost(manifest.sizeBytes) ?: 0L
+                installCompleteTempModelIfValid(tempFile, modelFile, manifest)?.let { return }
+                if (tempFile.exists() && tempFile.length() > manifest.sizeBytes) {
+                    tempFile.delete()
+                }
+                val existingBytes = tempFile.takeIf { it.exists() && it.length() in 1 until manifest.sizeBytes }?.length() ?: 0L
                 val connection = (URL(manifest.url).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 20_000
                     readTimeout = 90_000
@@ -561,6 +565,9 @@ private object AndroidKokoroEngine {
                 }
                 try {
                     val responseCode = connection.responseCode
+                    if (responseCode == 416) {
+                        installCompleteTempModelIfValid(tempFile, modelFile, manifest)?.let { return }
+                    }
                     val appending = existingBytes > 0L && responseCode == HttpURLConnection.HTTP_PARTIAL
                     if (responseCode !in listOf(HttpURLConnection.HTTP_OK, HttpURLConnection.HTTP_PARTIAL)) {
                         error("model download returned HTTP $responseCode")
@@ -628,6 +635,30 @@ private object AndroidKokoroEngine {
             }
         }
         error("Kokoro model download failed: ${lastError?.message ?: "unknown error"}")
+    }
+
+    private fun installCompleteTempModelIfValid(
+        tempFile: File,
+        modelFile: File,
+        manifest: KokoroModelManifest
+    ): Unit? {
+        if (!tempFile.exists() || tempFile.length() != manifest.sizeBytes) return null
+        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+            phase = KokoroVoiceSetupPhase.Installing,
+            downloadedBytes = tempFile.length(),
+            totalBytes = manifest.sizeBytes,
+            message = "Verifying completed Kokoro voice model."
+        )
+        if (!tempFile.matchesSha256(manifest.sha256)) {
+            tempFile.delete()
+            return null
+        }
+        if (modelFile.exists()) modelFile.delete()
+        if (!tempFile.renameTo(modelFile)) {
+            tempFile.copyTo(modelFile, overwrite = true)
+            tempFile.delete()
+        }
+        return Unit
     }
 
     private fun File.matchesSha256(expected: String): Boolean =
