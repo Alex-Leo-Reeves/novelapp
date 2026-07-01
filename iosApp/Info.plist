@@ -34,6 +34,10 @@
 	<string>$(TMDB_API_KEY)</string>
 	<key>TMDB_READ_ACCESS_TOKEN</key>
 	<string>$(TMDB_READ_ACCESS_TOKEN)</string>
+	<key>GROQ_API_KEY</key>
+	<string>$(GROQ_API_KEY)</string>
+	<key>GROQ_CLOUD_API_KEY</key>
+	<string>$(GROQ_CLOUD_API_KEY)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>

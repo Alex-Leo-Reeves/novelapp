@@ -1,15 +1,15 @@
 {
-  "versionCode": 10,
-  "versionName": "1.9",
-  "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/android-v1.9/novelapp-android.apk",
-  "apkBytes": 130292345,
+  "versionCode": 11,
+  "versionName": "1.10",
+  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "apkBytes": 67282920,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
     "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
-    "Bundled Kokoro ONNX in the app and removed the model download loop/fallback-to-system-TTS path.",
+    "Kokoro voice now downloads once after app launch and caches on device instead of being bundled in the app.",
     "Improved manga reading so pages display immediately while chapter caching continues in the background.",
     "Switched movie, cartoon, and K-drama playback toward VidLink, AutoEmbed, VidSrc.me, and optional OMSS-backed sources."
   ],
   "forceUpdate": false,
-  "apkSha256": "5dcbaf2d95947bdb535d9d9f8bcdc0d9c42906350ae14e62c2f323dcde240a7c"
+  "apkSha256": "ab36228c04f6740ec8df585988fdb845173b6054cc9273784d4a8e715bd60979"
 }

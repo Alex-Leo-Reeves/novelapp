@@ -124,8 +124,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 10
-        versionName = "1.9"
+        versionCode = 11
+        versionName = "1.10"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -166,7 +166,7 @@ android {
     buildFeatures {
         buildConfig = true
     }
-    sourceSets["main"].assets.srcDir(rootProject.file("kokoro-assets-android"))
+    sourceSets["main"].assets.srcDir(rootProject.file("kokoro-assets-runtime"))
 }
 
 room {

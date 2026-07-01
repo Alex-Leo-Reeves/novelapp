@@ -37,6 +37,8 @@ actual fun AnimePlayerScreen(
     currentTheme: AppTheme,
     initialPositionMs: Long,
     onProgress: (Long) -> Unit,
+    previewLimitMs: Long?,
+    onPreviewFinished: () -> Unit,
     onBack: () -> Unit
 ) {
     Box(

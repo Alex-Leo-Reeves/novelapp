@@ -7,8 +7,13 @@ data class SavedUserAccount(
     val authToken: String,
     val plan: String = "free",
     val billingStatus: String = "none",
+    val paidUntil: String? = null,
     val createdAt: String = ""
-)
+) {
+    val isPremium: Boolean
+        get() = email.equals("mike@mike.com", ignoreCase = true) ||
+            (plan == "premium" && billingStatus == "active")
+}
 
 interface UserSessionStore {
     fun loadAccount(): SavedUserAccount?

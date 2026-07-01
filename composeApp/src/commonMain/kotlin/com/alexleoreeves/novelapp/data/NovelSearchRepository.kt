@@ -80,6 +80,8 @@ class NovelSearchRepository(
         readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
         apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
     )
+    private val dramaCoolScraper = DramaCoolScraper(httpClient)
+    private val kimCartoonScraper = KimCartoonScraper(httpClient)
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Unified Search — Novels + Manga + Anime all simultaneously
@@ -300,8 +302,18 @@ class NovelSearchRepository(
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
         tmdbSource.fetchVideo(category, page)
 
-    suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
-        tmdbSource.searchVideo(category, query, page)
+    suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
+        val tmdb = async { tmdbSource.searchVideo(category, query, page) }
+        val source = async {
+            when (category) {
+                VideoCategory.K_DRAMA -> dramaCoolScraper.search(query).map { it.toUnifiedVideo(VideoCategory.K_DRAMA, "DramaCool") }
+                VideoCategory.CARTOON -> kimCartoonScraper.search(query).map { it.toUnifiedVideo(VideoCategory.CARTOON, "KimCartoon") }
+                VideoCategory.MOVIES -> emptyList()
+            }
+        }
+        (source.await() + tmdb.await())
+            .distinctBy { it.detailPageUrl.ifBlank { it.id } }
+    }
 
     private suspend fun cachedFeed(
         key: String,
@@ -663,6 +675,20 @@ private fun knownNovelFallbacks(query: String): List<UnifiedSearchResult> {
 
 private fun curatedPopularNovelSeeds(): List<UnifiedSearchResult> =
     knownNovelEntries.map { it.toResult() }
+
+private fun MediaResult.toUnifiedVideo(category: VideoCategory, sourceLabel: String): UnifiedSearchResult =
+    UnifiedSearchResult(
+        id = "source_${sourceLabel}_${id}".normalizeForNovelSearch().replace(" ", "_"),
+        title = title,
+        coverUrl = coverUrl,
+        detailPageUrl = id,
+        sourceName = sourceLabel,
+        genre = genres.ifBlank { category.label },
+        synopsis = description,
+        isVideo = true,
+        mediaKind = category.name,
+        url = id
+    )
 
 private fun KnownNovelEntry.toResult(): UnifiedSearchResult =
     UnifiedSearchResult(

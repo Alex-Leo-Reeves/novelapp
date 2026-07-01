@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,12 +32,15 @@ import com.alexleoreeves.novelapp.ui.theme.textColor
 import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 
 @Composable
 fun MediaDetailScreen(
     item: UnifiedSearchResult,
     currentTheme: AppTheme,
-    onPlayStream: (streamUrl: String, title: String) -> Unit,
+    isPremium: Boolean,
+    onSubscribe: () -> Unit,
+    onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?) -> Unit,
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -52,9 +56,25 @@ fun MediaDetailScreen(
     var episodesList by remember { mutableStateOf<List<MediaEpisode>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
+    var providerTmdbId by remember(item.detailPageUrl) { mutableStateOf("") }
+    var providerTmdbType by remember(item.detailPageUrl) { mutableStateOf("tv") }
 
     var selectedServer by remember { mutableStateOf(0) }
-    val serverNames = listOf("VidLink", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
+    val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
+    val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
+    val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
+    val embedServerNames = listOf("VidLink", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
+    val sourceServerOffset = if (isTmdbDetail) 0 else 2
+    val serverNames = if (isTmdbDetail) {
+        embedServerNames
+    } else {
+        listOf("Source host", "Episode page") + embedServerNames
+    }
+    val freeMoviePreviewMs = 20 * 60 * 1000L
+    val freeEpisodeCount = remember(episodesList, isPremium) {
+        if (isPremium || episodesList.isEmpty()) episodesList.size
+        else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
+    }
 
     val resolveMovieUrl: (String, Int) -> String = { id, server ->
         when (server) {
@@ -81,22 +101,45 @@ fun MediaDetailScreen(
     }
 
     LaunchedEffect(item.detailPageUrl) {
+        selectedServer = 0
+        providerTmdbId = ""
+        providerTmdbType = "tv"
         isLoadingEpisodes = true
         episodesList = when {
-            item.detailPageUrl.startsWith("tmdb://") -> {
+            isTmdbDetail -> {
                 if (mediaType == "tv") {
                     tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
                 } else {
                     emptyList()
                 }
             }
-            item.detailPageUrl.contains("dramacool") -> {
+            isDramaCoolDetail -> {
                 dramaScraper.fetchEpisodes(item.detailPageUrl)
             }
-            item.detailPageUrl.contains("kimcartoon") -> {
+            isKimCartoonDetail -> {
                 cartoonScraper.fetchEpisodes(item.detailPageUrl)
             }
             else -> emptyList()
+        }
+        if (!isTmdbDetail) {
+            val tmdbMatch = runCatching {
+                tmdbScraper.search(item.title)
+                    .sortedWith(
+                        compareByDescending<MediaResult> { it.title.normalizedMediaTitle() == item.title.normalizedMediaTitle() }
+                            .thenByDescending {
+                                when (item.mediaKind) {
+                                    VideoCategory.K_DRAMA.name -> it.type == "TVSHOW"
+                                    VideoCategory.CARTOON.name -> it.type == "TVSHOW" || it.genres.contains("Animation", ignoreCase = true)
+                                    else -> true
+                                }
+                            }
+                    )
+                    .firstOrNull()
+            }.getOrNull()
+            if (tmdbMatch != null) {
+                providerTmdbId = tmdbMatch.id
+                providerTmdbType = if (tmdbMatch.type == "MOVIE") "movie" else "tv"
+            }
         }
         isLoadingEpisodes = false
     }
@@ -105,23 +148,55 @@ fun MediaDetailScreen(
         scope.launch {
             statusText = "Resolving stream link..."
             val playUrl = when {
-                item.detailPageUrl.startsWith("tmdb://") -> {
+                isTmdbDetail -> {
                     val urlParts = ep.url.split(":")
                     val tvId = urlParts.getOrNull(1) ?: tmdbId
                     val s = urlParts.getOrNull(2) ?: "1"
                     val e = urlParts.getOrNull(3) ?: "1"
                     resolveTvUrl(tvId, s, e, selectedServer)
                 }
-                item.detailPageUrl.contains("dramacool") -> {
-                    dramaScraper.extractStreamUrl(ep.url) ?: ep.url
+                isDramaCoolDetail -> {
+                    when {
+                        selectedServer == 0 -> dramaScraper.extractStreamUrl(ep.url) ?: ep.url
+                        selectedServer == 1 -> ep.url
+                        providerTmdbId.isNotBlank() -> {
+                            val providerIndex = selectedServer - sourceServerOffset
+                            if (providerTmdbType == "movie") {
+                                resolveMovieUrl(providerTmdbId, providerIndex)
+                            } else {
+                                resolveTvUrl(providerTmdbId, "1", ep.episodeNumber.coerceAtLeast(1).toString(), providerIndex)
+                            }
+                        }
+                        else -> {
+                            statusText = "Provider match unavailable for this title. Opening source episode page."
+                            ep.url
+                        }
+                    }
                 }
-                item.detailPageUrl.contains("kimcartoon") -> {
-                    cartoonScraper.extractStreamUrl(ep.url) ?: ep.url
+                isKimCartoonDetail -> {
+                    when {
+                        selectedServer == 0 -> cartoonScraper.extractStreamUrl(ep.url) ?: ep.url
+                        selectedServer == 1 -> ep.url
+                        providerTmdbId.isNotBlank() -> {
+                            val providerIndex = selectedServer - sourceServerOffset
+                            if (providerTmdbType == "movie") {
+                                resolveMovieUrl(providerTmdbId, providerIndex)
+                            } else {
+                                resolveTvUrl(providerTmdbId, "1", ep.episodeNumber.coerceAtLeast(1).toString(), providerIndex)
+                            }
+                        }
+                        else -> {
+                            statusText = "Provider match unavailable for this title. Opening source episode page."
+                            ep.url
+                        }
+                    }
                 }
                 else -> ep.url
             }
-            statusText = ""
-            onPlayStream(playUrl, "${item.title} - ${ep.title}")
+            if (!statusText.startsWith("Provider match unavailable")) {
+                statusText = ""
+            }
+            onPlayStream(playUrl, "${item.title} - ${ep.title}", null)
         }
     }
 
@@ -248,10 +323,24 @@ fun MediaDetailScreen(
 
             // Movie: Single Play button
             if (item.detailPageUrl.startsWith("tmdb://") && mediaType == "movie") {
+                if (!isPremium) {
+                    Surface(
+                        color = currentTheme.accentColor().copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Free account preview: first 20 minutes. Subscribe for the full movie, cartoons, and K-drama.",
+                            color = currentTheme.textColor(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                }
                 Button(
                     onClick = {
                         val playUrl = resolveMovieUrl(tmdbId, selectedServer)
-                        onPlayStream(playUrl, item.title)
+                        onPlayStream(playUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -261,7 +350,16 @@ fun MediaDetailScreen(
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Watch Movie Now", fontWeight = FontWeight.Bold)
+                    Text(if (isPremium) "Watch Movie Now" else "Watch 20-minute Preview", fontWeight = FontWeight.Bold)
+                }
+                if (!isPremium) {
+                    OutlinedButton(
+                        onClick = onSubscribe,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Subscribe for full access")
+                    }
                 }
             }
  else {
@@ -290,9 +388,19 @@ fun MediaDetailScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 } else {
-                    episodesList.forEach { ep ->
+                    if (!isPremium) {
+                        Text(
+                            "Free account access: ${freeEpisodeCount} of ${episodesList.size} episodes unlocked.",
+                            color = currentTheme.subTextColor(),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    episodesList.forEachIndexed { index, ep ->
+                        val locked = !isPremium && index >= freeEpisodeCount
                         Card(
-                            onClick = { playEpisode(ep) },
+                            onClick = {
+                                if (locked) onSubscribe() else playEpisode(ep)
+                            },
                             shape = RoundedCornerShape(10.dp),
                             colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
                             modifier = Modifier
@@ -304,8 +412,8 @@ fun MediaDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "Play",
+                                    if (locked) Icons.Default.Lock else Icons.Default.PlayArrow,
+                                    contentDescription = if (locked) "Locked" else "Play",
                                     tint = currentTheme.accentColor(),
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -316,6 +424,15 @@ fun MediaDetailScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = currentTheme.textColor()
                                 )
+                                if (locked) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Premium",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = currentTheme.accentColor(),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -324,3 +441,8 @@ fun MediaDetailScreen(
         }
     }
 }
+
+private fun String.normalizedMediaTitle(): String =
+    lowercase()
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()

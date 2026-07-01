@@ -65,13 +65,15 @@ fun DesktopApp() {
         when {
             animeStreamUrl.value != null -> {
                 AnimePlayerScreen(
-                    streamUrl = animeStreamUrl.value!!,
-                    episodeTitle = animeEpisodeTitle.value,
-                    currentTheme = appTheme.value,
-                    initialPositionMs = 0L,
-                    onProgress = {},
-                    onBack = { animeStreamUrl.value = null }
-                )
+                        streamUrl = animeStreamUrl.value!!,
+                        episodeTitle = animeEpisodeTitle.value,
+                        currentTheme = appTheme.value,
+                        initialPositionMs = 0L,
+                        onProgress = {},
+                        previewLimitMs = null,
+                        onPreviewFinished = {},
+                        onBack = { animeStreamUrl.value = null }
+                    )
                 return@NovelAppTheme
             }
             selectedChapterUrl.value != null -> {
@@ -140,7 +142,9 @@ fun DesktopApp() {
                     selectedMedia.value != null -> MediaDetailScreen(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
-                        onPlayStream = { url, title ->
+                        isPremium = true,
+                        onSubscribe = {},
+                        onPlayStream = { url, title, _ ->
                             animeStreamUrl.value = url
                             animeEpisodeTitle.value = title
                         },

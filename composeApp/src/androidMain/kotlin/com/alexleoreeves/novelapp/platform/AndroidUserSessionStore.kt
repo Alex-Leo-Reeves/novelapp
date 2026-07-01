@@ -21,6 +21,7 @@ class AndroidUserSessionStore(context: Context) : UserSessionStore {
                 authToken = authToken,
                 plan = prefs.getString(KEY_PLAN, "free").orEmpty().ifBlank { "free" },
                 billingStatus = prefs.getString(KEY_BILLING_STATUS, "none").orEmpty().ifBlank { "none" },
+                paidUntil = prefs.getString(KEY_PAID_UNTIL, null),
                 createdAt = prefs.getString(KEY_CREATED_AT, "").orEmpty()
             )
         }
@@ -34,6 +35,7 @@ class AndroidUserSessionStore(context: Context) : UserSessionStore {
             .putString(KEY_AUTH_TOKEN, account.authToken)
             .putString(KEY_PLAN, account.plan)
             .putString(KEY_BILLING_STATUS, account.billingStatus)
+            .putString(KEY_PAID_UNTIL, account.paidUntil)
             .putString(KEY_CREATED_AT, account.createdAt)
             .commit()
     }
@@ -49,6 +51,7 @@ class AndroidUserSessionStore(context: Context) : UserSessionStore {
         const val KEY_AUTH_TOKEN = "auth_token"
         const val KEY_PLAN = "plan"
         const val KEY_BILLING_STATUS = "billing_status"
+        const val KEY_PAID_UNTIL = "paid_until"
         const val KEY_CREATED_AT = "created_at"
     }
 }

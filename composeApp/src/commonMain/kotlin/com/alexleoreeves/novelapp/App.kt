@@ -64,6 +64,7 @@ fun App(
     var cloudSyncPulse by remember { mutableStateOf(0) }
     var hasHydratedCloudState by remember { mutableStateOf(false) }
     var searchHistoryPulse by remember { mutableStateOf(0) }
+    var subscriptionMessage by remember { mutableStateOf<String?>(null) }
     val authApi = remember { AuthApi() }
 
     // App state
@@ -81,6 +82,7 @@ fun App(
     val animeStreamUrl = remember { mutableStateOf<String?>(null) }
     val animeEpisodeTitle = remember { mutableStateOf("") }
     val animeEpisodeNumber = remember { mutableStateOf(0) }
+    val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
 
     val repository = remember {
         NovelSearchRepository(
@@ -141,6 +143,34 @@ fun App(
         }
     }
 
+    fun beginPremiumCheckout() {
+        val activeAccount = account
+        if (activeAccount == null) {
+            showAuthSheet = true
+            return
+        }
+        scope.launch {
+            subscriptionMessage = "Starting subscription checkout..."
+            runCatching { authApi.createBillingCheckout(activeAccount.authToken) }
+                .onSuccess { checkout ->
+                    if (checkout.alreadyPremium || checkout.premium) {
+                        runCatching { authApi.billingStatus(activeAccount.authToken) }
+                            .onSuccess { status ->
+                                account = status.account
+                                userSessionStore.saveAccount(status.account)
+                            }
+                        subscriptionMessage = "Premium is already active on this account."
+                    } else if (checkout.link.isNotBlank()) {
+                        linkOpener.open(checkout.link)
+                        subscriptionMessage = "Complete the Flutterwave checkout, then reopen the app to refresh Premium."
+                    } else {
+                        subscriptionMessage = "Checkout link was not returned. Try again."
+                    }
+                }
+                .onFailure { subscriptionMessage = it.message ?: "Could not start subscription." }
+        }
+    }
+
     LaunchedEffect(account?.authToken, cloudSyncPulse) {
         val token = account?.authToken ?: return@LaunchedEffect
         if (!hasHydratedCloudState || cloudSyncPulse == 0) return@LaunchedEffect
@@ -188,6 +218,7 @@ fun App(
 
     LaunchedEffect(showSplash, isAuthChecked) {
         if (!showSplash && isAuthChecked) {
+            launch { ttsController.prepareText("Kokoro voice is getting ready.") }
             val manifest = fetchAppUpdateManifest(updateClient)
             startupUpdateManifest = manifest?.takeIf { it.isAvailable }
         }
@@ -241,11 +272,11 @@ fun App(
                         isAuthSubmitting = false
                     }
                 },
-                onCreateAccount = { username, email, password ->
+                onCreateAccount = { username, email, password, recoverySecret ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.register(username, email, password) }
+                        runCatching { authApi.register(username, email, password, recoverySecret) }
                             .onSuccess { created ->
                                 userSessionStore.saveAccount(created)
                                 account = created
@@ -255,6 +286,26 @@ fun App(
                                 queueCloudSync()
                             }
                             .onFailure { authError = it.message ?: "Account creation failed." }
+                        isAuthSubmitting = false
+                    }
+                },
+                onRecoverAccount = { recoverySecret, newPassword ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching {
+                            val recovered = authApi.recoverAccount(recoverySecret)
+                            authApi.resetPassword(recovered.authToken, newPassword)
+                        }
+                            .onSuccess { recovered ->
+                                userSessionStore.saveAccount(recovered)
+                                account = recovered
+                                isGuestSession = false
+                                showAuthSheet = false
+                                hydrateCloudState(recovered.authToken)
+                                queueCloudSync()
+                            }
+                            .onFailure { authError = it.message ?: "Account recovery failed." }
                         isAuthSubmitting = false
                     }
                 }
@@ -282,6 +333,7 @@ fun App(
             animeStreamUrl.value = item.streamUrl
             animeEpisodeTitle.value = item.episodeTitle
             animeEpisodeNumber.value = item.episodeNumber
+            animePreviewLimitMs.value = null
         }
 
         val canNavigateBack =
@@ -294,7 +346,10 @@ fun App(
 
         PlatformBackHandler(enabled = canNavigateBack) {
             when {
-                animeStreamUrl.value != null -> animeStreamUrl.value = null
+                animeStreamUrl.value != null -> {
+                    animeStreamUrl.value = null
+                    animePreviewLimitMs.value = null
+                }
                 selectedChapterUrl.value != null -> selectedChapterUrl.value = null
                 selectedAnime.value != null -> selectedAnime.value = null
                 selectedMedia.value != null -> selectedMedia.value = null
@@ -331,7 +386,16 @@ fun App(
                             )
                             queueCloudSync()
                         },
-                        onBack = { animeStreamUrl.value = null }
+                        previewLimitMs = animePreviewLimitMs.value,
+                        onPreviewFinished = {
+                            animeStreamUrl.value = null
+                            animePreviewLimitMs.value = null
+                            subscriptionMessage = "Free preview ended. Subscribe for full movies, cartoons, and K-drama."
+                        },
+                        onBack = {
+                            animeStreamUrl.value = null
+                            animePreviewLimitMs.value = null
+                        }
                     )
                 }
 
@@ -346,6 +410,7 @@ fun App(
                             animeStreamUrl.value = streamUrl
                             animeEpisodeTitle.value = epTitle
                             animeEpisodeNumber.value = epTitle.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                            animePreviewLimitMs.value = null
                         },
                         onBack = { selectedAnime.value = null },
                         requireAuth = requireAuth
@@ -419,9 +484,12 @@ fun App(
                     MediaDetailScreen(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
-                        onPlayStream = { url, title ->
+                        isPremium = account?.isPremium == true,
+                        onSubscribe = { beginPremiumCheckout() },
+                        onPlayStream = { url, title, previewLimitMs ->
                             animeStreamUrl.value = url
                             animeEpisodeTitle.value = title
+                            animePreviewLimitMs.value = previewLimitMs
                         },
                         onBack = { selectedMedia.value = null }
                     )
@@ -533,6 +601,7 @@ fun App(
                                                 animeStreamUrl.value = path
                                                 animeEpisodeTitle.value = title
                                                 animeEpisodeNumber.value = title.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                                                animePreviewLimitMs.value = null
                                             },
                                             onReadMangaChapter = { path, title ->
                                                 selectedNovel.value = UnifiedSearchResult(
@@ -657,11 +726,11 @@ fun App(
                         isAuthSubmitting = false
                     }
                 },
-                onCreateAccount = { username, email, password ->
+                onCreateAccount = { username, email, password, recoverySecret ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.register(username, email, password) }
+                        runCatching { authApi.register(username, email, password, recoverySecret) }
                             .onSuccess { created ->
                                 userSessionStore.saveAccount(created)
                                 account = created
@@ -672,6 +741,44 @@ fun App(
                             }
                             .onFailure { authError = it.message ?: "Account creation failed." }
                         isAuthSubmitting = false
+                    }
+                },
+                onRecoverAccount = { recoverySecret, newPassword ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching {
+                            val recovered = authApi.recoverAccount(recoverySecret)
+                            authApi.resetPassword(recovered.authToken, newPassword)
+                        }
+                            .onSuccess { recovered ->
+                                userSessionStore.saveAccount(recovered)
+                                account = recovered
+                                isGuestSession = false
+                                showAuthSheet = false
+                                hydrateCloudState(recovered.authToken)
+                                queueCloudSync()
+                            }
+                            .onFailure { authError = it.message ?: "Account recovery failed." }
+                        isAuthSubmitting = false
+                    }
+                }
+            )
+        }
+
+        subscriptionMessage?.let { message ->
+            AlertDialog(
+                onDismissRequest = { subscriptionMessage = null },
+                title = { Text("Premium") },
+                text = { Text(message) },
+                confirmButton = {
+                    Button(onClick = { beginPremiumCheckout() }) {
+                        Text("Subscribe")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { subscriptionMessage = null }) {
+                        Text("Close")
                     }
                 }
             )

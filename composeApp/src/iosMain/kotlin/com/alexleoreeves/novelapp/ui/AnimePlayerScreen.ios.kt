@@ -60,6 +60,8 @@ actual fun AnimePlayerScreen(
     currentTheme: AppTheme,
     initialPositionMs: Long,
     onProgress: (Long) -> Unit,
+    previewLimitMs: Long?,
+    onPreviewFinished: () -> Unit,
     onBack: () -> Unit
 ) {
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
@@ -75,6 +77,12 @@ actual fun AnimePlayerScreen(
                 isLoading = false
             }
         }
+    }
+
+    LaunchedEffect(streamUrl, retryKey, previewLimitMs) {
+        val limit = previewLimitMs ?: return@LaunchedEffect
+        delay(limit)
+        onPreviewFinished()
     }
 
     Box(

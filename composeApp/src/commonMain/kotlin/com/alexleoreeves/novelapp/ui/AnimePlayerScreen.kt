@@ -23,5 +23,7 @@ expect fun AnimePlayerScreen(
     currentTheme: AppTheme,
     initialPositionMs: Long = 0L,
     onProgress: (Long) -> Unit = {},
+    previewLimitMs: Long? = null,
+    onPreviewFinished: () -> Unit = {},
     onBack: () -> Unit
 )

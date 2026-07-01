@@ -126,12 +126,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func createAccount(username: String, email: String, password: String) async {
+    func createAccount(username: String, email: String, password: String, recoverySecret: String) async {
         isAuthSubmitting = true
         authError = nil
         defer { isAuthSubmitting = false }
         do {
-            account = try await auth.register(username: username, email: email, password: password)
+            account = try await auth.register(username: username, email: email, password: password, recoverySecret: recoverySecret)
             isGuest = false
             await hydrateUserState()
             await loadHomeIfNeeded(kind: selectedKind)
@@ -355,6 +355,7 @@ private struct AuthView: View {
     @State private var username = ""
     @State private var email = ""
     @State private var password = ""
+    @State private var recoverySecret = ""
     @State private var localError: String?
 
     var body: some View {
@@ -372,6 +373,7 @@ private struct AuthView: View {
                 .pickerStyle(.segmented)
                 if mode == .create {
                     FieldRow(title: "Username", text: $username, icon: "person")
+                    SecureFieldRow(title: "Recovery secret key", text: $recoverySecret)
                 }
                 FieldRow(title: "Email", text: $email, icon: "envelope", keyboard: .emailAddress)
                 SecureFieldRow(title: "Password", text: $password)
@@ -423,7 +425,12 @@ private struct AuthView: View {
                     localError = "Username must be at least 2 characters."
                     return
                 }
-                await app.createAccount(username: cleanUsername, email: cleanEmail, password: password)
+                let cleanRecoverySecret = recoverySecret.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard cleanRecoverySecret.count >= 10 else {
+                    localError = "Recovery secret must be at least 10 characters."
+                    return
+                }
+                await app.createAccount(username: cleanUsername, email: cleanEmail, password: password, recoverySecret: cleanRecoverySecret)
             } else {
                 await app.signIn(email: cleanEmail, password: password)
             }
@@ -1441,8 +1448,16 @@ final class AuthService {
 
     var savedToken: String? { KeychainStore.read(service: "novelapp.auth", account: "token") }
 
-    func register(username: String, email: String, password: String) async throws -> UserAccount {
-        let response: AuthResponse = try await rawAuth(path: "/auth/register", body: ["username": username, "email": email, "password": password])
+    func register(username: String, email: String, password: String, recoverySecret: String) async throws -> UserAccount {
+        let response: AuthResponse = try await rawAuth(
+            path: "/auth/register",
+            body: [
+                "username": username,
+                "email": email,
+                "password": password,
+                "recoverySecret": recoverySecret
+            ]
+        )
         if let token = response.token { KeychainStore.save(token, service: "novelapp.auth", account: "token") }
         return response.user
     }
