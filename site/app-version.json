@@ -1,18 +1,24 @@
 {
-  "versionCode": 14,
-  "versionName": "1.13",
+  "versionCode": 16,
+  "versionName": "1.15",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "apkBytes": 67282920,
+  "apkBytes": 67299300,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
     "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
     "Kokoro narration now starts immediately when no cached chapter audio exists and keeps existing cached audio available when present.",
     "Fixed Kokoro model resume at 100% so HTTP 416 responses verify and install the completed download instead of failing.",
     "Stopped automatic full-chapter audio creation from blocking the reader; narration now starts immediately if no cached chapter audio exists.",
+    "Android narration now speaks immediately through the device voice path and uses larger chunks to avoid a few-words-then-pause rhythm.",
+    "Paused narration no longer resumes after a pending voice segment finishes preparing.",
+    "Anime episode lists now show only real scraped episodes instead of fake 24-episode fallback pages.",
+    "Anime episodes now hand only direct Anineko provider streams to the in-app ExoPlayer instead of opening provider websites inside the app.",
+    "Added VidLink Pro as an anime server option that resolves TMDB TV episodes through the direct-stream backend before opening the in-app player.",
+    "Movie, K-drama, cartoon, and anime server options now resolve through backend direct-stream providers instead of sending raw embed pages to the player.",
     "Manga chapters now cache their pages before the reader opens so scrolling does not fight network image loading.",
     "Anime playback now prioritizes Anineko/AnimePahe direct streams and blocks YouTube/trailer fallbacks from opening as playback.",
     "K-drama and cartoon source results now prefer source stream extraction instead of broken generic embed providers."
   ],
   "forceUpdate": false,
-  "apkSha256": "bf56b6785994d159450e65303b72f3dbb55e35b2fc83f252c54acb6c08cacb27"
+  "apkSha256": "9610d766f19d12c2d6d57cfa22c6fb464c47555461524c0519b57dbd0b541252"
 }

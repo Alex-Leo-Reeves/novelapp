@@ -10,6 +10,8 @@ const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/dat
 const DATA_FILE = path.join(DATA_DIR, "auth.json");
 const SITE_DIR = path.join(process.cwd(), "site");
 const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || "");
+const VIDLINK_RESOLVER_BASE_URL = cleanBaseUrl(process.env.VIDLINK_RESOLVER_BASE_URL || process.env.VIDLINK_API_BASE_URL || "");
+const CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.env.CINEHUB_BASE_URL || process.env.CINEPRO_API_BASE_URL || "");
 const SUPABASE_URL = cleanBaseUrl(process.env.SUPABASE_URL || process.env.supabase_url || process.env.project_url || "");
 const SUPABASE_SECRET_KEY = String(process.env.SUPABASE_SECRET_KEY || process.env.supabase_secret_key || process.env.service_role_key || "").trim();
 const FLUTTERWAVE_SECRET_KEY = String(process.env.FLUTTERWAVE_SECRET_KEY || process.env.flutterwave_secret_key || "").trim();
@@ -877,6 +879,102 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
   ];
 }
 
+function isDirectStreamUrl(url) {
+  return /\.(m3u8|mp4|mpd|webm)(\?|$)/i.test(String(url || "").split("#")[0]);
+}
+
+function firstDirectStreamFromPayload(payload) {
+  const candidates = [];
+  const visit = (value) => {
+    if (!value) return;
+    if (typeof value === "string") {
+      if (isDirectStreamUrl(value)) candidates.push({ url: value });
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const direct = value.url || value.file || value.src || value.playlist || value.streamUrl;
+    if (typeof direct === "string" && isDirectStreamUrl(direct)) {
+      candidates.push({
+        url: direct,
+        provider: value.provider?.name || value.provider?.id || value.provider || value.label || value.quality || "",
+        headers: value.headers || value.proxyHeaders || null
+      });
+    }
+    ["files", "sources", "streams", "data", "stream"].forEach((key) => visit(value[key]));
+  };
+  visit(payload);
+  return candidates[0] || null;
+}
+
+async function vidlinkDirectRoute(mediaType, id, season = "1", episode = "1") {
+  if (!VIDLINK_RESOLVER_BASE_URL || typeof fetch !== "function") return null;
+  const params = new URLSearchParams({ id: String(id) });
+  if (mediaType !== "movie") {
+    params.set("s", String(season || "1"));
+    params.set("e", String(episode || "1"));
+  }
+  const payload = await fetchWithTimeout(`${VIDLINK_RESOLVER_BASE_URL}/api?${params.toString()}`, {
+    headers: { accept: "application/json" }
+  }, 15000).catch(() => null);
+  const stream = firstDirectStreamFromPayload(payload);
+  if (!stream?.url) return null;
+  return {
+    route: "direct",
+    url: stream.url,
+    provider: "VidLink Direct",
+    title: "VidLink Direct",
+    headers: stream.headers || null
+  };
+}
+
+async function cineProviderRoute(mediaType, id, season = "1", episode = "1") {
+  if (!CINEPRO_BASE_URL || typeof fetch !== "function") return null;
+  const endpoint = mediaType === "movie"
+    ? `${CINEPRO_BASE_URL}/movie/${encodeURIComponent(id)}`
+    : `${CINEPRO_BASE_URL}/tv/${encodeURIComponent(id)}?s=${encodeURIComponent(season || "1")}&e=${encodeURIComponent(episode || "1")}`;
+  const payload = await fetchWithTimeout(endpoint, {
+    headers: { accept: "application/json" }
+  }, 20000).catch(() => null);
+  const stream = firstDirectStreamFromPayload(payload);
+  if (!stream?.url) return null;
+  return {
+    route: "direct",
+    url: stream.url,
+    provider: stream.provider || "CinePro",
+    title: "CinePro",
+    headers: stream.headers || null
+  };
+}
+
+async function providerStreamRoute(mediaType, id, season, episode, provider) {
+  const normalizedProvider = String(provider || "vidlink").toLowerCase();
+  const normalizedType = mediaType === "movie" ? "movie" : "tv";
+  const routes = [];
+  if (normalizedProvider === "vidlink" || normalizedProvider === "all") {
+    const route = await vidlinkDirectRoute(normalizedType, id, season, episode);
+    if (route) routes.push(route);
+  }
+  if (normalizedProvider === "cinepro" || normalizedProvider === "cinehub" || normalizedProvider === "all") {
+    const route = await cineProviderRoute(normalizedType, id, season, episode);
+    if (route) routes.push(route);
+  }
+  if (normalizedProvider === "omss" || normalizedProvider === "all") {
+    const route = await omssRoute(normalizedType, id, season, episode, "");
+    if (route && route.route === "direct" && isDirectStreamUrl(route.url)) routes.push(route);
+  }
+  return routes[0] || {
+    route: "unavailable",
+    url: "",
+    provider: provider || "",
+    title: "Unavailable",
+    message: "This server did not return a direct playable stream."
+  };
+}
+
 async function omssRoute(mediaType, id, season, episode, title) {
   if (!OMSS_BASE_URL || typeof fetch !== "function") return null;
 
@@ -986,8 +1084,24 @@ async function handleContentApi(request, response, pathname, url) {
         omss: {
           enabled: Boolean(OMSS_BASE_URL)
         },
+        vidlink: {
+          enabled: Boolean(VIDLINK_RESOLVER_BASE_URL)
+        },
+        cinepro: {
+          enabled: Boolean(CINEPRO_BASE_URL)
+        },
+        directServers: ["VidLink Direct", "CinePro", "OMSS"],
         embeds: embedProviders("movie", "{tmdb_id}").map((provider) => provider.provider)
       });
+    }
+    if (request.method === "GET" && pathname === "/api/content/stream") {
+      const mediaType = String(url.searchParams.get("type") || "movie").toLowerCase() === "movie" ? "movie" : "tv";
+      const id = String(url.searchParams.get("id") || "").trim();
+      if (!id) return sendApiError(response, 400, "TMDB id is required.");
+      const season = String(url.searchParams.get("season") || "1");
+      const episode = String(url.searchParams.get("episode") || "1");
+      const provider = String(url.searchParams.get("provider") || "vidlink");
+      return sendApiData(response, 200, await providerStreamRoute(mediaType, id, season, episode, provider));
     }
     if (request.method === "POST" && pathname === "/api/content/chapters") {
       const body = await readBody(request);

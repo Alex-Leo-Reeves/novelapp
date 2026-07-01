@@ -198,7 +198,7 @@ class AninekoScraper(private val client: HttpClient) {
      * Search Anineko for an anime title and return a list of episode pages.
      * The live domain is resolved via DDG before any network call.
      */
-    suspend fun fetchEpisodes(animeTitleQuery: String, maxEpisodes: Int = 24): List<AnimeEpisode> {
+    suspend fun fetchEpisodes(animeTitleQuery: String, maxEpisodes: Int = 300): List<AnimeEpisode> {
         return runCatching {
             val baseUrl = liveBaseUrl()
             val directSeriesUrl = toAbsoluteAnimeUrl(baseUrl, "/watch/${animeTitleQuery.slugifyAnimeTitle()}")
@@ -276,7 +276,9 @@ class AninekoScraper(private val client: HttpClient) {
             }
             .distinctBy { it.url }
             .sortedByDescending { it.episodeNumber }
-            .take(maxEpisodes)
+            .let { episodes ->
+                if (maxEpisodes > 0) episodes.take(maxEpisodes) else episodes
+            }
     }
 
     fun fallbackEpisodes(animeTitleQuery: String, episodeCount: Int, maxEpisodes: Int = 24): List<AnimeEpisode> {
@@ -359,6 +361,7 @@ class AninekoScraper(private val client: HttpClient) {
 
     private suspend fun extractProviderStream(providerUrl: String, referer: String): String? = runCatching {
         if (providerUrl.isDirectAnimeMediaUrl()) return@runCatching providerUrl
+        providerUrl.toKnownAninekoDirectStream()?.let { return@runCatching it }
         val html: String = client.get(providerUrl) {
             BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
             header("Referer", referer)
@@ -404,6 +407,7 @@ class AninekoScraper(private val client: HttpClient) {
             .mapNotNull { normalizeProviderUrl(it, baseUrl) }
             .filter { it.startsWith("http", ignoreCase = true) }
             .filterNot { it.isNonPlayableAnimeProviderUrl() }
+            .sortedBy { it.animeProviderPriority() }
             .distinct()
     }
 
@@ -416,6 +420,29 @@ class AninekoScraper(private val client: HttpClient) {
             cleaned.startsWith("http://") || cleaned.startsWith("https://") -> cleaned
             else -> null
         }
+    }
+}
+
+private fun String.toKnownAninekoDirectStream(): String? {
+    val clean = substringBefore("?").substringBefore("#").trim()
+    val host = runCatching { Url(clean).host.lowercase() }.getOrNull().orEmpty()
+    val token = clean.trimEnd('/').substringAfterLast('/').takeIf { it.isNotBlank() } ?: return null
+    return when {
+        "vivibebe.site" in host && "/public/stream/" !in clean ->
+            "https://vivibebe.site/public/stream/$token/master.m3u8"
+        else -> null
+    }
+}
+
+private fun String.animeProviderPriority(): Int {
+    val host = runCatching { Url(this).host.lowercase() }.getOrNull().orEmpty()
+    return when {
+        "vivibebe" in host -> 0
+        "bibiemb" in host || "vibevibe" in host -> 1
+        "otakuhg" in host -> 2
+        "otakuvid" in host -> 3
+        "playmogo" in host -> 4
+        else -> 9
     }
 }
 
@@ -451,28 +478,43 @@ class AnimePaheScraper(private val client: HttpClient) {
                 ?: first["id"]?.jsonPrimitive?.contentOrNull
                 ?: return@runCatching emptyList()
 
-            val releaseResponse: String = client.get(API_URL) {
-                parameter("m", "release")
-                parameter("id", session)
-                parameter("sort", "episode_asc")
-                parameter("page", 1)
-                BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
-            }.body()
-            if (releaseResponse.isBlockedOrErrorPage()) return@runCatching emptyList()
+            val episodes = mutableListOf<AnimeEpisode>()
+            var page = 1
+            var lastPage = 1
+            do {
+                val releaseResponse: String = client.get(API_URL) {
+                    parameter("m", "release")
+                    parameter("id", session)
+                    parameter("sort", "episode_asc")
+                    parameter("page", page)
+                    BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
+                }.body()
+                if (releaseResponse.isBlockedOrErrorPage()) break
 
-            val releaseJson = json.parseToJsonElement(releaseResponse).jsonObject
-            val data = releaseJson["data"]?.jsonArray ?: return@runCatching emptyList()
-            data.mapIndexed { index, item ->
-                val obj = item.jsonObject
-                val episodeNumber = obj["episode"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toInt()
-                    ?: (index + 1)
-                val episodeSession = obj["session"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                AnimeEpisode(
-                    episodeNumber = episodeNumber,
-                    title = "Episode $episodeNumber",
-                    url = "$BASE_URL/play/$session/$episodeSession"
-                )
-            }.reversed()
+                val releaseJson = json.parseToJsonElement(releaseResponse).jsonObject
+                lastPage = releaseJson["last_page"]?.jsonPrimitive?.intOrNull
+                    ?: releaseJson["lastPage"]?.jsonPrimitive?.intOrNull
+                    ?: lastPage
+                val data = releaseJson["data"]?.jsonArray ?: break
+                data.forEachIndexed { index, item ->
+                    val obj = item.jsonObject
+                    val episodeNumber = obj["episode"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toInt()
+                        ?: (episodes.size + index + 1)
+                    val episodeSession = obj["session"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    if (episodeSession.isNotBlank()) {
+                        episodes.add(
+                            AnimeEpisode(
+                                episodeNumber = episodeNumber,
+                                title = "Episode $episodeNumber",
+                                url = "$BASE_URL/play/$session/$episodeSession"
+                            )
+                        )
+                    }
+                }
+                page++
+            } while (page <= lastPage && page <= 20)
+
+            episodes.distinctBy { it.url }.sortedByDescending { it.episodeNumber }
         }.getOrElse { e ->
             println("[AnimePahe] Episode fetch failed: ${e.message}")
             emptyList()

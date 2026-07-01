@@ -299,6 +299,8 @@ class KokoroNarrationController(
                     _isBuffering.value = false
                 }
 
+                if (!currentCoroutineContext().isActive || isPaused) break
+
                 _lastError.value = null
                 if (_settings.value.ambienceEnabled) {
                     playAmbientCue(segment.ambientCue, _settings.value.ambienceVolume)
@@ -847,13 +849,36 @@ private fun String.splitIntoNarrationParts(): List<String> {
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .ifEmpty { listOf(this.trim()) }
-    return sentenceParts.flatMap { sentence ->
-        if (sentence.wordsOnly().size <= 55) {
-            listOf(sentence)
-        } else {
-            sentence.wordsOnly().chunked(45).map { it.joinToString(" ") }
+    val parts = mutableListOf<String>()
+    val current = StringBuilder()
+    var currentWords = 0
+
+    fun flushCurrent() {
+        if (current.isNotEmpty()) {
+            parts.add(current.toString().trim())
+            current.clear()
+            currentWords = 0
         }
     }
+
+    for (sentence in sentenceParts) {
+        val words = sentence.wordsOnly()
+        if (words.size > 110) {
+            flushCurrent()
+            parts.addAll(words.chunked(95).map { it.joinToString(" ") })
+            continue
+        }
+
+        val wouldExceedWords = currentWords > 0 && currentWords + words.size > 95
+        val wouldExceedChars = current.isNotEmpty() && current.length + sentence.length + 1 > 760
+        if (wouldExceedWords || wouldExceedChars) {
+            flushCurrent()
+        }
+        current.append(sentence).append(' ')
+        currentWords += words.size
+    }
+    flushCurrent()
+    return parts
 }
 
 private fun detectTone(text: String): NarrationTone {

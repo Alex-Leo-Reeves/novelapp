@@ -32,26 +32,20 @@ import org.json.JSONObject
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.IO) {
-        runCatching { AndroidKokoroEngine.synthesize(request) }
+        runCatching { AndroidSystemTtsEngine.estimate(request) }
             .getOrElse { error ->
-                println("[Kokoro] Android ONNX unavailable for segment ${request.segmentIndex}: ${error.message}")
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Fallback,
-                    message = "Kokoro is unavailable on this device. Creating smooth chapter audio with Android speech."
+                    phase = KokoroVoiceSetupPhase.Error,
+                    message = "Voice setup failed: ${error.message ?: "unknown error"}"
                 )
-                runCatching { AndroidSystemTtsEngine.synthesizeToFile(request) }
-                    .getOrElse { fallbackError ->
-                        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                            phase = KokoroVoiceSetupPhase.Error,
-                            message = "Voice setup failed: ${fallbackError.message ?: error.message ?: "unknown error"}"
-                        )
-                        throw fallbackError
-                    }
+                throw error
             }
     }
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {
-    if (result.audioBytes.isNotEmpty()) {
+    if (result.engineName == AndroidSystemTtsEngine.ENGINE_NAME) {
+        AndroidSystemTtsEngine.speak(request)
+    } else if (result.audioBytes.isNotEmpty()) {
         platformPlayAudio(result.audioBytes)
     }
 }
@@ -79,6 +73,7 @@ actual fun resumeAmbientCue() = AndroidAmbientPlayer.resume()
 actual fun stopAmbientCue() = AndroidAmbientPlayer.stop()
 
 private object AndroidSystemTtsEngine {
+    const val ENGINE_NAME = "Android instant speech"
     private var initDeferred: CompletableDeferred<TextToSpeech>? = null
     private var tts: TextToSpeech? = null
 
@@ -90,7 +85,7 @@ private object AndroidSystemTtsEngine {
             audioBytes = ByteArray(0),
             durationMs = durationMs,
             sampleRate = 0,
-            engineName = "Android on-device TTS"
+            engineName = ENGINE_NAME
         )
     }
 
