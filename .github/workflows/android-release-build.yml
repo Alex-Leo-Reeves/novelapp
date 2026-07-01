@@ -135,12 +135,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="android-v1.10"
+          TAG="android-v1.11"
           ASSET="novelapp-android.apk"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
-              --title "Android v1.10" \
-              --notes "Android v1.10 with Supabase account sync, Kokoro model download/cache, improved manga caching, and updated media providers."
+              --title "Android v1.11" \
+              --notes "Android v1.11 with Supabase account sync, Kokoro model download/cache, improved manga caching, and updated media providers."
           fi
           gh release upload "$TAG" "${{ steps.apk.outputs.path }}#$ASSET" --clobber
 
@@ -174,5 +174,7 @@ jobs:
             echo "No Android manifest metadata changes to publish."
           else
             git commit -m "Publish Android release metadata [skip ci]"
+            git fetch origin "${{ github.ref_name }}"
+            git rebase "origin/${{ github.ref_name }}"
             git push origin "HEAD:${{ github.ref_name }}"
           fi

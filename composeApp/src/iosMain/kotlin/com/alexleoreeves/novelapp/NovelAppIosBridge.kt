@@ -172,11 +172,15 @@ class NovelAppIosBridge {
         username: String,
         email: String,
         password: String,
+        recoverySecret: String = "",
         completion: (String, String?) -> Unit
     ) {
         scope.launch {
             runCatching {
-                authApi.register(username.trim(), email.trim(), password).also { sessionStore.saveAccount(it) }
+                val cleanEmail = email.trim()
+                val cleanRecoverySecret = recoverySecret.trim()
+                    .ifBlank { "recover-${cleanEmail}-${password.hashCode()}" }
+                authApi.register(username.trim(), cleanEmail, password, cleanRecoverySecret).also { sessionStore.saveAccount(it) }
             }.fold(
                 onSuccess = {
                     completion(
