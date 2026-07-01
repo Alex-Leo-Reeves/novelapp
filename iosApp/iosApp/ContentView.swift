@@ -265,6 +265,16 @@ final class AppModel: ObservableObject {
         ])
     }
 
+    func watchRoutes(for item: ContentItem) async throws -> [WatchRoute] {
+        let payload: WatchRoutesPayload = try await api.post("/content/watch-routes", body: [
+            "kind": item.kind,
+            "title": item.title,
+            "detailUrl": item.detailUrl,
+            "sourceName": item.sourceName
+        ])
+        return payload.routes
+    }
+
     func toggleFavorite(_ item: ContentItem) {
         if let index = favorites.firstIndex(where: { $0.id == item.id }) {
             favorites.remove(at: index)
@@ -666,6 +676,7 @@ private struct DetailView: View {
     @State private var selectedNovelChapter: ReaderPayload?
     @State private var selectedMangaChapter: MangaPayload?
     @State private var selectedRoute: WatchRoute?
+    @State private var routes: [WatchRoute] = []
 
     var body: some View {
         ScrollView {
@@ -695,13 +706,7 @@ private struct DetailView: View {
                 if item.isReadable {
                     chapterSection
                 } else {
-                    Button {
-                        Task { await loadRoute() }
-                    } label: {
-                        Label("Watch now", systemImage: "play.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
+                    providerSection
                 }
                 if let error {
                     Text(error)
@@ -717,6 +722,8 @@ private struct DetailView: View {
         .task {
             if item.isReadable && chapters.isEmpty {
                 await loadChapters()
+            } else if !item.isReadable && routes.isEmpty {
+                await loadRoutes()
             }
         }
         .fullScreenCover(item: $selectedNovelChapter) { payload in
@@ -743,7 +750,7 @@ private struct DetailView: View {
                 if isLoading { ProgressView().tint(AppColors.accent) }
             }
             if chapters.isEmpty && !isLoading {
-                Text("No chapters loaded yet.")
+                Text(item.kind == "manga" ? "No readable image chapters were returned by this source." : "No readable chapters were returned by this source.")
                     .foregroundColor(.secondary)
             }
             ForEach(chapters) { chapter in
@@ -771,6 +778,59 @@ private struct DetailView: View {
         }
     }
 
+    private var providerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Servers")
+                    .font(.headline)
+                Spacer()
+                if isLoading { ProgressView().tint(AppColors.accent) }
+            }
+            if routes.isEmpty && !isLoading {
+                Button {
+                    Task { await loadRoutes() }
+                } label: {
+                    Label("Find servers", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+            }
+            ForEach(routes) { route in
+                if route.route == "unavailable" {
+                    Text(route.message ?? "No playable server was available.")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppColors.panel, in: RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Button {
+                        open(route: route)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: route.route == "direct" ? "play.circle.fill" : "globe")
+                                .foregroundColor(AppColors.accent)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(route.provider)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.white)
+                                Text(route.route == "direct" ? "Direct stream" : "Embedded player")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(12)
+                        .background(AppColors.panel, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private func loadChapters() async {
         isLoading = true
         error = nil
@@ -787,6 +847,9 @@ private struct DetailView: View {
         do {
             if item.kind == "manga" {
                 let pages = try await app.mangaPages(chapter: chapter, item: item)
+                guard !pages.isEmpty else {
+                    throw AppError.message("No readable manga pages were returned by this source. Try another result or chapter.")
+                }
                 app.recordRead(item, chapter: chapter)
                 selectedMangaChapter = MangaPayload(item: item, chapter: chapter, pages: pages)
             } else {
@@ -803,11 +866,30 @@ private struct DetailView: View {
         error = nil
         do {
             let route = try await app.watchRoute(for: item)
-            app.recordWatch(item)
-            selectedRoute = route
+            open(route: route)
         } catch {
             self.error = readable(error)
         }
+    }
+
+    private func loadRoutes() async {
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        do {
+            routes = try await app.watchRoutes(for: item)
+        } catch {
+            self.error = readable(error)
+        }
+    }
+
+    private func open(route: WatchRoute) {
+        guard route.route != "unavailable" else {
+            error = route.message ?? "No playable server was available."
+            return
+        }
+        app.recordWatch(item)
+        selectedRoute = route
     }
 }
 
@@ -2180,6 +2262,7 @@ struct ContentItemsPayload: Codable { let items: [ContentItem] }
 struct ChaptersPayload: Codable { let chapters: [ChapterItem] }
 struct ChapterTextPayload: Codable { let text: String }
 struct MangaPagesPayload: Codable { let pages: [String] }
+struct WatchRoutesPayload: Codable { let routes: [WatchRoute] }
 struct AuthResponse: Codable { let token: String?; let user: UserAccount }
 struct AuthErrorResponse: Codable { let error: String }
 struct APIEnvelope<T: Decodable>: Decodable { let ok: Bool; let data: T?; let error: String? }
