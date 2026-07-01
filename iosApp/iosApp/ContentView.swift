@@ -72,7 +72,10 @@ final class AppModel: ObservableObject {
     @Published var favorites: [ContentItem] = []
     @Published var readHistory: [HistoryItem] = []
     @Published var watchHistory: [HistoryItem] = []
+    @Published var searchHistoryByKind: [ContentKind: [SearchHistoryItem]] = [:]
     @Published var backgroundNarrationEnabled = false
+    @Published var isBillingWorking = false
+    @Published var billingMessage: String?
 
     private let api = APIClient()
     private let auth = AuthService()
@@ -148,6 +151,7 @@ final class AppModel: ObservableObject {
         favorites = []
         readHistory = []
         watchHistory = []
+        searchHistoryByKind = [:]
     }
 
     func select(kind: ContentKind) {
@@ -194,9 +198,25 @@ final class AppModel: ObservableObject {
                 "page": "1"
             ])
             itemsByKind[selectedKind] = payload.items
+            recordSearch(kind: selectedKind, query: clean)
         } catch {
             contentError = readable(error)
         }
+    }
+
+    func recentSearches(for kind: ContentKind) -> [SearchHistoryItem] {
+        Array(searchHistoryByKind[kind, default: []]
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(3))
+    }
+
+    func runRecentSearch(_ item: SearchHistoryItem) async {
+        if selectedKind != item.kind {
+            selectedKind = item.kind
+            contentError = nil
+        }
+        query = item.query
+        await searchActiveKind()
     }
 
     func refreshDifferentSet() async {
@@ -274,6 +294,43 @@ final class AppModel: ObservableObject {
         Task { await syncUserState() }
     }
 
+    func refreshBillingStatus() async {
+        guard let token = auth.savedToken else { return }
+        do {
+            let response: BillingStatusResponse = try await api.get("/billing/status", token: token)
+            account = response.user
+            billingMessage = response.premium ? "Premium is active." : "Premium is not active."
+        } catch {
+            billingMessage = readable(error)
+        }
+    }
+
+    func startPremiumCheckout() async -> URL? {
+        guard let token = auth.savedToken else {
+            billingMessage = "Sign in before starting checkout."
+            return nil
+        }
+        isBillingWorking = true
+        billingMessage = nil
+        defer { isBillingWorking = false }
+        do {
+            let response: BillingCheckoutResponse = try await api.post("/billing/checkout", body: [:], token: token)
+            if response.alreadyPremium == true {
+                await refreshBillingStatus()
+                billingMessage = "Premium is already active."
+                return nil
+            }
+            guard let link = response.link, let url = URL(string: link) else {
+                billingMessage = "Checkout link was not returned."
+                return nil
+            }
+            return url
+        } catch {
+            billingMessage = readable(error)
+            return nil
+        }
+    }
+
     func syncUserStateForView() async {
         await syncUserState()
     }
@@ -285,6 +342,10 @@ final class AppModel: ObservableObject {
             favorites = response.state.favorites.compactMap(ContentItem.init(syncFavorite:))
             readHistory = response.state.readHistory.map(HistoryItem.init(syncRead:))
             watchHistory = response.state.watchHistory.map(HistoryItem.init(syncWatch:))
+            searchHistoryByKind = Dictionary(grouping: response.state.searchHistory, by: \.kind)
+                .mapValues { entries in
+                    Array(entries.sorted { $0.updatedAt > $1.updatedAt }.prefix(3))
+                }
         } catch {
             contentError = readable(error)
         }
@@ -296,9 +357,20 @@ final class AppModel: ObservableObject {
             favorites: favorites.map(SyncFavorite.init(item:)),
             readHistory: readHistory.map(SyncReadHistory.init(item:)),
             watchHistory: watchHistory.map(SyncWatchHistory.init(item:)),
+            searchHistory: searchHistoryByKind.values.flatMap { $0 },
             updatedAt: Int64(Date().timeIntervalSince1970 * 1000)
         )
         try? await api.putRaw("/user/state", token: auth.savedToken, body: ["state": state])
+    }
+
+    private func recordSearch(kind: ContentKind, query: String) {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 2 else { return }
+        var entries = searchHistoryByKind[kind, default: []]
+        entries.removeAll { $0.query.compare(clean, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+        entries.insert(SearchHistoryItem(kind: kind, query: clean, updatedAt: Date()), at: 0)
+        searchHistoryByKind[kind] = Array(entries.prefix(3))
+        Task { await syncUserState() }
     }
 }
 
@@ -540,6 +612,28 @@ private struct DiscoverHeader: View {
             }
             .padding(12)
             .background(AppColors.panel, in: RoundedRectangle(cornerRadius: 10))
+            let recentSearches = app.recentSearches(for: app.selectedKind)
+            if !recentSearches.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(recentSearches) { item in
+                            Button {
+                                Task { await app.runRecentSearch(item) }
+                            } label: {
+                                Label(item.query, systemImage: "clock.arrow.circlepath")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(AppColors.panel.opacity(0.82), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.white)
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(ContentKind.allCases) { kind in
@@ -1136,6 +1230,7 @@ private struct DownloadsView: View {
 private struct YouView: View {
     @EnvironmentObject private var app: AppModel
     @EnvironmentObject private var narration: NarrationController
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -1167,6 +1262,37 @@ private struct YouView: View {
                 Text("Plan: \(account.plan) - Billing: \(account.billingStatus)")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await app.refreshBillingStatus() }
+                    } label: {
+                        Label("Refresh billing", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(CompactButtonStyle())
+
+                    if account.billingStatus != "active" {
+                        Button {
+                            Task {
+                                if let url = await app.startPremiumCheckout() {
+                                    openURL(url)
+                                }
+                            }
+                        } label: {
+                            if app.isBillingWorking {
+                                ProgressView().tint(.black)
+                            } else {
+                                Label("Go premium", systemImage: "creditcard")
+                            }
+                        }
+                        .buttonStyle(CompactButtonStyle())
+                        .disabled(app.isBillingWorking)
+                    }
+                }
+                if let billingMessage = app.billingMessage {
+                    Text(billingMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 Button("Sign out") { Task { await app.signOut() } }
                     .buttonStyle(SecondaryButtonStyle())
             } else {
@@ -1246,15 +1372,18 @@ final class NarrationController: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     func prepareAfterLaunch(force: Bool = false) async {
-        if !force, kokoro.isInstalled { return }
+        if !force, kokoro.isInstalled {
+            statusMessage = "Kokoro model ready; iOS speech playback active"
+            return
+        }
         statusMessage = "Kokoro setup checking"
         do {
             try await kokoro.ensureInstalled(force: force) { [weak self] message in
                 Task { @MainActor in self?.statusMessage = message }
             }
-            statusMessage = "Kokoro installed; Apple TTS fallback active until native ONNX speech session is enabled"
+            statusMessage = "Kokoro model ready; iOS speech playback active"
         } catch {
-            statusMessage = "Kokoro unavailable; Apple TTS fallback ready"
+            statusMessage = "Kokoro model unavailable; iOS speech playback active"
         }
     }
 
@@ -1351,12 +1480,24 @@ final class KokoroInstaller {
     private let fileManager = FileManager.default
 
     var isInstalled: Bool {
-        fileManager.fileExists(atPath: modelFile.path)
+        fileManager.fileExists(atPath: modelFile.path) || bundledModelFile != nil
     }
 
     func ensureInstalled(force: Bool, progress: @escaping (String) -> Void) async throws {
         if isInstalled && !force {
-            progress("Kokoro installed")
+            progress("Kokoro model ready")
+            return
+        }
+        if let bundledModelFile {
+            progress("Preparing bundled Kokoro model")
+            try fileManager.createDirectory(at: kokoroDirectory, withIntermediateDirectories: true, attributes: nil)
+            if force, fileManager.fileExists(atPath: modelFile.path) {
+                try fileManager.removeItem(at: modelFile)
+            }
+            if !fileManager.fileExists(atPath: modelFile.path) {
+                try fileManager.copyItem(at: bundledModelFile, to: modelFile)
+            }
+            progress("Kokoro model ready")
             return
         }
         progress("Downloading Kokoro manifest")
@@ -1384,6 +1525,10 @@ final class KokoroInstaller {
     private var modelFile: URL {
         kokoroDirectory.appendingPathComponent("model_quantized.onnx")
     }
+
+    private var bundledModelFile: URL? {
+        Bundle.main.url(forResource: "model_quantized", withExtension: "onnx", subdirectory: "kokoro")
+    }
 }
 
 // MARK: - API and Auth
@@ -1402,12 +1547,13 @@ final class APIClient {
         return try await perform(request)
     }
 
-    func post<T: Decodable>(_ path: String, body: [String: String]) async throws -> T {
+    func post<T: Decodable>(_ path: String, body: [String: String], token: String? = nil) async throws -> T {
         var request = URLRequest(url: apiBaseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
         request.httpMethod = "POST"
         request.timeoutInterval = 25
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await perform(request)
     }
@@ -1786,6 +1932,72 @@ enum ContentKind: String, CaseIterable, Identifiable {
         case .movies: return "film"
         }
     }
+
+    var syncTabName: String {
+        switch self {
+        case .novels: return "NOVELS"
+        case .manga: return "MANGA"
+        case .anime: return "ANIME"
+        case .kdrama: return "K_DRAMA"
+        case .cartoon: return "CARTOON"
+        case .movies: return "MOVIES"
+        }
+    }
+
+    init(searchTab: String) {
+        switch searchTab.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "NOVELS", "NOVEL": self = .novels
+        case "MANGA": self = .manga
+        case "ANIME": self = .anime
+        case "K_DRAMA", "KDRAMA", "K-DRAMA": self = .kdrama
+        case "CARTOON", "CARTOONS": self = .cartoon
+        case "MOVIES", "MOVIE": self = .movies
+        default: self = .novels
+        }
+    }
+}
+
+struct SearchHistoryItem: Codable, Identifiable, Hashable {
+    var id: String { "\(kind.syncTabName):\(query.lowercased())" }
+    let kind: ContentKind
+    let query: String
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case tab, kind, query, updatedAt, timestamp
+    }
+
+    init(kind: ContentKind, query: String, updatedAt: Date) {
+        self.kind = kind
+        self.query = query
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let tab = (try? container.decode(String.self, forKey: .tab))
+            ?? (try? container.decode(String.self, forKey: .kind))
+            ?? ContentKind.novels.syncTabName
+        kind = ContentKind(searchTab: tab)
+        query = ((try? container.decode(String.self, forKey: .query)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let value = try? container.decode(Int64.self, forKey: .updatedAt) {
+            updatedAt = Date(timeIntervalSince1970: TimeInterval(value) / 1000)
+        } else if let value = try? container.decode(Int64.self, forKey: .timestamp) {
+            updatedAt = Date(timeIntervalSince1970: TimeInterval(value) / 1000)
+        } else if let value = try? container.decode(String.self, forKey: .updatedAt),
+                  let date = ISO8601DateFormatter().date(from: value) {
+            updatedAt = date
+        } else {
+            updatedAt = Date()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind.syncTabName, forKey: .tab)
+        try container.encode(query, forKey: .query)
+        try container.encode(Int64(updatedAt.timeIntervalSince1970 * 1000), forKey: .updatedAt)
+    }
 }
 
 struct ContentItem: Identifiable, Codable, Hashable {
@@ -1813,6 +2025,7 @@ struct ContentItem: Identifiable, Codable, Hashable {
 
     init?(syncFavorite: SyncFavorite) {
         guard !syncFavorite.id.isEmpty else { return nil }
+        let inferredKind = ContentItem.kind(from: syncFavorite)
         self.init(
             id: syncFavorite.id,
             title: syncFavorite.title,
@@ -1820,9 +2033,36 @@ struct ContentItem: Identifiable, Codable, Hashable {
             coverUrl: syncFavorite.coverUrl,
             detailUrl: syncFavorite.detailPageUrl,
             sourceName: syncFavorite.sourceName,
-            kind: "novel",
+            kind: inferredKind,
             synopsis: ""
         )
+    }
+
+    private static func kind(from favorite: SyncFavorite) -> String {
+        let text = [
+            favorite.genre,
+            favorite.sourceName,
+            favorite.detailPageUrl,
+            favorite.id
+        ]
+        .compactMap { $0?.lowercased() }
+        .joined(separator: " ")
+        if text.contains("manga") || text.contains("manhwa") || text.contains("manhua") || text.contains("webtoon") || text.contains("mangadex") {
+            return "manga"
+        }
+        if text.contains("anime") || text.contains("anilist") {
+            return "anime"
+        }
+        if text.contains("k_drama") || text.contains("k-drama") || text.contains("kdrama") || text.contains("dramacool") {
+            return "kdrama"
+        }
+        if text.contains("cartoon") || text.contains("kimcartoon") {
+            return "cartoon"
+        }
+        if text.contains("movie") || text.contains("tmdb://movie") {
+            return "movies"
+        }
+        return "novel"
     }
 }
 
@@ -1897,6 +2137,20 @@ struct AuthResponse: Codable { let token: String?; let user: UserAccount }
 struct AuthErrorResponse: Codable { let error: String }
 struct APIEnvelope<T: Decodable>: Decodable { let ok: Bool; let data: T?; let error: String? }
 struct EmptyResponse: Decodable {}
+struct BillingStatusResponse: Codable {
+    let user: UserAccount
+    let premium: Bool
+    let monthlyFee: Int?
+    let currency: String?
+}
+struct BillingCheckoutResponse: Codable {
+    let link: String?
+    let txRef: String?
+    let amount: Int?
+    let currency: String?
+    let alreadyPremium: Bool?
+    let user: UserAccount?
+}
 
 struct KokoroManifest: Codable {
     let version: String
@@ -1920,16 +2174,18 @@ struct UserSyncState: Codable {
     let favorites: [SyncFavorite]
     let readHistory: [SyncReadHistory]
     let watchHistory: [SyncWatchHistory]
+    let searchHistory: [SearchHistoryItem]
     let updatedAt: Int64
 
     enum CodingKeys: String, CodingKey {
-        case favorites, readHistory, watchHistory, updatedAt
+        case favorites, readHistory, watchHistory, searchHistory, updatedAt
     }
 
-    init(favorites: [SyncFavorite], readHistory: [SyncReadHistory], watchHistory: [SyncWatchHistory], updatedAt: Int64) {
+    init(favorites: [SyncFavorite], readHistory: [SyncReadHistory], watchHistory: [SyncWatchHistory], searchHistory: [SearchHistoryItem], updatedAt: Int64) {
         self.favorites = favorites
         self.readHistory = readHistory
         self.watchHistory = watchHistory
+        self.searchHistory = searchHistory
         self.updatedAt = updatedAt
     }
 
@@ -1938,6 +2194,7 @@ struct UserSyncState: Codable {
         favorites = (try? container.decode([SyncFavorite].self, forKey: .favorites)) ?? []
         readHistory = (try? container.decode([SyncReadHistory].self, forKey: .readHistory)) ?? []
         watchHistory = (try? container.decode([SyncWatchHistory].self, forKey: .watchHistory)) ?? []
+        searchHistory = (try? container.decode([SearchHistoryItem].self, forKey: .searchHistory)) ?? []
         if let value = try? container.decode(Int64.self, forKey: .updatedAt) {
             updatedAt = value
         } else if let value = try? container.decode(String.self, forKey: .updatedAt) {
