@@ -307,6 +307,7 @@ class KokoroNarrationController(
 
     private suspend fun playCachedChapterAudio(cacheKey: String, persistent: Boolean) {
         val cachedPath = existingNarrationAudioCachePath(cacheKey, persistent)
+            ?: prepareChapterAudioFile(cacheKey, persistent)
         if (cachedPath == null) {
             playFromSegment(0)
             return

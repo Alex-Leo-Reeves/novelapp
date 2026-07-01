@@ -199,6 +199,8 @@ jobs:
             echo "No unsigned iOS IPA change to commit."
           else
             git commit -m "Publish unsigned iOS release [skip ci]"
+            git fetch origin "${{ github.ref_name }}"
+            git rebase "origin/${{ github.ref_name }}"
             git push
           fi
 
@@ -274,5 +276,7 @@ jobs:
             echo "No iOS IPA change to commit."
           else
             git commit -m "Publish iOS release [skip ci]"
+            git fetch origin "${{ github.ref_name }}"
+            git rebase "origin/${{ github.ref_name }}"
             git push
           fi

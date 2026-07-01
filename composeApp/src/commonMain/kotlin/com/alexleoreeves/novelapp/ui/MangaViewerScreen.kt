@@ -29,6 +29,7 @@ import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.audio.MangaOcrReader
 import com.alexleoreeves.novelapp.audio.OcrTextPanel
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.MangaReaderSystemUiEffect
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -84,6 +85,8 @@ fun MangaViewerScreen(
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val density = LocalDensity.current
     val readerBackground = if (usePureDarkReader) Color.Black else currentTheme.backgroundColor()
+
+    MangaReaderSystemUiEffect(enabled = true)
 
     LaunchedEffect(Unit) {
         clearTemporaryMangaPageCache()

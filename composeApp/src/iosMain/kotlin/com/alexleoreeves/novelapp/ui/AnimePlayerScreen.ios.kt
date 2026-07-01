@@ -247,9 +247,7 @@ private class PlayerNavigationDelegate(
 private fun String.toPlayerRequest(): NSMutableURLRequest {
     val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidlink.pro")!!
     return NSMutableURLRequest.requestWithURL(url).apply {
-        playerHeaders().forEach { (key, value) ->
-            this.setValue(value, forHTTPHeaderField = key)
-        }
+        allHTTPHeaderFields = playerHeaders()
     }
 }
 
