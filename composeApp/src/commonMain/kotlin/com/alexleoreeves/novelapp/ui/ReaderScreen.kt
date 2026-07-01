@@ -27,6 +27,7 @@ import com.alexleoreeves.novelapp.audio.KokoroNarrationController
 import com.alexleoreeves.novelapp.audio.KokoroVoiceSetupPhase
 import com.alexleoreeves.novelapp.audio.VoiceMode
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import com.alexleoreeves.novelapp.sensor.SleepDetector
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.delay
@@ -78,6 +79,9 @@ fun ReaderScreen(
     val lazyListState = rememberLazyListState()
     var isSeekingNarration by remember { mutableStateOf(false) }
     var seekProgress by remember { mutableStateOf(0f) }
+    var lastUserScrollAt by remember { mutableStateOf(0L) }
+    var lastAutoScrollTarget by remember { mutableStateOf(-1) }
+    val isUserScrolling = lazyListState.isScrollInProgress
     val paragraphs by remember(chapterText, isLoading) {
         derivedStateOf {
             if (isLoading || chapterText.startsWith("Loading")) {
@@ -126,6 +130,16 @@ fun ReaderScreen(
         isLoading = false
     }
 
+    LaunchedEffect(isLoading, chapterText, narrationCacheKey, isDownloadedChapter) {
+        if (!isLoading && chapterText.isNotBlank() && !chapterText.startsWith("Loading")) {
+            ttsController.prepareChapterAudio(
+                text = chapterText,
+                cacheKey = narrationCacheKey,
+                persistAudioCache = isDownloadedChapter
+            )
+        }
+    }
+
     LaunchedEffect(isLoading, initialParagraphIndex, paragraphs.size) {
         if (!isLoading && paragraphs.isNotEmpty() && initialParagraphIndex > 0) {
             lazyListState.scrollToItem((initialParagraphIndex + 1).coerceAtMost(paragraphs.size))
@@ -138,12 +152,20 @@ fun ReaderScreen(
         }
     }
 
-    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, ttsWordIndex.value, paragraphs.size) {
+    LaunchedEffect(isUserScrolling) {
+        if (isUserScrolling) lastUserScrollAt = currentTimeMillis()
+    }
+
+    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, ttsWordIndex.value, paragraphs.size, isUserScrolling) {
         if (!isPlaying.value || !autoScrollEnabled || paragraphs.isEmpty()) return@LaunchedEffect
+        if (isUserScrolling || currentTimeMillis() - lastUserScrollAt < 900L) return@LaunchedEffect
         val paragraphIndex = ttsParagraphIndex.value.takeIf { it >= 0 } ?: return@LaunchedEffect
-        if (ttsWordIndex.value > 0 && ttsWordIndex.value % 8 != 0) return@LaunchedEffect
+        if (ttsWordIndex.value > 0 && ttsWordIndex.value % 16 != 0) return@LaunchedEffect
         val listIndex = (paragraphIndex + 2).coerceIn(0, paragraphs.size + 1)
-        lazyListState.animateScrollToItem(listIndex)
+        if (listIndex != lastAutoScrollTarget && listIndex > lazyListState.firstVisibleItemIndex + 1) {
+            lastAutoScrollTarget = listIndex
+            lazyListState.scrollToItem(listIndex)
+        }
         onProgress(paragraphIndex)
     }
 
@@ -153,7 +175,6 @@ fun ReaderScreen(
     }
 
     // 5-minute inactivity → ambient mode
-    val isUserScrolling = lazyListState.isScrollInProgress
     LaunchedEffect(isPlaying.value, isUserScrolling) {
         if (isPlaying.value && !isUserScrolling) {
             delay(300_000L)

@@ -114,16 +114,19 @@ fun MangaViewerScreen(
             repository.fetchMangaPages(chapterUrl, sourceName)
         }
         preloadTotal = loadedPages.size
-        preloadStatus = if (loadedPages.isEmpty()) {
-            "No manga pages found."
-        } else {
-            "Caching pages for smooth reading..."
-        }
-        pages = loadedPages
-        isLoading = false
         currentPageIndex = initialPageIndex.coerceAtLeast(0)
-        if (loadedPages.isNotEmpty() && sourceName != "local") {
-            scope.launch {
+        pages = when {
+            loadedPages.isEmpty() -> {
+                preloadStatus = "No manga pages found."
+                emptyList()
+            }
+            sourceName == "local" -> {
+                preloadCompleted = loadedPages.size
+                preloadStatus = "Chapter loaded."
+                loadedPages
+            }
+            else -> {
+                preloadStatus = "Caching pages for smooth reading..."
                 runCatching {
                     cacheMangaChapterPages(
                         chapterKey = "$sourceName:$mangaTitle:$chapterTitle:$chapterUrl",
@@ -135,16 +138,19 @@ fun MangaViewerScreen(
                             preloadStatus = "Caching page ${completed.coerceAtMost(total)} of $total..."
                         }
                     )
-                }.onSuccess { cachedPages ->
-                    if (cachedPages.size == pages.size) {
-                        pages = cachedPages
+                }.getOrElse {
+                    preloadStatus = "Using online pages; cache failed."
+                    loadedPages
+                }.also { cachedPages ->
+                    if (cachedPages.isNotEmpty()) {
+                        preloadCompleted = cachedPages.size
+                        preloadTotal = cachedPages.size
                         preloadStatus = "Chapter cached for this session."
                     }
-                }.onFailure {
-                    preloadStatus = "Using online pages; cache failed."
                 }
             }
         }
+        isLoading = false
     }
 
     LaunchedEffect(isLoading, pages.size, initialPageIndex, scrollMode) {

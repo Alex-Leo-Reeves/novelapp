@@ -333,7 +333,6 @@ class AninekoScraper(private val client: HttpClient) {
                 val stream = extractProviderStream(providerUrl, effectiveUrl)
                 if (stream != null) return@runCatching stream
             }
-            providerUrls.firstOrNull()?.let { return@runCatching it }
 
             // Strategy 2: Find the embedded iframe server URL
             val iframeRegex = Regex("""<iframe[^>]+src="([^"]+)"""")
@@ -404,6 +403,7 @@ class AninekoScraper(private val client: HttpClient) {
             .flatMap { pattern -> pattern.findAll(cleaned).map { it.groupValues[1] }.toList() }
             .mapNotNull { normalizeProviderUrl(it, baseUrl) }
             .filter { it.startsWith("http", ignoreCase = true) }
+            .filterNot { it.isNonPlayableAnimeProviderUrl() }
             .distinct()
     }
 
@@ -489,7 +489,6 @@ class AnimePaheScraper(private val client: HttpClient) {
             val mp4Regex = Regex("""https?://[^\s"']+\.mp4[^\s"']*""")
             m3u8Regex.find(html)?.value
                 ?: mp4Regex.find(html)?.value
-                ?: Regex("""https?://kwik\.[^\s"']+""").find(html)?.value
         }.getOrNull()
     }
 }
@@ -543,4 +542,15 @@ private fun String.slugifyAnimeTitle(): String =
 private fun String.isDirectAnimeMediaUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
     return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") || clean.endsWith(".webm")
+}
+
+private fun String.isNonPlayableAnimeProviderUrl(): Boolean {
+    val lower = lowercase()
+    return "youtube.com" in lower ||
+        "youtu.be" in lower ||
+        "trailer" in lower ||
+        "doubleclick" in lower ||
+        "googleadservices" in lower ||
+        "popads" in lower ||
+        "popcash" in lower
 }

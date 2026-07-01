@@ -741,7 +741,7 @@ private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
         "kwik", "dood", "vidsrc", "vidlink", "autoembed", "stream", "embed", "tmdb", "themoviedb",
         "kisskh", "dramacool", "kimcartoon", "fastani", "vidplay", "filemoon",
         "rapidvideo", "voe", "cloudflare", "jwpcdn", "jwplatform", "cdnjs",
-        "bootstrapcdn", "googleapis", "gstatic", "youtube", "ytimg",
+        "bootstrapcdn", "googleapis", "gstatic",
         "font", "ajax.googleapis", "static", "cdn", "player", "media",
         "video", "m3u8", "hls", "mp4", "aniwatch", "zoro", "anime"
     ).any { requestedHost.contains(it) }
