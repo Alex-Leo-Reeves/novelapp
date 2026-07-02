@@ -20,17 +20,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
-import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import com.alexleoreeves.novelapp.ui.theme.*
-import io.ktor.client.request.get
-import io.ktor.client.request.parameter
-import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * AnimeDetailScreen — Shows anime info, episode list, and triggers episode playback.
@@ -85,7 +77,7 @@ fun AnimeDetailScreen(
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
         val provider = serverKeys.getOrElse(selectedServer) { "auto" }
-        episodes = if (provider == "vidlink") {
+        val loadedEpisodes = if (provider == "vidlink") {
             val tmdbMatch = titleQueries.firstNotNullOfOrNull { query ->
                 tmdbScraper.search(query)
                     .filter { it.type == "TVSHOW" }
@@ -117,10 +109,13 @@ fun AnimeDetailScreen(
                 episodeCount = anime.episodeCount
             )
         }
+        episodes = loadedEpisodes
+            .distinctBy { it.url.ifBlank { "${it.episodeNumber}:${it.title}" } }
+            .sortedWith(compareBy<AnimeEpisode> { it.episodeNumber.coerceAtLeast(0) }.thenBy { it.title })
         isLoadingEpisodes = false
     }
 
-    suspend fun resolveVidLinkAnimeEpisode(episode: AnimeEpisode): String? {
+    fun resolveVidLinkAnimeEpisode(episode: AnimeEpisode): String? {
         val parts = episode.url.split(":")
         val tvId = parts.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: vidlinkTmdbId
         val season = parts.getOrNull(2) ?: "1"
@@ -129,29 +124,7 @@ fun AnimeDetailScreen(
             snackMessage = "VidLink Pro could not match this anime to TMDB."
             return null
         }
-        return runCatching {
-            val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/content/stream") {
-                parameter("type", "tv")
-                parameter("id", tvId)
-                parameter("season", season)
-                parameter("episode", ep)
-                parameter("provider", "vidlink")
-            }.bodyAsText()
-            val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(raw).jsonObject
-            val data = root["data"]?.jsonObject
-            val route = data?.get("route")?.jsonPrimitive?.contentOrNull.orEmpty()
-            val stream = data?.get("url")?.jsonPrimitive?.contentOrNull.orEmpty()
-            val message = data?.get("message")?.jsonPrimitive?.contentOrNull
-            if (route == "direct" && stream.isDirectPlayableAnimeStreamUrl()) {
-                stream
-            } else {
-                snackMessage = message ?: "VidLink Pro did not return a direct playable stream for this episode."
-                null
-            }
-        }.getOrElse { error ->
-            snackMessage = "VidLink Pro failed: ${error.message ?: "network error"}"
-            null
-        }
+        return "https://vidlink.pro/tv/$tvId/$season/$ep"
     }
 
     // Show snack messages
@@ -463,10 +436,11 @@ fun AnimeDetailScreen(
                                 if (extractingEpisode != episode.episodeNumber) {
                                     scope.launch {
                                         extractingEpisode = episode.episodeNumber
-                                        val streamUrl = if (serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink") {
+                                        val isVidLink = serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink"
+                                        val streamUrl = if (isVidLink) {
                                             resolveVidLinkAnimeEpisode(episode)
                                         } else {
-                                            repository.extractStreamUrl(episode.url)
+                                            repository.extractStreamUrl(episode.url) ?: episode.url
                                         }
                                         extractingEpisode = null
                                         if (streamUrl != null) {

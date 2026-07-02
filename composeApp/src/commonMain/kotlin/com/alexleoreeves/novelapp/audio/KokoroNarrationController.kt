@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 
 private const val MACRO_WORD_TARGET = 200
 private const val NEXT_MACRO_PRELOAD_AT_WORD = 160
+private const val SMOOTH_AUDIO_SEGMENT_THRESHOLD = 2
 
 class KokoroNarrationController(
     initialSettings: KokoroNarrationSettings = KokoroNarrationSettings()
@@ -116,10 +117,12 @@ class KokoroNarrationController(
         }
 
         playbackJob = controllerScope.launch {
-            if (cacheKey.isNullOrBlank()) {
+            val smoothCacheKey = cacheKey?.takeIf { it.isNotBlank() }
+                ?: if (segments.size >= SMOOTH_AUDIO_SEGMENT_THRESHOLD) "temporary:${text.hashCode()}" else null
+            if (smoothCacheKey == null) {
                 playFromSegment(0)
             } else {
-                playCachedChapterAudio(cacheKey, persistAudioCache)
+                playCachedChapterAudio(smoothCacheKey, persistAudioCache)
             }
         }
         playbackJob?.join()
@@ -271,6 +274,7 @@ class KokoroNarrationController(
         _isPlaying.value = true
         syncBackgroundService()
         try {
+            preloadUpcomingSegments(startIndex)
             for (index in startIndex until segments.size) {
                 if (!currentCoroutineContext().isActive || isPaused) break
                 val segment = segments[index]
@@ -285,6 +289,7 @@ class KokoroNarrationController(
                 if (segment.wordEndInMacro >= NEXT_MACRO_PRELOAD_AT_WORD) {
                     preloadMacro(segment.macroIndex + 1)
                 }
+                preloadUpcomingSegments(index + 1)
 
                 val request = segment.toRequest(_settings.value)
                 val audio = try {
@@ -334,6 +339,7 @@ class KokoroNarrationController(
 
     private suspend fun playCachedChapterAudio(cacheKey: String, persistent: Boolean) {
         val cachedPath = existingNarrationAudioCachePath(cacheKey, persistent)
+            ?: prepareChapterAudioFile(cacheKey, persistent)
         if (cachedPath == null) {
             playFromSegment(0)
             return
@@ -445,7 +451,7 @@ class KokoroNarrationController(
                     )
                 }
                 synthesizeKokoroSpeech(segment.toRequest(_settings.value)).also { result ->
-                    KokoroVoiceSetup.status.value = if (result.audioBytes.isNotEmpty()) {
+                    KokoroVoiceSetup.status.value = if (result.isUsableNarrationResult()) {
                         KokoroVoiceSetupStatus(
                             phase = KokoroVoiceSetupPhase.Ready,
                             message = "Kokoro voice is ready on this device."
@@ -461,10 +467,22 @@ class KokoroNarrationController(
         }
     }
 
+    private fun KokoroSynthesisResult.isUsableNarrationResult(): Boolean =
+        audioBytes.isNotEmpty() || durationMs > 0L || engineName.contains("speech", ignoreCase = true)
+
     private fun preloadMacro(macroIndex: Int) {
         if (macroIndex !in macroStartSegmentIndexes.indices) return
         val start = macroStartSegmentIndexes[macroIndex]
         val endExclusive = macroStartSegmentIndexes.getOrNull(macroIndex + 1) ?: segments.size
+        for (index in start until endExclusive) {
+            if (index !in audioCache) prepareSegment(index)
+        }
+    }
+
+    private fun preloadUpcomingSegments(startIndex: Int, count: Int = 2) {
+        if (segments.isEmpty()) return
+        val start = startIndex.coerceIn(0, segments.lastIndex)
+        val endExclusive = (start + count).coerceAtMost(segments.size)
         for (index in start until endExclusive) {
             if (index !in audioCache) prepareSegment(index)
         }

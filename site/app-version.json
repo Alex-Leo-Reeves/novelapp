@@ -1,24 +1,19 @@
 {
-  "versionCode": 16,
-  "versionName": "1.15",
+  "versionCode": 17,
+  "versionName": "1.16",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "apkBytes": 67299300,
+  "apkBytes": 130349948,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
     "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
-    "Kokoro narration now starts immediately when no cached chapter audio exists and keeps existing cached audio available when present.",
-    "Fixed Kokoro model resume at 100% so HTTP 416 responses verify and install the completed download instead of failing.",
-    "Stopped automatic full-chapter audio creation from blocking the reader; narration now starts immediately if no cached chapter audio exists.",
-    "Android narration now speaks immediately through the device voice path and uses larger chunks to avoid a few-words-then-pause rhythm.",
-    "Paused narration no longer resumes after a pending voice segment finishes preparing.",
-    "Anime episode lists now show only real scraped episodes instead of fake 24-episode fallback pages.",
-    "Anime episodes now hand only direct Anineko provider streams to the in-app ExoPlayer instead of opening provider websites inside the app.",
-    "Added VidLink Pro as an anime server option that resolves TMDB TV episodes through the direct-stream backend before opening the in-app player.",
-    "Movie, K-drama, cartoon, and anime server options now resolve through backend direct-stream providers instead of sending raw embed pages to the player.",
-    "Manga chapters now cache their pages before the reader opens so scrolling does not fight network image loading.",
-    "Anime playback now prioritizes Anineko/AnimePahe direct streams and blocks YouTube/trailer fallbacks from opening as playback.",
-    "K-drama and cartoon source results now prefer source stream extraction instead of broken generic embed providers."
+    "Bundled the Kokoro ONNX model inside the Android app so first-run narration no longer depends on a fragile model download.",
+    "Android narration now uses the real Kokoro ONNX engine instead of the device TTS estimate path.",
+    "Chapter and long-text narration now prepares continuous audio before playback to reduce the talk-and-pause rhythm.",
+    "Anime playback keeps Auto, Anineko, AnimePahe, and VidLink Pro available, with Anineko/provider pages opening inside the app when direct stream extraction fails.",
+    "Anime episode lists are de-duplicated and sorted for a cleaner episode order.",
+    "Movie, cartoon, K-drama, and anime playback can open embed/provider players in-app instead of failing when a direct stream is unavailable.",
+    "DramaCool and KimCartoon source servers now fall back to their source episode pages when direct extraction is unavailable."
   ],
   "forceUpdate": false,
-  "apkSha256": "d17798bae4760dc5e75fe8f3826d42f94c81af12ab27f8c79060e1ff75986a9f"
+  "apkSha256": "57c9b42cae66caa46f3940ab05d1edfb54689c18c8cc61b5cc5b5d79af83d75f"
 }
