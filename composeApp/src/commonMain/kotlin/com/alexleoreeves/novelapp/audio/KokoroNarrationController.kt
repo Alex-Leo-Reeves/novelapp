@@ -117,12 +117,11 @@ class KokoroNarrationController(
         }
 
         playbackJob = controllerScope.launch {
-            val smoothCacheKey = cacheKey?.takeIf { it.isNotBlank() }
-                ?: if (segments.size >= SMOOTH_AUDIO_SEGMENT_THRESHOLD) "temporary:${text.hashCode()}" else null
-            if (smoothCacheKey == null) {
-                playFromSegment(0)
+            val reusableCacheKey = cacheKey?.takeIf { it.isNotBlank() }
+            if (reusableCacheKey != null && existingNarrationAudioCachePath(reusableCacheKey, persistAudioCache) != null) {
+                playCachedChapterAudio(reusableCacheKey, persistAudioCache)
             } else {
-                playCachedChapterAudio(smoothCacheKey, persistAudioCache)
+                playFromSegment(0)
             }
         }
         playbackJob?.join()
@@ -444,7 +443,7 @@ class KokoroNarrationController(
                     KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
                         phase = KokoroVoiceSetupPhase.Synthesizing,
                         message = if (index == 0) {
-                            "Preparing voice. First-time Kokoro setup may download once."
+                            "Preparing voice."
                         } else {
                             "Preparing the next voice segment."
                         }

@@ -63,7 +63,7 @@ fun MediaDetailScreen(
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
-    val embedServerNames = listOf("VidLink", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
+    val embedServerNames = listOf("VidLink Pro", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
     val embedServerKeys = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
     val sourceServerOffset = if (isTmdbDetail) 0 else 1
     val serverNames = if (isTmdbDetail) {
@@ -152,6 +152,9 @@ fun MediaDetailScreen(
             if (tmdbMatch != null) {
                 providerTmdbId = tmdbMatch.id
                 providerTmdbType = if (tmdbMatch.type == "MOVIE") "movie" else "tv"
+                if (episodesList.isEmpty() && providerTmdbType == "tv") {
+                    episodesList = tmdbScraper.fetchTVSeasonsAndEpisodes(providerTmdbId)
+                }
             }
         }
         isLoadingEpisodes = false

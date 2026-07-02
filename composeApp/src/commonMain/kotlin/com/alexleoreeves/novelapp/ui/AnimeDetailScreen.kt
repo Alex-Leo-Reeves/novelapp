@@ -61,6 +61,30 @@ fun AnimeDetailScreen(
     val serverNames = listOf("Auto", "Anineko", "AnimePahe", "VidLink Pro")
     val serverKeys = listOf("auto", "anineko", "animepahe", "vidlink")
 
+    suspend fun loadVidLinkEpisodes(titleQueries: List<String>): List<AnimeEpisode> {
+        val tmdbMatch = titleQueries.firstNotNullOfOrNull { query ->
+            tmdbScraper.search(query)
+                .filter { it.type == "TVSHOW" }
+                .sortedWith(
+                    compareByDescending<MediaResult> { it.title.normalizedAnimeMediaTitle() == query.normalizedAnimeMediaTitle() }
+                        .thenByDescending { it.title.normalizedAnimeMediaTitle().contains(query.normalizedAnimeMediaTitle()) }
+                )
+                .firstOrNull()
+        }
+        vidlinkTmdbId = tmdbMatch?.id.orEmpty()
+        return if (vidlinkTmdbId.isNotBlank()) {
+            tmdbScraper.fetchTVSeasonsAndEpisodes(vidlinkTmdbId).map { episode ->
+                AnimeEpisode(
+                    episodeNumber = episode.episodeNumber,
+                    title = episode.title,
+                    url = episode.url
+                )
+            }
+        } else {
+            emptyList()
+        }
+    }
+
     // Load episodes on mount
     LaunchedEffect(anime.id, selectedServer) {
         isLoadingEpisodes = true
@@ -78,36 +102,19 @@ fun AnimeDetailScreen(
             .distinctBy { it.lowercase() }
         val provider = serverKeys.getOrElse(selectedServer) { "auto" }
         val loadedEpisodes = if (provider == "vidlink") {
-            val tmdbMatch = titleQueries.firstNotNullOfOrNull { query ->
-                tmdbScraper.search(query)
-                    .filter { it.type == "TVSHOW" }
-                    .sortedWith(
-                        compareByDescending<MediaResult> { it.title.normalizedAnimeMediaTitle() == query.normalizedAnimeMediaTitle() }
-                            .thenByDescending { it.title.normalizedAnimeMediaTitle().contains(query.normalizedAnimeMediaTitle()) }
-                    )
-                    .firstOrNull()
-            }
-            vidlinkTmdbId = tmdbMatch?.id.orEmpty()
-            if (vidlinkTmdbId.isNotBlank()) {
-                tmdbScraper.fetchTVSeasonsAndEpisodes(vidlinkTmdbId).map { episode ->
-                    AnimeEpisode(
-                        episodeNumber = episode.episodeNumber,
-                        title = episode.title,
-                        url = episode.url
-                    )
-                }
-            } else {
+            loadVidLinkEpisodes(titleQueries).ifEmpty {
                 snackMessage = "VidLink Pro needs a TMDB TV match for this anime."
                 emptyList()
             }
         } else {
             vidlinkTmdbId = ""
-            repository.fetchEpisodesFromAnimeProvider(
+            val providerEpisodes = repository.fetchEpisodesFromAnimeProvider(
                 provider = provider,
                 animeTitleQuery = titleQueries.firstOrNull() ?: anime.displayTitle,
                 alternateQueries = titleQueries.drop(1),
                 episodeCount = anime.episodeCount
             )
+            providerEpisodes.ifEmpty { loadVidLinkEpisodes(titleQueries) }
         }
         episodes = loadedEpisodes
             .distinctBy { it.url.ifBlank { "${it.episodeNumber}:${it.title}" } }
@@ -437,7 +444,8 @@ fun AnimeDetailScreen(
                                     scope.launch {
                                         extractingEpisode = episode.episodeNumber
                                         val isVidLink = serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink"
-                                        val streamUrl = if (isVidLink) {
+                                        val isTmdbEpisode = episode.url.startsWith("tv:")
+                                        val streamUrl = if (isVidLink || isTmdbEpisode) {
                                             resolveVidLinkAnimeEpisode(episode)
                                         } else {
                                             repository.extractStreamUrl(episode.url) ?: episode.url
@@ -476,7 +484,10 @@ fun AnimeDetailScreen(
                                                     sourceName = anime.sourceName
                                                 )
                                             )
-                                            val streamUrl = if (serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink") {
+                                            val streamUrl = if (
+                                                serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink" ||
+                                                episode.url.startsWith("tv:")
+                                            ) {
                                                 resolveVidLinkAnimeEpisode(episode)
                                             } else {
                                                 repository.extractStreamUrl(episode.url)
