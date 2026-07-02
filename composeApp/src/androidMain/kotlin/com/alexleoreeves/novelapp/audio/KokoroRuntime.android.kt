@@ -25,6 +25,7 @@ import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
@@ -32,15 +33,37 @@ import org.json.JSONObject
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.IO) {
+        if (!AndroidKokoroEngine.isReadyForImmediateUse()) {
+            AndroidKokoroEngine.prepareInBackground()
+            return@withContext androidSpeechFallback(
+                request = request,
+                message = "Kokoro voice is warming up. Playing narration now."
+            )
+        }
         runCatching { AndroidKokoroEngine.synthesize(request) }
             .getOrElse { error ->
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Error,
-                    message = "Kokoro ONNX failed: ${error.message ?: "unknown error"}"
+                    phase = KokoroVoiceSetupPhase.Fallback,
+                    message = "Kokoro ONNX is unavailable right now. Playing narration with Android speech."
                 )
-                throw error
+                AndroidKokoroEngine.prepareInBackground(force = true)
+                androidSpeechFallback(
+                    request = request,
+                    message = "Kokoro ONNX is unavailable right now. Playing narration with Android speech."
+                )
             }
     }
+
+private suspend fun androidSpeechFallback(
+    request: KokoroSynthesisRequest,
+    message: String
+): KokoroSynthesisResult {
+    KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+        phase = KokoroVoiceSetupPhase.Fallback,
+        message = message
+    )
+    return AndroidSystemTtsEngine.estimate(request)
+}
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {
     if (result.engineName == AndroidSystemTtsEngine.ENGINE_NAME) {
@@ -412,7 +435,10 @@ private object AndroidKokoroEngine {
     private const val SAMPLE_RATE = 24_000
     private const val ASSET_ROOT = "kokoro"
     private const val MIN_MODEL_BYTES = 50L * 1024L * 1024L
+    private const val ALLOW_NETWORK_MODEL_DOWNLOAD = false
     private val environment: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
+    private val warmupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val warmupStarted = AtomicBoolean(false)
     private var session: OrtSession? = null
     private val voiceCache = mutableMapOf<String, FloatArray>()
     private val dictionary: Map<String, String> by lazy {
@@ -460,6 +486,32 @@ private object AndroidKokoroEngine {
         }
     }
 
+    fun isReadyForImmediateUse(): Boolean =
+        session != null
+
+    fun prepareInBackground(force: Boolean = false) {
+        if (!force && !warmupStarted.compareAndSet(false, true)) return
+        warmupScope.launch {
+            runCatching {
+                val assetDir = ensureAssets()
+                if (session == null) {
+                    session = createSession(File(assetDir, "model_quantized.onnx"))
+                }
+                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                    phase = KokoroVoiceSetupPhase.Ready,
+                    message = "Kokoro voice is ready on this device."
+                )
+            }.onFailure { error ->
+                warmupStarted.set(false)
+                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                    phase = KokoroVoiceSetupPhase.Fallback,
+                    message = "Kokoro warm-up failed. Android speech will keep narration available."
+                )
+                println("[Kokoro] Android warm-up failed: ${error.message}")
+            }
+        }
+    }
+
     private fun createSession(modelFile: File): OrtSession {
         if (!modelFile.exists() || modelFile.length() == 0L) {
             error("Kokoro model is missing from local device storage.")
@@ -485,11 +537,14 @@ private object AndroidKokoroEngine {
         if (!modelFile.exists() || modelFile.length() < MIN_MODEL_BYTES) {
             copyBundledModel(modelFile)
         }
-        if (!modelFile.exists() || modelFile.length() < MIN_MODEL_BYTES) {
+        if (ALLOW_NETWORK_MODEL_DOWNLOAD && (!modelFile.exists() || modelFile.length() < MIN_MODEL_BYTES)) {
             val manifest = fetchManifest()
             if (!modelFile.exists() || modelFile.length() != manifest.sizeBytes || !modelFile.matchesSha256(manifest.sha256)) {
                 downloadModel(targetDir, manifest, modelFile)
             }
+        }
+        if (!modelFile.exists() || modelFile.length() < MIN_MODEL_BYTES) {
+            error("Bundled Kokoro model is missing or incomplete.")
         }
         val required = listOf(
             "voices/af_heart.bin",

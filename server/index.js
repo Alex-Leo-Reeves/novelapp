@@ -490,8 +490,17 @@ const KNOWN_ANIME = [
 
 const KNOWN_MEDIA = [
   ["toy-story", "Toy Story", "Movie", "TMDB", "movie", "tmdb://movie/862", "A cowboy doll feels threatened when a space ranger toy arrives.", "https://image.tmdb.org/t/p/w500/uXDfjJbdP4ijW5hWSBrPrlKpxab.jpg"],
+  ["inception", "Inception", "Movie", "TMDB", "movie", "tmdb://movie/27205", "A thief enters dreams to plant an idea inside a corporate heir's mind.", "https://image.tmdb.org/t/p/w500/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg"],
+  ["the-matrix", "The Matrix", "Movie", "TMDB", "movie", "tmdb://movie/603", "A hacker discovers the world he knows is a simulated reality.", "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"],
+  ["spider-verse", "Spider-Man: Into the Spider-Verse", "Movie", "TMDB", "movie", "tmdb://movie/324857", "Miles Morales becomes Spider-Man and meets heroes from across the multiverse.", "https://image.tmdb.org/t/p/w500/iiZZdoQBEYBv6id8su7ImL0oCbD.jpg"],
   ["teen-titans", "Teen Titans", "Cartoon", "TMDB", "cartoon", "tmdb://tv/604", "Young heroes protect Jump City while growing as a team.", "https://image.tmdb.org/t/p/w500/8JfwXjP3iLjyfDfF0ECmS2rN0aA.jpg"],
-  ["crash-landing-on-you", "Crash Landing on You", "K-Drama", "TMDB", "kdrama", "tmdb://tv/94796", "A South Korean heiress crash lands in North Korea and meets an officer.", "https://image.tmdb.org/t/p/w500/2u8I9AzgbLGGqE4JdW6uJQO0t5C.jpg"]
+  ["avatar-last-airbender", "Avatar: The Last Airbender", "Cartoon", "TMDB", "cartoon", "tmdb://tv/246", "A young Avatar must master the elements and stop a war.", "https://image.tmdb.org/t/p/w500/cHFZA8Tlv03nKTGXhLOYOLtqoSm.jpg"],
+  ["adventure-time", "Adventure Time", "Cartoon", "TMDB", "cartoon", "tmdb://tv/15260", "Finn and Jake explore a strange magical land full of danger and jokes.", "https://image.tmdb.org/t/p/w500/qk3eQ8jW4opJ48gFWYUXWaMT4l.jpg"],
+  ["spongebob-squarepants", "SpongeBob SquarePants", "Cartoon", "TMDB", "cartoon", "tmdb://tv/387", "SpongeBob works, plays, and creates chaos under the sea.", "https://image.tmdb.org/t/p/w500/8v5zQ9FJ6V4t4TYNDfLSk7R4hzG.jpg"],
+  ["crash-landing-on-you", "Crash Landing on You", "K-Drama", "TMDB", "kdrama", "tmdb://tv/94796", "A South Korean heiress crash lands in North Korea and meets an officer.", "https://image.tmdb.org/t/p/w500/2u8I9AzgbLGGqE4JdW6uJQO0t5C.jpg"],
+  ["squid-game", "Squid Game", "K-Drama", "TMDB", "kdrama", "tmdb://tv/93405", "Desperate players enter deadly games for a life-changing prize.", "https://image.tmdb.org/t/p/w500/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg"],
+  ["true-beauty", "True Beauty", "K-Drama", "TMDB", "kdrama", "tmdb://tv/112888", "A high school student hides her insecurities behind makeup and finds connection.", "https://image.tmdb.org/t/p/w500/sld43SJArZqlnANJGBkZyQpXHHH.jpg"],
+  ["queen-of-tears", "Queen of Tears", "K-Drama", "TMDB", "kdrama", "tmdb://tv/215720", "A married couple faces crisis, love, and family pressure at the top of a business empire.", "https://image.tmdb.org/t/p/w500/1uEwVlg4L7QjOglfaXr0iM2ZJ48.jpg"]
 ];
 
 function fixtureItems(type, query = "") {
@@ -863,7 +872,7 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
   const movie = mediaType === "movie";
   return [
     {
-      provider: "VidLink",
+      provider: "VidLink Pro",
       url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
     },
     {
@@ -875,6 +884,18 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
       url: movie
         ? `https://vidsrc.me/embed/movie?tmdb=${id}`
         : `https://vidsrc.me/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+    },
+    {
+      provider: "EmbedSu",
+      url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
+    },
+    {
+      provider: "VidSrc.cc",
+      url: movie ? `https://vidsrc.cc/v2/embed/movie/${id}` : `https://vidsrc.cc/v2/embed/tv/${id}/${season}/${episode}`
+    },
+    {
+      provider: "2Embed",
+      url: movie ? `https://2embed.cc/embed/${id}` : `https://2embed.cc/embedtv/${id}&s=${season}&e=${episode}`
     }
   ];
 }

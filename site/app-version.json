@@ -1,19 +1,22 @@
 {
-  "versionCode": 17,
-  "versionName": "1.16",
+  "versionCode": 18,
+  "versionName": "1.17",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "apkBytes": 130349948,
+  "apkBytes": 162751768,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
     "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
     "Bundled the Kokoro ONNX model inside the Android app so first-run narration no longer depends on a fragile model download.",
-    "Android narration now uses the real Kokoro ONNX engine instead of the device TTS estimate path.",
-    "Chapter and long-text narration now prepares continuous audio before playback to reduce the talk-and-pause rhythm.",
+    "Kokoro warms the bundled ONNX model in the background and starts narration immediately instead of blocking on first-time setup.",
+    "Chapter and long-text narration no longer waits for a full chapter audio file before the first words play.",
     "Anime playback keeps Auto, Anineko, AnimePahe, and VidLink Pro available, with Anineko/provider pages opening inside the app when direct stream extraction fails.",
     "Anime episode lists are de-duplicated and sorted for a cleaner episode order.",
     "Movie, cartoon, K-drama, and anime playback can open embed/provider players in-app instead of failing when a direct stream is unavailable.",
-    "DramaCool and KimCartoon source servers now fall back to their source episode pages when direct extraction is unavailable."
+    "DramaCool and KimCartoon source servers now fall back to their source episode pages when direct extraction is unavailable.",
+    "Android builds now accept GROQ_CLOUD_API_KEY as a Groq key name so narration cleanup does not fall back to the mock key after the env rename.",
+    "Movie, K-drama, cartoon, and anime feeds now fall back through the Render content API when direct app-side provider calls return empty.",
+    "Anime episode screens fall back to TMDB/VidLink Pro episode metadata when Anineko or AnimePahe cannot fetch an episode list."
   ],
   "forceUpdate": false,
-  "apkSha256": "f5735437ff57b3261f90d4f237bb9f7382796deb41794a6b73515e0412d52c5a"
+  "apkSha256": "21dd74f66ca3a4913f1781901df874488c2d79817235efbd6ff633f5a55db06c"
 }

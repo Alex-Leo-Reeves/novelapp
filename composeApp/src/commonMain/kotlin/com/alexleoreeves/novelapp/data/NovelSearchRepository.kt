@@ -5,12 +5,16 @@ import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.bodyAsText
 import io.ktor.serialization.kotlinx.json.*
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
+
+private val backendContentJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 /**
  * Aggregates search results from all registered sources in parallel.
@@ -283,24 +287,36 @@ class NovelSearchRepository(
 
     /** Fetch currently airing anime for the Anime tab home feed */
     suspend fun fetchCurrentlyAiring(page: Int = 1): List<AnimeResult> {
-        val aniList = aniListSource.fetchCurrentlyAiring(page = page, perPage = 24)
-        return aniList.ifEmpty { tmdbSource.fetchAnimeFallback(page) }
+        val aniList = runCatching { aniListSource.fetchCurrentlyAiring(page = page, perPage = 24) }
+            .getOrElse { emptyList() }
+        return aniList
+            .ifEmpty { tmdbSource.fetchAnimeFallback(page) }
+            .ifEmpty { backendAnime(page) }
     }
 
     /** Fetch trending anime */
     suspend fun fetchTrendingAnime(page: Int = 1): List<AnimeResult> {
-        val aniList = aniListSource.fetchTrending(page = page, perPage = 24)
-        return aniList.ifEmpty { tmdbSource.fetchAnimeFallback(page) }
+        val aniList = runCatching { aniListSource.fetchTrending(page = page, perPage = 24) }
+            .getOrElse { emptyList() }
+        return aniList
+            .ifEmpty { tmdbSource.fetchAnimeFallback(page) }
+            .ifEmpty { backendAnime(page) }
     }
 
     /** Search anime only */
     suspend fun searchAnime(query: String): List<AnimeResult> {
-        val aniList = aniListSource.search(query)
-        return aniList.ifEmpty { tmdbSource.searchAnimeFallback(query) }
+        val aniList = runCatching { aniListSource.search(query) }
+            .getOrElse { emptyList() }
+        return aniList
+            .ifEmpty { tmdbSource.searchAnimeFallback(query) }
+            .ifEmpty { backendAnimeSearch(query) }
     }
 
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
-        tmdbSource.fetchVideo(category, page)
+        cachedFeed("video:${category.name}:$page") {
+            tmdbSource.fetchVideo(category, page)
+                .ifEmpty { backendVideo(category, page = page) }
+        }
 
     suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
         val tmdb = async { tmdbSource.searchVideo(category, query, page) }
@@ -311,8 +327,47 @@ class NovelSearchRepository(
                 VideoCategory.MOVIES -> emptyList()
             }
         }
-        (source.await() + tmdb.await())
+        val combined = (source.await() + tmdb.await())
             .distinctBy { it.detailPageUrl.ifBlank { it.id } }
+        combined.ifEmpty { backendVideo(category, query, page) }
+    }
+
+    private suspend fun backendAnime(page: Int = 1): List<AnimeResult> =
+        backendContentItems("anime", page = page).mapNotNull { it.toBackendAnimeResult() }
+
+    private suspend fun backendAnimeSearch(query: String, page: Int = 1): List<AnimeResult> =
+        backendContentItems("anime", query = query, page = page).mapNotNull { it.toBackendAnimeResult() }
+
+    private suspend fun backendVideo(
+        category: VideoCategory,
+        query: String = "",
+        page: Int = 1
+    ): List<UnifiedSearchResult> =
+        backendContentItems(category.backendContentType(), query, page).mapNotNull { it.toBackendUnifiedVideo(category) }
+
+    private suspend fun backendContentItems(
+        type: String,
+        query: String = "",
+        page: Int = 1
+    ): List<JsonObject> = runCatching {
+        val endpoint = if (query.isBlank()) "home" else "search"
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/content/$endpoint") {
+            parameter("type", type)
+            parameter("page", page)
+            if (query.isNotBlank()) parameter("q", query)
+        }.bodyAsText()
+        val root = backendContentJson
+            .parseToJsonElement(raw)
+            .jsonObject
+        root["data"]
+            ?.jsonObject
+            ?.get("items")
+            ?.jsonArray
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+    }.getOrElse { error ->
+        println("[Content API] $type feed failed: ${error.message}")
+        emptyList()
     }
 
     private suspend fun cachedFeed(
@@ -366,6 +421,14 @@ class NovelSearchRepository(
             if (animePaheEpisodes.isNotEmpty()) return animePaheEpisodes
         }
 
+        if (episodeCount > 0) {
+            return aninekoScraper.fallbackEpisodes(
+                animeTitleQuery = animeTitleQuery,
+                episodeCount = episodeCount,
+                maxEpisodes = maxEpisodes.coerceAtMost(episodeCount).coerceAtLeast(1)
+            )
+        }
+
         return emptyList()
     }
 
@@ -401,7 +464,15 @@ class NovelSearchRepository(
                         .distinctBy { it.url }
                         .sortedByDescending { it.episodeNumber }
                         .takeIf { it.isNotEmpty() }
-                }.orEmpty()
+                } ?: if (episodeCount > 0) {
+                    aninekoScraper.fallbackEpisodes(
+                        animeTitleQuery = animeTitleQuery,
+                        episodeCount = episodeCount,
+                        maxEpisodes = maxEpisodes.coerceAtMost(episodeCount).coerceAtLeast(1)
+                    )
+                } else {
+                    emptyList()
+                }
             }
             "animepahe" -> queries.firstNotNullOfOrNull { query ->
                 animePaheScraper.fetchEpisodes(query)
@@ -730,6 +801,50 @@ private fun MediaResult.toUnifiedVideo(category: VideoCategory, sourceLabel: Str
         mediaKind = category.name,
         url = id
     )
+
+private fun VideoCategory.backendContentType(): String = when (this) {
+    VideoCategory.K_DRAMA -> "kdrama"
+    VideoCategory.CARTOON -> "cartoon"
+    VideoCategory.MOVIES -> "movies"
+}
+
+private fun JsonObject.contentString(name: String): String =
+    this[name]?.jsonPrimitive?.contentOrNull.orEmpty()
+
+private fun JsonObject.toBackendUnifiedVideo(category: VideoCategory): UnifiedSearchResult? {
+    val title = contentString("title").ifBlank { return null }
+    val detailUrl = contentString("detailUrl")
+    val kind = contentString("kind")
+    val rawId = contentString("id").ifBlank { "$kind:$title" }
+    return UnifiedSearchResult(
+        id = "backend_${category.name}_${rawId}".normalizeForNovelSearch().replace(" ", "_"),
+        title = title,
+        coverUrl = contentString("coverUrl"),
+        detailPageUrl = detailUrl,
+        sourceName = contentString("sourceName").ifBlank { "NovelApp" },
+        genre = contentString("subtitle").ifBlank { category.label },
+        synopsis = contentString("synopsis"),
+        isVideo = true,
+        mediaKind = category.name,
+        url = detailUrl
+    )
+}
+
+private fun JsonObject.toBackendAnimeResult(): AnimeResult? {
+    val title = contentString("title").ifBlank { return null }
+    return AnimeResult(
+        id = contentString("id").ifBlank { "backend_anime_${title.normalizeForNovelSearch()}" },
+        titleRomaji = title,
+        titleEnglish = title,
+        coverUrl = contentString("coverUrl"),
+        synopsis = contentString("synopsis"),
+        genres = contentString("subtitle")
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() },
+        sourceName = contentString("sourceName").ifBlank { "NovelApp" }
+    )
+}
 
 private fun KnownNovelEntry.toResult(): UnifiedSearchResult =
     UnifiedSearchResult(
