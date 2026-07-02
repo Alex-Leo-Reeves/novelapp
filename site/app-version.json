@@ -18,5 +18,5 @@
     "Anime episode screens fall back to TMDB/VidLink Pro episode metadata when Anineko or AnimePahe cannot fetch an episode list."
   ],
   "forceUpdate": false,
-  "apkSha256": "21dd74f66ca3a4913f1781901df874488c2d79817235efbd6ff633f5a55db06c"
+  "apkSha256": "ebc721e30c15e18a556d937d2dce15e893d7bcb6fef3e49c7c72be78ca0953d5"
 }
