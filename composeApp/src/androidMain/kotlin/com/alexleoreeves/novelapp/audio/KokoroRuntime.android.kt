@@ -32,11 +32,11 @@ import org.json.JSONObject
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.IO) {
-        runCatching { AndroidSystemTtsEngine.estimate(request) }
+        runCatching { AndroidKokoroEngine.synthesize(request) }
             .getOrElse { error ->
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
                     phase = KokoroVoiceSetupPhase.Error,
-                    message = "Voice setup failed: ${error.message ?: "unknown error"}"
+                    message = "Kokoro ONNX failed: ${error.message ?: "unknown error"}"
                 )
                 throw error
             }
@@ -411,6 +411,7 @@ private fun pcm16ToWav(pcmBytes: ByteArray, sampleRate: Int): ByteArray {
 private object AndroidKokoroEngine {
     private const val SAMPLE_RATE = 24_000
     private const val ASSET_ROOT = "kokoro"
+    private const val MIN_MODEL_BYTES = 50L * 1024L * 1024L
     private val environment: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
     private var session: OrtSession? = null
     private val voiceCache = mutableMapOf<String, FloatArray>()
@@ -481,9 +482,14 @@ private object AndroidKokoroEngine {
             phase = KokoroVoiceSetupPhase.Checking,
             message = "Checking Kokoro voice model on this device."
         )
-        val manifest = fetchManifest()
-        if (!modelFile.exists() || modelFile.length() != manifest.sizeBytes || !modelFile.matchesSha256(manifest.sha256)) {
-            downloadModel(targetDir, manifest, modelFile)
+        if (!modelFile.exists() || modelFile.length() < MIN_MODEL_BYTES) {
+            copyBundledModel(modelFile)
+        }
+        if (!modelFile.exists() || modelFile.length() < MIN_MODEL_BYTES) {
+            val manifest = fetchManifest()
+            if (!modelFile.exists() || modelFile.length() != manifest.sizeBytes || !modelFile.matchesSha256(manifest.sha256)) {
+                downloadModel(targetDir, manifest, modelFile)
+            }
         }
         val required = listOf(
             "voices/af_heart.bin",
@@ -509,6 +515,32 @@ private object AndroidKokoroEngine {
             message = "Kokoro voice is ready on this device."
         )
         return targetDir
+    }
+
+    private fun copyBundledModel(modelFile: File) {
+        val context = AppContextHolder.applicationContext
+            ?: error("Android app context is unavailable for Kokoro assets.")
+        runCatching {
+            KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                phase = KokoroVoiceSetupPhase.Installing,
+                message = "Installing bundled Kokoro voice model."
+            )
+            modelFile.parentFile?.mkdirs()
+            val tmpFile = File(modelFile.parentFile, "${modelFile.name}.asset")
+            if (tmpFile.exists()) tmpFile.delete()
+            context.assets.open("$ASSET_ROOT/model_quantized.onnx").use { input ->
+                tmpFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (tmpFile.length() < MIN_MODEL_BYTES) {
+                tmpFile.delete()
+                error("bundled Kokoro model is incomplete")
+            }
+            if (modelFile.exists()) modelFile.delete()
+            if (!tmpFile.renameTo(modelFile)) {
+                tmpFile.delete()
+                error("bundled Kokoro model could not be installed")
+            }
+        }
     }
 
     private fun fetchManifest(): KokoroModelManifest {

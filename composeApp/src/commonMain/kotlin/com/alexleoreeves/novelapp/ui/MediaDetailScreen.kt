@@ -24,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
-import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import com.alexleoreeves.novelapp.ui.theme.cardColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
@@ -32,14 +31,7 @@ import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
 import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.platform.platformHttpClient
-import io.ktor.client.request.get
-import io.ktor.client.request.parameter
-import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlin.math.ceil
 
 @Composable
@@ -71,13 +63,13 @@ fun MediaDetailScreen(
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
-    val directServerNames = listOf("VidLink Direct", "CinePro", "OMSS")
-    val directServerKeys = listOf("vidlink", "cinepro", "omss")
+    val embedServerNames = listOf("VidLink", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
+    val embedServerKeys = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
     val sourceServerOffset = if (isTmdbDetail) 0 else 1
     val serverNames = if (isTmdbDetail) {
-        directServerNames
+        embedServerNames
     } else {
-        listOf("Source stream") + directServerNames
+        listOf("Source stream") + embedServerNames
     }
     val freeMoviePreviewMs = 20 * 60 * 1000L
     val freeEpisodeCount = remember(episodesList, isPremium) {
@@ -85,37 +77,39 @@ fun MediaDetailScreen(
         else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
     }
 
-    suspend fun resolveProviderStream(
+    fun resolveProviderStream(
         type: String,
         id: String,
         season: String = "1",
         episode: String = "1",
         server: Int
     ): String? {
-        val provider = directServerKeys.getOrElse(server.coerceAtLeast(0)) { directServerKeys.first() }
-        return runCatching {
-            val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/content/stream") {
-                parameter("type", type)
-                parameter("id", id)
-                parameter("season", season)
-                parameter("episode", episode)
-                parameter("provider", provider)
-            }.bodyAsText()
-            val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(raw).jsonObject
-            val data = root["data"]?.jsonObject
-            val route = data?.get("route")?.jsonPrimitive?.contentOrNull.orEmpty()
-            val stream = data?.get("url")?.jsonPrimitive?.contentOrNull.orEmpty()
-            val message = data?.get("message")?.jsonPrimitive?.contentOrNull
-            if (route == "direct" && stream.isDirectPlayableStreamUrl()) {
-                statusText = ""
-                stream
-            } else {
-                statusText = message ?: "${serverNames.getOrNull(selectedServer) ?: "Selected server"} did not return a direct playable stream."
-                null
+        val provider = embedServerKeys.getOrElse(server.coerceAtLeast(0)) { embedServerKeys.first() }
+        if (id.isBlank()) {
+            statusText = "Provider match unavailable for this title."
+            return null
+        }
+        statusText = ""
+        return if (type == "movie") {
+            when (provider) {
+                "vidlink" -> "https://vidlink.pro/movie/$id"
+                "autoembed" -> "https://player.autoembed.cc/movie/$id"
+                "vidsrcme" -> "https://vidsrc.me/embed/movie?tmdb=$id"
+                "embedsu" -> "https://embed.su/embed/movie/$id"
+                "vidsrccc" -> "https://vidsrc.cc/v2/embed/movie/$id"
+                "twoembed" -> "https://2embed.cc/embed/$id"
+                else -> "https://vidlink.pro/movie/$id"
             }
-        }.getOrElse { error ->
-            statusText = "Could not resolve ${serverNames.getOrNull(selectedServer) ?: "selected server"}: ${error.message ?: "network error"}"
-            null
+        } else {
+            when (provider) {
+                "vidlink" -> "https://vidlink.pro/tv/$id/$season/$episode"
+                "autoembed" -> "https://player.autoembed.cc/tv/$id/$season/$episode"
+                "vidsrcme" -> "https://vidsrc.me/embed/tv?tmdb=$id&season=$season&episode=$episode"
+                "embedsu" -> "https://embed.su/embed/tv/$id/$season/$episode"
+                "vidsrccc" -> "https://vidsrc.cc/v2/embed/tv/$id/$season/$episode"
+                "twoembed" -> "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
+                else -> "https://vidlink.pro/tv/$id/$season/$episode"
+            }
         }
     }
 
@@ -178,11 +172,7 @@ fun MediaDetailScreen(
                     when {
                         selectedServer == 0 -> {
                             val extracted = dramaScraper.extractStreamUrl(ep.url)
-                            if (extracted == null) {
-                                statusText = "Could not extract a playable stream from the source."
-                                return@launch
-                            }
-                            extracted
+                            extracted ?: ep.url
                         }
                         providerTmdbId.isNotBlank() -> {
                             val providerIndex = selectedServer - sourceServerOffset
@@ -202,11 +192,7 @@ fun MediaDetailScreen(
                     when {
                         selectedServer == 0 -> {
                             val extracted = cartoonScraper.extractStreamUrl(ep.url)
-                            if (extracted == null) {
-                                statusText = "Could not extract a playable stream from the source."
-                                return@launch
-                            }
-                            extracted
+                            extracted ?: ep.url
                         }
                         providerTmdbId.isNotBlank() -> {
                             val providerIndex = selectedServer - sourceServerOffset

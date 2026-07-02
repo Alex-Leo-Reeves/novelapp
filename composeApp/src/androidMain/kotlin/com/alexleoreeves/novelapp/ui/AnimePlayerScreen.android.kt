@@ -4,6 +4,11 @@ import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -87,12 +92,10 @@ actual fun AnimePlayerScreen(
 
     val isDirectMedia = streamUrl.isDirectPlayableMediaUrl()
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
-    var playerError by remember(streamUrl, retryKey) {
-        mutableStateOf<String?>(
-            if (isDirectMedia) null else "This episode did not resolve to a direct playable stream."
-        )
-    }
+    var playerError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var isPlayerBuffering by remember(streamUrl, retryKey) { mutableStateOf(isDirectMedia) }
+    var isWebLoading by remember(streamUrl, retryKey) { mutableStateOf(!isDirectMedia) }
+    var webError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
 
     // ── ExoPlayer setup ───────────────────────────────────────────────────
     val exoPlayer = remember(streamUrl, retryKey) {
@@ -216,14 +219,61 @@ actual fun AnimePlayerScreen(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.mediaPlaybackRequiresUserGesture = false
+                        settings.userAgentString = PLAYER_USER_AGENT
+                        webChromeClient = WebChromeClient()
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                isWebLoading = true
+                                webError = null
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                isWebLoading = false
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                                error: WebResourceError?
+                            ) {
+                                if (request?.isForMainFrame != false) {
+                                    isWebLoading = false
+                                    webError = error?.description?.toString() ?: "Embedded player failed to load."
+                                }
+                            }
+                        }
+                        loadUrl(streamUrl, streamUrl.playerHeaders())
+                    }
+                },
+                update = { view ->
+                    if (view.url != streamUrl) {
+                        isWebLoading = true
+                        webError = null
+                        view.loadUrl(streamUrl, streamUrl.playerHeaders())
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
             PlayerLoadingOverlay(
-                visible = true,
+                visible = isWebLoading || webError != null,
                 title = episodeTitle,
                 providerName = streamUrl.providerName(),
-                message = playerError ?: "This episode is not a direct stream.",
-                isError = true,
+                message = webError ?: "Opening embedded player...",
+                isError = webError != null,
                 onRetry = {
-                    playerError = "This episode still did not resolve to a direct playable stream."
+                    isWebLoading = true
+                    webError = null
                     retryKey++
                 },
                 onBack = onBack
