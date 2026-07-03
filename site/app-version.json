@@ -15,5 +15,5 @@
     "New Android installs keep session data out of device restore so Mike’s premium account cannot auto-appear on another phone."
   ],
   "forceUpdate": false,
-  "apkSha256": "74eafdf4136bd496b8f3b10889c52456dc721dde58bcf28a54c139d00ffccda2"
+  "apkSha256": "6e989aa5fb4c47263224d53443ff817adc1b57cab5a3110c2a6c381428f658b9"
 }
