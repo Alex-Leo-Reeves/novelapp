@@ -4,6 +4,12 @@ const http = require("http");
 const path = require("path");
 const { URL } = require("url");
 const swiftNovelScrapers = require("./swift-novel-scrapers");
+let consumetExtensions = null;
+try {
+  consumetExtensions = require("@consumet/extensions");
+} catch (error) {
+  console.warn("[content] Consumet extensions unavailable:", error.message || error);
+}
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/data" : path.join(process.cwd(), "server-data"));
@@ -12,6 +18,7 @@ const SITE_DIR = path.join(process.cwd(), "site");
 const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || "");
 const VIDLINK_RESOLVER_BASE_URL = cleanBaseUrl(process.env.VIDLINK_RESOLVER_BASE_URL || process.env.VIDLINK_API_BASE_URL || "");
 const CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.env.CINEHUB_BASE_URL || process.env.CINEPRO_API_BASE_URL || "");
+const CONSUMET_BASE_URL = cleanBaseUrl(process.env.CONSUMET_BASE_URL || process.env.CONSUMET_API_BASE_URL || "");
 const SUPABASE_URL = cleanBaseUrl(process.env.SUPABASE_URL || process.env.supabase_url || process.env.project_url || "");
 const SUPABASE_SECRET_KEY = String(process.env.SUPABASE_SECRET_KEY || process.env.supabase_secret_key || process.env.service_role_key || "").trim();
 const FLUTTERWAVE_SECRET_KEY = String(process.env.FLUTTERWAVE_SECRET_KEY || process.env.flutterwave_secret_key || "").trim();
@@ -21,13 +28,43 @@ const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = "sha256";
-const PREMIUM_MONTHLY_NAIRA = 1000;
+const DEFAULT_PREMIUM_PLAN_ID = "premium_3_devices";
 const PREMIUM_SEED_EMAIL = "mike@mike.com";
 const PREMIUM_SEED_USERNAME = "mike";
 const PREMIUM_SEED_PASSWORD = "123456";
 const MOVIE_FREE_PREVIEW_MS = 20 * 60 * 1000;
 const EPISODIC_FREE_FRACTION = 0.2;
 let legacySupabaseMigrationDone = false;
+
+const BILLING_PLANS = {
+  free: {
+    id: "free",
+    label: "Free",
+    amount: 0,
+    currency: "NGN",
+    maxDevices: 2,
+    premium: false,
+    description: "Free preview access and up to 2 signed-in devices."
+  },
+  premium_3_devices: {
+    id: "premium_3_devices",
+    label: "Premium 3 devices",
+    amount: 1000,
+    currency: "NGN",
+    maxDevices: 3,
+    premium: true,
+    description: "Full movies, cartoons, K-drama, and up to 3 signed-in devices."
+  },
+  premium_unlimited: {
+    id: "premium_unlimited",
+    label: "Premium unlimited",
+    amount: 4000,
+    currency: "NGN",
+    maxDevices: null,
+    premium: true,
+    description: "Full access and unlimited signed-in devices."
+  }
+};
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -40,6 +77,67 @@ const MIME_TYPES = {
   ".ipa": "application/octet-stream",
   ".msi": "application/octet-stream",
   ".txt": "text/plain; charset=utf-8"
+};
+
+const CONSUMET_ANIME_PROVIDERS = {
+  hianime: {
+    label: "HiAnime",
+    path: "hianime",
+    className: "Hianime",
+    servers: ["VidCloud", "MegaCloud", "VidStreaming", "StreamSB", "StreamTape", "UpCloud"]
+  },
+  animekai: {
+    label: "AnimeKai",
+    path: "animekai",
+    className: "AnimeKai",
+    servers: ["MegaCloud", "VidCloud", "VidStreaming", "StreamSB", "StreamTape", "UpCloud"]
+  },
+  kickassanime: {
+    label: "KickAssAnime",
+    path: "kickassanime",
+    className: "KickAssAnime",
+    servers: ["BirdStream", "DuckStream", "VidStreaming"]
+  },
+  animesaturn: {
+    label: "AnimeSaturn",
+    path: "animesaturn",
+    className: "AnimeSaturn",
+    servers: []
+  },
+  animeunity: {
+    label: "AnimeUnity",
+    path: "animeunity",
+    className: "AnimeUnity",
+    servers: []
+  },
+  animesama: {
+    label: "AnimeSama",
+    path: "animesama",
+    className: "AnimeSama",
+    servers: []
+  },
+  consumetpahe: {
+    label: "Consumet Pahe",
+    path: "animepahe",
+    className: "AnimePahe",
+    servers: []
+  }
+};
+
+const CONSUMET_ANIME_ALIASES = {
+  zoro: "hianime",
+  "zoro/hianime": "hianime",
+  "zoro-hianime": "hianime",
+  aniwatch: "hianime",
+  anix: "animekai",
+  saturn: "animesaturn",
+  unity: "animeunity",
+  sama: "animesama",
+  pahe: "consumetpahe",
+  animepaheconsumet: "consumetpahe",
+  "consumet-pahe": "consumetpahe",
+  kaa: "kickassanime",
+  "kickass-anime": "kickassanime"
 };
 
 function cleanBaseUrl(value) {
@@ -179,6 +277,13 @@ async function createSupabaseSession(userId) {
   return token;
 }
 
+async function countSupabaseActiveSessions(userId) {
+  const rows = await supabaseRequest(
+    `novel_sessions?user_id=eq.${encodeURIComponent(userId)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=token_hash`
+  );
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
 async function findSupabaseSessionUser(token) {
   if (!token) return null;
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
@@ -316,24 +421,45 @@ function normalizeEmail(email) {
 }
 
 function publicUser(user) {
+  const plan = billingPlanFor(user?.plan);
   return {
     id: user.id,
     username: user.username,
     email: user.email,
-    plan: user.plan || "free",
+    plan: plan.id,
     billingStatus: user.billingStatus || "none",
     paidUntil: user.paidUntil || null,
-    createdAt: user.createdAt
+    createdAt: user.createdAt,
+    maxDevices: userMaxDevices(user)
   };
+}
+
+function billingPlanFor(planId) {
+  const clean = String(planId || "free").trim().toLowerCase();
+  if (clean === "premium") return BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID];
+  return BILLING_PLANS[clean] || BILLING_PLANS.free;
+}
+
+function availableBillingPlans() {
+  return [
+    BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID],
+    BILLING_PLANS.premium_unlimited
+  ];
 }
 
 function isPremiumUser(user) {
   if (!user) return false;
   if (user.email === PREMIUM_SEED_EMAIL) return true;
-  if ((user.plan || "free") !== "premium") return false;
+  if (!billingPlanFor(user.plan).premium) return false;
   if ((user.billingStatus || "none") !== "active") return false;
   if (!user.paidUntil) return true;
   return Date.parse(user.paidUntil) > Date.now();
+}
+
+function userMaxDevices(user) {
+  if (!user) return BILLING_PLANS.free.maxDevices;
+  if (user.email === PREMIUM_SEED_EMAIL) return null;
+  return billingPlanFor(user.plan).maxDevices;
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("base64")) {
@@ -373,6 +499,28 @@ function createSession(data, userId) {
   });
 
   return token;
+}
+
+function countActiveFileSessions(data, userId) {
+  const now = Date.now();
+  data.sessions = data.sessions.filter((session) => session.expiresAt > now);
+  return data.sessions.filter((session) => session.userId === userId).length;
+}
+
+async function assertCanCreateSession(user) {
+  const limit = userMaxDevices(user);
+  if (limit == null) return;
+  const activeCount = supabaseEnabled()
+    ? await countSupabaseActiveSessions(user.id)
+    : countActiveFileSessions(readData(), user.id);
+  if (activeCount >= limit) {
+    const upgradeHint = limit < 3
+      ? "Upgrade to the ₦1,000 plan for 3 devices or ₦4,000 for unlimited devices."
+      : "Upgrade to the ₦4,000 unlimited device plan.";
+    const error = new Error(`This account is already signed in on ${activeCount} device(s). ${upgradeHint}`);
+    error.statusCode = 402;
+    throw error;
+  }
 }
 
 function getBearerToken(request) {
@@ -901,7 +1049,9 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
 }
 
 function isDirectStreamUrl(url) {
-  return /\.(m3u8|mp4|mpd|webm)(\?|$)/i.test(String(url || "").split("#")[0]);
+  const clean = String(url || "").split("#")[0];
+  return /\.(m3u8|mp4|mpd|webm)(\?|$)/i.test(clean) ||
+    /\/(?:playlist|manifest|hls|dash)(?:[/?#]|$)/i.test(clean);
 }
 
 function firstDirectStreamFromPayload(payload) {
@@ -929,6 +1079,303 @@ function firstDirectStreamFromPayload(payload) {
   };
   visit(payload);
   return candidates[0] || null;
+}
+
+function timeoutPromise(promise, timeoutMillis, label = "operation") {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMillis);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function normalizeConsumetAnimeProvider(provider) {
+  const raw = String(provider || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const alias = CONSUMET_ANIME_ALIASES[raw] || CONSUMET_ANIME_ALIASES[String(provider || "").toLowerCase()];
+  const key = alias || raw;
+  return CONSUMET_ANIME_PROVIDERS[key] ? key : "";
+}
+
+function consumetAnimeProvider(provider) {
+  const key = normalizeConsumetAnimeProvider(provider);
+  return key ? { key, ...CONSUMET_ANIME_PROVIDERS[key] } : null;
+}
+
+function consumetProviderInstance(providerKey) {
+  const config = consumetAnimeProvider(providerKey);
+  const ctor = config && consumetExtensions?.ANIME?.[config.className];
+  return typeof ctor === "function" ? new ctor() : null;
+}
+
+function titleToText(title) {
+  if (!title) return "";
+  if (typeof title === "string") return title;
+  if (Array.isArray(title)) return title.map((item) => Array.isArray(item) ? item[1] : item).filter(Boolean).join(" ");
+  if (typeof title === "object") return title.english || title.userPreferred || title.romaji || title.native || Object.values(title).find(Boolean) || "";
+  return String(title);
+}
+
+function normalizeMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function animeResultScore(query, result) {
+  const q = normalizeMatchText(query);
+  const t = normalizeMatchText(titleToText(result?.title));
+  if (!q || !t) return 0;
+  if (t === q) return 1000;
+  if (t.startsWith(q)) return 850;
+  if (t.includes(q)) return 650;
+  const qWords = new Set(q.split(" ").filter(Boolean));
+  const hits = t.split(" ").filter((word) => qWords.has(word)).length;
+  return hits * 100 - Math.abs(t.length - q.length);
+}
+
+function safeResultsArray(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.data?.results)) return payload.data.results;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.items)) return payload.items;
+  return [];
+}
+
+function safeEpisodesArray(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.episodes)) return payload.episodes;
+  if (Array.isArray(payload?.data?.episodes)) return payload.data.episodes;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function consumetEpisodeNumber(episode, index) {
+  const raw = episode?.number ?? episode?.episodeNumber ?? episode?.episode ?? episode?.episodeNum ?? episode?.ep;
+  const parsed = Number.parseFloat(String(raw || ""));
+  if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  const text = `${episode?.title || ""} ${episode?.id || ""}`;
+  const match = /(?:episode|ep)[^0-9]{0,4}(\d+)/i.exec(text) || /(?:^|[^0-9])(\d+)(?:$|[^0-9])/i.exec(text);
+  return Number.parseInt(match?.[1] || "", 10) || index + 1;
+}
+
+function consumetEpisodeMarker(providerKey, episodeId) {
+  return `consumet://${providerKey}/${encodeURIComponent(String(episodeId || ""))}`;
+}
+
+function normalizeConsumetEpisodes(providerKey, episodes, maxEpisodes = 300) {
+  return episodes
+    .map((episode, index) => {
+      const id = String(episode?.id || episode?.episodeId || episode?.url || "").trim();
+      if (!id) return null;
+      const episodeNumber = consumetEpisodeNumber(episode, index);
+      return {
+        episodeNumber,
+        title: String(episode?.title || episode?.name || `Episode ${episodeNumber}`).trim(),
+        url: consumetEpisodeMarker(providerKey, id),
+        thumbnail: String(episode?.image || episode?.thumbnail || episode?.cover || "").trim()
+      };
+    })
+    .filter(Boolean)
+    .filter((episode, index, all) => all.findIndex((item) => item.url === episode.url) === index)
+    .sort((a, b) => b.episodeNumber - a.episodeNumber)
+    .slice(0, Math.max(1, maxEpisodes || 300));
+}
+
+async function packageConsumetAnimeEpisodes(providerKey, query, maxEpisodes) {
+  const config = consumetAnimeProvider(providerKey);
+  const provider = consumetProviderInstance(providerKey);
+  if (!config || !provider?.search) return null;
+
+  const searchPayload = await timeoutPromise(provider.search(query, 1), 16000, `${config.label} search`);
+  const candidates = safeResultsArray(searchPayload)
+    .filter((item) => item?.id)
+    .sort((a, b) => animeResultScore(query, b) - animeResultScore(query, a))
+    .slice(0, 5);
+
+  for (const candidate of candidates) {
+    const id = String(candidate.id || "").trim();
+    if (!id) continue;
+    const info = provider.fetchAnimeInfo
+      ? await timeoutPromise(provider.fetchAnimeInfo(id), 18000, `${config.label} anime info`).catch(() => null)
+      : candidate;
+    const episodes = normalizeConsumetEpisodes(config.key, safeEpisodesArray(info), maxEpisodes);
+    if (episodes.length) {
+      return {
+        provider: config.label,
+        providerKey: config.key,
+        title: titleToText(info?.title || candidate.title),
+        episodes
+      };
+    }
+  }
+
+  return {
+    provider: config.label,
+    providerKey: config.key,
+    title: "",
+    episodes: []
+  };
+}
+
+async function externalConsumetFetch(pathname, timeoutMillis = 16000) {
+  if (!CONSUMET_BASE_URL || typeof fetch !== "function") return null;
+  return fetchWithTimeout(`${CONSUMET_BASE_URL}${pathname}`, {
+    headers: { accept: "application/json" }
+  }, timeoutMillis).catch(() => null);
+}
+
+async function externalConsumetAnimeEpisodes(providerKey, query, maxEpisodes) {
+  const config = consumetAnimeProvider(providerKey);
+  if (!config || !CONSUMET_BASE_URL) return null;
+  const encodedQuery = encodeURIComponent(query);
+  const searchPayload = await firstNonNullAsync([
+    () => externalConsumetFetch(`/anime/${config.path}/${encodedQuery}?page=1`),
+    () => externalConsumetFetch(`/anime/${config.path}/${encodedQuery}`),
+    () => externalConsumetFetch(`/anime/${config.path}?query=${encodedQuery}&page=1`)
+  ]);
+  const candidates = safeResultsArray(searchPayload)
+    .filter((item) => item?.id)
+    .sort((a, b) => animeResultScore(query, b) - animeResultScore(query, a))
+    .slice(0, 5);
+  for (const candidate of candidates) {
+    const id = String(candidate.id || "").trim();
+    const encodedId = encodeURIComponent(id);
+    const info = await firstNonNullAsync([
+      () => externalConsumetFetch(`/anime/${config.path}/info/${encodedId}`, 18000),
+      () => externalConsumetFetch(`/anime/${config.path}/info?id=${encodedId}`, 18000)
+    ]);
+    const episodes = normalizeConsumetEpisodes(config.key, safeEpisodesArray(info || candidate), maxEpisodes);
+    if (episodes.length) {
+      return {
+        provider: config.label,
+        providerKey: config.key,
+        title: titleToText(info?.title || candidate.title),
+        episodes
+      };
+    }
+  }
+  return {
+    provider: config.label,
+    providerKey: config.key,
+    title: "",
+    episodes: []
+  };
+}
+
+async function firstNonNullAsync(loaders) {
+  for (const loader of loaders) {
+    const result = await loader().catch(() => null);
+    if (result) return result;
+  }
+  return null;
+}
+
+async function consumetAnimeEpisodes(provider, query, maxEpisodes = 300) {
+  const config = consumetAnimeProvider(provider);
+  if (!config) throw new Error("Unknown Consumet anime provider.");
+  const local = await packageConsumetAnimeEpisodes(config.key, query, maxEpisodes).catch((error) => {
+    console.warn(`[content] ${config.label} local episode lookup failed:`, error.message || error);
+    return null;
+  });
+  if (local?.episodes?.length) return local;
+
+  const external = await externalConsumetAnimeEpisodes(config.key, query, maxEpisodes).catch((error) => {
+    console.warn(`[content] ${config.label} external episode lookup failed:`, error.message || error);
+    return null;
+  });
+  if (external?.episodes?.length) return external;
+
+  return {
+    provider: config.label,
+    providerKey: config.key,
+    title: local?.title || external?.title || "",
+    episodes: [],
+    message: CONSUMET_BASE_URL || consumetExtensions?.ANIME
+      ? "No episodes were returned by this anime provider."
+      : "Consumet anime providers are not configured on this backend."
+  };
+}
+
+async function packageConsumetAnimeStream(providerKey, episodeId) {
+  const config = consumetAnimeProvider(providerKey);
+  const provider = consumetProviderInstance(providerKey);
+  if (!config || !provider?.fetchEpisodeSources) return null;
+  const streamingServers = consumetExtensions?.StreamingServers || {};
+  const subOrDub = consumetExtensions?.SubOrSub || {};
+  const serverValues = [
+    undefined,
+    ...config.servers.map((server) => streamingServers[server] || String(server).toLowerCase())
+  ];
+  const subPrefs = [subOrDub.SUB, undefined, subOrDub.BOTH].filter((item, index, all) => all.indexOf(item) === index);
+
+  for (const server of serverValues) {
+    for (const subPref of subPrefs) {
+      const args = [episodeId];
+      if (server) args.push(server);
+      if (server && subPref) args.push(subPref);
+      const payload = await timeoutPromise(
+        provider.fetchEpisodeSources(...args),
+        18000,
+        `${config.label} stream`
+      ).catch(() => null);
+      const stream = firstDirectStreamFromPayload(payload);
+      if (stream?.url) {
+        return {
+          route: "direct",
+          url: stream.url,
+          provider: stream.provider || config.label,
+          title: config.label,
+          headers: stream.headers || null
+        };
+      }
+    }
+  }
+  return null;
+}
+
+async function externalConsumetAnimeStream(providerKey, episodeId) {
+  const config = consumetAnimeProvider(providerKey);
+  if (!config || !CONSUMET_BASE_URL) return null;
+  const encodedId = encodeURIComponent(episodeId);
+  const payload = await firstNonNullAsync([
+    () => externalConsumetFetch(`/anime/${config.path}/watch/${encodedId}`, 18000),
+    () => externalConsumetFetch(`/anime/${config.path}/watch?episodeId=${encodedId}`, 18000)
+  ]);
+  const stream = firstDirectStreamFromPayload(payload);
+  if (!stream?.url) return null;
+  return {
+    route: "direct",
+    url: stream.url,
+    provider: stream.provider || config.label,
+    title: config.label,
+    headers: stream.headers || null
+  };
+}
+
+async function consumetAnimeStreamRoute(provider, episodeId) {
+  const config = consumetAnimeProvider(provider);
+  if (!config) throw new Error("Unknown Consumet anime provider.");
+  const local = await packageConsumetAnimeStream(config.key, episodeId).catch((error) => {
+    console.warn(`[content] ${config.label} local stream lookup failed:`, error.message || error);
+    return null;
+  });
+  if (local?.url && isDirectStreamUrl(local.url)) return local;
+  const external = await externalConsumetAnimeStream(config.key, episodeId).catch((error) => {
+    console.warn(`[content] ${config.label} external stream lookup failed:`, error.message || error);
+    return null;
+  });
+  if (external?.url && isDirectStreamUrl(external.url)) return external;
+  return {
+    route: "unavailable",
+    url: "",
+    provider: config.label,
+    title: "Unavailable",
+    message: "This anime server did not return a direct playable stream."
+  };
 }
 
 async function vidlinkDirectRoute(mediaType, id, season = "1", episode = "1") {
@@ -1111,9 +1558,31 @@ async function handleContentApi(request, response, pathname, url) {
         cinepro: {
           enabled: Boolean(CINEPRO_BASE_URL)
         },
+        consumetAnime: {
+          enabled: Boolean(consumetExtensions?.ANIME || CONSUMET_BASE_URL),
+          localPackage: Boolean(consumetExtensions?.ANIME),
+          externalBaseUrl: Boolean(CONSUMET_BASE_URL),
+          providers: Object.entries(CONSUMET_ANIME_PROVIDERS).map(([key, value]) => ({
+            key,
+            label: value.label
+          }))
+        },
         directServers: ["VidLink Direct", "CinePro", "OMSS"],
         embeds: embedProviders("movie", "{tmdb_id}").map((provider) => provider.provider)
       });
+    }
+    if (request.method === "GET" && pathname === "/api/content/anime/episodes") {
+      const provider = String(url.searchParams.get("provider") || "hianime").trim();
+      const query = String(url.searchParams.get("q") || "").trim();
+      if (!query) return sendApiError(response, 400, "Anime title query is required.");
+      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 300) || 300));
+      return sendApiData(response, 200, await consumetAnimeEpisodes(provider, query, limit));
+    }
+    if (request.method === "GET" && pathname === "/api/content/anime/stream") {
+      const provider = String(url.searchParams.get("provider") || "hianime").trim();
+      const episodeId = String(url.searchParams.get("episodeId") || "").trim();
+      if (!episodeId) return sendApiError(response, 400, "Consumet episode id is required.");
+      return sendApiData(response, 200, await consumetAnimeStreamRoute(provider, episodeId));
     }
     if (request.method === "GET" && pathname === "/api/content/stream") {
       const mediaType = String(url.searchParams.get("type") || "movie").toLowerCase() === "movie" ? "movie" : "tv";
@@ -1236,6 +1705,11 @@ async function handleLogin(request, response) {
     if (!user || !passwordMatches(password, user.passwordSalt, user.passwordHash)) {
       return sendError(response, 401, "Email or password is incorrect.");
     }
+    try {
+      await assertCanCreateSession(user);
+    } catch (error) {
+      return sendError(response, error.statusCode || 403, error.message);
+    }
     const token = await createSupabaseSession(user.id);
     return sendJson(response, 200, { token, user: publicUser(user) });
   }
@@ -1246,6 +1720,11 @@ async function handleLogin(request, response) {
 
   if (!user || !passwordMatches(password, user.passwordSalt, user.passwordHash)) {
     return sendError(response, 401, "Email or password is incorrect.");
+  }
+  try {
+    await assertCanCreateSession(user);
+  } catch (error) {
+    return sendError(response, error.statusCode || 403, error.message);
   }
 
   const token = createSession(data, user.id);
@@ -1296,6 +1775,11 @@ async function handleRecoverAccount(request, response) {
       })();
 
   if (!user) return sendError(response, 404, "No account matched that recovery secret.");
+  try {
+    await assertCanCreateSession(user);
+  } catch (error) {
+    return sendError(response, error.statusCode || 403, error.message);
+  }
   const token = supabaseEnabled()
     ? await createSupabaseSession(user.id)
     : (() => {
@@ -1350,11 +1834,15 @@ async function requireApiUser(request, response) {
 }
 
 function subscriptionPayload(user) {
+  const plan = billingPlanFor(user?.plan);
   return {
     user: publicUser(user),
     premium: isPremiumUser(user),
-    monthlyFee: PREMIUM_MONTHLY_NAIRA,
+    currentPlan: plan.id,
+    monthlyFee: BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID].amount,
     currency: "NGN",
+    maxDevices: userMaxDevices(user),
+    plans: availableBillingPlans(),
     freePreview: {
       episodicFraction: EPISODIC_FREE_FRACTION,
       movieMs: MOVIE_FREE_PREVIEW_MS
@@ -1433,11 +1921,13 @@ async function recordBillingEvent({ userId, txRef, transactionId, status, amount
   writeData(data);
 }
 
-async function markUserPremium(userId, payment) {
+async function markUserPremium(userId, payment, planId = DEFAULT_PREMIUM_PLAN_ID) {
+  const plan = billingPlanFor(planId);
+  if (!plan.premium) throw new Error("Invalid paid plan.");
   const paidUntil = addOneMonth();
   if (supabaseEnabled()) {
     const user = await updateSupabaseUser(userId, {
-      plan: "premium",
+      plan: plan.id,
       billing_status: "active",
       paid_until: paidUntil
     });
@@ -1455,7 +1945,7 @@ async function markUserPremium(userId, payment) {
   const data = readData();
   const user = data.users.find((item) => item.id === userId);
   if (!user) throw new Error("Account not found for this payment.");
-  user.plan = "premium";
+  user.plan = plan.id;
   user.billingStatus = "active";
   user.paidUntil = paidUntil;
   data.billingEvents = Array.isArray(data.billingEvents) ? data.billingEvents : [];
@@ -1475,33 +1965,47 @@ async function markUserPremium(userId, payment) {
 }
 
 function extractCheckoutUserId(txRef) {
-  const match = /^novelapp-sub-([^-]+)-/.exec(String(txRef || ""));
-  return match?.[1] || null;
+  const value = String(txRef || "");
+  return /^novelapp-sub-[a-z0-9_]+-([0-9a-f-]{36})-/i.exec(value)?.[1]
+    || /^novelapp-sub-([0-9a-f-]{36})-/i.exec(value)?.[1]
+    || null;
+}
+
+function extractCheckoutPlanId(txRef) {
+  const value = String(txRef || "");
+  return /^novelapp-sub-([a-z0-9_]+)-[0-9a-f-]{36}-/i.exec(value)?.[1]
+    || DEFAULT_PREMIUM_PLAN_ID;
 }
 
 async function handleBillingCheckout(request, response) {
   const user = await requireApiUser(request, response);
   if (!user) return;
-  if (isPremiumUser(user)) return sendJson(response, 200, { ...subscriptionPayload(user), alreadyPremium: true });
-  const txRef = `novelapp-sub-${user.id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const body = request.method === "POST" ? await readBody(request).catch(() => ({})) : {};
+  const requestedPlan = billingPlanFor(body.planId || body.plan || DEFAULT_PREMIUM_PLAN_ID);
+  if (!requestedPlan.premium) return sendError(response, 400, "Choose a paid plan.");
+  const currentPlan = billingPlanFor(user.plan);
+  if (isPremiumUser(user) && currentPlan.amount >= requestedPlan.amount) {
+    return sendJson(response, 200, { ...subscriptionPayload(user), alreadyPremium: true });
+  }
+  const txRef = `novelapp-sub-${requestedPlan.id}-${user.id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
   const payload = await flutterwaveRequest("payments", {
     method: "POST",
     body: {
       tx_ref: txRef,
-      amount: PREMIUM_MONTHLY_NAIRA,
-      currency: "NGN",
+      amount: requestedPlan.amount,
+      currency: requestedPlan.currency,
       redirect_url: `${PUBLIC_APP_URL}/billing-return.html`,
       customer: {
         email: user.email,
         name: user.username
       },
       customizations: {
-        title: "NovelApp Premium",
-        description: "Monthly access to all movies, cartoons, and K-drama episodes"
+        title: requestedPlan.label,
+        description: requestedPlan.description
       },
       meta: {
         user_id: user.id,
-        plan: "premium_monthly"
+        plan: requestedPlan.id
       }
     }
   });
@@ -1510,8 +2014,9 @@ async function handleBillingCheckout(request, response) {
   return sendJson(response, 200, {
     link,
     txRef,
-    amount: PREMIUM_MONTHLY_NAIRA,
-    currency: "NGN"
+    amount: requestedPlan.amount,
+    currency: requestedPlan.currency,
+    plan: requestedPlan
   });
 }
 
@@ -1524,7 +2029,9 @@ async function verifyFlutterwavePayment({ transactionId, txRef }) {
   const currency = String(data.currency || "").toUpperCase();
   const status = String(data.status || "").toLowerCase();
   const resolvedTxRef = data.tx_ref || txRef;
-  if (status !== "successful" || currency !== "NGN" || amount < PREMIUM_MONTHLY_NAIRA) {
+  const planId = data.meta?.plan || extractCheckoutPlanId(resolvedTxRef);
+  const plan = billingPlanFor(planId);
+  if (!plan.premium || status !== "successful" || currency !== plan.currency || amount < plan.amount) {
     await recordBillingEvent({
       userId: extractCheckoutUserId(resolvedTxRef),
       txRef: resolvedTxRef,
@@ -1534,7 +2041,7 @@ async function verifyFlutterwavePayment({ transactionId, txRef }) {
       currency,
       raw: payload
     });
-    throw new Error("Payment was not successful for the monthly subscription.");
+    throw new Error("Payment was not successful for the selected subscription.");
   }
   const userId = data.meta?.user_id || extractCheckoutUserId(resolvedTxRef);
   if (!userId) throw new Error("Payment did not include an account id.");
@@ -1545,7 +2052,7 @@ async function verifyFlutterwavePayment({ transactionId, txRef }) {
     amount,
     currency,
     raw: payload
-  });
+  }, plan.id);
 }
 
 async function handleBillingVerify(request, response) {

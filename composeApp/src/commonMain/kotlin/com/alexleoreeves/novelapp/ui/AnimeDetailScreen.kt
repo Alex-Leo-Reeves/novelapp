@@ -20,7 +20,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
-import com.alexleoreeves.novelapp.platform.platformHttpClient
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -46,8 +45,6 @@ fun AnimeDetailScreen(
     requireAuth: (() -> Unit) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val httpClient = remember { platformHttpClient() }
-    val tmdbScraper = remember { TMDBMovieScraper(httpClient) }
     var episodes by remember { mutableStateOf<List<AnimeEpisode>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(true) }
     var extractingEpisode by remember { mutableStateOf<Int?>(null) }  // episode number being extracted
@@ -55,40 +52,47 @@ fun AnimeDetailScreen(
     var refreshTrigger by remember { mutableStateOf(0) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
     var selectedServer by remember { mutableStateOf(0) }
-    var vidlinkTmdbId by remember(anime.id) { mutableStateOf("") }
+    var seasonChoices by remember(anime.id) { mutableStateOf(listOf(anime.toInitialSeasonChoice())) }
+    var selectedSeasonId by remember(anime.id) { mutableStateOf(anime.id) }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
-    val serverNames = listOf("Auto", "Anineko", "AnimePahe", "VidLink Pro")
-    val serverKeys = listOf("auto", "anineko", "animepahe", "vidlink")
+    val serverNames = listOf(
+        "Anineko",
+        "AnimePahe",
+        "HiAnime",
+        "AnimeKai",
+        "KickAssAnime",
+        "AnimeSaturn",
+        "AnimeUnity",
+        "AnimeSama",
+        "Consumet Pahe"
+    )
+    val serverKeys = listOf(
+        "anineko",
+        "animepahe",
+        "hianime",
+        "animekai",
+        "kickassanime",
+        "animesaturn",
+        "animeunity",
+        "animesama",
+        "consumetpahe"
+    )
+    val selectedSeason = seasonChoices.firstOrNull { it.id == selectedSeasonId }
+        ?: seasonChoices.first()
 
-    suspend fun loadVidLinkEpisodes(titleQueries: List<String>): List<AnimeEpisode> {
-        val tmdbMatch = titleQueries.firstNotNullOfOrNull { query ->
-            tmdbScraper.search(query)
-                .filter { it.type == "TVSHOW" }
-                .sortedWith(
-                    compareByDescending<MediaResult> { it.title.normalizedAnimeMediaTitle() == query.normalizedAnimeMediaTitle() }
-                        .thenByDescending { it.title.normalizedAnimeMediaTitle().contains(query.normalizedAnimeMediaTitle()) }
-                )
-                .firstOrNull()
-        }
-        vidlinkTmdbId = tmdbMatch?.id.orEmpty()
-        return if (vidlinkTmdbId.isNotBlank()) {
-            tmdbScraper.fetchTVSeasonsAndEpisodes(vidlinkTmdbId).map { episode ->
-                AnimeEpisode(
-                    episodeNumber = episode.episodeNumber,
-                    title = episode.title,
-                    url = episode.url
-                )
-            }
-        } else {
-            emptyList()
-        }
+    LaunchedEffect(anime.id) {
+        val loadedChoices = repository.fetchAnimeSeasonChoices(anime)
+        seasonChoices = loadedChoices
+        selectedSeasonId = loadedChoices.firstOrNull { it.id == anime.id }?.id
+            ?: loadedChoices.firstOrNull()?.id
+            ?: anime.id
     }
 
     // Load episodes on mount
-    LaunchedEffect(anime.id, selectedServer) {
+    LaunchedEffect(anime.id, selectedServer, selectedSeason.id) {
         isLoadingEpisodes = true
-        val rawTitles = listOf(anime.displayTitle, anime.titleEnglish, anime.titleRomaji)
+        val rawTitles = selectedSeason.searchQueries
             .map { it.trim() }
             .filter { it.isNotBlank() }
         val titleQueries = (rawTitles + rawTitles.flatMap { title ->
@@ -100,38 +104,18 @@ fun AnimeDetailScreen(
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
-        val provider = serverKeys.getOrElse(selectedServer) { "auto" }
-        val loadedEpisodes = if (provider == "vidlink") {
-            loadVidLinkEpisodes(titleQueries).ifEmpty {
-                snackMessage = "VidLink Pro needs a TMDB TV match for this anime."
-                emptyList()
-            }
-        } else {
-            vidlinkTmdbId = ""
-            val providerEpisodes = repository.fetchEpisodesFromAnimeProvider(
-                provider = provider,
-                animeTitleQuery = titleQueries.firstOrNull() ?: anime.displayTitle,
-                alternateQueries = titleQueries.drop(1),
-                episodeCount = anime.episodeCount
-            )
-            providerEpisodes.ifEmpty { loadVidLinkEpisodes(titleQueries) }
-        }
+        val provider = serverKeys.getOrElse(selectedServer) { "anineko" }
+        val loadedEpisodes = repository.fetchEpisodesFromAnimeProvider(
+            provider = provider,
+            animeTitleQuery = titleQueries.firstOrNull() ?: selectedSeason.displayTitle,
+            alternateQueries = titleQueries.drop(1),
+            episodeCount = selectedSeason.episodeCount.takeIf { it > 0 } ?: anime.episodeCount,
+            preferredAninekoSlug = selectedSeason.aninekoSlug
+        )
         episodes = loadedEpisodes
             .distinctBy { it.url.ifBlank { "${it.episodeNumber}:${it.title}" } }
             .sortedWith(compareBy<AnimeEpisode> { it.episodeNumber.coerceAtLeast(0) }.thenBy { it.title })
         isLoadingEpisodes = false
-    }
-
-    fun resolveVidLinkAnimeEpisode(episode: AnimeEpisode): String? {
-        val parts = episode.url.split(":")
-        val tvId = parts.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: vidlinkTmdbId
-        val season = parts.getOrNull(2) ?: "1"
-        val ep = parts.getOrNull(3) ?: episode.episodeNumber.coerceAtLeast(1).toString()
-        if (tvId.isBlank()) {
-            snackMessage = "VidLink Pro could not match this anime to TMDB."
-            return null
-        }
-        return "https://vidlink.pro/tv/$tvId/$season/$ep"
     }
 
     // Show snack messages
@@ -333,6 +317,50 @@ fun AnimeDetailScreen(
                 }
             }
 
+            if (seasonChoices.size > 1) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Season",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = currentTheme.textColor(),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            seasonChoices.forEach { choice ->
+                                FilterChip(
+                                    selected = selectedSeason.id == choice.id,
+                                    onClick = { selectedSeasonId = choice.id },
+                                    label = { Text(choice.label, style = MaterialTheme.typography.labelSmall) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = currentTheme.accentColor(),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                        Text(
+                            selectedSeason.displayTitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = currentTheme.subTextColor(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                }
+            }
+
             // ── Episodes Header ───────────────────────────────────────────
             item {
                 Row(
@@ -436,25 +464,19 @@ fun AnimeDetailScreen(
                         isExtracting = extractingEpisode == episode.episodeNumber,
                         isDownloaded = isDownloaded,
                         isDownloading = isDownloading,
-                        sourceLabel = serverNames.getOrElse(selectedServer) { "Auto" },
+                        sourceLabel = serverNames.getOrElse(selectedServer) { "Anineko" },
                         currentTheme = currentTheme,
                         onPlayClick = {
                             requireAuth {
                                 if (extractingEpisode != episode.episodeNumber) {
                                     scope.launch {
                                         extractingEpisode = episode.episodeNumber
-                                        val isVidLink = serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink"
-                                        val isTmdbEpisode = episode.url.startsWith("tv:")
-                                        val streamUrl = if (isVidLink || isTmdbEpisode) {
-                                            resolveVidLinkAnimeEpisode(episode)
-                                        } else {
-                                            repository.extractStreamUrl(episode.url) ?: episode.url
-                                        }
+                                        val streamUrl = repository.extractStreamUrl(episode.url)
                                         extractingEpisode = null
                                         if (streamUrl != null) {
                                             onPlayEpisode(
                                                 streamUrl,
-                                                "${anime.displayTitle} – EP ${episode.episodeNumber}"
+                                                "${selectedSeason.displayTitle} – EP ${episode.episodeNumber}"
                                             )
                                         } else {
                                             snackMessage = "Stream unavailable for Episode ${episode.episodeNumber}. Try again later."
@@ -484,25 +506,34 @@ fun AnimeDetailScreen(
                                                     sourceName = anime.sourceName
                                                 )
                                             )
-                                            val streamUrl = if (
-                                                serverKeys.getOrElse(selectedServer) { "auto" } == "vidlink" ||
-                                                episode.url.startsWith("tv:")
-                                            ) {
-                                                resolveVidLinkAnimeEpisode(episode)
-                                            } else {
-                                                repository.extractStreamUrl(episode.url)
-                                            }
+                                            val streamUrl = repository.extractStreamUrl(episode.url)
                                             if (streamUrl != null) {
-                                                downloadRepo.addEpisode(
-                                                    DownloadedEpisode(
-                                                        parentId = anime.id,
-                                                        episodeNumber = episode.episodeNumber,
-                                                        episodeTitle = episode.title,
-                                                        localFilePath = streamUrl,
-                                                        fileSizeBytes = 240_000_000L
-                                                    )
+                                                val saved = saveDownloadedVideo(
+                                                    parentId = anime.id,
+                                                    episodeNumber = episode.episodeNumber,
+                                                    sourceUrl = streamUrl
                                                 )
+                                                if (saved.success) {
+                                                    downloadRepo.addEpisode(
+                                                        DownloadedEpisode(
+                                                            parentId = anime.id,
+                                                            episodeNumber = episode.episodeNumber,
+                                                            episodeTitle = episode.title,
+                                                            localFilePath = saved.localPath,
+                                                            fileSizeBytes = saved.fileSizeBytes
+                                                        )
+                                                    )
+                                                    snackMessage = "Episode ${episode.episodeNumber} saved for offline playback."
+                                                } else {
+                                                    if (downloadRepo.getEpisodesFor(anime.id).isEmpty()) {
+                                                        downloadRepo.deleteItem(anime.id)
+                                                    }
+                                                    snackMessage = saved.error.ifBlank { "Failed to save episode for offline playback." }
+                                                }
                                             } else {
+                                                if (downloadRepo.getEpisodesFor(anime.id).isEmpty()) {
+                                                    downloadRepo.deleteItem(anime.id)
+                                                }
                                                 snackMessage = "Failed to extract stream for offline saving."
                                             }
                                         } catch (e: Exception) {
@@ -533,6 +564,16 @@ private fun String.removeAnimeSeasonSuffix(): String =
     cleanAnimeSearchTitle()
         .replace(Regex("""\b(season\s+[2-9]|\d+(st|nd|rd|th)\s+season|part\s+\d+|cour\s+\d+|ova|ona|special|movie|recap)\b.*$""", RegexOption.IGNORE_CASE), "")
         .trim()
+
+private fun AnimeResult.toInitialSeasonChoice(): AnimeSeasonChoice =
+    AnimeSeasonChoice(
+        id = id,
+        label = "Season",
+        title = displayTitle,
+        titleEnglish = titleEnglish,
+        titleRomaji = titleRomaji,
+        episodeCount = episodeCount
+    )
 
 @Composable
 private fun EpisodeRow(
@@ -632,22 +673,6 @@ private fun EpisodeRow(
             }
         }
     }
-}
-
-private fun String.normalizedAnimeMediaTitle(): String =
-    lowercase()
-        .replace("&", "and")
-        .replace(Regex("""[^a-z0-9]+"""), " ")
-        .trim()
-        .replace(Regex("""\s+"""), " ")
-
-private fun String.isDirectPlayableAnimeStreamUrl(): Boolean {
-    val clean = substringBefore("?").substringBefore("#").lowercase()
-    return clean.endsWith(".m3u8") ||
-        clean.endsWith(".mp4") ||
-        clean.endsWith(".mpd") ||
-        clean.endsWith(".webm") ||
-        startsWith("file:", ignoreCase = true)
 }
 
 @Composable

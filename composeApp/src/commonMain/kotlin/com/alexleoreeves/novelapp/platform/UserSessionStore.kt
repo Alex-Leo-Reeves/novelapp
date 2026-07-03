@@ -8,11 +8,12 @@ data class SavedUserAccount(
     val plan: String = "free",
     val billingStatus: String = "none",
     val paidUntil: String? = null,
-    val createdAt: String = ""
+    val createdAt: String = "",
+    val maxDevices: Int? = 2
 ) {
     val isPremium: Boolean
         get() = email.equals("mike@mike.com", ignoreCase = true) ||
-            (plan == "premium" && billingStatus == "active")
+            ((plan == "premium" || plan.startsWith("premium_")) && billingStatus == "active")
 }
 
 interface UserSessionStore {

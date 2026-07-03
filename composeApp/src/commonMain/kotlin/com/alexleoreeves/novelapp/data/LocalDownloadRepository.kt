@@ -34,16 +34,42 @@ class LocalDownloadRepository {
 
     // ── Read ──────────────────────────────────────────────────────────────
     fun getAllItems(): List<DownloadedItem> = loadIndex().items
-    fun getAnimeItems(): List<DownloadedItem> = loadIndex().items.filter { it.type == "ANIME" }
-    fun getMangaItems(): List<DownloadedItem> = loadIndex().items.filter { it.type == "MANGA" }
-    fun getNovelItems(): List<DownloadedItem> = loadIndex().items.filter { it.type == "NOVEL" }
+    fun getAnimeItems(): List<DownloadedItem> {
+        val idx = loadIndex()
+        val offlineEpisodeParents = idx.episodes
+            .filter { isDownloadedLocalFileAvailable(it.localFilePath) }
+            .map { it.parentId }
+            .toSet()
+        return idx.items.filter { it.type == "ANIME" && it.id in offlineEpisodeParents }
+    }
+    fun getMangaItems(): List<DownloadedItem> {
+        val idx = loadIndex()
+        val offlineChapterParents = idx.chapters
+            .filter { isChapterLocalAvailable(it) }
+            .map { it.parentId }
+            .toSet()
+        return idx.items.filter { it.type == "MANGA" && it.id in offlineChapterParents }
+    }
+
+    fun getNovelItems(): List<DownloadedItem> {
+        val idx = loadIndex()
+        val offlineChapterParents = idx.chapters
+            .filter { isChapterLocalAvailable(it) }
+            .map { it.parentId }
+            .toSet()
+        return idx.items.filter { it.type == "NOVEL" && it.id in offlineChapterParents }
+    }
 
     fun getEpisodesFor(parentId: String): List<DownloadedEpisode> =
-        loadIndex().episodes.filter { it.parentId == parentId }
+        loadIndex().episodes.filter {
+            it.parentId == parentId && isDownloadedLocalFileAvailable(it.localFilePath)
+        }
             .sortedByDescending { it.episodeNumber }
 
     fun getChaptersFor(parentId: String): List<DownloadedChapter> =
-        loadIndex().chapters.filter { it.parentId == parentId }
+        loadIndex().chapters.filter {
+            it.parentId == parentId && isChapterLocalAvailable(it)
+        }
             .sortedByDescending { it.chapterNumber }
 
     // ── Write ─────────────────────────────────────────────────────────────
@@ -80,6 +106,8 @@ class LocalDownloadRepository {
 
     fun deleteItem(itemId: String) {
         val idx = loadIndex()
+        val removedEpisodes = idx.episodes.filter { it.parentId == itemId }
+        val removedChapters = idx.chapters.filter { it.parentId == itemId }
         saveIndex(
             idx.copy(
                 items = idx.items.filter { it.id != itemId },
@@ -89,29 +117,50 @@ class LocalDownloadRepository {
                 watchHistory = idx.watchHistory.filter { it.parentId != itemId }
             )
         )
+        removedEpisodes.forEach { deleteDownloadedText(it.localFilePath) }
+        removedChapters.forEach { deleteDownloadedText(it.localFilePath) }
     }
 
     fun deleteEpisode(parentId: String, episodeNumber: Int) {
         val idx = loadIndex()
+        val removed = idx.episodes.filter { it.parentId == parentId && it.episodeNumber == episodeNumber }
         saveIndex(idx.copy(
             episodes = idx.episodes.filter { !(it.parentId == parentId && it.episodeNumber == episodeNumber) },
             watchHistory = idx.watchHistory.filter { !(it.parentId == parentId && it.episodeNumber == episodeNumber) }
         ))
+        removed.forEach { deleteDownloadedText(it.localFilePath) }
     }
 
     fun deleteChapter(parentId: String, chapterNumber: Int) {
         val idx = loadIndex()
+        val removed = idx.chapters.filter { it.parentId == parentId && it.chapterNumber == chapterNumber }
         saveIndex(idx.copy(
             chapters = idx.chapters.filter { !(it.parentId == parentId && it.chapterNumber == chapterNumber) },
             readHistory = idx.readHistory.filter { !(it.parentId == parentId && it.chapterTitle.contains("Chapter $chapterNumber", ignoreCase = true)) }
         ))
+        removed.forEach { deleteDownloadedText(it.localFilePath) }
     }
 
     fun isEpisodeDownloaded(parentId: String, episodeNumber: Int): Boolean =
-        loadIndex().episodes.any { it.parentId == parentId && it.episodeNumber == episodeNumber }
+        loadIndex().episodes.any {
+            it.parentId == parentId &&
+                it.episodeNumber == episodeNumber &&
+                isDownloadedLocalFileAvailable(it.localFilePath)
+        }
 
     fun isChapterDownloaded(parentId: String, chapterNumber: Int): Boolean =
-        loadIndex().chapters.any { it.parentId == parentId && it.chapterNumber == chapterNumber }
+        loadIndex().chapters.any {
+            it.parentId == parentId &&
+                it.chapterNumber == chapterNumber &&
+                isChapterLocalAvailable(it)
+        }
+
+    private fun isChapterLocalAvailable(chapter: DownloadedChapter): Boolean {
+        val paths = chapter.localFilePath.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        return paths.isNotEmpty() && paths.all { isDownloadedLocalFileAvailable(it) }
+    }
 
     // ── History / Resume ─────────────────────────────────────────────────
     fun getReadHistory(): List<ReadHistoryItem> =

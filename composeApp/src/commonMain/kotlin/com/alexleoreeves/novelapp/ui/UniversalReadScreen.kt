@@ -137,9 +137,14 @@ fun UniversalReadScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val percent = setupStatus.progressFraction
+                val statusMessage = if (isBuffering.value && !setupStatus.shouldShow) {
+                    "Preparing narration audio."
+                } else {
+                    setupStatus.userMessage.ifBlank { "Preparing voice." }
+                }
                 Text(
                     text = buildString {
-                        append(setupStatus.userMessage.ifBlank { "Preparing voice." })
+                        append(statusMessage)
                         if (percent != null) {
                             append(" ")
                             append((percent * 100f).roundToInt())

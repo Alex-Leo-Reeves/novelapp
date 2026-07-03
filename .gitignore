@@ -1,5 +1,6 @@
 .gradle
 .kotlin/
+node_modules/
 *.hprof
 normal-release-build.log
 normal-release-build.pid
@@ -18,6 +19,7 @@ captures/
 *.jks
 keystores/
 server-data/
+.secure_references/
 iosApp/*.xcodeproj/
 iosApp/*.xcworkspace/
 *.xcarchive

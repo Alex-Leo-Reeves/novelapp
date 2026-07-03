@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.data
 
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -74,6 +75,36 @@ class AniListSource(private val client: HttpClient) {
               }
             }
         """.trimIndent()
+
+        private val RELATION_QUERY = """
+            query (${'$'}id: Int) {
+              Media(id: ${'$'}id, type: ANIME) {
+                id
+                title { romaji english }
+                coverImage { large }
+                description(asHtml: false)
+                episodes
+                genres
+                status
+                relations {
+                  edges {
+                    relationType
+                    node {
+                      id
+                      type
+                      format
+                      title { romaji english }
+                      coverImage { large }
+                      description(asHtml: false)
+                      episodes
+                      genres
+                      status
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
     }
 
     suspend fun fetchCurrentlyAiring(page: Int = 1, perPage: Int = 20): List<AnimeResult> {
@@ -134,6 +165,61 @@ class AniListSource(private val client: HttpClient) {
         }.getOrElse { emptyList() }
     }
 
+    suspend fun fetchSeasonChain(startId: String, maxDepth: Int = 12): List<AnimeResult> {
+        val start = startId.toIntOrNull() ?: return emptyList()
+        val seen = mutableSetOf<Int>()
+        val center = fetchRelationNode(start) ?: return emptyList()
+        val prequels = mutableListOf<AnimeResult>()
+        val sequels = mutableListOf<AnimeResult>()
+
+        seen += center.media.id.toIntOrNull() ?: start
+        var cursor = center
+        repeat(maxDepth) {
+            val previousId = cursor.prequelId?.takeUnless { it in seen } ?: return@repeat
+            val previous = fetchRelationNode(previousId) ?: return@repeat
+            seen += previousId
+            prequels += previous.media
+            cursor = previous
+        }
+
+        cursor = center
+        repeat(maxDepth) {
+            val nextId = cursor.sequelId?.takeUnless { it in seen } ?: return@repeat
+            val next = fetchRelationNode(nextId) ?: return@repeat
+            seen += nextId
+            sequels += next.media
+            cursor = next
+        }
+
+        return (prequels.asReversed() + center.media + sequels)
+            .distinctBy { it.id }
+    }
+
+    private suspend fun fetchRelationNode(id: Int): AniListRelationNode? = runCatching {
+        val body = buildJsonObject {
+            put("query", RELATION_QUERY)
+            putJsonObject("variables") { put("id", id) }
+        }
+        val response: String = client.post(ENDPOINT) {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }.body()
+        val media = json.parseToJsonElement(response)
+            .jsonObject["data"]
+            ?.jsonObject?.get("Media")
+            ?.jsonObject
+            ?: return@runCatching null
+        val anime = media.toAnimeResult() ?: return@runCatching null
+        val edges = media["relations"]
+            ?.jsonObject?.get("edges")
+            ?.jsonArray
+            .orEmpty()
+            .mapNotNull { it.jsonObject }
+        val prequelId = edges.firstRelatedAnimeId("PREQUEL")
+        val sequelId = edges.firstRelatedAnimeId("SEQUEL")
+        AniListRelationNode(anime, prequelId, sequelId)
+    }.getOrNull()
+
     private fun parseAnimeList(response: String): List<AnimeResult> {
         val root = json.parseToJsonElement(response).jsonObject
         val mediaArray = root["data"]
@@ -142,32 +228,48 @@ class AniListSource(private val client: HttpClient) {
             ?.jsonArray ?: return emptyList()
 
         return mediaArray.mapNotNull { element ->
-            runCatching {
-                val obj = element.jsonObject
-                val titleObj = obj["title"]?.jsonObject
-                val nextEp = obj["nextAiringEpisode"]?.jsonObject
-                val coverObj = obj["coverImage"]?.jsonObject
-                val genres = obj["genres"]?.jsonArray
-                    ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-
-                AnimeResult(
-                    id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@runCatching null,
-                    titleRomaji = titleObj?.get("romaji")?.jsonPrimitive?.contentOrNull ?: "",
-                    titleEnglish = titleObj?.get("english")?.jsonPrimitive?.contentOrNull ?: "",
-                    coverUrl = coverObj?.get("large")?.jsonPrimitive?.contentOrNull ?: "",
-                    synopsis = obj["description"]?.jsonPrimitive?.contentOrNull
-                        ?.replace(Regex("<[^>]*>"), "") // Strip HTML tags
-                        ?: "",
-                    episodeCount = obj["episodes"]?.jsonPrimitive?.intOrNull ?: 0,
-                    nextEpisode = nextEp?.get("episode")?.jsonPrimitive?.intOrNull ?: 0,
-                    nextAiringAt = nextEp?.get("airingAt")?.jsonPrimitive?.longOrNull ?: 0L,
-                    status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "RELEASING",
-                    genres = genres,
-                    sourceName = "AniList"
-                )
-            }.getOrNull()
+            runCatching { element.jsonObject.toAnimeResult() }.getOrNull()
         }
     }
+
+    private fun JsonObject.toAnimeResult(): AnimeResult? {
+        val titleObj = this["title"]?.jsonObject
+        val nextEp = this["nextAiringEpisode"]?.jsonObject
+        val coverObj = this["coverImage"]?.jsonObject
+        val genres = this["genres"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+        return AnimeResult(
+            id = this["id"]?.jsonPrimitive?.contentOrNull ?: return null,
+            titleRomaji = titleObj?.get("romaji")?.jsonPrimitive?.contentOrNull ?: "",
+            titleEnglish = titleObj?.get("english")?.jsonPrimitive?.contentOrNull ?: "",
+            coverUrl = coverObj?.get("large")?.jsonPrimitive?.contentOrNull ?: "",
+            synopsis = this["description"]?.jsonPrimitive?.contentOrNull
+                ?.replace(Regex("<[^>]*>"), "")
+                ?: "",
+            episodeCount = this["episodes"]?.jsonPrimitive?.intOrNull ?: 0,
+            nextEpisode = nextEp?.get("episode")?.jsonPrimitive?.intOrNull ?: 0,
+            nextAiringAt = nextEp?.get("airingAt")?.jsonPrimitive?.longOrNull ?: 0L,
+            status = this["status"]?.jsonPrimitive?.contentOrNull ?: "RELEASING",
+            genres = genres,
+            sourceName = "AniList"
+        )
+    }
+
+    private fun List<JsonObject>.firstRelatedAnimeId(relationType: String): Int? =
+        firstNotNullOfOrNull { edge ->
+            if (edge["relationType"]?.jsonPrimitive?.contentOrNull != relationType) return@firstNotNullOfOrNull null
+            val node = edge["node"]?.jsonObject ?: return@firstNotNullOfOrNull null
+            val type = node["type"]?.jsonPrimitive?.contentOrNull
+            val format = node["format"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (type != "ANIME" || format == "MUSIC") return@firstNotNullOfOrNull null
+            node["id"]?.jsonPrimitive?.intOrNull
+        }
+
+    private data class AniListRelationNode(
+        val media: AnimeResult,
+        val prequelId: Int?,
+        val sequelId: Int?
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -452,93 +554,246 @@ private fun String.animeProviderPriority(): Int {
 class AnimePaheScraper(private val client: HttpClient) {
 
     companion object {
-        private const val BASE_URL = "https://animepahe.pw"
-        private const val API_URL = "$BASE_URL/api"
-        private val BROWSER_HEADERS = mapOf(
+        private val BASE_URL_CANDIDATES = listOf(
+            "https://animepahe.ch",
+            "https://animepahe.ng",
+            "https://animepahe.com",
+            "https://animepahe.pw",
+            "https://animepahe.org"
+        )
+        private val BASE_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,application/json",
-            "Accept-Language" to "en-US,en;q=0.9",
-            "Referer" to BASE_URL
+            "Accept-Language" to "en-US,en;q=0.9"
         )
     }
 
+    private var cachedBaseUrl: String? = null
+
     suspend fun fetchEpisodes(animeTitleQuery: String): List<AnimeEpisode> {
-        return runCatching {
-            val searchResponse: String = client.get(API_URL) {
-                parameter("m", "search")
-                parameter("q", animeTitleQuery)
-                BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
-            }.body()
-            if (searchResponse.isBlockedOrErrorPage()) return@runCatching emptyList()
-
-            val searchJson = json.parseToJsonElement(searchResponse).jsonObject
-            val first = searchJson["data"]?.jsonArray?.firstOrNull()?.jsonObject
-                ?: return@runCatching emptyList()
-            val session = first["session"]?.jsonPrimitive?.contentOrNull
-                ?: first["id"]?.jsonPrimitive?.contentOrNull
-                ?: return@runCatching emptyList()
-
-            val episodes = mutableListOf<AnimeEpisode>()
-            var page = 1
-            var lastPage = 1
-            do {
-                val releaseResponse: String = client.get(API_URL) {
-                    parameter("m", "release")
-                    parameter("id", session)
-                    parameter("sort", "episode_asc")
-                    parameter("page", page)
-                    BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
-                }.body()
-                if (releaseResponse.isBlockedOrErrorPage()) break
-
-                val releaseJson = json.parseToJsonElement(releaseResponse).jsonObject
-                lastPage = releaseJson["last_page"]?.jsonPrimitive?.intOrNull
-                    ?: releaseJson["lastPage"]?.jsonPrimitive?.intOrNull
-                    ?: lastPage
-                val data = releaseJson["data"]?.jsonArray ?: break
-                data.forEachIndexed { index, item ->
-                    val obj = item.jsonObject
-                    val episodeNumber = obj["episode"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toInt()
-                        ?: (episodes.size + index + 1)
-                    val episodeSession = obj["session"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                    if (episodeSession.isNotBlank()) {
-                        episodes.add(
-                            AnimeEpisode(
-                                episodeNumber = episodeNumber,
-                                title = "Episode $episodeNumber",
-                                url = "$BASE_URL/play/$session/$episodeSession"
-                            )
-                        )
-                    }
-                }
-                page++
-            } while (page <= lastPage && page <= 20)
-
-            episodes.distinctBy { it.url }.sortedByDescending { it.episodeNumber }
-        }.getOrElse { e ->
-            println("[AnimePahe] Episode fetch failed: ${e.message}")
-            emptyList()
+        for (baseUrl in candidateBaseUrls()) {
+            val episodes = runCatching {
+                fetchEpisodesFromBase(baseUrl, animeTitleQuery)
+            }.getOrElse { e ->
+                println("[AnimePahe] Episode fetch failed on $baseUrl: ${e.message}")
+                emptyList()
+            }
+            if (episodes.isNotEmpty()) {
+                cachedBaseUrl = baseUrl
+                return episodes
+            }
         }
+        return emptyList()
     }
 
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
-        return runCatching {
-            val html: String = client.get(episodePageUrl) {
-                BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
-            }.body()
-            if (html.isBlockedOrErrorPage()) return@runCatching null
-            val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
-            val mp4Regex = Regex("""https?://[^\s"']+\.mp4[^\s"']*""")
-            m3u8Regex.find(html)?.value
-                ?: mp4Regex.find(html)?.value
-        }.getOrNull()
+        for (baseUrl in candidateBaseUrls(episodePageUrl.originOrNull())) {
+            val stream = runCatching {
+                val effectiveUrl = rewriteUrlOrigin(episodePageUrl, baseUrl)
+                val html: String = client.get(effectiveUrl) {
+                    browserHeaders(baseUrl).forEach { (k, v) -> header(k, v) }
+                }.body()
+                if (html.isBlockedOrErrorPage()) return@runCatching null
+                extractDirectAnimePaheMediaUrl(html)
+            }.getOrNull()
+            if (stream != null) {
+                cachedBaseUrl = baseUrl
+                return stream
+            }
+        }
+        return null
     }
+
+    private suspend fun fetchEpisodesFromBase(baseUrl: String, animeTitleQuery: String): List<AnimeEpisode> {
+        val apiUrl = "$baseUrl/api"
+        val searchResponse: String = client.get(apiUrl) {
+            parameter("m", "search")
+            parameter("q", animeTitleQuery)
+            browserHeaders(baseUrl).forEach { (k, v) -> header(k, v) }
+        }.body()
+        if (searchResponse.isBlockedOrErrorPage()) return emptyList()
+
+        val searchJson = json.parseToJsonElement(searchResponse).jsonObject
+        val first = searchJson["data"]?.jsonArray?.firstOrNull()?.jsonObject
+            ?: return emptyList()
+        val session = first["session"]?.jsonPrimitive?.contentOrNull
+            ?: first["id"]?.jsonPrimitive?.contentOrNull
+            ?: return emptyList()
+
+        val episodes = mutableListOf<AnimeEpisode>()
+        var page = 1
+        var lastPage = 1
+        do {
+            val releaseResponse: String = client.get(apiUrl) {
+                parameter("m", "release")
+                parameter("id", session)
+                parameter("sort", "episode_asc")
+                parameter("page", page)
+                browserHeaders(baseUrl).forEach { (k, v) -> header(k, v) }
+            }.body()
+            if (releaseResponse.isBlockedOrErrorPage()) break
+
+            val releaseJson = json.parseToJsonElement(releaseResponse).jsonObject
+            lastPage = releaseJson["last_page"]?.jsonPrimitive?.intOrNull
+                ?: releaseJson["lastPage"]?.jsonPrimitive?.intOrNull
+                ?: lastPage
+            val data = releaseJson["data"]?.jsonArray ?: break
+            data.forEachIndexed { index, item ->
+                val obj = item.jsonObject
+                val episodeNumber = obj["episode"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toInt()
+                    ?: (episodes.size + index + 1)
+                val episodeSession = obj["session"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (episodeSession.isNotBlank()) {
+                    episodes.add(
+                        AnimeEpisode(
+                            episodeNumber = episodeNumber,
+                            title = "Episode $episodeNumber",
+                            url = "$baseUrl/play/$session/$episodeSession"
+                        )
+                    )
+                }
+            }
+            page++
+        } while (page <= lastPage && page <= 20)
+
+        return episodes.distinctBy { it.url }.sortedByDescending { it.episodeNumber }
+    }
+
+    private fun candidateBaseUrls(preferred: String? = null): List<String> =
+        buildList {
+            if (!preferred.isNullOrBlank()) add(preferred)
+            cachedBaseUrl?.let { add(it) }
+            addAll(BASE_URL_CANDIDATES)
+        }.distinct()
+
+    private fun browserHeaders(baseUrl: String): Map<String, String> =
+        BASE_HEADERS + ("Referer" to baseUrl)
+
+    private fun extractDirectAnimePaheMediaUrl(html: String): String? {
+        val cleaned = html
+            .replace("\\/", "/")
+            .replace("&amp;", "&")
+            .decodeHtmlEntitiesLite()
+        val patterns = listOf(
+            Regex("""https?://[^\s"'<>]+\.m3u8[^\s"'<>]*""", RegexOption.IGNORE_CASE),
+            Regex("""https?://[^\s"'<>]+\.mp4[^\s"'<>]*""", RegexOption.IGNORE_CASE),
+            Regex("""["'](?:file|src|url)["']\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE),
+            Regex("""(?:file|src|url)\s*=\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE)
+        )
+        return patterns.firstNotNullOfOrNull { pattern ->
+            pattern.find(cleaned)?.let { match ->
+                match.groupValues.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: match.value.trim('"', '\'')
+            }
+        }?.decodeHtmlEntitiesLite()
+    }
+}
+
+class ConsumetAnimeScraper(private val client: HttpClient) {
+    companion object {
+        private const val MARKER_PREFIX = "consumet://"
+
+        fun isConsumetEpisodeUrl(url: String): Boolean =
+            url.startsWith(MARKER_PREFIX, ignoreCase = true)
+    }
+
+    suspend fun fetchEpisodes(
+        provider: String,
+        animeTitleQuery: String,
+        alternateQueries: List<String> = emptyList(),
+        maxEpisodes: Int = 300
+    ): List<AnimeEpisode> {
+        val queries = (listOf(animeTitleQuery) + alternateQueries)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+
+        for (query in queries) {
+            val episodes = runCatching {
+                val raw: String = client.get("${AppReleaseConfig.API_BASE_URL}/content/anime/episodes") {
+                    parameter("provider", provider)
+                    parameter("q", query)
+                    parameter("limit", maxEpisodes.coerceAtLeast(1))
+                }.body()
+                val root = json.parseToJsonElement(raw).jsonObject
+                val data = root["data"]?.jsonObject ?: return@runCatching emptyList()
+                data["episodes"]
+                    ?.jsonArray
+                    .orEmpty()
+                    .mapNotNull { element ->
+                        val item = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+                        val number = item["episodeNumber"]?.jsonPrimitive?.intOrNull
+                            ?: item["number"]?.jsonPrimitive?.intOrNull
+                            ?: 0
+                        val url = item["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        if (url.isBlank()) return@mapNotNull null
+                        AnimeEpisode(
+                            episodeNumber = number,
+                            title = item["title"]?.jsonPrimitive?.contentOrNull
+                                ?.takeIf { it.isNotBlank() }
+                                ?: "Episode ${number.takeIf { it > 0 } ?: ""}".trim(),
+                            url = url,
+                            thumbnail = item["thumbnail"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        )
+                    }
+                    .distinctBy { it.url }
+                    .sortedByDescending { it.episodeNumber }
+            }.getOrElse { error ->
+                println("[Consumet:$provider] Episode fetch failed for '$query': ${error.message}")
+                emptyList()
+            }
+            if (episodes.isNotEmpty()) return episodes
+        }
+        return emptyList()
+    }
+
+    suspend fun extractStreamUrl(episodePageUrl: String): String? {
+        val ref = parseEpisodeRef(episodePageUrl) ?: return null
+        return runCatching {
+            val raw: String = client.get("${AppReleaseConfig.API_BASE_URL}/content/anime/stream") {
+                parameter("provider", ref.provider)
+                parameter("episodeId", ref.episodeId)
+            }.body()
+            val root = json.parseToJsonElement(raw).jsonObject
+            val data = root["data"]?.jsonObject ?: return@runCatching null
+            val route = data["route"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val streamUrl = data["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            streamUrl.takeIf {
+                route.equals("direct", ignoreCase = true) && it.isDirectAnimeMediaUrl()
+            }
+        }.getOrElse { error ->
+            println("[Consumet:${ref.provider}] Stream extraction failed: ${error.message}")
+            null
+        }
+    }
+
+    private fun parseEpisodeRef(url: String): ConsumetEpisodeRef? {
+        if (!isConsumetEpisodeUrl(url)) return null
+        val rest = url.removePrefix(MARKER_PREFIX)
+        val provider = rest.substringBefore("/").trim()
+        val encodedEpisodeId = rest.substringAfter("/", "").trim()
+        if (provider.isBlank() || encodedEpisodeId.isBlank()) return null
+        return ConsumetEpisodeRef(
+            provider = provider,
+            episodeId = encodedEpisodeId.decodeURLQueryComponent()
+        )
+    }
+
+    private data class ConsumetEpisodeRef(
+        val provider: String,
+        val episodeId: String
+    )
 }
 
 private fun toAbsoluteAnimeUrl(baseUrl: String, href: String): String {
     if (href.startsWith("http://") || href.startsWith("https://")) return href
     return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
 }
+
+private fun String.originOrNull(): String? =
+    runCatching {
+        val url = Url(this)
+        "${url.protocol.name}://${url.host}"
+    }.getOrNull()
 
 private fun animeTitleMatchScore(query: String, title: String): Int {
     val q = query.normalizedAnimeTitle()
@@ -583,7 +838,11 @@ private fun String.slugifyAnimeTitle(): String =
 
 private fun String.isDirectAnimeMediaUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
-    return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") || clean.endsWith(".webm")
+    return clean.endsWith(".m3u8") ||
+        clean.endsWith(".mp4") ||
+        clean.endsWith(".mpd") ||
+        clean.endsWith(".webm") ||
+        Regex("""/(playlist|manifest|hls|dash)(/|$)""").containsMatchIn(clean)
 }
 
 private fun String.isNonPlayableAnimeProviderUrl(): Boolean {

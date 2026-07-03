@@ -79,6 +79,7 @@ class NovelSearchRepository(
     internal val aniListSource = AniListSource(httpClient)
     internal val aninekoScraper = AninekoScraper(httpClient)
     internal val animePaheScraper = AnimePaheScraper(httpClient)
+    internal val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
     internal val tmdbSource = TmdbSource(
         client = httpClient,
         readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
@@ -436,7 +437,8 @@ class NovelSearchRepository(
         provider: String,
         animeTitleQuery: String,
         episodeCount: Int = 0,
-        alternateQueries: List<String> = emptyList()
+        alternateQueries: List<String> = emptyList(),
+        preferredAninekoSlug: String? = null
     ): List<AnimeEpisode> {
         val normalizedProvider = provider.lowercase()
         if (normalizedProvider == "auto") {
@@ -449,6 +451,11 @@ class NovelSearchRepository(
         val maxEpisodes = episodeCount.takeIf { it > 0 } ?: 300
         return when (normalizedProvider) {
             "anineko" -> {
+                preferredAninekoSlug?.takeIf { it.isNotBlank() }?.let { slug ->
+                    aninekoScraper.fetchEpisodesBySlug(slug, maxEpisodes)
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { return it }
+                }
                 val normalizedAnimeTitle = animeTitleQuery.normalizedAnimeSearchTitle()
                 val knownSlug = knownAnimeSlugOverrides[normalizedAnimeTitle]
                     ?: knownAnimeSlugOverrides.entries.firstOrNull { (k, _) ->
@@ -480,11 +487,43 @@ class NovelSearchRepository(
                     .sortedByDescending { it.episodeNumber }
                     .takeIf { it.isNotEmpty() }
             }.orEmpty()
+            "hianime", "animekai", "kickassanime", "animesaturn", "animeunity", "animesama", "consumetpahe", "zoro" ->
+                consumetAnimeScraper.fetchEpisodes(
+                    provider = normalizedProvider,
+                    animeTitleQuery = queries.firstOrNull() ?: animeTitleQuery,
+                    alternateQueries = queries.drop(1),
+                    maxEpisodes = maxEpisodes
+                )
             else -> fetchEpisodes(animeTitleQuery, episodeCount, alternateQueries)
         }
     }
 
+    suspend fun fetchAnimeSeasonChoices(anime: AnimeResult): List<AnimeSeasonChoice> {
+        val chain = aniListSource.fetchSeasonChain(anime.id)
+            .takeIf { it.isNotEmpty() }
+            ?: listOf(anime)
+        val choices = chain.mapIndexed { index, item ->
+            val title = item.displayTitle
+            AnimeSeasonChoice(
+                id = item.id,
+                label = title.animeSeasonLabel(index),
+                title = title,
+                titleEnglish = item.titleEnglish,
+                titleRomaji = item.titleRomaji,
+                episodeCount = item.episodeCount,
+                aninekoSlug = item.bestKnownAninekoSlug()
+            )
+        }
+        return choices
+            .distinctBy { it.id }
+            .ifEmpty { listOf(anime.toCurrentSeasonChoice()) }
+    }
+
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
+        if (ConsumetAnimeScraper.isConsumetEpisodeUrl(episodePageUrl)) {
+            return consumetAnimeScraper.extractStreamUrl(episodePageUrl)
+                ?.takeIf { it.isDirectPlayableAnimeStream() }
+        }
         val extracted = if (episodePageUrl.contains("animepahe", ignoreCase = true)) {
             animePaheScraper.extractStreamUrl(episodePageUrl)
                 ?: aninekoScraper.extractStreamUrl(episodePageUrl)
@@ -527,6 +566,7 @@ private fun String.isDirectPlayableAnimeStream(): Boolean {
         clean.endsWith(".mp4") ||
         clean.endsWith(".mpd") ||
         clean.endsWith(".webm") ||
+        Regex("""/(playlist|manifest|hls|dash)(/|$)""").containsMatchIn(clean) ||
         startsWith("file:", ignoreCase = true)
 }
 
@@ -940,11 +980,27 @@ private val knownAnimeSlugOverrides = mapOf(
     "dragon ball" to "dragon-ball",
     "dragon ball z" to "dragon-ball-z",
     "dragon ball super" to "dragon-ball-super",
+    "jujutsu kaisen 2nd season" to "jujutsu-kaisen-2nd-season",
+    "jujutsu kaisen season 2" to "jujutsu-kaisen-2nd-season",
+    "jujutsu kaisen 0 movie" to "jujutsu-kaisen-0-movie",
     "my hero academia" to "boku-no-hero-academia",
     "boku no hero academia" to "boku-no-hero-academia",
-    "solo leveling" to "ore-dake-level-up-na-ken",
+    "my hero academia 2" to "my-hero-academia-2",
+    "my hero academia 3" to "my-hero-academia-3",
+    "my hero academia 4" to "my-hero-academia-4",
+    "my hero academia 5" to "my-hero-academia-5",
+    "my hero academia 6" to "my-hero-academia-6",
+    "my hero academia 7" to "my-hero-academia-7",
+    "my hero academia final season" to "my-hero-academia-final-season",
+    "solo leveling season 2 arise from the shadow" to "solo-leveling-season-2-arise-from-the-shadow",
+    "solo leveling 2nd season" to "solo-leveling-season-2-arise-from-the-shadow",
+    "solo leveling" to "solo-leveling",
     "jujutsu kaisen" to "jujutsu-kaisen-tv",
-    "one piece" to "one-piece"
+    "one piece" to "one-piece",
+    "re zero" to "rezero-starting-life-in-another-world",
+    "rezero" to "rezero-starting-life-in-another-world",
+    "re zero starting life in another world" to "rezero-starting-life-in-another-world",
+    "liar game" to "liar-game"
 )
 
 private fun String.normalizedAnimeSearchTitle(): String =
@@ -959,3 +1015,35 @@ private fun String.removeAnimeSeasonSuffix(): String =
         .replace(Regex("""\b(season\s+\d+|\d+(st|nd|rd|th)\s+season|s\d+|part\s+\d+|cour\s+\d+|movie|special|ova|ona|recap|dub|sub)\b"""), "")
         .replace(Regex("""\s+"""), " ")
         .trim()
+
+private fun AnimeResult.toCurrentSeasonChoice(): AnimeSeasonChoice =
+    AnimeSeasonChoice(
+        id = id,
+        label = displayTitle.animeSeasonLabel(0),
+        title = displayTitle,
+        titleEnglish = titleEnglish,
+        titleRomaji = titleRomaji,
+        episodeCount = episodeCount,
+        aninekoSlug = bestKnownAninekoSlug()
+    )
+
+private fun AnimeResult.bestKnownAninekoSlug(): String? =
+    listOf(displayTitle, titleEnglish, titleRomaji)
+        .map { it.normalizedAnimeSearchTitle() }
+        .firstNotNullOfOrNull { title ->
+            knownAnimeSlugOverrides[title]
+                ?: knownAnimeSlugOverrides.entries.firstOrNull { (key, _) ->
+                    title.contains(key) || key.contains(title)
+                }?.value
+        }
+
+private fun String.animeSeasonLabel(index: Int): String {
+    val normalized = normalizedAnimeSearchTitle()
+    Regex("""\bseason\s+(\d+)\b""").find(normalized)?.groupValues?.getOrNull(1)?.let { return "Season $it" }
+    Regex("""\b(\d+)(?:st|nd|rd|th)\s+season\b""").find(normalized)?.groupValues?.getOrNull(1)?.let { return "Season $it" }
+    Regex("""\bpart\s+(\d+)\b""").find(normalized)?.groupValues?.getOrNull(1)?.let { return "Part $it" }
+    if ("final season" in normalized) return "Final"
+    if ("movie" in normalized) return "Movie"
+    if ("special" in normalized || "ova" in normalized || "ona" in normalized) return "Specials"
+    return "Season ${index + 1}"
+}

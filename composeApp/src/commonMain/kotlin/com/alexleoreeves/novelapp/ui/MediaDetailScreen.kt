@@ -30,8 +30,17 @@ import com.alexleoreeves.novelapp.ui.theme.subTextColor
 import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
 import com.alexleoreeves.novelapp.ui.theme.accentColor
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.platformHttpClient
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.math.ceil
 
 @Composable
@@ -63,28 +72,23 @@ fun MediaDetailScreen(
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
-    val embedServerNames = listOf("VidLink Pro", "AutoEmbed", "VidSrc.me", "EmbedSu", "VidSrc.cc", "2Embed")
+    val embedServerNames = listOf("Web fallback: VidLink", "Web fallback: AutoEmbed", "Web fallback: VidSrc.me", "Web fallback: EmbedSu", "Web fallback: VidSrc.cc", "Web fallback: 2Embed")
     val embedServerKeys = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
-    val sourceServerOffset = if (isTmdbDetail) 0 else 1
-    val serverNames = if (isTmdbDetail) {
-        embedServerNames
-    } else {
-        listOf("Source stream") + embedServerNames
-    }
+    val serverNames = listOf("Direct first") + embedServerNames
     val freeMoviePreviewMs = 20 * 60 * 1000L
     val freeEpisodeCount = remember(episodesList, isPremium) {
         if (isPremium || episodesList.isEmpty()) episodesList.size
         else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
     }
 
-    fun resolveProviderStream(
+    fun resolveWebFallbackStream(
         type: String,
         id: String,
         season: String = "1",
         episode: String = "1",
         server: Int
     ): String? {
-        val provider = embedServerKeys.getOrElse(server.coerceAtLeast(0)) { embedServerKeys.first() }
+        val provider = embedServerKeys.getOrElse((server - 1).coerceAtLeast(0)) { embedServerKeys.first() }
         if (id.isBlank()) {
             statusText = "Provider match unavailable for this title."
             return null
@@ -111,6 +115,35 @@ fun MediaDetailScreen(
                 else -> "https://vidlink.pro/tv/$id/$season/$episode"
             }
         }
+    }
+
+    suspend fun resolvePlayableRoute(
+        type: String,
+        id: String,
+        season: String = "1",
+        episode: String = "1"
+    ): String? {
+        if (id.isBlank()) {
+            statusText = "Provider match unavailable for this title."
+            return null
+        }
+        val direct = resolveBackendMediaStream(httpClient, type, id, season, episode)
+        if (direct?.isDirect == true) {
+            statusText = ""
+            return direct.url
+        }
+        val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
+        if (fallback != null) {
+            val selected = serverNames.getOrNull(selectedServer).orEmpty()
+            statusText = if (selectedServer == 0) {
+                "Direct stream unavailable; opening Web fallback: VidLink."
+            } else {
+                "Direct stream unavailable; opening $selected."
+            }
+            return fallback
+        }
+        statusText = direct?.message ?: "No playable provider was available for this title."
+        return null
     }
 
     LaunchedEffect(item.detailPageUrl) {
@@ -169,51 +202,40 @@ fun MediaDetailScreen(
                     val tvId = urlParts.getOrNull(1) ?: tmdbId
                     val s = urlParts.getOrNull(2) ?: "1"
                     val e = urlParts.getOrNull(3) ?: "1"
-                    resolveProviderStream("tv", tvId, s, e, selectedServer) ?: return@launch
+                    resolvePlayableRoute("tv", tvId, s, e) ?: return@launch
                 }
                 isDramaCoolDetail -> {
-                    when {
-                        selectedServer == 0 -> {
-                            val extracted = dramaScraper.extractStreamUrl(ep.url)
-                            extracted ?: ep.url
+                    if (providerTmdbId.isNotBlank()) {
+                        if (providerTmdbType == "movie") {
+                            resolvePlayableRoute("movie", providerTmdbId) ?: return@launch
+                        } else {
+                            resolvePlayableRoute("tv", providerTmdbId, "1", ep.episodeNumber.coerceAtLeast(1).toString()) ?: return@launch
                         }
-                        providerTmdbId.isNotBlank() -> {
-                            val providerIndex = selectedServer - sourceServerOffset
-                            if (providerTmdbType == "movie") {
-                                resolveProviderStream("movie", providerTmdbId, server = providerIndex) ?: return@launch
-                            } else {
-                                resolveProviderStream("tv", providerTmdbId, "1", ep.episodeNumber.coerceAtLeast(1).toString(), providerIndex) ?: return@launch
-                            }
-                        }
-                        else -> {
-                            statusText = "Provider match unavailable for this title."
-                            return@launch
+                    } else {
+                        val extracted = dramaScraper.extractStreamUrl(ep.url)
+                            ?.takeIf { it.isDirectPlayableStreamUrl() }
+                        extracted ?: ep.url.also {
+                            statusText = "Direct stream unavailable; opening source web fallback."
                         }
                     }
                 }
                 isKimCartoonDetail -> {
-                    when {
-                        selectedServer == 0 -> {
-                            val extracted = cartoonScraper.extractStreamUrl(ep.url)
-                            extracted ?: ep.url
+                    if (providerTmdbId.isNotBlank()) {
+                        if (providerTmdbType == "movie") {
+                            resolvePlayableRoute("movie", providerTmdbId) ?: return@launch
+                        } else {
+                            resolvePlayableRoute("tv", providerTmdbId, "1", ep.episodeNumber.coerceAtLeast(1).toString()) ?: return@launch
                         }
-                        providerTmdbId.isNotBlank() -> {
-                            val providerIndex = selectedServer - sourceServerOffset
-                            if (providerTmdbType == "movie") {
-                                resolveProviderStream("movie", providerTmdbId, server = providerIndex) ?: return@launch
-                            } else {
-                                resolveProviderStream("tv", providerTmdbId, "1", ep.episodeNumber.coerceAtLeast(1).toString(), providerIndex) ?: return@launch
-                            }
-                        }
-                        else -> {
-                            statusText = "Provider match unavailable for this title."
-                            return@launch
+                    } else {
+                        val extracted = cartoonScraper.extractStreamUrl(ep.url)
+                            ?.takeIf { it.isDirectPlayableStreamUrl() }
+                        extracted ?: ep.url.also {
+                            statusText = "Direct stream unavailable; opening source web fallback."
                         }
                     }
                 }
                 else -> ep.url
             }
-            statusText = ""
             onPlayStream(playUrl, "${item.title} - ${ep.title}", null)
         }
     }
@@ -359,7 +381,7 @@ fun MediaDetailScreen(
                     onClick = {
                         scope.launch {
                             statusText = "Resolving ${serverNames.getOrNull(selectedServer) ?: "server"}..."
-                            val playUrl = resolveProviderStream("movie", tmdbId, server = selectedServer)
+                            val playUrl = resolvePlayableRoute("movie", tmdbId)
                                 ?: return@launch
                             onPlayStream(playUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
                         }
@@ -384,7 +406,7 @@ fun MediaDetailScreen(
                     }
                 }
             }
- else {
+            else {
                 // TV / Episodic: List of episodes
                 Text(
                     text = "Episodes",
@@ -469,11 +491,51 @@ private fun String.normalizedMediaTitle(): String =
         .replace(Regex("[^a-z0-9]+"), " ")
         .trim()
 
+private val mediaRouteJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+}
+
+private data class BackendMediaRoute(
+    val url: String = "",
+    val route: String = "",
+    val provider: String = "",
+    val message: String = ""
+) {
+    val isDirect: Boolean
+        get() = route.equals("direct", ignoreCase = true) && url.isDirectPlayableStreamUrl()
+}
+
+private suspend fun resolveBackendMediaStream(
+    client: HttpClient,
+    type: String,
+    id: String,
+    season: String = "1",
+    episode: String = "1"
+): BackendMediaRoute? = runCatching {
+    val raw = client.get("${AppReleaseConfig.API_BASE_URL}/content/stream") {
+        parameter("type", if (type == "movie") "movie" else "tv")
+        parameter("id", id)
+        parameter("season", season)
+        parameter("episode", episode)
+        parameter("provider", "all")
+    }.bodyAsText()
+    val root = mediaRouteJson.parseToJsonElement(raw).jsonObject
+    val data = root["data"]?.jsonObject ?: root
+    BackendMediaRoute(
+        url = data["url"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        route = data["route"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        provider = data["provider"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        message = data["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    )
+}.getOrNull()
+
 private fun String.isDirectPlayableStreamUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
     return clean.endsWith(".m3u8") ||
         clean.endsWith(".mp4") ||
         clean.endsWith(".mpd") ||
         clean.endsWith(".webm") ||
+        Regex("""/(playlist|manifest|hls|dash)(/|$)""").containsMatchIn(clean) ||
         startsWith("file:", ignoreCase = true)
 }
