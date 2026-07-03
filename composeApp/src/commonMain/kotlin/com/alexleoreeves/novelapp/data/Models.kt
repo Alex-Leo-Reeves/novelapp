@@ -136,3 +136,22 @@ data class AnimeEpisode(
     val url: String,       // Anineko/AnimePahe page URL to scrape stream from
     val thumbnail: String = ""
 )
+
+data class AnimeSeasonChoice(
+    val id: String,
+    val label: String,
+    val title: String,
+    val titleEnglish: String = "",
+    val titleRomaji: String = "",
+    val episodeCount: Int = 0,
+    val aninekoSlug: String? = null
+) {
+    val displayTitle: String
+        get() = title.ifBlank { titleEnglish.ifBlank { titleRomaji } }
+
+    val searchQueries: List<String>
+        get() = listOf(displayTitle, titleEnglish, titleRomaji)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+}

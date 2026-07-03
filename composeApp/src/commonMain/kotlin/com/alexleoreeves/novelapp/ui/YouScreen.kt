@@ -54,6 +54,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.AppTheme
 import com.alexleoreeves.novelapp.data.AppUpdateManifest
+import com.alexleoreeves.novelapp.data.AuthApi
+import com.alexleoreeves.novelapp.data.BillingPlan
+import com.alexleoreeves.novelapp.data.BillingStatus
 import com.alexleoreeves.novelapp.data.LocalDownloadRepository
 import com.alexleoreeves.novelapp.data.ReadHistoryItem
 import com.alexleoreeves.novelapp.data.WatchHistoryItem
@@ -93,6 +96,7 @@ fun YouScreen(
     onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
     onResumeRead: (ReadHistoryItem) -> Unit,
     onResumeWatch: (WatchHistoryItem) -> Unit,
+    onSubscribePlan: (String) -> Unit,
     onSignOut: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -105,6 +109,9 @@ fun YouScreen(
     }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
     var showDownloads by remember { mutableStateOf(false) }
+    val authApi = remember { AuthApi() }
+    var billingStatus by remember(account.authToken) { mutableStateOf<BillingStatus?>(null) }
+    var billingMessage by remember(account.authToken) { mutableStateOf("") }
 
     suspend fun checkForUpdates() {
         updateState = UpdateState.Checking
@@ -122,6 +129,15 @@ fun YouScreen(
 
     LaunchedEffect(Unit) {
         checkForUpdates()
+    }
+
+    LaunchedEffect(account.authToken) {
+        runCatching { authApi.billingStatus(account.authToken) }
+            .onSuccess {
+                billingStatus = it
+                billingMessage = ""
+            }
+            .onFailure { billingMessage = it.message ?: "Subscription details unavailable." }
     }
 
     DisposableEffect(Unit) {
@@ -177,6 +193,15 @@ fun YouScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             ProfileCard(account = account, currentTheme = currentTheme)
+
+            SectionTitle("Subscription", currentTheme)
+            SubscriptionCard(
+                account = account,
+                billingStatus = billingStatus,
+                message = billingMessage,
+                currentTheme = currentTheme,
+                onSubscribePlan = onSubscribePlan
+            )
 
             SectionTitle("Downloads", currentTheme)
             DownloadsEntryCard(
@@ -480,6 +505,127 @@ private fun ProfileCard(account: SavedUserAccount, currentTheme: AppTheme) {
         }
     }
 }
+
+@Composable
+private fun SubscriptionCard(
+    account: SavedUserAccount,
+    billingStatus: BillingStatus?,
+    message: String,
+    currentTheme: AppTheme,
+    onSubscribePlan: (String) -> Unit
+) {
+    val plan = billingStatus?.currentPlan ?: account.plan
+    val isPremium = billingStatus?.premium ?: account.isPremium
+    val maxDevices = billingStatus?.maxDevices ?: account.maxDevices
+    val plans = billingStatus?.plans.orEmpty().ifEmpty {
+        listOf(
+            BillingPlan(
+                id = "premium_3_devices",
+                label = "Premium 3 devices",
+                amount = 1000,
+                maxDevices = 3,
+                description = "Full movies, cartoons, K-drama, and up to 3 signed-in devices."
+            ),
+            BillingPlan(
+                id = "premium_unlimited",
+                label = "Premium unlimited",
+                amount = 4000,
+                maxDevices = null,
+                description = "Full access and unlimited signed-in devices."
+            )
+        )
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (isPremium) "Premium active" else "Free account",
+                        color = currentTheme.textColor(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Plan: ${plan.readablePlanName()}",
+                        color = currentTheme.subTextColor(),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Surface(
+                    color = currentTheme.accentColor().copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(
+                        maxDevices?.let { "$it devices" } ?: "Unlimited",
+                        color = currentTheme.accentColor(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Text(
+                "Free accounts can stay signed in on 2 devices. Paid plans unlock full movies, cartoons, and K-drama.",
+                color = currentTheme.subTextColor(),
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            if (message.isNotBlank()) {
+                Text(
+                    message,
+                    color = currentTheme.accentColor(),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+
+            plans.forEach { paidPlan ->
+                val active = isPremium && plan == paidPlan.id
+                val label = "${paidPlan.label} · ₦${paidPlan.amount}/month"
+                if (active) {
+                    OutlinedButton(
+                        onClick = {},
+                        enabled = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("$label active")
+                    }
+                } else {
+                    Button(
+                        onClick = { onSubscribePlan(paidPlan.id) },
+                        colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(label, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun String.readablePlanName(): String =
+    when (this) {
+        "premium", "premium_3_devices" -> "Premium 3 devices"
+        "premium_unlimited" -> "Premium unlimited"
+        else -> "Free"
+    }
 
 @Composable
 private fun SectionTitle(text: String, currentTheme: AppTheme) {

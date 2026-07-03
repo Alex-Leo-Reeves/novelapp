@@ -413,32 +413,53 @@ fun NovelDetailScreen(
                                             if (novel.isManga) {
                                                 val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
                                                 if (pages.isNotEmpty()) {
-                                                    downloadRepo.addChapter(
-                                                        DownloadedChapter(
-                                                            parentId = novel.id,
-                                                            chapterNumber = chapter.chapterNumber,
-                                                            chapterTitle = chapter.title,
-                                                            localFilePath = pages.joinToString(","),
-                                                            pageCount = pages.size
-                                                        )
+                                                    val localPages = cacheMangaChapterPages(
+                                                        chapterKey = "${novel.sourceName}:${novel.id}:${chapter.chapterNumber}:${chapter.url}",
+                                                        pageUrls = pages,
+                                                        persistent = true,
+                                                        onProgress = { _, _ -> }
                                                     )
+                                                    val offlinePages = localPages.filter { isDownloadedLocalFileAvailable(it) }
+                                                    if (offlinePages.size == pages.size) {
+                                                        downloadRepo.addChapter(
+                                                            DownloadedChapter(
+                                                                parentId = novel.id,
+                                                                chapterNumber = chapter.chapterNumber,
+                                                                chapterTitle = chapter.title,
+                                                                localFilePath = offlinePages.joinToString(","),
+                                                                pageCount = offlinePages.size
+                                                            )
+                                                        )
+                                                    } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                                        downloadRepo.deleteItem(novel.id)
+                                                    }
+                                                } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                                    downloadRepo.deleteItem(novel.id)
                                                 }
                                             } else {
                                                 val text = repository.fetchChapterText(chapter.url, novel.sourceName)
                                                 if (text.isNotEmpty() && !text.startsWith("Failed")) {
                                                     val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
-                                                    downloadRepo.addChapter(
-                                                        DownloadedChapter(
-                                                            parentId = novel.id,
-                                                            chapterNumber = chapter.chapterNumber,
-                                                            chapterTitle = chapter.title,
-                                                            localFilePath = path
+                                                    if (path.isNotBlank() && isDownloadedLocalFileAvailable(path)) {
+                                                        downloadRepo.addChapter(
+                                                            DownloadedChapter(
+                                                                parentId = novel.id,
+                                                                chapterNumber = chapter.chapterNumber,
+                                                                chapterTitle = chapter.title,
+                                                                localFilePath = path
+                                                            )
                                                         )
-                                                    )
+                                                    } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                                        downloadRepo.deleteItem(novel.id)
+                                                    }
+                                                } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                                    downloadRepo.deleteItem(novel.id)
                                                 }
                                             }
                                         } catch (e: Exception) {
-                                            // ignore
+                                            if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                                                downloadRepo.deleteItem(novel.id)
+                                            }
                                         } finally {
                                             downloadingChapters = downloadingChapters - chapter.chapterNumber
                                             refreshTrigger++

@@ -111,6 +111,15 @@ fun ReaderScreen(
         }
     }
 
+    fun scrollToReaderProgress(progress: Float) {
+        if (paragraphs.isEmpty()) return
+        val paragraphIndex = ((paragraphs.size - 1) * progress.coerceIn(0f, 1f)).roundToInt()
+            .coerceIn(0, paragraphs.lastIndex)
+        scope.launch {
+            lazyListState.animateScrollToItem((paragraphIndex + 2).coerceAtMost(paragraphs.size + 1))
+        }
+    }
+
     DisposableEffect(chapterUrl) {
         onDispose {
             sleepDetector.stopMonitoring()
@@ -402,9 +411,14 @@ fun ReaderScreen(
                                     onValueChange = { value ->
                                         isSeekingNarration = true
                                         seekProgress = value
+                                        scrollToReaderProgress(value)
                                     },
                                     onValueChangeFinished = {
-                                        ttsController.seekToProgress(seekProgress)
+                                        if (isPlaying.value || isBuffering.value) {
+                                            ttsController.seekToProgress(seekProgress)
+                                        } else {
+                                            scrollToReaderProgress(seekProgress)
+                                        }
                                         isSeekingNarration = false
                                     },
                                     valueRange = 0f..1f,
@@ -492,9 +506,14 @@ fun ReaderScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     val percent = setupStatus.progressFraction
+                                    val statusMessage = if (isBuffering.value && !setupStatus.shouldShow) {
+                                        "Preparing narration audio."
+                                    } else {
+                                        setupStatus.userMessage.ifBlank { "Preparing voice." }
+                                    }
                                     Text(
                                         text = buildString {
-                                            append(setupStatus.userMessage.ifBlank { "Preparing voice." })
+                                            append(statusMessage)
                                             if (percent != null) {
                                                 append(" ")
                                                 append((percent * 100f).roundToInt())

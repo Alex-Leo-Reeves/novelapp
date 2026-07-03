@@ -63,6 +63,23 @@ actual fun loadDownloadedText(localPath: String): String {
 
 actual fun deleteDownloadedText(localPath: String) {
     runCatching {
-        NSFileManager.defaultManager.removeItemAtPath(localPath, error = null)
+        localPath.split(",")
+            .map { it.trim().removePrefix("file://") }
+            .filter { it.isNotBlank() }
+            .forEach { path ->
+                NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+            }
     }
+}
+
+actual suspend fun saveDownloadedVideo(
+    parentId: String,
+    episodeNumber: Int,
+    sourceUrl: String
+): DownloadedVideoFile =
+    DownloadedVideoFile(error = "Offline video downloads are only available on Android right now.")
+
+actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
+    val path = localPath.removePrefix("file://")
+    return path.isNotBlank() && NSFileManager.defaultManager.fileExistsAtPath(path)
 }

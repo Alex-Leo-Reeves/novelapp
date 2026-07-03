@@ -1,22 +1,19 @@
 {
-  "versionCode": 18,
-  "versionName": "1.17",
+  "versionCode": 21,
+  "versionName": "1.20",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "apkBytes": 162751768,
+  "apkBytes": 162785336,
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Hardened account sync so favorites, reading history, watch history, and recent searches merge across Android and iPhone.",
-    "Bundled the Kokoro ONNX model inside the Android app so first-run narration no longer depends on a fragile model download.",
-    "Kokoro warms the bundled ONNX model in the background and starts narration immediately instead of blocking on first-time setup.",
-    "Chapter and long-text narration no longer waits for a full chapter audio file before the first words play.",
-    "Anime playback keeps Auto, Anineko, AnimePahe, and VidLink Pro available, with Anineko/provider pages opening inside the app when direct stream extraction fails.",
-    "Anime episode lists are de-duplicated and sorted for a cleaner episode order.",
-    "Movie, cartoon, K-drama, and anime playback can open embed/provider players in-app instead of failing when a direct stream is unavailable.",
-    "DramaCool and KimCartoon source servers now fall back to their source episode pages when direct extraction is unavailable.",
-    "Android builds now accept GROQ_CLOUD_API_KEY as a Groq key name so narration cleanup does not fall back to the mock key after the env rename.",
-    "Movie, K-drama, cartoon, and anime feeds now fall back through the Render content API when direct app-side provider calls return empty.",
-    "Anime episode screens fall back to TMDB/VidLink Pro episode metadata when Anineko or AnimePahe cannot fetch an episode list."
+    "Kokoro narration now splits text safely below the 510-token model limit, prebuffers upcoming chunks, and streams generated PCM audio through Android AudioTrack without temp files.",
+    "Kokoro ONNX failures now surface real diagnostics instead of silently dropping back to Android TTS.",
+    "Added account billing plan choices for Premium 3 devices and Premium Unlimited, with active-session device limits enforced on login.",
+    "Movie, cartoon, and K-drama free accounts keep the 20-minute movie preview and 20% episode preview before subscription.",
+    "Offline downloads now save real local anime video/HLS files, manga page files, and novel text into app-private device storage, and the Downloads library hides stale remote-only entries.",
+    "Anime adds Consumet-backed server choices alongside Anineko and AnimePahe, plus season selection for multi-season titles.",
+    "Video players now recognize suffixless playlist/manifest stream URLs as direct media so they do not open as blank web pages.",
+    "New Android installs keep session data out of device restore so Mike’s premium account cannot auto-appear on another phone."
   ],
   "forceUpdate": false,
-  "apkSha256": "ebc721e30c15e18a556d937d2dce15e893d7bcb6fef3e49c7c72be78ca0953d5"
+  "apkSha256": "74eafdf4136bd496b8f3b10889c52456dc721dde58bcf28a54c139d00ffccda2"
 }

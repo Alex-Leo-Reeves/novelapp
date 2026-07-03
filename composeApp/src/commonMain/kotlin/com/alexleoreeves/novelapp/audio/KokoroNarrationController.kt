@@ -16,17 +16,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 private const val MACRO_WORD_TARGET = 200
 private const val NEXT_MACRO_PRELOAD_AT_WORD = 160
-private const val SMOOTH_AUDIO_SEGMENT_THRESHOLD = 2
+private const val PREFETCH_SEGMENT_COUNT = 3
+private const val MAX_SEGMENT_WORDS = 60
+private const val MAX_SEGMENT_CHARS = 360
 
 class KokoroNarrationController(
     initialSettings: KokoroNarrationSettings = KokoroNarrationSettings()
 ) {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val synthesizeMutex = Mutex()
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
@@ -115,10 +120,15 @@ class KokoroNarrationController(
             _lastError.value = "There is no readable text in this chapter."
             return
         }
+        preloadUpcomingSegments(0, count = PREFETCH_SEGMENT_COUNT)
 
         playbackJob = controllerScope.launch {
             val reusableCacheKey = cacheKey?.takeIf { it.isNotBlank() }
-            if (reusableCacheKey != null && existingNarrationAudioCachePath(reusableCacheKey, persistAudioCache) != null) {
+            if (
+                persistAudioCache &&
+                reusableCacheKey != null &&
+                existingNarrationAudioCachePath(reusableCacheKey, persistent = true) != null
+            ) {
                 playCachedChapterAudio(reusableCacheKey, persistAudioCache)
             } else {
                 playFromSegment(0)
@@ -147,6 +157,7 @@ class KokoroNarrationController(
         ensurePlan(text, resetCursor = true)
         if (segments.isNotEmpty()) {
             _isBuffering.value = true
+            preloadUpcomingSegments(0, count = 2)
             runCatching { prepareSegment(0).await() }
                 .onFailure { _lastError.value = it.message ?: "Voice preparation failed." }
             _isBuffering.value = false
@@ -272,8 +283,8 @@ class KokoroNarrationController(
     private suspend fun playFromSegment(startIndex: Int) {
         _isPlaying.value = true
         syncBackgroundService()
+        preloadUpcomingSegments(startIndex, count = PREFETCH_SEGMENT_COUNT)
         try {
-            preloadUpcomingSegments(startIndex)
             for (index in startIndex until segments.size) {
                 if (!currentCoroutineContext().isActive || isPaused) break
                 val segment = segments[index]
@@ -284,11 +295,6 @@ class KokoroNarrationController(
                 _currentWordIndex.value = segment.wordStartIndex
                 _currentSegment.value = segment
                 _playbackProgress.value = index.toProgressFraction()
-
-                if (segment.wordEndInMacro >= NEXT_MACRO_PRELOAD_AT_WORD) {
-                    preloadMacro(segment.macroIndex + 1)
-                }
-                preloadUpcomingSegments(index + 1)
 
                 val request = segment.toRequest(_settings.value)
                 val audio = try {
@@ -306,6 +312,11 @@ class KokoroNarrationController(
                 if (!currentCoroutineContext().isActive || isPaused) break
 
                 _lastError.value = null
+                if (segment.wordEndInMacro >= NEXT_MACRO_PRELOAD_AT_WORD) {
+                    preloadMacro(segment.macroIndex + 1)
+                } else {
+                    preloadUpcomingSegments(index + 1, count = PREFETCH_SEGMENT_COUNT)
+                }
                 if (_settings.value.ambienceEnabled) {
                     playAmbientCue(segment.ambientCue, _settings.value.ambienceVolume)
                 } else {
@@ -449,7 +460,9 @@ class KokoroNarrationController(
                         }
                     )
                 }
-                synthesizeKokoroSpeech(segment.toRequest(_settings.value)).also { result ->
+                synthesizeMutex.withLock {
+                    synthesizeKokoroSpeech(segment.toRequest(_settings.value))
+                }.also { result ->
                     KokoroVoiceSetup.status.value = if (result.isUsableNarrationResult()) {
                         KokoroVoiceSetupStatus(
                             phase = KokoroVoiceSetupPhase.Ready,
@@ -467,7 +480,7 @@ class KokoroNarrationController(
     }
 
     private fun KokoroSynthesisResult.isUsableNarrationResult(): Boolean =
-        audioBytes.isNotEmpty() || durationMs > 0L || engineName.contains("speech", ignoreCase = true)
+        audioBytes.isNotEmpty() && engineName.contains("Kokoro ONNX", ignoreCase = true)
 
     private fun preloadMacro(macroIndex: Int) {
         if (macroIndex !in macroStartSegmentIndexes.indices) return
@@ -827,18 +840,18 @@ private fun String.toNarrationParagraphs(): List<String> =
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .flatMap { paragraph ->
-            if (paragraph.length <= 520) {
+            if (paragraph.length <= MAX_SEGMENT_CHARS) {
                 listOf(paragraph)
             } else {
-                paragraph.splitReaderSentenceBlocks(maxChars = 420)
+                paragraph.splitReaderSentenceBlocks(maxChars = MAX_SEGMENT_CHARS)
             }
         }
 
 private fun String.splitReaderSentenceBlocks(maxChars: Int): List<String> {
-    val sentences = split(Regex("""(?<=[.!?。！？…])\s+"""))
+    val sentences = splitNarrationClauses()
         .map { it.trim() }
         .filter { it.isNotBlank() }
-    if (sentences.isEmpty()) return chunked(maxChars)
+    if (sentences.isEmpty()) return splitByWordAndCharLimits(MAX_SEGMENT_WORDS, maxChars)
 
     val blocks = mutableListOf<String>()
     val current = StringBuilder()
@@ -852,7 +865,7 @@ private fun String.splitReaderSentenceBlocks(maxChars: Int): List<String> {
                 blocks.add(current.toString().trim())
                 current.clear()
             }
-            blocks.addAll(sentence.chunked(maxChars))
+            blocks.addAll(sentence.splitByWordAndCharLimits(MAX_SEGMENT_WORDS, maxChars))
         } else {
             current.append(sentence).append(' ')
         }
@@ -862,7 +875,7 @@ private fun String.splitReaderSentenceBlocks(maxChars: Int): List<String> {
 }
 
 private fun String.splitIntoNarrationParts(): List<String> {
-    val sentenceParts = split(Regex("""(?<=[.!?。！？…])\s+"""))
+    val sentenceParts = splitNarrationClauses()
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .ifEmpty { listOf(this.trim()) }
@@ -880,14 +893,14 @@ private fun String.splitIntoNarrationParts(): List<String> {
 
     for (sentence in sentenceParts) {
         val words = sentence.wordsOnly()
-        if (words.size > 110) {
+        if (words.size > MAX_SEGMENT_WORDS || sentence.length > MAX_SEGMENT_CHARS) {
             flushCurrent()
-            parts.addAll(words.chunked(95).map { it.joinToString(" ") })
+            parts.addAll(sentence.splitByWordAndCharLimits(MAX_SEGMENT_WORDS, MAX_SEGMENT_CHARS))
             continue
         }
 
-        val wouldExceedWords = currentWords > 0 && currentWords + words.size > 95
-        val wouldExceedChars = current.isNotEmpty() && current.length + sentence.length + 1 > 760
+        val wouldExceedWords = currentWords > 0 && currentWords + words.size > MAX_SEGMENT_WORDS
+        val wouldExceedChars = current.isNotEmpty() && current.length + sentence.length + 1 > MAX_SEGMENT_CHARS
         if (wouldExceedWords || wouldExceedChars) {
             flushCurrent()
         }
@@ -896,6 +909,47 @@ private fun String.splitIntoNarrationParts(): List<String> {
     }
     flushCurrent()
     return parts
+}
+
+private fun String.splitNarrationClauses(): List<String> =
+    split(Regex("""(?<=[,.;:!?。！？…])\s+"""))
+
+private fun String.splitByWordAndCharLimits(maxWords: Int, maxChars: Int): List<String> {
+    val words = split(Regex("""\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+    if (words.isEmpty()) return chunked(maxChars).filter { it.isNotBlank() }
+
+    val chunks = mutableListOf<String>()
+    val current = StringBuilder()
+    var currentWords = 0
+
+    fun flushCurrent() {
+        if (current.isNotEmpty()) {
+            chunks += current.toString().trim()
+            current.clear()
+            currentWords = 0
+        }
+    }
+
+    for (word in words) {
+        val separator = if (current.isEmpty()) 0 else 1
+        val wouldExceedWords = currentWords >= maxWords
+        val wouldExceedChars = current.isNotEmpty() && current.length + separator + word.length > maxChars
+        if (wouldExceedWords || wouldExceedChars) flushCurrent()
+
+        if (word.length > maxChars) {
+            flushCurrent()
+            chunks.addAll(word.chunked(maxChars))
+            continue
+        }
+
+        if (current.isNotEmpty()) current.append(' ')
+        current.append(word)
+        currentWords += 1
+    }
+    flushCurrent()
+    return chunks
 }
 
 private fun detectTone(text: String): NarrationTone {

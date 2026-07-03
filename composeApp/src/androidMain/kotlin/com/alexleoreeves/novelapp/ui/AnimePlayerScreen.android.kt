@@ -147,6 +147,13 @@ actual fun AnimePlayerScreen(
                     if (playbackState == Player.STATE_READY) playerError = null
                 }
 
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        isPlayerBuffering = false
+                        playerError = null
+                    }
+                }
+
                 override fun onPlayerError(error: PlaybackException) {
                     playerError = error.localizedMessage ?: "Stream failed to load."
                     isPlayerBuffering = false
@@ -176,12 +183,25 @@ actual fun AnimePlayerScreen(
         if (exoPlayer != null) {
             while (true) {
                 onProgress(exoPlayer.currentPosition)
+                if (exoPlayer.isPlaying || exoPlayer.currentPosition > 0L) {
+                    isPlayerBuffering = false
+                    playerError = null
+                }
                 if (previewLimitMs != null && exoPlayer.currentPosition >= previewLimitMs) {
                     exoPlayer.pause()
                     onPreviewFinished()
                     break
                 }
                 delay(2500)
+            }
+        }
+    }
+
+    LaunchedEffect(streamUrl, retryKey, isDirectMedia) {
+        if (!isDirectMedia) {
+            delay(8_000)
+            if (webError == null) {
+                isWebLoading = false
             }
         }
     }
@@ -219,52 +239,54 @@ actual fun AnimePlayerScreen(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        setBackgroundColor(android.graphics.Color.BLACK)
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.mediaPlaybackRequiresUserGesture = false
-                        settings.userAgentString = PLAYER_USER_AGENT
-                        webChromeClient = WebChromeClient()
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                isWebLoading = true
-                                webError = null
-                            }
+            key(streamUrl, retryKey) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false
+                            settings.userAgentString = PLAYER_USER_AGENT
+                            webChromeClient = WebChromeClient()
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                    isWebLoading = true
+                                    webError = null
+                                }
 
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                isWebLoading = false
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: WebResourceError?
-                            ) {
-                                if (request?.isForMainFrame != false) {
+                                override fun onPageFinished(view: WebView?, url: String?) {
                                     isWebLoading = false
-                                    webError = error?.description?.toString() ?: "Embedded player failed to load."
+                                }
+
+                                override fun onReceivedError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    error: WebResourceError?
+                                ) {
+                                    if (request?.isForMainFrame != false) {
+                                        isWebLoading = false
+                                        webError = error?.description?.toString() ?: "Embedded player failed to load."
+                                    }
                                 }
                             }
+                            loadUrl(streamUrl, streamUrl.playerHeaders())
                         }
-                        loadUrl(streamUrl, streamUrl.playerHeaders())
-                    }
-                },
-                update = { view ->
-                    if (view.url != streamUrl) {
-                        isWebLoading = true
-                        webError = null
-                        view.loadUrl(streamUrl, streamUrl.playerHeaders())
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    update = { view ->
+                        if (view.url != streamUrl) {
+                            isWebLoading = true
+                            webError = null
+                            view.loadUrl(streamUrl, streamUrl.playerHeaders())
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             PlayerLoadingOverlay(
                 visible = isWebLoading || webError != null,
                 title = episodeTitle,
@@ -634,6 +656,7 @@ private fun String.isDirectPlayableMediaUrl(): Boolean {
         clean.endsWith(".webm") ||
         clean.endsWith(".mkv") ||
         clean.endsWith(".mov") ||
+        Regex("""/(playlist|manifest|hls|dash)(/|$)""").containsMatchIn(clean) ||
         !startsWith("http", ignoreCase = true)
 }
 

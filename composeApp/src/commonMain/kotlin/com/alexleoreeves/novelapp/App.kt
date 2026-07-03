@@ -143,7 +143,7 @@ fun App(
         }
     }
 
-    fun beginPremiumCheckout() {
+    fun beginPremiumCheckout(planId: String = "premium_3_devices") {
         val activeAccount = account
         if (activeAccount == null) {
             showAuthSheet = true
@@ -151,7 +151,7 @@ fun App(
         }
         scope.launch {
             subscriptionMessage = "Starting subscription checkout..."
-            runCatching { authApi.createBillingCheckout(activeAccount.authToken) }
+            runCatching { authApi.createBillingCheckout(activeAccount.authToken, planId) }
                 .onSuccess { checkout ->
                     if (checkout.alreadyPremium || checkout.premium) {
                         runCatching { authApi.billingStatus(activeAccount.authToken) }
@@ -159,10 +159,10 @@ fun App(
                                 account = status.account
                                 userSessionStore.saveAccount(status.account)
                             }
-                        subscriptionMessage = "Premium is already active on this account."
+                        subscriptionMessage = "This plan is already active on this account."
                     } else if (checkout.link.isNotBlank()) {
                         linkOpener.open(checkout.link)
-                        subscriptionMessage = "Complete the Flutterwave checkout, then reopen the app to refresh Premium."
+                        subscriptionMessage = "Complete the Flutterwave checkout, then reopen the app to refresh your plan."
                     } else {
                         subscriptionMessage = "Checkout link was not returned. Try again."
                     }
@@ -218,7 +218,6 @@ fun App(
 
     LaunchedEffect(showSplash, isAuthChecked) {
         if (!showSplash && isAuthChecked) {
-            launch { ttsController.prepareText("Kokoro voice is getting ready.") }
             val manifest = fetchAppUpdateManifest(updateClient)
             startupUpdateManifest = manifest?.takeIf { it.isAvailable }
         }
@@ -485,7 +484,7 @@ fun App(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
                         isPremium = account?.isPremium == true,
-                        onSubscribe = { beginPremiumCheckout() },
+                        onSubscribe = { beginPremiumCheckout("premium_3_devices") },
                         onPlayStream = { url, title, previewLimitMs ->
                             animeStreamUrl.value = url
                             animeEpisodeTitle.value = title
@@ -632,6 +631,7 @@ fun App(
                                             },
                                             onResumeRead = { item -> openReadHistory(item) },
                                             onResumeWatch = { item -> openWatchHistory(item) },
+                                            onSubscribePlan = { planId -> beginPremiumCheckout(planId) },
                                             onSignOut = {
                                                 scope.launch {
                                                     account?.authToken?.let { token ->
@@ -772,7 +772,7 @@ fun App(
                 title = { Text("Premium") },
                 text = { Text(message) },
                 confirmButton = {
-                    Button(onClick = { beginPremiumCheckout() }) {
+                    Button(onClick = { beginPremiumCheckout("premium_3_devices") }) {
                         Text("Subscribe")
                     }
                 },

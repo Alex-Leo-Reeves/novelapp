@@ -121,16 +121,21 @@ class AuthApi(
         return BillingStatus(
             account = payload.user.toAccount(token),
             premium = payload.premium,
+            currentPlan = payload.currentPlan,
             monthlyFee = payload.monthlyFee,
             currency = payload.currency,
+            maxDevices = payload.maxDevices,
+            plans = payload.plans,
             freePreview = payload.freePreview
         )
     }
 
-    suspend fun createBillingCheckout(token: String): BillingCheckout {
+    suspend fun createBillingCheckout(token: String, planId: String = "premium_3_devices"): BillingCheckout {
         val response = client.post("$baseUrl/billing/checkout") {
             accept(ContentType.Application.Json)
+            contentType(ContentType.Application.Json)
             bearerAuth(token)
+            setBody(BillingCheckoutRequest(planId = planId))
         }
         val rawBody = response.bodyAsText()
         if (response.status != HttpStatusCode.OK) {
@@ -178,8 +183,11 @@ class AuthApi(
 data class BillingStatus(
     val account: SavedUserAccount,
     val premium: Boolean,
+    val currentPlan: String,
     val monthlyFee: Int,
     val currency: String,
+    val maxDevices: Int?,
+    val plans: List<BillingPlan>,
     val freePreview: BillingPreview
 )
 
@@ -222,7 +230,8 @@ private data class AuthUserResponse(
     val plan: String = "free",
     val billingStatus: String = "none",
     val paidUntil: String? = null,
-    val createdAt: String = ""
+    val createdAt: String = "",
+    val maxDevices: Int? = 2
 ) {
     fun toAccount(token: String): SavedUserAccount =
         SavedUserAccount(
@@ -233,7 +242,8 @@ private data class AuthUserResponse(
             plan = plan,
             billingStatus = billingStatus,
             paidUntil = paidUntil,
-            createdAt = createdAt
+            createdAt = createdAt,
+            maxDevices = maxDevices
         )
 }
 
@@ -254,6 +264,22 @@ private data class UserStateResponse(
 )
 
 @Serializable
+private data class BillingCheckoutRequest(
+    val planId: String
+)
+
+@Serializable
+data class BillingPlan(
+    val id: String,
+    val label: String,
+    val amount: Int,
+    val currency: String = "NGN",
+    val maxDevices: Int? = null,
+    val premium: Boolean = true,
+    val description: String = ""
+)
+
+@Serializable
 data class BillingPreview(
     val episodicFraction: Double = 0.2,
     val movieMs: Long = 1_200_000L
@@ -263,8 +289,11 @@ data class BillingPreview(
 private data class BillingStatusResponse(
     val user: AuthUserResponse,
     val premium: Boolean = false,
+    val currentPlan: String = "free",
     val monthlyFee: Int = 1000,
     val currency: String = "NGN",
+    val maxDevices: Int? = 2,
+    val plans: List<BillingPlan> = emptyList(),
     val freePreview: BillingPreview = BillingPreview()
 )
 
@@ -274,6 +303,7 @@ data class BillingCheckout(
     val txRef: String = "",
     val amount: Int = 1000,
     val currency: String = "NGN",
+    val plan: BillingPlan? = null,
     val alreadyPremium: Boolean = false,
     val premium: Boolean = false
 )
