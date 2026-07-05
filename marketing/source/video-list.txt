@@ -1,0 +1,13 @@
+file '../screenshots/novelapp-discover.png'
+duration 2.6
+file '../screenshots/novelapp-manga.png'
+duration 2.6
+file '../screenshots/novelapp-novel.png'
+duration 2.6
+file '../screenshots/novelapp-video.png'
+duration 2.6
+file '../screenshots/novelapp-account.png'
+duration 2.6
+file '../screenshots/novelapp-update.png'
+duration 2.6
+file '../screenshots/novelapp-update.png'

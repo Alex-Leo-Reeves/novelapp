@@ -83,6 +83,11 @@ actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
     return file.exists() && file.length() > 0L
 }
 
+actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? {
+    val ctx = com.alexleoreeves.novelapp.sensor.AppContextHolder.applicationContext ?: return null
+    return com.alexleoreeves.novelapp.ui.extractStreamFromEmbed(ctx, embedUrl, timeoutMs)
+}
+
 private fun getVideoDownloadsDir(parentId: String, episodeNumber: Int): File {
     val ctx = AppContextHolder.applicationContext ?: return File("/tmp")
     val dir = File(ctx.filesDir, "downloads/videos/${parentId.safePathPart()}/ep_$episodeNumber")

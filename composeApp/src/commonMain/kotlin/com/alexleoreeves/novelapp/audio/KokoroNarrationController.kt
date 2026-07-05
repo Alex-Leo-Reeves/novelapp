@@ -23,7 +23,7 @@ import kotlin.math.roundToInt
 
 private const val MACRO_WORD_TARGET = 200
 private const val NEXT_MACRO_PRELOAD_AT_WORD = 160
-private const val PREFETCH_SEGMENT_COUNT = 3
+private const val PREFETCH_SEGMENT_COUNT = 5
 private const val MAX_SEGMENT_WORDS = 60
 private const val MAX_SEGMENT_CHARS = 360
 
@@ -284,6 +284,15 @@ class KokoroNarrationController(
         _isPlaying.value = true
         syncBackgroundService()
         preloadUpcomingSegments(startIndex, count = PREFETCH_SEGMENT_COUNT)
+
+        // Buffer at least 2 segments before starting audio output
+        if (startIndex + 1 < segments.size) {
+            _isBuffering.value = true
+            runCatching { prepareSegment(startIndex).await() }
+            runCatching { prepareSegment(startIndex + 1).await() }
+            _isBuffering.value = false
+        }
+
         try {
             for (index in startIndex until segments.size) {
                 if (!currentCoroutineContext().isActive || isPaused) break

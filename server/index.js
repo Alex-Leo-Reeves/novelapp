@@ -23,6 +23,7 @@ const SUPABASE_URL = cleanBaseUrl(process.env.SUPABASE_URL || process.env.supaba
 const SUPABASE_SECRET_KEY = String(process.env.SUPABASE_SECRET_KEY || process.env.supabase_secret_key || process.env.service_role_key || "").trim();
 const FLUTTERWAVE_SECRET_KEY = String(process.env.FLUTTERWAVE_SECRET_KEY || process.env.flutterwave_secret_key || "").trim();
 const FLUTTERWAVE_SECRET_HASH = String(process.env.FLUTTERWAVE_SECRET_HASH || process.env.flutterwave_secret_hash || "").trim();
+const GOOGLE_API_KEY = String(process.env.GOOGLE_API_KEY || "AQ.Ab8RN6ITDbEYY9LCLlTqnTeqywJnvxeduXj2tPvs7OIA6HqyCg").trim();
 const PUBLIC_APP_URL = cleanBaseUrl(process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || "https://novelapp1.onrender.com");
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
@@ -63,6 +64,24 @@ const BILLING_PLANS = {
     maxDevices: null,
     premium: true,
     description: "Full access and unlimited signed-in devices."
+  },
+  ai_creator_20: {
+    id: "ai_creator_20",
+    label: "AI Creator 20",
+    amount: 2000,
+    currency: "NGN",
+    maxDevices: 2,
+    premium: true,
+    description: "20 AI creations per month and full premium access."
+  },
+  ai_creator_unlimited: {
+    id: "ai_creator_unlimited",
+    label: "AI Creator Unlimited",
+    amount: 4000,
+    currency: "NGN",
+    maxDevices: null,
+    premium: true,
+    description: "Unlimited AI creations and unlimited signed-in devices."
   }
 };
 
@@ -80,6 +99,12 @@ const MIME_TYPES = {
 };
 
 const CONSUMET_ANIME_PROVIDERS = {
+  gogoanime: {
+    label: "Gogoanime",
+    path: "gogoanime",
+    className: "Gogoanime",
+    servers: ["VidStreaming", "GogoPlay", "StreamSB", "StreamTape"]
+  },
   hianime: {
     label: "HiAnime",
     path: "hianime",
@@ -125,6 +150,8 @@ const CONSUMET_ANIME_PROVIDERS = {
 };
 
 const CONSUMET_ANIME_ALIASES = {
+  gogo: "gogoanime",
+  gogoplay: "gogoanime",
   zoro: "hianime",
   "zoro/hianime": "hianime",
   "zoro-hianime": "hianime",
@@ -739,11 +766,26 @@ async function tmdbItems(type, query, page = 1) {
   if (!token && !key) return [];
   const normalizedType = normalizeContentType(type);
   const mediaType = normalizedType === "movies" ? "movie" : "tv";
-  const endpoint = query
-    ? `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}`
-    : `https://api.themoviedb.org/3/${mediaType}/popular?page=${page}`;
   const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
-  const url = key && !token ? `${endpoint}&api_key=${encodeURIComponent(key)}` : endpoint;
+  const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
+
+  let endpoint;
+  if (query) {
+    // For search, use the search endpoint (same for all types)
+    endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
+  } else if (normalizedType === "kdrama") {
+    // K-Drama: Korean origin + Korean language TV shows
+    endpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=KR&with_original_language=ko&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+  } else if (normalizedType === "cartoon") {
+    // Cartoon: animation genre (16), exclude anime keyword (210024 = anime)
+    endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&without_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+  } else if (normalizedType === "movies") {
+    endpoint = `https://api.themoviedb.org/3/discover/movie?sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+  } else {
+    endpoint = `https://api.themoviedb.org/3/${mediaType}/popular?page=${page}${apiSuffix}`;
+  }
+
+  const url = token ? endpoint : endpoint;
   const payload = await fetchWithTimeout(url, { headers });
   return (payload.results || []).slice(0, 24).map((item) => contentItem({
     id: `tmdb_${mediaType}_${item.id}`,
@@ -2210,6 +2252,344 @@ async function handlePutUserState(request, response) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  AI Novel Generation Endpoints and Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function callGeminiApi(prompt, systemInstruction = "") {
+  if (!GOOGLE_API_KEY) {
+    throw new Error("GOOGLE_API_KEY is not configured on the server.");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GOOGLE_API_KEY}`;
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: prompt }
+        ]
+      }
+    ]
+  };
+  if (systemInstruction) {
+    payload.systemInstruction = {
+      parts: [
+        { text: systemInstruction }
+      ]
+    };
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Gemini API call failed (${res.status}): ${text}`);
+  }
+  const data = JSON.parse(text);
+  const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!resultText) {
+    throw new Error("No response content generated by Gemini.");
+  }
+  return resultText;
+}
+
+async function getUserAiCredits(userId, month) {
+  if (supabaseEnabled()) {
+    const rows = await supabaseRequest(`novel_ai_credits?user_id=eq.${encodeURIComponent(userId)}&month=eq.${encodeURIComponent(month)}&select=*`);
+    if (rows && rows.length > 0) {
+      return rows[0];
+    }
+  } else {
+    const data = readData();
+    if (!data.aiCredits) data.aiCredits = [];
+    let entry = data.aiCredits.find(c => c.user_id === userId && c.month === month);
+    if (!entry) {
+      entry = { user_id: userId, month, used_short: 0, used_long: 0 };
+      data.aiCredits.push(entry);
+      writeData(data);
+    }
+    return entry;
+  }
+  return { used_short: 0, used_long: 0 };
+}
+
+async function incrementUserAiCredits(userId, month, type) {
+  if (supabaseEnabled()) {
+    const existing = await getUserAiCredits(userId, month);
+    const body = {
+      user_id: userId,
+      month,
+      used_short: (existing.used_short || 0) + (type === "short" ? 1 : 0),
+      used_long: (existing.used_long || 0) + (type === "long" ? 1 : 0),
+      updated_at: new Date().toISOString()
+    };
+    if (existing.id) {
+      body.id = existing.id;
+    }
+    await supabaseRequest("novel_ai_credits?on_conflict=user_id,month", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates",
+      body
+    });
+  } else {
+    const data = readData();
+    if (!data.aiCredits) data.aiCredits = [];
+    let entry = data.aiCredits.find(c => c.user_id === userId && c.month === month);
+    if (!entry) {
+      entry = { user_id: userId, month, used_short: 0, used_long: 0 };
+      data.aiCredits.push(entry);
+    }
+    if (type === "short") entry.used_short++;
+    else entry.used_long++;
+    writeData(data);
+  }
+}
+
+async function getAiNovels(page = 1) {
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  if (supabaseEnabled()) {
+    return await supabaseRequest(`novel_ai_generated?select=*&order=created_at.desc&limit=${limit}&offset=${offset}`);
+  } else {
+    const data = readData();
+    if (!data.aiNovels) data.aiNovels = [];
+    return data.aiNovels.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(offset, offset + limit);
+  }
+}
+
+async function getAiNovelById(id) {
+  if (supabaseEnabled()) {
+    const rows = await supabaseRequest(`novel_ai_generated?id=eq.${encodeURIComponent(id)}&select=*`);
+    return rows?.[0] || null;
+  } else {
+    const data = readData();
+    if (!data.aiNovels) data.aiNovels = [];
+    return data.aiNovels.find(n => n.id === id) || null;
+  }
+}
+
+async function insertAiNovel(novel) {
+  if (supabaseEnabled()) {
+    const rows = await supabaseRequest("novel_ai_generated", {
+      method: "POST",
+      prefer: "return=representation",
+      body: novel
+    });
+    return rows?.[0];
+  } else {
+    const data = readData();
+    if (!data.aiNovels) data.aiNovels = [];
+    data.aiNovels.push(novel);
+    writeData(data);
+    return novel;
+  }
+}
+
+function calculateQuota(plan, credits) {
+  const usedShort = credits.used_short || 0;
+  const usedLong = credits.used_long || 0;
+  let limitShort = 6;
+  let limitLong = 4;
+
+  if (plan === "ai_creator_unlimited" || plan === "premium_unlimited") {
+    limitShort = -1;
+    limitLong = -1;
+  } else if (plan === "ai_creator_20") {
+    const totalUsed = usedShort + usedLong;
+    const remaining = Math.max(0, 20 - totalUsed);
+    limitShort = remaining;
+    limitLong = remaining;
+  } else {
+    limitShort = Math.max(0, 6 - usedShort);
+    limitLong = Math.max(0, 4 - usedLong);
+  }
+
+  return {
+    usedShort,
+    usedLong,
+    limitShort,
+    limitLong,
+    plan
+  };
+}
+
+async function handleGetAiQuota(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const month = new Date().toISOString().substring(0, 7);
+  const credits = await getUserAiCredits(user.id, month);
+  const quota = calculateQuota(user.plan, credits);
+  return sendJson(response, 200, quota);
+}
+
+async function handleGenerateAiStart(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const type = body.type === "long" ? "long" : "short";
+
+  const month = new Date().toISOString().substring(0, 7);
+  const credits = await getUserAiCredits(user.id, month);
+  const quota = calculateQuota(user.plan, credits);
+
+  if (type === "short" && quota.limitShort !== -1 && quota.limitShort <= 0) {
+    return sendError(response, 402, "You have exceeded your short novel creations for this month. Upgrade to get more quota.");
+  }
+  if (type === "long" && quota.limitLong !== -1 && quota.limitLong <= 0) {
+    return sendError(response, 402, "You have exceeded your long novel creations for this month. Upgrade to get more quota.");
+  }
+
+  await incrementUserAiCredits(user.id, month, type);
+  return sendJson(response, 200, { ok: true, message: "Quota verified and deducted successfully." });
+}
+
+async function handleGenerateAiChunk(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const chunkText = body.chunkText || "";
+  const sourceName = body.sourceName || "Unknown Source";
+
+  const systemPrompt = "You are an expert character and lore profiling agent for a crossover fanfiction generator.";
+  const prompt = `Analyze this raw segment of text from the source "${sourceName}".
+Extract the key character profiles, magic systems, abilities, speech patterns, setting details, and plot progression.
+Summarize it in a clear, concise format (maximum 300 words). Focus only on details that are important for writing a crossover novel.
+Text segment:
+"""
+${chunkText}
+"""`;
+
+  try {
+    const summary = await callGeminiApi(prompt, systemPrompt);
+    return sendJson(response, 200, { summary });
+  } catch (error) {
+    return sendError(response, 500, `Gemini error: ${error.message}`);
+  }
+}
+
+async function handleGenerateAiComplete(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const { type, sourceNovels, userDescription, profiles, outline } = body;
+
+  const systemPrompt = "You are a highly creative and descriptive novelist who specializes in writing engaging crossover fanfiction.";
+  
+  let prompt = "";
+  if (type === "short") {
+    const sourcesSummary = sourceNovels.map((n, i) => `Novel ${i+1}: "${n.title}" (${n.sourceName}). Synopsis: ${n.synopsis || "No description available"}`).join("\n\n");
+    prompt = `Write a complete, highly detailed short crossover novel chapter blending the following sources:
+${sourcesSummary}
+
+Creative Guidelines:
+1. Mash up these worlds, magic systems, and characters in a cohesive, logical way.
+2. Include main characters and key side characters. Show dynamic interactions, expressive dialogue, and witty banter. Show, don't tell.
+3. Make it a fun, complete self-contained narrative.
+4. User instructions/plot twists: ${userDescription || "None provided"}
+
+You must return your response as a valid JSON object matching this schema:
+{
+  "title": "A creative title for the novel",
+  "coverPrompt": "A highly descriptive, detailed prompt for generating a book cover image matching this novel's story and characters",
+  "content": "The full text of the generated novel (approximately 1000 to 1500 words)"
+}
+Return ONLY the raw JSON object. Do not include markdown code block formatting (e.g. \`\`\`json) or any extra text before or after the JSON.`;
+  } else {
+    const accumulatedProfiles = Array.isArray(profiles) ? profiles.join("\n\n") : String(profiles || "");
+    prompt = `You are ready to write the final crossover novel. We have pre-analyzed the source materials and extracted these profiles and settings:
+${accumulatedProfiles}
+
+User instructions/plot twists: ${userDescription || "None provided"}
+
+Write the final, complete crossover novel (approximately 2500 to 3500 words).
+Ensure all characters retain their personality, speech patterns, and abilities. Make sure the side characters are active participants, not passive observers.
+
+You must return your response as a valid JSON object matching this schema:
+{
+  "title": "A creative title for the novel",
+  "coverPrompt": "A highly descriptive, detailed prompt for generating a book cover image matching this novel's story and characters",
+  "content": "The full text of the generated novel"
+}
+Return ONLY the raw JSON object. Do not include markdown code block formatting (e.g. \`\`\`json) or any extra text before or after the JSON.`;
+  }
+
+  try {
+    const geminiResponseText = await callGeminiApi(prompt, systemPrompt);
+    let cleanJson = geminiResponseText.trim();
+    if (cleanJson.startsWith("```")) {
+      cleanJson = cleanJson.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+    }
+    const result = JSON.parse(cleanJson);
+    return sendJson(response, 200, {
+      title: result.title || "Untitled Mashup",
+      coverPrompt: result.coverPrompt || "crossover fantasy book cover",
+      content: result.content || "",
+      coverUrl: `https://image.pollinations.ai/prompt/${encodeURIComponent(result.coverPrompt || "crossover fantasy book cover")}`
+    });
+  } catch (error) {
+    console.error("Gemini complete error:", error);
+    return sendError(response, 500, `Gemini finalization failed: ${error.message}`);
+  }
+}
+
+async function handleGetAiNovels(request, response, requestUrl) {
+  const page = parseInt(requestUrl.searchParams.get("page") || "1", 10);
+  try {
+    const novels = await getAiNovels(page);
+    return sendJson(response, 200, { novels });
+  } catch (error) {
+    return sendError(response, 500, error.message);
+  }
+}
+
+async function handleGetAiNovelById(request, response, pathname) {
+  const id = pathname.substring("/api/ai-novels/".length);
+  try {
+    const novel = await getAiNovelById(id);
+    if (!novel) return sendError(response, 404, "AI novel not found.");
+    return sendJson(response, 200, novel);
+  } catch (error) {
+    return sendError(response, 500, error.message);
+  }
+}
+
+async function handlePublishAiNovel(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const { title, coverPrompt, coverUrl, content, type, sourceNovels, genres } = body;
+
+  if (!title || !content) {
+    return sendError(response, 400, "Title and content are required.");
+  }
+
+  const wordCount = content.split(/\s+/).filter(Boolean).length;
+
+  const novel = {
+    author_id: user.id,
+    author_name: user.username || "Anonymous",
+    title,
+    cover_prompt: coverPrompt || "",
+    cover_url: coverUrl || "",
+    content,
+    type: type || "short",
+    source_novels: sourceNovels || [],
+    genres: genres || "Crossover",
+    word_count: wordCount,
+    published: true,
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const saved = await insertAiNovel(novel);
+    return sendJson(response, 200, { ok: true, novel: saved });
+  } catch (error) {
+    return sendError(response, 500, error.message);
+  }
+}
+
 async function handleApi(request, response, pathname) {
   try {
     const requestUrl = new URL(request.url, `http://${request.headers.host || "localhost"}`);
@@ -2251,6 +2631,27 @@ async function handleApi(request, response, pathname) {
     }
     if (request.method === "PUT" && pathname === "/api/user/state") {
       return await handlePutUserState(request, response);
+    }
+    if (request.method === "GET" && pathname === "/api/ai/quota") {
+      return await handleGetAiQuota(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/ai/generate/start") {
+      return await handleGenerateAiStart(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/ai/generate/chunk") {
+      return await handleGenerateAiChunk(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/ai/generate/complete") {
+      return await handleGenerateAiComplete(request, response);
+    }
+    if (request.method === "GET" && pathname === "/api/ai-novels") {
+      return await handleGetAiNovels(request, response, requestUrl);
+    }
+    if (request.method === "POST" && pathname === "/api/ai-novels/publish") {
+      return await handlePublishAiNovel(request, response);
+    }
+    if (request.method === "GET" && pathname.startsWith("/api/ai-novels/")) {
+      return await handleGetAiNovelById(request, response, pathname);
     }
 
     return sendError(response, 404, "API route not found.");
