@@ -58,6 +58,7 @@ fun AnimeDetailScreen(
     val listState = rememberLazyListState()
     val serverNames = listOf(
         "Anineko",
+        "Gogoanime",
         "AnimePahe",
         "HiAnime",
         "AnimeKai",
@@ -69,6 +70,7 @@ fun AnimeDetailScreen(
     )
     val serverKeys = listOf(
         "anineko",
+        "gogoanime",
         "animepahe",
         "hianime",
         "animekai",
@@ -92,30 +94,35 @@ fun AnimeDetailScreen(
     // Load episodes on mount
     LaunchedEffect(anime.id, selectedServer, selectedSeason.id) {
         isLoadingEpisodes = true
-        val rawTitles = selectedSeason.searchQueries
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-        val titleQueries = (rawTitles + rawTitles.flatMap { title ->
-            listOf(
-                title.cleanAnimeSearchTitle(),
-                title.removeAnimeSeasonSuffix()
+        try {
+            val rawTitles = selectedSeason.searchQueries
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+            val titleQueries = (rawTitles + rawTitles.flatMap { title ->
+                listOf(
+                    title.cleanAnimeSearchTitle(),
+                    title.removeAnimeSeasonSuffix()
+                )
+            })
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase() }
+            val provider = serverKeys.getOrElse(selectedServer) { "anineko" }
+            val loadedEpisodes = repository.fetchEpisodesFromAnimeProvider(
+                provider = provider,
+                animeTitleQuery = titleQueries.firstOrNull() ?: selectedSeason.displayTitle,
+                alternateQueries = titleQueries.drop(1),
+                episodeCount = selectedSeason.episodeCount.takeIf { it > 0 } ?: anime.episodeCount,
+                preferredAninekoSlug = selectedSeason.aninekoSlug
             )
-        })
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinctBy { it.lowercase() }
-        val provider = serverKeys.getOrElse(selectedServer) { "anineko" }
-        val loadedEpisodes = repository.fetchEpisodesFromAnimeProvider(
-            provider = provider,
-            animeTitleQuery = titleQueries.firstOrNull() ?: selectedSeason.displayTitle,
-            alternateQueries = titleQueries.drop(1),
-            episodeCount = selectedSeason.episodeCount.takeIf { it > 0 } ?: anime.episodeCount,
-            preferredAninekoSlug = selectedSeason.aninekoSlug
-        )
-        episodes = loadedEpisodes
-            .distinctBy { it.url.ifBlank { "${it.episodeNumber}:${it.title}" } }
-            .sortedWith(compareBy<AnimeEpisode> { it.episodeNumber.coerceAtLeast(0) }.thenBy { it.title })
-        isLoadingEpisodes = false
+            episodes = loadedEpisodes
+                .distinctBy { it.url.ifBlank { "${it.episodeNumber}:${it.title}" } }
+                .sortedWith(compareBy<AnimeEpisode> { it.episodeNumber.coerceAtLeast(0) }.thenBy { it.title })
+        } catch (e: Exception) {
+            println("[AnimeDetailScreen] Error loading episodes: ${e.message}")
+        } finally {
+            isLoadingEpisodes = false
+        }
     }
 
     // Show snack messages

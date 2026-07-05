@@ -57,7 +57,6 @@ fun App(
     var isGuestSession by remember { mutableStateOf(false) }
     var isAuthSubmitting by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
-    // Shown as an overlay when a guest tries to use a gated action
     var showAuthSheet by remember { mutableStateOf(false) }
     var startupUpdateManifest by remember { mutableStateOf<AppUpdateManifest?>(null) }
     var isStartupUpdateDismissed by remember { mutableStateOf(false) }
@@ -67,7 +66,6 @@ fun App(
     var subscriptionMessage by remember { mutableStateOf<String?>(null) }
     val authApi = remember { AuthApi() }
 
-    // App state
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
     val downloadRepo = remember { LocalDownloadRepository() }
     val selectedNovel = remember { mutableStateOf<UnifiedSearchResult?>(null) }
@@ -223,13 +221,11 @@ fun App(
         }
     }
 
-    // Helper: run [action] if the user has an account, otherwise show the auth sheet.
     val requireAuth: (() -> Unit) -> Unit = { action ->
         if (account != null) action() else showAuthSheet = true
     }
 
     NovelAppTheme(appTheme = appTheme.value) {
-        // ── Splash Screen ───────────────────────────────────────────────────
         if (showSplash) {
             SplashScreen(onFinished = { showSplash = false })
             return@NovelAppTheme
@@ -484,6 +480,8 @@ fun App(
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
                         isPremium = account?.isPremium == true,
+                        downloadRepo = downloadRepo,
+                        requireAuth = requireAuth,
                         onSubscribe = { beginPremiumCheckout("premium_3_devices") },
                         onPlayStream = { url, title, previewLimitMs ->
                             animeStreamUrl.value = url
@@ -582,11 +580,12 @@ fun App(
                                 BottomTab.READ -> UniversalReadScreen(
                                     currentTheme = appTheme.value,
                                     ttsController = ttsController,
-                                    requireAuth = requireAuth
+                                    requireAuth = requireAuth,
+                                    account = account,
+                                    downloadRepo = downloadRepo
                                 )
                                 BottomTab.YOU -> {
                                     if (account == null) {
-                                        // Guest tapped You tab — show auth sheet, stay on Discover
                                         showAuthSheet = true
                                         currentTab.value = BottomTab.DISCOVER
                                     } else {
@@ -658,7 +657,7 @@ fun App(
                 }
             }
 
-            // ── Floating Draggable Mini-Player (novels/manga only) ──────────
+            // ── Floating Draggable Mini-Player ─────────────────────────
             val isPlaying = ttsController.isPlaying.collectAsState()
             if (isPlaying.value && animeStreamUrl.value == null) {
                 var isExpanded by remember { mutableStateOf(true) }
@@ -697,7 +696,6 @@ fun App(
             }
         }
 
-        // ── Auth overlay sheet (shown when guest tries a gated action) ────────
         if (showAuthSheet) {
             AuthScreen(
                 currentTheme = appTheme.value,

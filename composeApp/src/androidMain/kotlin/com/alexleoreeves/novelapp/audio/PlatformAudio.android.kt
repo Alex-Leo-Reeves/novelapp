@@ -63,32 +63,55 @@ actual fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audio
 }
 
 private object AndroidGeneratedAudioPlayer {
-    private const val STREAM_HANDOFF_MS = 85L
+    /** How many ms before the *end* of a segment we hand control back so the next segment
+     *  can start writing into the hardware buffer without a gap. */
+    private const val STREAM_HANDOFF_MS = 60L
+    /** Polling interval for the playback-head monitor loop. */
+    private const val POLL_INTERVAL_MS = 8L
+    /** Maximum bytes to write per non-blocking attempt before yielding. */
+    private const val WRITE_CHUNK_BYTES = 8192
+
     private var activePlayer: MediaPlayer? = null
     private var activeTrack: AudioTrack? = null
     private var trackSampleRate: Int = 0
     private var trackChannelCount: Int = 0
+    /** Monotonically increasing frame counter — wraps the AudioTrack 32-bit head. */
     private var writtenFrames: Long = 0L
 
+    /**
+     * Write [audioBytes] (a PCM-16 WAV) into the shared [AudioTrack] using
+     * WRITE_NON_BLOCKING chunks, yielding to the coroutine scheduler between
+     * each chunk so the thread never stalls.  After all bytes are queued, the
+     * coroutine waits until the hardware head reaches the handoff point.
+     */
     suspend fun playWavBytes(audioBytes: ByteArray) = withContext(Dispatchers.IO) {
         val wav = audioBytes.decodePcm16Wav() ?: return@withContext
         val track = ensureTrack(wav.sampleRate, wav.channelCount)
+
+        // ── Non-blocking write loop ────────────────────────────────────────
         var offset = 0
         while (offset < wav.pcmBytes.size) {
+            val remaining = wav.pcmBytes.size - offset
+            val toWrite = remaining.coerceAtMost(WRITE_CHUNK_BYTES)
             val written = track.write(
                 wav.pcmBytes,
                 offset,
-                wav.pcmBytes.size - offset,
-                AudioTrack.WRITE_BLOCKING
+                toWrite,
+                AudioTrack.WRITE_NON_BLOCKING
             )
-            if (written < 0) error("AudioTrack write failed: $written")
-            offset += written
+            when {
+                written > 0 -> offset += written
+                written == 0 -> delay(POLL_INTERVAL_MS) // buffer full — yield
+                else -> error("AudioTrack write failed: $written")
+            }
         }
+
+        // ── Record total frames written and compute handoff target ─────────
         val targetFrame = synchronized(this@AndroidGeneratedAudioPlayer) {
             writtenFrames += wav.frameCount
             writtenFrames
         }
-        val handoffFrames = (wav.sampleRate * STREAM_HANDOFF_MS / 1000L).coerceAtLeast(1L)
+        val handoffFrames = (wav.sampleRate.toLong() * STREAM_HANDOFF_MS / 1000L).coerceAtLeast(1L)
         waitUntilPlayed(track, (targetFrame - handoffFrames).coerceAtLeast(0L))
     }
 
@@ -186,7 +209,8 @@ private object AndroidGeneratedAudioPlayer {
                 sampleRate,
                 channelMask,
                 AudioFormat.ENCODING_PCM_16BIT
-            ).coerceAtLeast(sampleRate * channelCount * 2 / 4)
+            ).coerceAtLeast(sampleRate * channelCount * 2 / 2) // doubled from /4
+            val trackBuffer = max(minBuffer, sampleRate * channelCount * 2 * 2) // 2 seconds buffer
             val track = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -202,7 +226,7 @@ private object AndroidGeneratedAudioPlayer {
                         .build()
                 )
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .setBufferSizeInBytes(max(minBuffer, sampleRate * channelCount * 2 / 2))
+                .setBufferSizeInBytes(trackBuffer)
                 .build()
             track.play()
             activeTrack = track
@@ -214,10 +238,24 @@ private object AndroidGeneratedAudioPlayer {
     }
 
     private suspend fun waitUntilPlayed(track: AudioTrack, targetFrame: Long) {
+        // AudioTrack.playbackHeadPosition is a 32-bit unsigned counter: mask it and
+        // compare against our monotonic writtenFrames to handle wrap-around.
         while (activeTrack === track) {
-            val playedFrames = track.playbackHeadPosition.toLong() and 0xffffffffL
-            if (playedFrames >= targetFrame) return
-            delay(12L)
+            val headRaw = track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+            // Compute how far behind the head is relative to our monotonic target.
+            // If writtenFrames <= 2^32 the simple comparison is correct; beyond that
+            // we use the low-32-bit portion of targetFrame.
+            val headMono = if (writtenFrames <= 0xFFFFFFFFL) {
+                headRaw
+            } else {
+                // Recover the high bits from writtenFrames, then correct for potential wrap.
+                val highBits = writtenFrames and -4294967296L
+                var estimate = highBits or headRaw
+                if (estimate < writtenFrames - 2147483648L) estimate -= 4294967296L
+                estimate
+            }
+            if (headMono >= targetFrame) return
+            delay(POLL_INTERVAL_MS)
         }
     }
 }

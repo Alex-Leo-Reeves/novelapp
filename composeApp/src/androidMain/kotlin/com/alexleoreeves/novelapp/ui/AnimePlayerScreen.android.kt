@@ -91,45 +91,64 @@ actual fun AnimePlayerScreen(
     }
 
     val isDirectMedia = streamUrl.isDirectPlayableMediaUrl()
+    val isEmbedUrl = !isDirectMedia && streamUrl.startsWith("http")
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
     var playerError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var isPlayerBuffering by remember(streamUrl, retryKey) { mutableStateOf(isDirectMedia) }
-    var isWebLoading by remember(streamUrl, retryKey) { mutableStateOf(!isDirectMedia) }
-    var webError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+
+    // Stream extraction state for embed.su / non-direct URLs
+    var extractedStreamUrl by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    var isExtracting by remember(streamUrl, retryKey) { mutableStateOf(isEmbedUrl) }
+    var extractError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+
+    // Resolve the effective URL to feed ExoPlayer
+    val effectiveStreamUrl = if (isDirectMedia) streamUrl else extractedStreamUrl
+
+    // Background extraction for embed URLs
+    LaunchedEffect(streamUrl, retryKey) {
+        if (!isEmbedUrl) return@LaunchedEffect
+        isExtracting = true
+        extractedStreamUrl = null
+        extractError = null
+        val result = extractStreamFromEmbed(context, streamUrl, timeoutMs = 25_000L)
+        isExtracting = false
+        if (result != null) {
+            extractedStreamUrl = result
+        } else {
+            extractError = "Could not extract a stream from this source. The embed may be unavailable. Try another server."
+        }
+    }
 
     // ── ExoPlayer setup ───────────────────────────────────────────────────
-    val exoPlayer = remember(streamUrl, retryKey) {
-        if (isDirectMedia) {
-            val cache = NovelAppVideoCache.get(context)
-            val requestHeaders = streamUrl.playerHeaders()
-            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent(PLAYER_USER_AGENT)
-                .setDefaultRequestProperties(requestHeaders)
-            val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-            val cacheDataSourceFactory = CacheDataSource.Factory()
-                .setCache(cache)
-                .setUpstreamDataSourceFactory(dataSourceFactory)
-                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-            val loadControl = DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    30_000,
-                    90_000,
-                    1_500,
-                    4_000
-                )
-                .build()
-            ExoPlayer.Builder(context)
-                .setLoadControl(loadControl)
-                .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
-                .build()
-                .apply {
-                setMediaItem(MediaItem.fromUri(streamUrl))
-                prepare()
-                if (initialPositionMs > 0L) seekTo(initialPositionMs)
-                playWhenReady = true
-            }
-        } else {
-            null
+    val exoPlayer = remember(effectiveStreamUrl, retryKey) {
+        val url = effectiveStreamUrl ?: return@remember null
+        val cache = NovelAppVideoCache.get(context)
+        val requestHeaders = url.playerHeaders()
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(PLAYER_USER_AGENT)
+            .setDefaultRequestProperties(requestHeaders)
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(cache)
+            .setUpstreamDataSourceFactory(dataSourceFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                30_000,
+                90_000,
+                1_500,
+                4_000
+            )
+            .build()
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            .build()
+            .apply {
+            setMediaItem(MediaItem.fromUri(url))
+            prepare()
+            if (initialPositionMs > 0L) seekTo(initialPositionMs)
+            playWhenReady = true
         }
     }
     DisposableEffect(exoPlayer) {
@@ -197,15 +216,6 @@ actual fun AnimePlayerScreen(
         }
     }
 
-    LaunchedEffect(streamUrl, retryKey, isDirectMedia) {
-        if (!isDirectMedia) {
-            delay(8_000)
-            if (webError == null) {
-                isWebLoading = false
-            }
-        }
-    }
-
     // Apply audio language to ExoPlayer
     LaunchedEffect(audioLanguage) {
         exoPlayer?.let { player ->
@@ -233,74 +243,26 @@ actual fun AnimePlayerScreen(
         }
     }
 
-    if (!isDirectMedia) {
+    // Show extracting / error overlay for embed URLs that haven't resolved yet
+    if (isEmbedUrl && (isExtracting || extractError != null)) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
         ) {
-            key(streamUrl, retryKey) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.mediaPlaybackRequiresUserGesture = false
-                            settings.userAgentString = PLAYER_USER_AGENT
-                            webChromeClient = WebChromeClient()
-                            webViewClient = object : WebViewClient() {
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                    isWebLoading = true
-                                    webError = null
-                                }
-
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    isWebLoading = false
-                                }
-
-                                override fun onReceivedError(
-                                    view: WebView?,
-                                    request: WebResourceRequest?,
-                                    error: WebResourceError?
-                                ) {
-                                    if (request?.isForMainFrame != false) {
-                                        isWebLoading = false
-                                        webError = error?.description?.toString() ?: "Embedded player failed to load."
-                                    }
-                                }
-                            }
-                            loadUrl(streamUrl, streamUrl.playerHeaders())
-                        }
-                    },
-                    update = { view ->
-                        if (view.url != streamUrl) {
-                            isWebLoading = true
-                            webError = null
-                            view.loadUrl(streamUrl, streamUrl.playerHeaders())
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
             PlayerLoadingOverlay(
-                visible = isWebLoading || webError != null,
+                visible = true,
                 title = episodeTitle,
                 providerName = streamUrl.providerName(),
-                message = webError ?: "Opening embedded player...",
-                isError = webError != null,
+                message = extractError
+                    ?: "Extracting stream, blocking ads...",
+                isError = extractError != null,
                 onRetry = {
-                    isWebLoading = true
-                    webError = null
                     retryKey++
                 },
                 onBack = onBack
             )
-
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
@@ -311,16 +273,18 @@ actual fun AnimePlayerScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
         }
-    } else {
-        val player = exoPlayer ?: return
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .clickable(indication = null, interactionSource = remember {
-                    androidx.compose.foundation.interaction.MutableInteractionSource()
-                }) { showControls = !showControls }
-        ) {
+        return
+    }
+    val player = exoPlayer ?: return
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(indication = null, interactionSource = remember {
+                androidx.compose.foundation.interaction.MutableInteractionSource()
+            }) { showControls = !showControls }
+    ) {
         // ── Video View ────────────────────────────────────────────────────
         AndroidView(
             factory = { ctx ->
@@ -615,7 +579,6 @@ actual fun AnimePlayerScreen(
                 }
             }
         }
-    }
     }
 }
 

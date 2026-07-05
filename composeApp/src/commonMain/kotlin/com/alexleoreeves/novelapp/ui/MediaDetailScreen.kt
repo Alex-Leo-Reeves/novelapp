@@ -9,9 +9,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,6 +47,8 @@ fun MediaDetailScreen(
     item: UnifiedSearchResult,
     currentTheme: AppTheme,
     isPremium: Boolean,
+    downloadRepo: LocalDownloadRepository,
+    requireAuth: (() -> Unit) -> Unit,
     onSubscribe: () -> Unit,
     onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?) -> Unit,
     onBack: () -> Unit
@@ -81,19 +82,16 @@ fun MediaDetailScreen(
         else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
     }
 
-    fun resolveWebFallbackStream(
+    fun buildWebFallbackStream(
         type: String,
         id: String,
         season: String = "1",
         episode: String = "1",
         server: Int
     ): String? {
-        val provider = embedServerKeys.getOrElse((server - 1).coerceAtLeast(0)) { embedServerKeys.first() }
-        if (id.isBlank()) {
-            statusText = "Provider match unavailable for this title."
-            return null
-        }
-        statusText = ""
+        if (id.isBlank()) return null
+        val providers = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
+        val provider = providers.getOrElse((server - 1).coerceAtLeast(0)) { providers.first() }
         return if (type == "movie") {
             when (provider) {
                 "vidlink" -> "https://vidlink.pro/movie/$id"
@@ -117,6 +115,131 @@ fun MediaDetailScreen(
         }
     }
 
+    var downloadingEpisodes by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+
+    fun downloadEpisode(ep: MediaEpisode) {
+        requireAuth {
+            if (downloadRepo.isEpisodeDownloaded(item.id, ep.episodeNumber)) {
+                downloadRepo.deleteEpisode(item.id, ep.episodeNumber)
+                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                    downloadRepo.deleteItem(item.id)
+                }
+                refreshTrigger++
+            } else {
+                downloadingEpisodes = downloadingEpisodes + ep.episodeNumber
+                statusText = "Resolving download link for Episode ${ep.episodeNumber}..."
+                scope.launch {
+                    try {
+                        downloadRepo.addItem(
+                            DownloadedItem(
+                                id = item.id,
+                                title = item.title,
+                                coverUrl = item.coverUrl,
+                                type = "ANIME", // Keep it "ANIME" so it fits the video tab offline views perfectly
+                                sourceName = item.sourceName
+                            )
+                        )
+                        // Resolve the URL using the same logic as playback!
+                        val playUrl = when {
+                            isTmdbDetail -> {
+                                val urlParts = ep.url.split(":")
+                                val tvId = urlParts.getOrNull(1) ?: tmdbId
+                                val s = urlParts.getOrNull(2) ?: "1"
+                                val e = urlParts.getOrNull(3) ?: "1"
+                                resolveBackendMediaStream(httpClient, "tv", tvId, s, e)?.url
+                                    ?: buildWebFallbackStream("tv", tvId, s, e, selectedServer)
+                            }
+                            isDramaCoolDetail -> {
+                                if (providerTmdbId.isNotBlank()) {
+                                    if (providerTmdbType == "movie") {
+                                        resolveBackendMediaStream(httpClient, "movie", providerTmdbId, "1", "1")?.url
+                                            ?: buildWebFallbackStream("movie", providerTmdbId, server = selectedServer)
+                                    } else {
+                                        val episodeNumber = ep.episodeNumber.coerceAtLeast(1).toString()
+                                        resolveBackendMediaStream(httpClient, "tv", providerTmdbId, "1", episodeNumber)?.url
+                                            ?: buildWebFallbackStream("tv", providerTmdbId, "1", episodeNumber, selectedServer)
+                                    }
+                                } else {
+                                    dramaScraper.extractStreamUrl(ep.url)
+                                        ?.takeIf { it.isDirectPlayableStreamUrl() }
+                                }
+                            }
+                            isKimCartoonDetail -> {
+                                if (providerTmdbId.isNotBlank()) {
+                                    if (providerTmdbType == "movie") {
+                                        resolveBackendMediaStream(httpClient, "movie", providerTmdbId, "1", "1")?.url
+                                            ?: buildWebFallbackStream("movie", providerTmdbId, server = selectedServer)
+                                    } else {
+                                        val episodeNumber = ep.episodeNumber.coerceAtLeast(1).toString()
+                                        resolveBackendMediaStream(httpClient, "tv", providerTmdbId, "1", episodeNumber)?.url
+                                            ?: buildWebFallbackStream("tv", providerTmdbId, "1", episodeNumber, selectedServer)
+                                    }
+                                } else {
+                                    cartoonScraper.extractStreamUrl(ep.url)
+                                        ?.takeIf { it.isDirectPlayableStreamUrl() }
+                                }
+                            }
+                            else -> ep.url
+                        }
+
+                        if (playUrl != null) {
+                            statusText = "Extracting stream link..."
+                            val directUrl = if (playUrl.isDirectPlayableStreamUrl()) {
+                                playUrl
+                            } else {
+                                // It is an embed/website, scrape it
+                                extractStreamFromEmbed(playUrl)
+                            }
+                            if (directUrl != null) {
+                                statusText = "Downloading Episode ${ep.episodeNumber}..."
+                                val saved = saveDownloadedVideo(
+                                    parentId = item.id,
+                                    episodeNumber = ep.episodeNumber,
+                                    sourceUrl = directUrl
+                                )
+                                if (saved.success) {
+                                    downloadRepo.addEpisode(
+                                        DownloadedEpisode(
+                                            parentId = item.id,
+                                            episodeNumber = ep.episodeNumber,
+                                            episodeTitle = ep.title,
+                                            localFilePath = saved.localPath,
+                                            fileSizeBytes = saved.fileSizeBytes
+                                        )
+                                    )
+                                    statusText = "Episode ${ep.episodeNumber} saved offline."
+                                } else {
+                                    statusText = saved.error.ifBlank { "Download failed." }
+                                    if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                        downloadRepo.deleteItem(item.id)
+                                    }
+                                }
+                            } else {
+                                statusText = "Failed to extract direct stream for download."
+                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                    downloadRepo.deleteItem(item.id)
+                                }
+                            }
+                        } else {
+                            statusText = "Stream unavailable for download."
+                            if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                    downloadRepo.deleteItem(item.id)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        statusText = "Download failed: ${e.message}"
+                    } finally {
+                        downloadingEpisodes = downloadingEpisodes - ep.episodeNumber
+                        refreshTrigger++
+                    }
+                }
+            }
+        }
+    }
+
+    val isMovieContent = mediaType == "movie"
+
     suspend fun resolvePlayableRoute(
         type: String,
         id: String,
@@ -132,17 +255,31 @@ fun MediaDetailScreen(
             statusText = ""
             return direct.url
         }
-        val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
-        if (fallback != null) {
-            val selected = serverNames.getOrNull(selectedServer).orEmpty()
-            statusText = if (selectedServer == 0) {
-                "Direct stream unavailable; opening Web fallback: VidLink."
-            } else {
-                "Direct stream unavailable; opening $selected."
+        if (type == "movie") {
+            // Movies: fall back to web embed page (VidLink etc.)
+            val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
+            if (fallback != null) {
+                val selected = serverNames.getOrNull(selectedServer).orEmpty()
+                statusText = if (selectedServer == 0) {
+                    "Direct stream unavailable; opening Web fallback: VidLink."
+                } else {
+                    "Direct stream unavailable; opening $selected."
+                }
+                return fallback
             }
-            return fallback
+        } else {
+            // TV (K-Drama / Cartoon): silently scrape embed.su — the player will
+            // extract the .m3u8 in background via EmbedSuStreamScraper.
+            if (id.isNotBlank()) {
+                // Build embed.su URL — this will be intercepted by the hidden WebView scraper
+                val embedUrl = buildEmbedSuUrl(id, type, season, episode)
+                statusText = "Loading via embed.su stream extraction..."
+                return embedUrl
+            }
+            statusText = direct?.message
+                ?.takeIf { it.isNotBlank() }
+                ?: "Direct stream unavailable. Try a different episode."
         }
-        statusText = direct?.message ?: "No playable provider was available for this title."
         return null
     }
 
@@ -197,6 +334,16 @@ fun MediaDetailScreen(
         scope.launch {
             statusText = "Resolving stream link..."
             val playUrl = when {
+                // TMDB TV content (K-Drama / Cartoon): go straight to embed.su
+                // The platform's EmbedSuStreamScraper extracts the .m3u8 in the background.
+                isTmdbDetail && mediaType == "tv" -> {
+                    val urlParts = ep.url.split(":")
+                    val tvId = urlParts.getOrNull(1) ?: tmdbId
+                    val s = urlParts.getOrNull(2) ?: "1"
+                    val e = urlParts.getOrNull(3) ?: "1"
+                    statusText = "Loading via embed.su stream extraction..."
+                    buildEmbedSuUrl(tvId, "tv", s, e)
+                }
                 isTmdbDetail -> {
                     val urlParts = ep.url.split(":")
                     val tvId = urlParts.getOrNull(1) ?: tmdbId
@@ -214,9 +361,11 @@ fun MediaDetailScreen(
                     } else {
                         val extracted = dramaScraper.extractStreamUrl(ep.url)
                             ?.takeIf { it.isDirectPlayableStreamUrl() }
-                        extracted ?: ep.url.also {
-                            statusText = "Direct stream unavailable; opening source web fallback."
+                        if (extracted == null) {
+                            statusText = "Direct stream unavailable for this episode. Try a different episode or check back later."
+                            return@launch
                         }
+                        extracted
                     }
                 }
                 isKimCartoonDetail -> {
@@ -229,9 +378,11 @@ fun MediaDetailScreen(
                     } else {
                         val extracted = cartoonScraper.extractStreamUrl(ep.url)
                             ?.takeIf { it.isDirectPlayableStreamUrl() }
-                        extracted ?: ep.url.also {
-                            statusText = "Direct stream unavailable; opening source web fallback."
+                        if (extracted == null) {
+                            statusText = "Direct stream unavailable for this episode. Try a different episode or check back later."
+                            return@launch
                         }
+                        extracted
                     }
                 }
                 else -> ep.url
@@ -377,25 +528,132 @@ fun MediaDetailScreen(
                         )
                     }
                 }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            statusText = "Resolving ${serverNames.getOrNull(selectedServer) ?: "server"}..."
-                            val playUrl = resolvePlayableRoute("movie", tmdbId)
-                                ?: return@launch
-                            onPlayStream(playUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (isPremium) "Watch Movie Now" else "Watch 20-minute Preview", fontWeight = FontWeight.Bold)
+
+                var downloadingMovie by remember { mutableStateOf(false) }
+                val isMovieDownloaded = remember(refreshTrigger) {
+                    downloadRepo.isEpisodeDownloaded(item.id, 1)
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                statusText = "Resolving ${serverNames.getOrNull(selectedServer) ?: "server"}..."
+                                val playUrl = resolvePlayableRoute("movie", tmdbId)
+                                    ?: return@launch
+                                onPlayStream(playUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isPremium) "Watch Movie Now" else "Watch 20-minute Preview", fontWeight = FontWeight.Bold)
+                    }
+
+                    IconButton(
+                        onClick = {
+                            requireAuth {
+                                if (isMovieDownloaded) {
+                                    downloadRepo.deleteEpisode(item.id, 1)
+                                    if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                        downloadRepo.deleteItem(item.id)
+                                    }
+                                    refreshTrigger++
+                                } else {
+                                    downloadingMovie = true
+                                    statusText = "Resolving download link..."
+                                    scope.launch {
+                                        try {
+                                            downloadRepo.addItem(
+                                                DownloadedItem(
+                                                    id = item.id,
+                                                    title = item.title,
+                                                    coverUrl = item.coverUrl,
+                                                    type = "ANIME",
+                                                    sourceName = item.sourceName
+                                                )
+                                            )
+                                            val playUrl = resolvePlayableRoute("movie", tmdbId)
+                                            if (playUrl != null) {
+                                                statusText = "Extracting stream link..."
+                                                val directUrl = if (playUrl.isDirectPlayableStreamUrl()) {
+                                                    playUrl
+                                                } else {
+                                                    extractStreamFromEmbed(playUrl)
+                                                }
+                                                if (directUrl != null) {
+                                                    statusText = "Downloading movie..."
+                                                    val saved = saveDownloadedVideo(
+                                                        parentId = item.id,
+                                                        episodeNumber = 1,
+                                                        sourceUrl = directUrl
+                                                    )
+                                                    if (saved.success) {
+                                                        downloadRepo.addEpisode(
+                                                            DownloadedEpisode(
+                                                                parentId = item.id,
+                                                                episodeNumber = 1,
+                                                                episodeTitle = item.title,
+                                                                localFilePath = saved.localPath,
+                                                                fileSizeBytes = saved.fileSizeBytes
+                                                            )
+                                                        )
+                                                        statusText = "Movie saved offline."
+                                                    } else {
+                                                        statusText = saved.error.ifBlank { "Movie download failed." }
+                                                        if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                                            downloadRepo.deleteItem(item.id)
+                                                        }
+                                                    }
+                                                } else {
+                                                    statusText = "Failed to extract movie stream."
+                                                    if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                                        downloadRepo.deleteItem(item.id)
+                                                    }
+                                                }
+                                            } else {
+                                                statusText = "Movie stream unavailable for download."
+                                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                                    downloadRepo.deleteItem(item.id)
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            statusText = "Download failed: ${e.message}"
+                                        } finally {
+                                            downloadingMovie = false
+                                            refreshTrigger++
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .size(50.dp)
+                            .background(currentTheme.cardColor(), RoundedCornerShape(12.dp))
+                    ) {
+                        if (downloadingMovie) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = currentTheme.accentColor()
+                            )
+                        } else if (isMovieDownloaded) {
+                            Icon(Icons.Default.OfflinePin, contentDescription = "Downloaded", tint = Color(0xFF4CAF50))
+                        } else {
+                            Icon(Icons.Default.Download, contentDescription = "Download Movie", tint = currentTheme.textColor())
+                        }
+                    }
+                }
+
                 if (!isPremium) {
                     OutlinedButton(
                         onClick = onSubscribe,
@@ -441,6 +699,11 @@ fun MediaDetailScreen(
                     }
                     episodesList.forEachIndexed { index, ep ->
                         val locked = !isPremium && index >= freeEpisodeCount
+                        val isDownloaded = remember(refreshTrigger, ep.episodeNumber) {
+                            downloadRepo.isEpisodeDownloaded(item.id, ep.episodeNumber)
+                        }
+                        val isDownloading = ep.episodeNumber in downloadingEpisodes
+
                         Card(
                             onClick = {
                                 if (locked) onSubscribe() else playEpisode(ep)
@@ -466,7 +729,8 @@ fun MediaDetailScreen(
                                     text = ep.title,
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = currentTheme.textColor()
+                                    color = currentTheme.textColor(),
+                                    modifier = Modifier.weight(1f)
                                 )
                                 if (locked) {
                                     Spacer(Modifier.width(8.dp))
@@ -476,6 +740,35 @@ fun MediaDetailScreen(
                                         color = currentTheme.accentColor(),
                                         fontWeight = FontWeight.Bold
                                     )
+                                } else {
+                                    IconButton(
+                                        onClick = {
+                                            downloadEpisode(ep)
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        if (isDownloading) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp,
+                                                color = currentTheme.accentColor()
+                                            )
+                                        } else if (isDownloaded) {
+                                            Icon(
+                                                Icons.Default.OfflinePin,
+                                                contentDescription = "Downloaded",
+                                                tint = Color(0xFF4CAF50),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Outlined.Download,
+                                                contentDescription = "Download",
+                                                tint = currentTheme.subTextColor(),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -529,6 +822,39 @@ private suspend fun resolveBackendMediaStream(
         message = data["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
     )
 }.getOrNull()
+
+private fun resolveWebFallbackStream(
+    type: String,
+    id: String,
+    season: String = "1",
+    episode: String = "1",
+    server: Int
+): String? {
+    if (id.isBlank()) return null
+    val providers = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
+    val provider = providers.getOrElse((server - 1).coerceAtLeast(0)) { providers.first() }
+    return if (type == "movie") {
+        when (provider) {
+            "vidlink" -> "https://vidlink.pro/movie/$id"
+            "autoembed" -> "https://player.autoembed.cc/movie/$id"
+            "vidsrcme" -> "https://vidsrc.me/embed/movie?tmdb=$id"
+            "embedsu" -> "https://embed.su/embed/movie/$id"
+            "vidsrccc" -> "https://vidsrc.cc/v2/embed/movie/$id"
+            "twoembed" -> "https://2embed.cc/embed/$id"
+            else -> "https://vidlink.pro/movie/$id"
+        }
+    } else {
+        when (provider) {
+            "vidlink" -> "https://vidlink.pro/tv/$id/$season/$episode"
+            "autoembed" -> "https://player.autoembed.cc/tv/$id/$season/$episode"
+            "vidsrcme" -> "https://vidsrc.me/embed/tv?tmdb=$id&season=$season&episode=$episode"
+            "embedsu" -> "https://embed.su/embed/tv/$id/$season/$episode"
+            "vidsrccc" -> "https://vidsrc.cc/v2/embed/tv/$id/$season/$episode"
+            "twoembed" -> "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
+            else -> "https://vidlink.pro/tv/$id/$season/$episode"
+        }
+    }
+}
 
 private fun String.isDirectPlayableStreamUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()

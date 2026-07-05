@@ -59,6 +59,8 @@ actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
     }
 }
 
+actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? = null
+
 private fun String.toLocalFile(): File? =
     runCatching {
         if (startsWith("file://", ignoreCase = true)) File(URI(this)) else File(this)

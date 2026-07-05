@@ -5,6 +5,7 @@ expect fun loadDownloadedText(localPath: String): String
 expect fun deleteDownloadedText(localPath: String)
 expect suspend fun saveDownloadedVideo(parentId: String, episodeNumber: Int, sourceUrl: String): DownloadedVideoFile
 expect fun isDownloadedLocalFileAvailable(localPath: String): Boolean
+expect suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long = 22_000L): String?
 
 data class DownloadedVideoFile(
     val localPath: String = "",

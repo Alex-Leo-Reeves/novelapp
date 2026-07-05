@@ -83,3 +83,5 @@ actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
     val path = localPath.removePrefix("file://")
     return path.isNotBlank() && NSFileManager.defaultManager.fileExistsAtPath(path)
 }
+
+actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? = null

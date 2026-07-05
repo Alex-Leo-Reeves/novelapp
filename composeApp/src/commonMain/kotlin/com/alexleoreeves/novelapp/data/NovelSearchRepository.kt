@@ -75,6 +75,13 @@ class NovelSearchRepository(
         WeebCentralScraper(httpClient)  // replaces MangaSeeScraper (mangasee123.com → weebcentral.com)
     )
 
+    /** Comic sources */
+    private val comicSources: List<ComicSource> = listOf(
+        ZipComicScraper(httpClient),
+        ReadAllComicsScraper(httpClient),
+        BatCaveScraper(httpClient)
+    )
+
     /** Anime sources */
     internal val aniListSource = AniListSource(httpClient)
     internal val aninekoScraper = AninekoScraper(httpClient)

@@ -98,13 +98,16 @@ class TmdbSource(
     private suspend fun fetchCartoons(page: Int): List<UnifiedSearchResult> {
         val movies = discover("movie", page, VideoCategory.CARTOON) {
             parameter("with_genres", "16")
-            parameter("without_original_language", "ja")
+            parameter("sort_by", "popularity.desc")
         }
         val tv = discover("tv", page, VideoCategory.CARTOON) {
             parameter("with_genres", "16")
-            parameter("without_original_language", "ja")
+            parameter("sort_by", "popularity.desc")
         }
-        return (movies + tv).distinctBy { it.id }
+        // Post-filter: exclude Japanese-language content (anime) which lacks a `without_original_language` API param
+        return (movies + tv)
+            .filter { item -> !item.genre.contains("Japanese", ignoreCase = true) }
+            .distinctBy { it.id }
     }
 
     private suspend fun fetchMovies(page: Int): List<UnifiedSearchResult> =
