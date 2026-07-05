@@ -171,6 +171,39 @@ function cleanBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
+function buildAppVersionPayload() {
+  const appVersionPath = path.join(SITE_DIR, "app-version.json");
+  const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
+  let payload = {
+    versionCode: 22,
+    versionName: "1.21",
+    apkUrl: `${PUBLIC_APP_URL}/downloads/novelapp-android.apk`,
+    ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
+    releaseNotes: [],
+    forceUpdate: false
+  };
+
+  if (fs.existsSync(appVersionPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(appVersionPath, "utf8"));
+      if (parsed && typeof parsed === "object") {
+        payload = { ...payload, ...parsed };
+      }
+    } catch (error) {
+      console.warn(`[app-version] Failed to parse ${appVersionPath}: ${error.message || error}`);
+    }
+  }
+
+  if (fs.existsSync(apkPath) && fs.statSync(apkPath).isFile()) {
+    const stat = fs.statSync(apkPath);
+    const buffer = fs.readFileSync(apkPath);
+    payload.apkBytes = stat.size;
+    payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+  }
+
+  return payload;
+}
+
 function ensureDataFile() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DATA_FILE)) {
@@ -2750,6 +2783,15 @@ const server = http.createServer((request, response) => {
 
   if (url.pathname === "/health") {
     return sendJson(response, 200, { ok: true });
+  }
+
+  if (url.pathname === "/app-version.json") {
+    response.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    });
+    response.end(JSON.stringify(buildAppVersionPayload()));
+    return;
   }
 
   // Kokoro manifest — mobile clients download the ONNX model once and cache it on device.
