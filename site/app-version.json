@@ -1,19 +1,19 @@
 {
-  "versionCode": 21,
-  "versionName": "1.20",
-  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "apkBytes": 162785336,
-  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-  "releaseNotes": [
-    "Kokoro narration now splits text safely below the 510-token model limit, prebuffers upcoming chunks, and streams generated PCM audio through Android AudioTrack without temp files.",
-    "Kokoro ONNX failures now surface real diagnostics instead of silently dropping back to Android TTS.",
-    "Added account billing plan choices for Premium 3 devices and Premium Unlimited, with active-session device limits enforced on login.",
-    "Movie, cartoon, and K-drama free accounts keep the 20-minute movie preview and 20% episode preview before subscription.",
-    "Offline downloads now save real local anime video/HLS files, manga page files, and novel text into app-private device storage, and the Downloads library hides stale remote-only entries.",
-    "Anime adds Consumet-backed server choices alongside Anineko and AnimePahe, plus season selection for multi-season titles.",
-    "Video players now recognize suffixless playlist/manifest stream URLs as direct media so they do not open as blank web pages.",
-    "New Android installs keep session data out of device restore so Mike’s premium account cannot auto-appear on another phone."
-  ],
-  "forceUpdate": false,
-  "apkSha256": "6e989aa5fb4c47263224d53443ff817adc1b57cab5a3110c2a6c381428f658b9"
+    "versionCode": 22,
+    "versionName": "1.21",
+    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+    "apkBytes": 162785336,
+    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+    "releaseNotes": [
+        "Kokoro narration now splits text safely below the 510-token model limit, prebuffers upcoming chunks, and streams generated PCM audio through Android AudioTrack without temp files.",
+        "Kokoro ONNX failures now surface real diagnostics instead of silently dropping back to Android TTS.",
+        "Added account billing plan choices for Premium 3 devices and Premium Unlimited, with active-session device limits enforced on login.",
+        "Movie, cartoon, and K-drama free accounts keep the 20-minute movie preview and 20% episode preview before subscription.",
+        "Offline downloads now save real local anime video/HLS files, manga page files, and novel text into app-private device storage, and the Downloads library hides stale remote-only entries.",
+        "Anime adds Consumet-backed server choices alongside Anineko and AnimePahe, plus season selection for multi-season titles.",
+        "Video players now recognize suffixless playlist/manifest stream URLs as direct media so they do not open as blank web pages.",
+        "New Android installs keep session data out of device restore so Mike’s premium account cannot auto-appear on another phone."
+    ],
+    "forceUpdate": false,
+    "apkSha256": "6e989aa5fb4c47263224d53443ff817adc1b57cab5a3110c2a6c381428f658b9"
 }
