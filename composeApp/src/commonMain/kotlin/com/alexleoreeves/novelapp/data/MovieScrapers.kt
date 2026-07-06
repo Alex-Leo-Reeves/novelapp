@@ -116,12 +116,40 @@ class DramaCoolScraper(private val httpClient: HttpClient) {
 // ─────────────────────────────────────────────────────────────────────────────
 class WcoStreamScraper(private val httpClient: HttpClient) {
     private companion object {
-        private const val FALLBACK_URL = "https://www.wcostream.one"
+        private const val FALLBACK_URL = "https://www.wcostream.org"
         private const val BRAND_QUERY = "wcostream cartoon official"
+        // Alternative fallback if main one fails
+        private val FALLBACK_CHAIN = listOf(
+            "https://www.wcostream.org",
+            "https://www.wcostream.com",
+            "https://wcostream.net",
+            "https://wcostream.one",
+            "https://www.wcostream.tv"
+        )
     }
 
-    private suspend fun liveBaseUrl(): String =
-        resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
+    private suspend fun liveBaseUrl(): String {
+        val resolved = resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
+        // Verify resolved domain is a WCOStream domain
+        if (resolved.contains("wcostream", ignoreCase = true)) {
+            return resolved
+        }
+        // Try each fallback URL in order (global timeout on httpClient handles this)
+        for (fallback in FALLBACK_CHAIN) {
+            try {
+                val test = httpClient.get(fallback) {
+                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
+                }.bodyAsText()
+                if (!test.isBlockedOrErrorPage()) {
+                    println("[WCOStream] Using fallback: $fallback")
+                    return fallback
+                }
+            } catch (e: Exception) {
+                continue
+            }
+        }
+        return FALLBACK_URL
+    }
 
     suspend fun search(query: String): List<MediaResult> {
         return try {
@@ -423,6 +451,50 @@ class TMDBMovieScraper(private val httpClient: HttpClient) {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    /** Paged multi-search — searches pages 1..[page] and aggregates results */
+    suspend fun searchMultiPaged(query: String, maxPages: Int = 3): List<MediaResult> {
+        val all = mutableListOf<MediaResult>()
+        for (p in 1..maxPages.coerceIn(1, 10)) {
+            val page = try {
+                val response = httpClient.get("$tmdbBaseUrl/search/multi") {
+                    tmdbAuth()
+                    parameter("query", query)
+                    parameter("page", p)
+                    parameter("include_adult", "false")
+                }.bodyAsText()
+                val json = Json { ignoreUnknownKeys = true }
+                val root = json.parseToJsonElement(response).jsonObject
+                root["results"]?.jsonArray.orEmpty()
+            } catch (e: Exception) {
+                break
+            }
+            if (page.isEmpty()) break
+            all.addAll(page.mapNotNull { el ->
+                val obj = el.jsonObject
+                val mediaType = obj["media_type"]?.jsonPrimitive?.content ?: "movie"
+                if (mediaType != "movie" && mediaType != "tv") return@mapNotNull null
+                val id = obj["id"]?.jsonPrimitive?.content ?: ""
+                val title = obj["title"]?.jsonPrimitive?.content
+                    ?: obj["name"]?.jsonPrimitive?.content ?: ""
+                val desc = obj["overview"]?.jsonPrimitive?.content ?: ""
+                val poster = obj["poster_path"]?.jsonPrimitive?.contentOrNull
+                val cover = if (poster != null) "$imageBaseUrl$poster" else ""
+                MediaResult(
+                    id = id,
+                    title = title,
+                    coverUrl = cover,
+                    description = desc,
+                    genres = if (mediaType == "movie") "Movie" else "TV Show",
+                    type = if (mediaType == "movie") "MOVIE" else "TVSHOW",
+                    releaseDate = obj["release_date"]?.jsonPrimitive?.content
+                        ?: obj["first_air_date"]?.jsonPrimitive?.content ?: ""
+                )
+            })
+            if (all.size >= 48) break
+        }
+        return all.distinctBy { it.id }.take(48)
     }
 
     suspend fun fetchTrending(type: String = "movie"): List<MediaResult> {

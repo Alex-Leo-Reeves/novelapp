@@ -77,19 +77,36 @@ fun FootballHomeScreen(
     }
 
     // Fetch fixtures and leagues
-    LaunchedEffect(selectedLeagueId, refreshTrigger.value) {
+    LaunchedEffect(selectedLeagueId, refreshTrigger.value, activeTab) {
         isLoading = true
         errorMessage = null
-        val fetched = footballApi.fetchFixtures()
-        if (fetched.isEmpty()) {
-            // Try fetching live matches as fallback
-            val liveMatch = footballApi.fetchLiveFixtures()
-            fixtures = liveMatch
-            if (liveMatch.isEmpty()) {
-                errorMessage = "No matches found. Pull down to refresh."
+        if (activeTab == 3) {
+            // Upcoming tab: fetch next 5 days of fixtures
+            val upcoming = footballApi.fetchUpcomingFixtures()
+            fixtures = upcoming
+            if (upcoming.isEmpty()) {
+                // Fallback: try today's fixtures and filter for not-started
+                val todayFixtures = footballApi.fetchFixtures()
+                val upcomingToday = todayFixtures.filter { it.isNotStarted }
+                if (upcomingToday.isNotEmpty()) {
+                    fixtures = upcomingToday
+                    errorMessage = null
+                } else {
+                    errorMessage = "No upcoming matches scheduled in the next 5 days. Try the Today tab to see scheduled matches."
+                }
             }
         } else {
-            fixtures = fetched
+            val fetched = footballApi.fetchFixtures()
+            if (fetched.isEmpty()) {
+                // Try fetching live matches as fallback
+                val liveMatch = footballApi.fetchLiveFixtures()
+                fixtures = liveMatch
+                if (liveMatch.isEmpty()) {
+                    errorMessage = "No matches found. Pull down to refresh or check your internet connection."
+                }
+            } else {
+                fixtures = fetched
+            }
         }
         val leaguesFetched = footballApi.fetchLeagues()
         leagues = leaguesFetched.take(20)

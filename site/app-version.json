@@ -1,15 +1,16 @@
 {
-    "versionCode": 24,
-    "versionName": "1.23",
+    "versionCode": 26,
+    "versionName": "1.25",
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "apkBytes": 162916408,
+    "apkBytes": 162932992,
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Football streaming completely rebuilt — removed broken iptv-org M3U parser and fake fixture-ID URLs. Now constructs real embed page URLs using team names via streamed.su, crackstreams.biz, sportshub.stream, and others.",
-        "AnimePlayerScreen now powers football streams — WebView intercepts .m3u8 streams from sports aggregators using the same pipeline as movies and anime.",
-        "Match detail screen shows full score, teams, and league info — tap 'Find Live Stream' to get a playable embed.",
-        "Server continues improvements from v1.22 — null safety on Supabase, AniList, MangaDex, Wikidata; graceful port-in-use exit; hardened content search and home endpoints."
+        "Nollywood (Nigerian Films) tab fully wired: EmptyStateView icon + text, TMDB Nigerian film discovery, curated 20-film Nollywood seed list, multi-stream playback via server proxy",
+        "Football streaming via live sports aggregators: streamed.su, crackstreams.biz, sportshub.stream — WebView intercepts .m3u8 streams using the same pipeline as movies and anime",
+        "EmptyStateView now shows proper icon (Flag) and text (No Nollywood films loaded yet) for the NIGERIAN_FILMS tab",
+        "TMDB multi-search (pages 1-3) + trend fallback ensures movies, shows, and Nigerian films return results for any search query",
+        "Build fix: coroutineScope context added to searchVideo parallel page fetches, MediaResult type conversion resolved for multi-search pipeline"
     ],
     "forceUpdate": false,
-    "apkSha256": "500d2b182c1bc42f56261527476aa6e79f514991a5ed3404839b2f5cfa71936d"
+    "apkSha256": "4006779b90dc9cf15c764dd2e1f71948a686ca2ed4ad0292a2c981547c163346"
 }

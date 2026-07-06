@@ -25,12 +25,6 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 
-/**
- * Match detail screen with stream playback options.
- * When the user taps "Watch", we:
- * 1. Call our server to resolve a stream URL for this fixture
- * 2. Pass the URL to the existing AnimePlayerScreen
- */
 @Composable
 fun FootballMatchScreen(
     match: FootballMatch,
@@ -53,6 +47,8 @@ fun FootballMatchScreen(
 
     var isLoadingStream by remember { mutableStateOf(false) }
     var streamUrl by remember { mutableStateOf<String?>(null) }
+    var streamUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    var currentFallbackIndex by remember { mutableIntStateOf(0) }
     var streamError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -62,19 +58,37 @@ fun FootballMatchScreen(
             isLoadingStream = true
             streamError = null
             streamUrl = null
-            // Get all embed URLs from server — these are sports streaming
-            // aggregator pages that the AnimePlayerScreen WebView interceptor
-            // will load to extract the actual .m3u8 stream from network traffic
+            streamUrls = emptyList()
+            currentFallbackIndex = 0
             val urls = footballApi.resolveStreamUrls(match.fixtureId)
-            val firstUrl = urls.firstOrNull()
-            if (firstUrl != null) {
-                streamUrl = firstUrl
-                onPlayStream(firstUrl, "${match.homeTeam} vs ${match.awayTeam}")
-            } else {
+            streamUrls = urls
+            if (urls.isEmpty()) {
                 streamError = "No stream available for this match yet. Try again closer to kickoff."
+                isLoadingStream = false
+                return@launch
             }
+            currentFallbackIndex = 0
+            streamUrl = urls[0]
+            onPlayStream(urls[0], "${match.homeTeam} vs ${match.awayTeam}")
             isLoadingStream = false
         }
+    }
+
+    fun tryNextServer() {
+        if (streamUrls.isEmpty()) {
+            resolveStream()
+            return
+        }
+        if (streamUrls.size == 1) {
+            streamError = "Only one stream source available. Try the same source again."
+            return
+        }
+        val nextIndex = if (currentFallbackIndex + 1 < streamUrls.size) currentFallbackIndex + 1 else 0
+        currentFallbackIndex = nextIndex
+        val nextUrl = streamUrls[nextIndex]
+        streamUrl = nextUrl
+        streamError = null
+        onPlayStream(nextUrl, "${match.homeTeam} vs ${match.awayTeam}")
     }
 
     Column(
@@ -83,7 +97,6 @@ fun FootballMatchScreen(
             .background(currentTheme.backgroundColor())
             .verticalScroll(rememberScrollState())
     ) {
-        // ── Hero header with gradient ──────────────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -99,8 +112,6 @@ fun FootballMatchScreen(
                         )
                     )
             )
-
-            // Back button
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
@@ -111,8 +122,6 @@ fun FootballMatchScreen(
             ) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
-
-            // Match info centered
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -120,7 +129,6 @@ fun FootballMatchScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // League badge
                 Surface(
                     color = currentTheme.surfaceColor().copy(alpha = 0.86f),
                     shape = RoundedCornerShape(8.dp)
@@ -132,20 +140,13 @@ fun FootballMatchScreen(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
-
                 Spacer(Modifier.height(24.dp))
-
-                // Score row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Home team
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text(
                             match.homeTeam,
                             color = if (match.homeGoals != null && match.awayGoals != null &&
@@ -158,8 +159,6 @@ fun FootballMatchScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    // Score
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             match.scoreDisplay,
@@ -172,10 +171,7 @@ fun FootballMatchScreen(
                             style = MaterialTheme.typography.displayLarge
                         )
                         if (match.elapsed != null && match.isLive) {
-                            Surface(
-                                color = Color(0xFF1B5E20),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
+                            Surface(color = Color(0xFF1B5E20), shape = RoundedCornerShape(6.dp)) {
                                 Text(
                                     "${match.elapsed}'",
                                     color = Color.White,
@@ -186,12 +182,7 @@ fun FootballMatchScreen(
                             }
                         }
                     }
-
-                    // Away team
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text(
                             match.awayTeam,
                             color = if (match.homeGoals != null && match.awayGoals != null &&
@@ -205,10 +196,7 @@ fun FootballMatchScreen(
                         )
                     }
                 }
-
                 Spacer(Modifier.height(16.dp))
-
-                // Status badge
                 Surface(
                     color = when {
                         match.isLive -> Color(0xFF1B5E20)
@@ -233,12 +221,10 @@ fun FootballMatchScreen(
             }
         }
 
-        // ── Action section ────────────────────────────────────────────────
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Match info card
             Surface(
                 color = currentTheme.cardColor(),
                 shape = RoundedCornerShape(14.dp),
@@ -252,7 +238,6 @@ fun FootballMatchScreen(
                 }
             }
 
-            // Stream section
             Surface(
                 color = currentTheme.cardColor(),
                 shape = RoundedCornerShape(14.dp),
@@ -262,60 +247,35 @@ fun FootballMatchScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        "Watch Match",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = currentTheme.textColor(),
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Watch Match", style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
 
                     when {
                         isLoadingStream -> {
-                            Box(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                        color = footballAccent
-                                    )
-                                    Text(
-                                        "Resolving stream link...",
-                                        color = currentTheme.subTextColor(),
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = footballAccent)
+                                    Text("Resolving stream link...", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
                         streamUrl != null -> {
-                            Text(
-                                "Stream ready!",
-                                color = footballAccent,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.Check, null, tint = footballAccent, modifier = Modifier.size(18.dp))
+                                Text("Stream ready!", color = footballAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                if (streamUrls.size > 1) {
+                                    Spacer(Modifier.weight(1f))
+                                    Text("Server ${currentFallbackIndex + 1}/${streamUrls.size}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
                         }
                         streamError != null -> {
-                            Surface(
-                                color = Color(0xFFFF6F00).copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    streamError ?: "",
-                                    color = Color(0xFFFF6F00),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(10.dp)
-                                )
+                            Surface(color = Color(0xFFFF6F00).copy(alpha = 0.12f), shape = RoundedCornerShape(8.dp)) {
+                                Text(streamError ?: "", color = Color(0xFFFF6F00), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(10.dp))
                             }
                         }
                     }
 
-                    // Watch button
+                    // Main watch button
                     Button(
                         onClick = {
                             if (streamUrl != null) {
@@ -324,21 +284,12 @@ fun FootballMatchScreen(
                                 resolveStream()
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (match.isLive) Color(0xFF1B5E20) else footballAccent
-                        ),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (match.isLive) Color(0xFF1B5E20) else footballAccent),
                         enabled = !isLoadingStream
                     ) {
-                        Icon(
-                            if (isLoadingStream) Icons.Default.HourglassEmpty
-                            else Icons.Default.PlayArrow,
-                            null,
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Icon(if (isLoadingStream) Icons.Default.HourglassEmpty else Icons.Default.PlayArrow, null, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(
                             when {
@@ -348,14 +299,30 @@ fun FootballMatchScreen(
                                 match.isFinished -> "Find Replay"
                                 else -> "Check Stream"
                             },
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.bodyLarge
+                            fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge
                         )
+                    }
+
+                    // Try another server button (shown when streams exist but user needs to cycle)
+                    if (streamUrls.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { tryNextServer() },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.SwapHoriz, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (streamUrls.size > 1) "Try Server ${(currentFallbackIndex % streamUrls.size) + 2}/${streamUrls.size}"
+                                else "Retry Same Source",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
 
                     if (streamError != null) {
                         Text(
-                            "Note: Live football streams are found by matching the fixture to available broadcast sources. If no stream is available, check back closer to match time.",
+                            "Tip: Different stream sources work at different times. Tap 'Try' to cycle through available servers (${streamUrls.size} found).",
                             color = currentTheme.subTextColor().copy(alpha = 0.6f),
                             style = MaterialTheme.typography.labelSmall
                         )
@@ -364,7 +331,6 @@ fun FootballMatchScreen(
             }
         }
     }
-
     DisposableEffect(Unit) {
         onDispose { httpClient.close() }
     }
@@ -372,18 +338,8 @@ fun FootballMatchScreen(
 
 @Composable
 private fun InfoRow(label: String, value: String, currentTheme: AppTheme) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
-        Text(
-            value,
-            color = currentTheme.textColor(),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold
-        )
+        Text(value, color = currentTheme.textColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
