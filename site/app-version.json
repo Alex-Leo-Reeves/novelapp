@@ -11,5 +11,5 @@
     "MangaDex chapters and metadata parsing is now fully null-safe for items missing attributes or relationships."
   ],
   "forceUpdate": false,
-  "apkSha256": "6c25ab7ab27f7ec563594e3a0105d47681888c51a49eb660569ef517fec11329"
+  "apkSha256": "131d6dc98e3131f90967ea3869107783807e445f7e3114fe6375623610211956"
 }
