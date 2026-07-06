@@ -1,12 +1,12 @@
 {
-    "versionCode": 28,
-    "versionName": "1.27",
-    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "apkBytes": 162965760,
-    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-    "releaseNotes": [
-        "Fixed Ktor 3.x ContentType.parse() compilation error — replaced with raw header() calls to avoid ParametersBuilder.parse name collision in AnimeScrapers.kt and MangaScrapers.kt"
-    ],
-    "forceUpdate": false,
-    "apkSha256": "ee859af35110154719eab3a4d4e686363accfbed8221a2454936216ba3ef7c17"
+  "versionCode": 28,
+  "versionName": "1.27",
+  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "apkBytes": 162965760,
+  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+  "releaseNotes": [
+    "Fixed Ktor 3.x ContentType.parse() compilation error — replaced with raw header() calls to avoid ParametersBuilder.parse name collision in AnimeScrapers.kt and MangaScrapers.kt"
+  ],
+  "forceUpdate": false,
+  "apkSha256": "211ed80b3d90bdd36621f9df3801b222d1205954c7205a8b790412a7bc2150ab"
 }
