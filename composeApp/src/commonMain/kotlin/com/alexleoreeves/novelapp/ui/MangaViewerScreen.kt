@@ -33,8 +33,10 @@ import com.alexleoreeves.novelapp.platform.MangaReaderSystemUiEffect
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -182,6 +184,17 @@ fun MangaViewerScreen(
         onProgress(currentPageIndex.coerceAtLeast(0))
     }
 
+    // Track user scrolling for OCR auto-scroll debounce
+    var lastUserOcrScrollAt by remember { mutableStateOf(0L) }
+    val isPagerScrolling = pagerState.isScrollInProgress
+    val isUserOcrScrolling = if (scrollMode == MangaScrollMode.WEBTOON) lazyListState.isScrollInProgress else isPagerScrolling
+
+    LaunchedEffect(isUserOcrScrolling) {
+        if (isUserOcrScrolling) {
+            lastUserOcrScrollAt = currentTimeMillis()
+        }
+    }
+
     LaunchedEffect(isOcrActive) {
         if (!isOcrActive) {
             ocrReaderJob?.cancel()
@@ -202,6 +215,12 @@ fun MangaViewerScreen(
         ocrReaderJob = scope.launch {
             var pageIndex = currentPageIndex.coerceIn(0, pages.lastIndex)
             while (currentCoroutineContext().isActive && isOcrActive && pageIndex in pages.indices) {
+                // Respect user scrolling — 3 second grace period
+                if (currentTimeMillis() - lastUserOcrScrollAt < 3_000L) {
+                    delay(500)
+                    continue
+                }
+
                 ocrReadingPageIndex = pageIndex
                 activeBubbleIndex = -1
                 ocrStatus = "Scanning page ${pageIndex + 1}..."
@@ -226,6 +245,12 @@ fun MangaViewerScreen(
 
                 panels.forEachIndexed { bubbleIndex, panel ->
                     if (!currentCoroutineContext().isActive || !isOcrActive) return@launch
+                    // Re-check user scroll during bubble reading
+                    if (currentTimeMillis() - lastUserOcrScrollAt < 3_000L) {
+                        delay(500)
+                        return@forEachIndexed
+                    }
+
                     activeBubbleIndex = bubbleIndex
                     ocrStatus = "Reading bubble ${bubbleIndex + 1} of ${panels.size} on page ${pageIndex + 1}"
 

@@ -53,9 +53,10 @@ private val olderCartoonAccent = Color(0xFF6D4C41) // brown — nostalgia
 private val moviesAccent = Color(0xFF7C4DFF)
 
 private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
+    ContentTab.ANIME -> VideoCategory.ANIME
     ContentTab.K_DRAMA -> VideoCategory.K_DRAMA
     ContentTab.CARTOON -> VideoCategory.CARTOON
-    ContentTab.OLDER_CARTOON -> VideoCategory.CARTOON  // reuses TMDB cartoon category
+    ContentTab.OLDER_CARTOON -> VideoCategory.CLASSIC  // classic TV + live-action + older cartoons via TMDB general TV
     ContentTab.MOVIES -> VideoCategory.MOVIES
     else -> null
 }
@@ -172,14 +173,11 @@ fun DiscoverHomeScreen(
             popularItemsByTab = popularItemsByTab + (ContentTab.MANGA to loaded)
             isLoadingPopular = false
         }
-    }
-
-    // ── Anime tab content load ─────────────────────────────────────────────
-    LaunchedEffect(activeTab) {
-        if (activeTab == ContentTab.ANIME && airingAnime.isEmpty()) {
-            isLoadingAnime = true
-            airingAnime = repository.fetchCurrentlyAiring()
-            isLoadingAnime = false
+        if (activeTab == ContentTab.COMIC && popularItemsByTab[ContentTab.COMIC].isNullOrEmpty()) {
+            isLoadingPopular = true
+            val loaded = repository.fetchPopularComics(page = pageByTab[ContentTab.COMIC] ?: 1)
+            popularItemsByTab = popularItemsByTab + (ContentTab.COMIC to loaded)
+            isLoadingPopular = false
         }
     }
 
@@ -199,9 +197,9 @@ fun DiscoverHomeScreen(
     val filteredPopular by remember(activePopularItems, activeTab, selectedCategory, selectedMangaGenre) {
         derivedStateOf {
             var list = when (activeTab) {
-                ContentTab.NOVELS -> activePopularItems.filter { !it.isManga && !it.isAnime }
+                ContentTab.NOVELS -> activePopularItems.filter { !it.isManga && !it.isAnime && !it.isComic }
                 ContentTab.MANGA -> activePopularItems.filter { it.isManga }
-                ContentTab.COMIC -> activePopularItems.filter { it.isManga } // comic uses popular manga data until dedicated scraper
+                ContentTab.COMIC -> activePopularItems.filter { it.isComic }
                 ContentTab.ANIME -> activePopularItems.filter { it.isAnime }
                 ContentTab.K_DRAMA,
                 ContentTab.CARTOON,
@@ -226,13 +224,13 @@ fun DiscoverHomeScreen(
     }
 
     // ── Filter search results by active tab ────────────────────────────────
-    val filteredSearch by remember(searchResults, activeTab) {
+    val filteredSearch by remember(searchResults, activeTab, videoSearchResults) {
         derivedStateOf {
             when (activeTab) {
-                ContentTab.NOVELS -> searchResults.filter { !it.isManga && !it.isAnime }
-                ContentTab.MANGA,
-                ContentTab.COMIC -> searchResults.filter { it.isManga }
-                ContentTab.ANIME -> searchResults.filter { it.isAnime }
+                ContentTab.NOVELS -> searchResults.filter { !it.isManga && !it.isAnime && !it.isComic }
+                ContentTab.MANGA -> searchResults.filter { it.isManga }
+                ContentTab.COMIC -> searchResults.filter { it.isComic }
+                ContentTab.ANIME,
                 ContentTab.K_DRAMA,
                 ContentTab.CARTOON,
                 ContentTab.OLDER_CARTOON,
@@ -255,11 +253,7 @@ fun DiscoverHomeScreen(
         val q = searchQuery
         val tab = activeTab
         when (tab) {
-            ContentTab.ANIME -> {
-                animeSearchResults = repository.searchAnime(q)
-                isSearching = false
-                onSearchCommitted(tab, q)
-            }
+            ContentTab.ANIME,
             ContentTab.K_DRAMA,
             ContentTab.CARTOON,
             ContentTab.OLDER_CARTOON,
@@ -272,8 +266,8 @@ fun DiscoverHomeScreen(
             else -> {
                 searchResults = when (tab) {
                     ContentTab.NOVELS -> repository.searchNovels(q)
-                    ContentTab.MANGA,
-                    ContentTab.COMIC -> repository.searchManga(q)
+                    ContentTab.MANGA -> repository.searchManga(q)
+                    ContentTab.COMIC -> repository.searchComics(q)
                     else -> emptyList()
                 }
                 isSearching = false
@@ -297,7 +291,7 @@ fun DiscoverHomeScreen(
             try {
                 if (searchQuery.length >= 2) {
                     when (activeTab) {
-                        ContentTab.ANIME -> animeSearchResults = repository.searchAnime(searchQuery)
+                        ContentTab.ANIME,
                         ContentTab.K_DRAMA,
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
@@ -310,8 +304,8 @@ fun DiscoverHomeScreen(
                             }
                         }
                         ContentTab.NOVELS -> searchResults = repository.searchNovels(searchQuery)
-                        ContentTab.MANGA,
-                        ContentTab.COMIC -> searchResults = repository.searchManga(searchQuery)
+                        ContentTab.MANGA -> searchResults = repository.searchManga(searchQuery)
+                        ContentTab.COMIC -> searchResults = repository.searchComics(searchQuery)
                     }
                 } else {
                     when (activeTab) {
@@ -321,20 +315,13 @@ fun DiscoverHomeScreen(
                             isLoadingPopular = true
                             val loaded = when (activeTab) {
                                 ContentTab.NOVELS -> repository.fetchPopularNovels(page = nextPage)
+                                ContentTab.COMIC -> repository.fetchPopularComics(page = nextPage)
                                 else -> repository.fetchPopularManga(page = nextPage)
                             }
                             popularItemsByTab = popularItemsByTab + (activeTab to loaded)
                             isLoadingPopular = false
                         }
-                        ContentTab.ANIME -> {
-                            isLoadingAnime = true
-                            airingAnime = if (nextPage % 2 == 0) {
-                                repository.fetchTrendingAnime(page = nextPage)
-                            } else {
-                                repository.fetchCurrentlyAiring(page = nextPage)
-                            }
-                            isLoadingAnime = false
-                        }
+                        ContentTab.ANIME,
                         ContentTab.K_DRAMA,
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
@@ -425,7 +412,7 @@ fun DiscoverHomeScreen(
                                     ContentTab.NOVELS -> "Search light novels..."
                                     ContentTab.MANGA -> "Search manga titles..."
                                     ContentTab.COMIC -> "Search western comics..."
-                                    ContentTab.ANIME -> "Search anime (AniList)..."
+                                    ContentTab.ANIME -> "Search anime..."
                                     ContentTab.K_DRAMA -> "Search K-drama..."
                                     ContentTab.CARTOON -> "Search cartoons..."
                                     ContentTab.OLDER_CARTOON -> "Search classic cartoons..."
@@ -689,7 +676,6 @@ fun DiscoverHomeScreen(
                     Spacer(Modifier.width(6.dp))
                     Text("Results for \"$searchQuery\"", style = MaterialTheme.typography.labelLarge, color = currentTheme.subTextColor())
                     val resultCount = when {
-                        activeTab == ContentTab.ANIME -> animeSearchResults.size
                         activeTab.videoCategory() != null -> videoSearchResults.size
                         else -> filteredSearch.size
                     }
@@ -731,10 +717,14 @@ fun DiscoverHomeScreen(
         val novelCols = if (isDesktop) 4 else 2
         val mediaCols = if (isDesktop) 4 else 2
 
+        // Pull-to-refresh: only activates when the grid is at the top AND not scrolling.
+        // gridState.isScrollInProgress gates it so drag events are NOT consumed while
+        // the user is scrolling the grid — this fixes the scroll fighting issue.
+        val isGridScrolling = gridState.isScrollInProgress
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(activeTab, isRefreshing) {
+                .pointerInput(activeTab, isRefreshing, isGridScrolling) {
                     detectVerticalDragGestures(
                         onDragEnd = {
                             val shouldRefresh =
@@ -745,6 +735,8 @@ fun DiscoverHomeScreen(
                         },
                         onDragCancel = { pullDistance = 0f },
                         onVerticalDrag = { change, dragAmount ->
+                            // Skip if grid is actively scrolling — pass the event through
+                            if (isGridScrolling) return@detectVerticalDragGestures
                             val atTop = gridState.firstVisibleItemIndex == 0 &&
                                 gridState.firstVisibleItemScrollOffset == 0
                             if (atTop && dragAmount > 0f && !isRefreshing) {
@@ -792,58 +784,7 @@ fun DiscoverHomeScreen(
             }
 
             when {
-                // Anime tab
-                activeTab == ContentTab.ANIME -> {
-                    val baseAnime = if (searchQuery.length >= 2) animeSearchResults else airingAnime
-                    val filteredAnime = if (selectedAnimeGenre == "All") {
-                        baseAnime
-                    } else {
-                        baseAnime.filter { anime ->
-                            anime.genres.any { it.equals(selectedAnimeGenre, ignoreCase = true) } ||
-                                anime.displayTitle.contains(selectedAnimeGenre, ignoreCase = true)
-                        }.ifEmpty { baseAnime }
-                    }
-                    val showAnime = filteredAnime
-                    if (isLoadingAnime && searchQuery.isEmpty()) {
-                        LoadingShimmerGrid(currentTheme)
-                    } else if (showAnime.isEmpty() && !isSearching) {
-                        EmptyStateView(currentTheme = currentTheme, tab = activeTab, hasSearch = searchQuery.isNotEmpty())
-                    } else {
-                        LazyVerticalGrid(
-                            state = gridState,
-                            columns = GridCells.Fixed(animeCols),
-                            contentPadding = PaddingValues(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(showAnime, key = { it.id }) { anime ->
-                                AnimeCard(
-                                    anime = anime,
-                                    currentTheme = currentTheme,
-                                    onClick = {
-                                        onNovelSelected(
-                                            UnifiedSearchResult(
-                                                id = "anilist_${anime.id}",
-                                                title = anime.displayTitle,
-                                                author = "",
-                                                coverUrl = anime.coverUrl,
-                                                sourceName = "AniList",
-                                                url = "anilist:${anime.id}",
-                                                genre = anime.genres.joinToString(", "),
-                                                synopsis = anime.synopsis,
-                                                isManga = false,
-                                                isAnime = true,
-                                                animeResult = anime
-                                            )
-                                        )
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-                // TMDB-backed video tabs
+                // TMDB-backed video tabs (includes Anime, K-Drama, Cartoon, Movies)
                 activeTab.videoCategory() != null -> {
                     if (isLoadingVideo && searchQuery.isEmpty()) {
                         LoadingShimmerGrid(currentTheme)
@@ -1087,6 +1028,7 @@ fun ContentCard(
                         item.isAnime -> animeAccent
                         item.isManga -> Color(0xFFE91E8C)
                         item.isVideo -> when (item.mediaKind) {
+                            VideoCategory.ANIME.name -> animeAccent
                             VideoCategory.K_DRAMA.name -> kDramaAccent
                             VideoCategory.CARTOON.name -> cartoonAccent
                             VideoCategory.MOVIES.name -> moviesAccent

@@ -10,6 +10,20 @@ import java.net.URL
 
 private fun getNovelDownloadsDir(novelId: String): File {
     val ctx = AppContextHolder.applicationContext ?: return File("/tmp")
+    // Try public Downloads directory first so users can find saved files
+    val publicDir = try {
+        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS
+        )
+        if (downloadsDir != null) {
+            val dir = File(downloadsDir, "NovelApp/novels/$novelId")
+            if (dir.mkdirs() || dir.exists()) dir else null
+        } else null
+    } catch (e: Exception) { null }
+    
+    if (publicDir != null) return publicDir
+    
+    // Fallback to app-internal storage
     val dir = File(ctx.filesDir, "downloads/novels/$novelId")
     dir.mkdirs()
     return dir

@@ -20,7 +20,16 @@ import kotlin.math.log10
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.IO) {
-        DesktopKokoroEngine.synthesize(request)
+        runCatching { DesktopKokoroEngine.synthesize(request) }
+            .getOrElse { error ->
+                val diagnostics = "voice=${request.voiceId} error=${error.javaClass.simpleName}:${error.message ?: "unknown"}"
+                println("[Kokoro] Desktop ONNX synthesis failed: $diagnostics")
+                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                    phase = KokoroVoiceSetupPhase.Error,
+                    message = "Kokoro ONNX failed: ${error.message ?: "unknown error"}"
+                )
+                throw error
+            }
     }
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {

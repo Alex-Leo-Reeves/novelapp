@@ -108,6 +108,144 @@ class DramaCoolScraper(private val httpClient: HttpClient) {
     }
 }
 // ─────────────────────────────────────────────────────────────────────────────
+//  WCOStream Scraper — classic 90s/2000s cartoons (Nickelodeon, Cartoon Network,
+//  Disney Channel legacy animation). WCOStream hosts almost every piece of
+//  animated history ever created. Stream extraction: scrape episode page → find
+//  iframe embed → extract direct .mp4/.m3u8 URL.
+//  Domain auto-heals via resolveLiveDomain().
+// ─────────────────────────────────────────────────────────────────────────────
+class WcoStreamScraper(private val httpClient: HttpClient) {
+    private companion object {
+        private const val FALLBACK_URL = "https://www.wcostream.one"
+        private const val BRAND_QUERY = "wcostream cartoon official"
+    }
+
+    private suspend fun liveBaseUrl(): String =
+        resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
+
+    suspend fun search(query: String): List<MediaResult> {
+        return try {
+            val baseUrl = liveBaseUrl()
+            val html = httpClient.get("$baseUrl/search") {
+                parameter("keyword", query.replace(" ", "+"))
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                header("Referer", "$baseUrl/")
+            }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
+
+            val doc = Ksoup.parse(html)
+            doc.select("div.category-item, div.video-item, div.item, article.item, li.video-item, div.post").mapNotNull { el ->
+                val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
+                val href = link.attr("href")
+                val title = link.attr("title")
+                    .ifBlank { link.text() }
+                    .ifBlank { el.select("img").firstOrNull()?.attr("alt").orEmpty() }
+                    .decodeHtmlEntitiesLite()
+                if (href.isBlank() || title.isBlank() || title.isNavigationTitle() ||
+                    href.contains("/category") || href.contains("/tag") || href.contains("/genre")) return@mapNotNull null
+                val cover = el.select("img").firstOrNull()
+                    ?.let { it.attr("data-src").ifBlank { it.attr("src") } }.orEmpty()
+                val year = el.select("span.year, span.date, div.year").firstOrNull()?.text().orEmpty()
+                MediaResult(
+                    id = absoluteUrl(baseUrl, href),
+                    title = title,
+                    coverUrl = absoluteUrl(baseUrl, cover),
+                    description = "Classic cartoon from WCOStream",
+                    genres = "Animation, Cartoon" + if (year.isNotBlank()) ", $year" else "",
+                    type = "CARTOON"
+                )
+            }.distinctBy { it.id }.take(30)
+        } catch (e: Exception) {
+            println("[WCOStream] Search failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun fetchEpisodes(detailUrl: String): List<MediaEpisode> {
+        return try {
+            val baseUrl = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(detailUrl, baseUrl)
+            val html = httpClient.get(effectiveUrl) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$baseUrl/")
+            }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
+
+            val doc = Ksoup.parse(html)
+            // WCOStream lists episodes inside <ul> <li> <a> or <div> <a> structures
+            // Usually: div#main-content ul li a, or div.episodes-list a
+            val episodeLinks = doc.select("div#main-content ul li a, div.list-episode a, ul.episodes li a, div.episodes a, a[href*=/episode]")
+                .filter { el ->
+                    val href = el.attr("href")
+                    href.isNotBlank() && !href.contains("/search") && !href.contains("/category")
+                }
+                .distinctBy { it.attr("href") }
+
+            episodeLinks.mapIndexed { index, el ->
+                val href = el.attr("href")
+                val title = el.text().decodeHtmlEntitiesLite().ifBlank { "Episode ${index + 1}" }
+                MediaEpisode(
+                    title = title,
+                    url = absoluteUrl(baseUrl, href),
+                    episodeNumber = index + 1
+                )
+            }.reversed() // ascending order
+        } catch (e: Exception) {
+            println("[WCOStream] Episodes failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun extractStreamUrl(episodeUrl: String): String? {
+        return try {
+            val baseUrl = liveBaseUrl()
+            val effectiveUrl = rewriteUrlOrigin(episodeUrl, baseUrl)
+            val html = httpClient.get(effectiveUrl) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$baseUrl/")
+            }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return null
+
+            // Step 1: Try direct media URL extraction from the episode page
+            extractDirectVideoUrl(html)?.let { return it }
+
+            // Step 2: Extract the iframe embed src (WCOStream wraps videos in <div id="video-container"><iframe src="..." /></div>)
+            val doc = Ksoup.parse(html)
+            val iframeSrc = doc.select("div#video-container iframe, div.video-wrapper iframe, iframe[src*=/embed], iframe[src*=cembed]")
+                .firstOrNull()
+                ?.attr("src")
+                .orEmpty()
+
+            val iframeUrl = iframeSrc.toAbsoluteVideoUrl(effectiveUrl)
+                ?.takeUnless { it.isNonPlayableVideoProviderUrl() }
+            if (iframeUrl != null) {
+                val iframeHtml = httpClient.get(iframeUrl) {
+                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                    header("Referer", effectiveUrl)
+                }.bodyAsText()
+                extractDirectVideoUrl(iframeHtml)?.let { return it }
+
+                // Step 3: Try loading the embed page with a WebView-like approach: extract any <source> or data-video attributes
+                val iframeDoc = Ksoup.parse(iframeHtml)
+                val sourceSrc = iframeDoc.select("video source, source").firstOrNull()?.attr("src").orEmpty()
+                if (sourceSrc.isNotBlank() && sourceSrc.toAbsoluteVideoUrl(iframeUrl) != null) {
+                    return absoluteUrl(iframeUrl, sourceSrc)
+                }
+                // data-video or file variable
+                val dataVideo = Regex("""data-video=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+                    .find(iframeHtml)
+                    ?.groupValues?.getOrNull(1).orEmpty()
+                if (dataVideo.isNotBlank()) return absoluteUrl(iframeUrl, dataVideo)
+            }
+            null
+        } catch (e: Exception) {
+            println("[WCOStream] Stream extraction failed: ${e.message}")
+            null
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  KimCartoon Scraper
 // ─────────────────────────────────────────────────────────────────────────────
 class KimCartoonScraper(private val httpClient: HttpClient) {

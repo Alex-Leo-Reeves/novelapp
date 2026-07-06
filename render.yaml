@@ -15,3 +15,5 @@ services:
         value: /var/data
       - key: NODE_ENV
         value: production
+      - key: SPORTS_API_KEY
+        value: 5af86754eced2be2e63ca6a7e5d1c7d8

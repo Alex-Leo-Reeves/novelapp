@@ -60,13 +60,26 @@ class TmdbSource(
 
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
         when (category) {
+            VideoCategory.ANIME -> fetchAnime(page)
             VideoCategory.K_DRAMA -> fetchKDrama(page)
             VideoCategory.CARTOON -> fetchCartoons(page)
+            VideoCategory.CLASSIC -> fetchGenericTv(page)  // general TV — no genre filter
             VideoCategory.MOVIES -> fetchMovies(page)
         }
 
     suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
         when (category) {
+            VideoCategory.ANIME -> searchTv(query, page, category)
+                .filter { item ->
+                    item.genre.contains("Japanese", ignoreCase = true) &&
+                        item.genre.contains("Animation", ignoreCase = true)
+                }
+                .ifEmpty {
+                    searchTv(query, page, category).filter { item ->
+                        item.genre.contains("Japanese", ignoreCase = true) ||
+                            item.genre.contains("Animation", ignoreCase = true)
+                    }
+                }
             VideoCategory.K_DRAMA -> searchTv(query, page, category)
                 .let { results ->
                     results.filter { item ->
@@ -80,38 +93,85 @@ class TmdbSource(
                         !item.genre.contains("Japanese", ignoreCase = true)
                 }
                 .distinctBy { it.id }
+            VideoCategory.CLASSIC -> searchTv(query, page, category)
             VideoCategory.MOVIES -> searchMovie(query, page, category)
         }
 
+    /** K-Drama: fetch popular/weekly trending TV and filter for Korean */
     private suspend fun fetchKDrama(page: Int): List<UnifiedSearchResult> = runCatching {
-        val response = client.get("$baseUrl/discover/tv") {
+        val response = client.get("$baseUrl/trending/tv/week") {
             tmdbAuth()
-            parameter("with_origin_country", "KR")
-            parameter("with_original_language", "ko")
-            parameter("sort_by", "popularity.desc")
-            parameter("include_adult", "false")
-            parameter("page", page)
+            parameter("page", page.coerceIn(1, 10))
         }.bodyAsText()
-        parseResults(response).mapNotNull { it.jsonObject.toUnified("tv", VideoCategory.K_DRAMA) }
+        parseResults(response)
+            .mapNotNull { it.jsonObject.toUnified("tv", VideoCategory.K_DRAMA) }
+            .filter { it.genre.contains("Korean", ignoreCase = true) }
+            .takeIf { it.isNotEmpty() }
+            ?: runCatching {
+                // Fallback: use discover with Korean filters
+                val fallback = client.get("$baseUrl/discover/tv") {
+                    tmdbAuth()
+                    parameter("with_origin_country", "KR")
+                    parameter("with_original_language", "ko")
+                    parameter("sort_by", "popularity.desc")
+                    parameter("include_adult", "false")
+                    parameter("page", page)
+                }.bodyAsText()
+                parseResults(fallback).mapNotNull { it.jsonObject.toUnified("tv", VideoCategory.K_DRAMA) }
+            }.getOrElse { emptyList() }
     }.getOrElse { emptyList() }
 
-    private suspend fun fetchCartoons(page: Int): List<UnifiedSearchResult> {
-        val movies = discover("movie", page, VideoCategory.CARTOON) {
-            parameter("with_genres", "16")
-            parameter("sort_by", "popularity.desc")
-        }
-        val tv = discover("tv", page, VideoCategory.CARTOON) {
-            parameter("with_genres", "16")
-            parameter("sort_by", "popularity.desc")
-        }
-        // Post-filter: exclude Japanese-language content (anime) which lacks a `without_original_language` API param
-        return (movies + tv)
+    /** Cartoons: fetch popular/weekly trending movie + TV and filter for animation (exclude Japanese/anime) */
+    private suspend fun fetchCartoons(page: Int): List<UnifiedSearchResult> = runCatching {
+        val movies = trending("movie", page)
+            .filter { it.genre.contains("Animation", ignoreCase = true) }
+        val tv = trending("tv", page)
+            .filter { it.genre.contains("Animation", ignoreCase = true) }
+        val result = (movies + tv)
             .filter { item -> !item.genre.contains("Japanese", ignoreCase = true) }
             .distinctBy { it.id }
-    }
+        (result + discover("movie", page, VideoCategory.CARTOON) {
+            parameter("with_genres", "16")
+            parameter("sort_by", "popularity.desc")
+        } + discover("tv", page, VideoCategory.CARTOON) {
+            parameter("with_genres", "16")
+            parameter("sort_by", "popularity.desc")
+        })
+            .filter { item -> !item.genre.contains("Japanese", ignoreCase = true) }
+            .distinctBy { it.id }
+    }.getOrElse { emptyList() }
+
+    /** Anime: fetch popular/weekly trending TV and filter for Japanese + animation */
+    private suspend fun fetchAnime(page: Int): List<UnifiedSearchResult> = runCatching {
+        val result = trending("tv", page)
+            .filter { item ->
+                item.genre.contains("Japanese", ignoreCase = true) &&
+                    item.genre.contains("Animation", ignoreCase = true)
+            }
+        (result + discover("tv", page, VideoCategory.ANIME) {
+            parameter("with_genres", "16")
+            parameter("with_original_language", "ja")
+            parameter("sort_by", "popularity.desc")
+        })
+            .filter { item -> item.genre.contains("Japanese", ignoreCase = true) && item.genre.contains("Animation", ignoreCase = true) }
+            .distinctBy { it.id }
+    }.getOrElse { emptyList() }
 
     private suspend fun fetchMovies(page: Int): List<UnifiedSearchResult> =
         discover("movie", page, VideoCategory.MOVIES)
+
+    /** Fetch general TV content (classic/live-action shows) with no genre filter */
+    private suspend fun fetchGenericTv(page: Int): List<UnifiedSearchResult> =
+        trending("tv", page).ifEmpty { discover("tv", page, VideoCategory.CLASSIC) }
+
+    /** Reliable trending endpoint — always returns results even with basic API keys */
+    private suspend fun trending(mediaType: String, page: Int): List<UnifiedSearchResult> = runCatching {
+        val response = client.get("$baseUrl/trending/${mediaType}/week") {
+            tmdbAuth()
+            parameter("page", page.coerceIn(1, 10))
+        }.bodyAsText()
+        parseResults(response).mapNotNull { it.jsonObject.toUnified(mediaType, VideoCategory.CLASSIC) }
+    }.getOrElse { emptyList() }
 
     private suspend fun discover(
         mediaType: String,

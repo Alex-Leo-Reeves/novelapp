@@ -730,7 +730,7 @@ class RoyalRoadSource(private val httpClient: HttpClient) : NovelSource {
 // ─────────────────────────────────────────────────────────────────────────────
 private fun String.encodeURL(): String = this.replace(" ", "+")
 
-private fun absoluteUrl(baseUrl: String, href: String): String {
+internal fun absoluteUrl(baseUrl: String, href: String): String {
     if (href.isBlank()) return ""
     if (href.startsWith("http://") || href.startsWith("https://")) return href
     return baseUrl.trimEnd('/') + "/" + href.trimStart('/')
