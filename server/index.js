@@ -194,8 +194,8 @@ function buildAppVersionPayload() {
     const appVersionPath = path.join(SITE_DIR, "app-version.json");
     const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
     let payload = {
-        versionCode: 23,
-        versionName: "1.22",
+        versionCode: 24,
+        versionName: "1.23",
         apkUrl: `${PUBLIC_APP_URL}/downloads/novelapp-android.apk`,
         ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
         releaseNotes: [],
