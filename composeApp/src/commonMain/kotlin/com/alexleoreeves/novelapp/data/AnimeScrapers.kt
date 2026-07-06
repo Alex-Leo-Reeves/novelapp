@@ -117,7 +117,7 @@ class AniListSource(private val client: HttpClient) {
                 }
             }
             val response: String = client.post(ENDPOINT) {
-                contentType(ContentType.Application.Json)
+                header("Content-Type", "application/json")
                 setBody(body.toString())
             }.body()
             parseAnimeList(response)
@@ -138,7 +138,7 @@ class AniListSource(private val client: HttpClient) {
                 }
             }
             val response: String = client.post(ENDPOINT) {
-                contentType(ContentType.Application.Json)
+                header("Content-Type", "application/json")
                 setBody(body.toString())
             }.body()
             parseAnimeList(response)
@@ -158,7 +158,7 @@ class AniListSource(private val client: HttpClient) {
                 }
             }
             val response: String = client.post(ENDPOINT) {
-                contentType(ContentType.Application.Json)
+                header("Content-Type", "application/json")
                 setBody(body.toString())
             }.body()
             parseAnimeList(response)
@@ -200,10 +200,10 @@ class AniListSource(private val client: HttpClient) {
             put("query", RELATION_QUERY)
             putJsonObject("variables") { put("id", id) }
         }
-        val response: String = client.post(ENDPOINT) {
-            contentType(ContentType.Application.Json)
-            setBody(body.toString())
-        }.body()
+            val response: String = client.post(ENDPOINT) {
+                header("Content-Type", "application/json")
+                setBody(body.toString())
+            }.body()
         val media = json.parseToJsonElement(response)
             .jsonObject["data"]
             ?.jsonObject?.get("Media")

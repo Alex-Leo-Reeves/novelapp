@@ -49,7 +49,7 @@ class MangaDexSource(
 
         try {
             val response = httpClient.post("https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token") {
-                contentType(ContentType.Application.FormUrlEncoded)
+                header("Content-Type", "application/x-www-form-urlencoded")
                 setBody(
                     Parameters.build {
                         append("grant_type", "password")
@@ -74,7 +74,7 @@ class MangaDexSource(
         ensureAuthenticated()
         return try {
             val response = httpClient.get("https://api.mangadex.org/manga") {
-                accept(ContentType.Application.Json)
+                header("Accept", "application/json")
                 parameter("title", query)
                 parameter("limit", 15)
                 parameter("includes[]", "cover_art")
@@ -136,7 +136,7 @@ class MangaDexSource(
 
             do {
                 val response = httpClient.get("https://api.mangadex.org/manga/$mangaId/feed") {
-                    accept(ContentType.Application.Json)
+                    header("Accept", "application/json")
                     parameter("limit", 100)
                     parameter("offset", offset)
                     parameter("translatedLanguage[]", "en")
@@ -178,7 +178,7 @@ class MangaDexSource(
         val chapterId = chapterUrl.removePrefix("mangadex-chapter://")
         return try {
             val response = httpClient.get("https://api.mangadex.org/at-home/server/$chapterId") {
-                accept(ContentType.Application.Json)
+                header("Accept", "application/json")
                 if (accessToken != null) {
                     header("Authorization", "Bearer $accessToken")
                 }
