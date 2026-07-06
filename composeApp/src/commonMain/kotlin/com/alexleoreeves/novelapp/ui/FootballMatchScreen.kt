@@ -62,10 +62,14 @@ fun FootballMatchScreen(
             isLoadingStream = true
             streamError = null
             streamUrl = null
-            val url = footballApi.resolveStreamUrl(match.fixtureId)
-            if (url != null) {
-                streamUrl = url
-                onPlayStream(url, "${match.homeTeam} vs ${match.awayTeam}")
+            // Get all embed URLs from server — these are sports streaming
+            // aggregator pages that the AnimePlayerScreen WebView interceptor
+            // will load to extract the actual .m3u8 stream from network traffic
+            val urls = footballApi.resolveStreamUrls(match.fixtureId)
+            val firstUrl = urls.firstOrNull()
+            if (firstUrl != null) {
+                streamUrl = firstUrl
+                onPlayStream(firstUrl, "${match.homeTeam} vs ${match.awayTeam}")
             } else {
                 streamError = "No stream available for this match yet. Try again closer to kickoff."
             }
