@@ -1,15 +1,15 @@
 {
-    "versionCode": 23,
-    "versionName": "1.22",
-    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "apkBytes": 162916408,
-    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-    "releaseNotes": [
-        "Server hardened against malformed API responses from Supabase, AniList, MangaDex, and Wikidata — null safety checks prevent crashes on unexpected or partial data.",
-        "Server now gracefully exits with a clear message if the configured port is already in use, instead of hanging silently.",
-        "Fixed crash in content search and home endpoints when third-party APIs return incomplete payloads.",
-        "MangaDex chapters and metadata parsing is now fully null-safe for items missing attributes or relationships."
-    ],
-    "forceUpdate": false,
-    "apkSha256": "96356f046896a7e589d5bff80cda37e98d88e5e1299f9374e8379b32c9a6da97"
+  "versionCode": 23,
+  "versionName": "1.22",
+  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "apkBytes": 162916408,
+  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+  "releaseNotes": [
+    "Server hardened against malformed API responses from Supabase, AniList, MangaDex, and Wikidata — null safety checks prevent crashes on unexpected or partial data.",
+    "Server now gracefully exits with a clear message if the configured port is already in use, instead of hanging silently.",
+    "Fixed crash in content search and home endpoints when third-party APIs return incomplete payloads.",
+    "MangaDex chapters and metadata parsing is now fully null-safe for items missing attributes or relationships."
+  ],
+  "forceUpdate": false,
+  "apkSha256": "6c25ab7ab27f7ec563594e3a0105d47681888c51a49eb660569ef517fec11329"
 }
