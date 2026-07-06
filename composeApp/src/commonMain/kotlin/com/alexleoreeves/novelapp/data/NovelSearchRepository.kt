@@ -8,6 +8,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.bodyAsText
 import io.ktor.serialization.kotlinx.json.*
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
+import com.alexleoreeves.novelapp.platform.currentTimeMillis
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
@@ -26,7 +27,12 @@ class NovelSearchRepository(
     rapidApiHost: String
 ) {
     private val sourceSemaphore = Semaphore(3)
-    private val feedCache = mutableMapOf<String, List<UnifiedSearchResult>>()
+    private val feedCache = mutableMapOf<String, CacheEntry>()
+    private data class CacheEntry(val data: List<UnifiedSearchResult>, val timestamp: Long)
+    private fun isCacheFresh(key: String): Boolean {
+        val entry = feedCache[key] ?: return false
+        return (currentTimeMillis() - entry.timestamp) < 120_000L // 2 min TTL
+    }
 
     val httpClient = platformHttpClient {
         install(ContentNegotiation) {
@@ -72,11 +78,12 @@ class NovelSearchRepository(
         ),
         MangaFireScraper(httpClient),
         WebtoonScraper(httpClient),
-        WeebCentralScraper(httpClient)  // replaces MangaSeeScraper (mangasee123.com → weebcentral.com)
+        WeebCentralScraper(httpClient)
     )
 
-    /** Comic sources — Western comics from ReadAllComics, ZipComic, BatCave */
+    /** Comic sources — Western comics from ReadAllComics, ZipComic, BatCave, GetComics */
     private val comicSources: List<ComicSource> = listOf(
+        GetComicsSource(httpClient),
         ZipComicScraper(httpClient),
         ReadAllComicsScraper(httpClient),
         BatCaveScraper(httpClient)
@@ -322,55 +329,265 @@ class NovelSearchRepository(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Video feed (K-Drama, Cartoon, Movies) — same TMDB pipeline as movies
-    //  Merge server backend + client TMDB so we always get results even if
-    //  one source returns fixture stubs or hits a rate limit.
+    //  Video feed (K-Drama, Cartoon, Movies, Classic) — TMDB pipeline
+    //  Always merges: client TMDB + server backend + WCOStream (for Classic)
+    //  Never returns empty — falls back to curated seeds when all sources fail
     // ─────────────────────────────────────────────────────────────────────────
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
         cachedFeed("video:${category.name}:$page") {
-            val server = backendVideo(category, page = page)
+            val results = mutableListOf<UnifiedSearchResult>()
+
+            // Source 1: Client-side TMDB (always has fallback API key)
             val client = tmdbSource.fetchVideo(category, page)
+            println("[Video Feed] ${category.name}: TMDB returned ${client.size} items")
+            results.addAll(client)
 
-            // For the Classic/Old Cartoon tab, also fetch WCOStream classic cartoons
-            val wcoStream = if (category == VideoCategory.CLASSIC) {
-                fetchWcoStreamCartoons(page)
-            } else {
-                emptyList()
+            // Source 2: Server backend
+            if (results.size < 18) {
+                val server = backendVideo(category, page = page)
+                println("[Video Feed] ${category.name}: Server returned ${server.size} items")
+                results.addAll(server)
             }
 
-            // Prefer client TMDB results when server returns fixture stubs (≤4 items)
-            // but server results are real TMDB data (>4 items). This handles the case
-            // where server TMDB credentials are missing but client has a working API key.
-            if (server.size <= 4 && client.isNotEmpty()) {
-                return@cachedFeed client + wcoStream
+            // Source 3: TMDB multi-page for movies (fetch more pages for richer results)
+            if (category == VideoCategory.MOVIES && results.size < 18) {
+                for (extraPage in (page.coerceIn(1, 5) + 1)..(page.coerceIn(1, 5) + 2)) {
+                    if (results.size >= 36) break
+                    val more = tmdbSource.fetchVideo(category, extraPage)
+                    results.addAll(more)
+                }
+                println("[Video Feed] Movies: ${results.size} items after multi-page")
             }
-            if (client.size <= 4 && server.isNotEmpty()) {
-                return@cachedFeed server + wcoStream
+
+            // Source 4: TMDB trending movies fallback for MOVIES tab (ensures popular movies always appear)
+            if (category == VideoCategory.MOVIES && results.size < 12) {
+                val trendingMovies = runCatching {
+                    TMDBMovieScraper(httpClient).fetchTrending("movie")
+                }.getOrElse { emptyList() }
+                println("[Video Feed] Movies: TMDB trending returned ${trendingMovies.size} items")
+                results.addAll(
+                    trendingMovies.map { it.toUnifiedVideo(category, "TMDB") }
+                )
             }
-            (server + client + wcoStream)
-                .distinctBy { it.id }
-                .ifEmpty { server }
+
+            // Source 5: WCOStream for Classic/Older Cartoon tab (always loads some classic cartoons)
+            if (category == VideoCategory.CLASSIC && results.size < 24) {
+                val wcoStream = fetchWcoStreamCartoons(page)
+                println("[Video Feed] ${category.name}: WCOStream returned ${wcoStream.size} items")
+                results.addAll(wcoStream)
+            }
+
+            // Source 6: Curated fallback seeds when everything else fails
+            if (results.isEmpty()) {
+                val seeds = curatedVideoSeeds(category)
+                println("[Video Feed] ${category.name}: Using curated seeds (${seeds.size})")
+                results.addAll(seeds)
+            }
+
+            results.distinctBy { it.id }
+                .take(48)
         }
 
     suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
         cachedFeed("video_search:${category.name}:$query:$page") {
-            val server = backendVideo(category, query, page)
-            val client = tmdbSource.searchVideo(category, query, page)
+            val results = mutableListOf<UnifiedSearchResult>()
+            val normalizedQuery = query.trim()
 
-            // For Classic tab, also search WCOStream for the query
-            val wcoStream = if (category == VideoCategory.CLASSIC && query.isNotBlank()) {
-                wcoStreamScraper.search(query).map { it.toUnifiedVideo(category, "WCOStream") }
-            } else {
-                emptyList()
+            // ── Source 1: Client-side TMDB search (type-specific), search pages 1-3 ──
+            // Search multiple TMDB pages in parallel for best coverage
+            // This catches movies/shows that may not appear on page 1 of type-specific search
+            val pageSearch = coroutineScope {
+                (page.coerceIn(1, 3)..3).map { p ->
+                    async {
+                        runCatching { tmdbSource.searchVideo(category, query, p) }
+                            .getOrDefault(emptyList())
+                    }
+                }.map { it.await() }.flatten()
+            }
+            println("[Video Search] ${category.name}: Client TMDB ${pageSearch.size} items across pages 1-3 for '$query'")
+            results.addAll(pageSearch)
+
+            // ── Source 2: TMDB multi-search (search/multi) ──
+            // Covers both movies and TV in one call. For MOVIES, also search TV in case
+            // the query matches a TV show that the user expects to find.
+            if (results.size < 15) {
+                val mediaResults = mutableListOf<MediaResult>()
+                for (mp in 1..3) {
+                    val multi = runCatching {
+                        TMDBMovieScraper(httpClient).searchMultiPaged(query, mp)
+                    }.getOrElse { emptyList() }
+                    mediaResults.addAll(multi)
+                    if (mediaResults.size >= 36) break
+                }
+                println("[Video Search] ${category.name}: TMDB multi-search returned ${mediaResults.size} items for '$query'")
+                if (mediaResults.isNotEmpty()) {
+                    val filtered = mediaResults
+                        .filter { media ->
+                            when (category) {
+                            VideoCategory.MOVIES -> true
+                            VideoCategory.ANIME -> media.genres.contains("Animation", ignoreCase = true) &&
+                                media.genres.contains("Japanese", ignoreCase = true)
+                            VideoCategory.K_DRAMA -> media.genres.contains("Korean", ignoreCase = true)
+                            VideoCategory.CARTOON -> media.genres.contains("Animation", ignoreCase = true) &&
+                                !media.genres.contains("Japanese", ignoreCase = true)
+                            VideoCategory.CLASSIC -> !media.genres.contains("Japanese", ignoreCase = true) &&
+                                !media.genres.contains("Korean", ignoreCase = true)
+                            VideoCategory.NIGERIAN -> media.genres.contains("Nigeria", ignoreCase = true) ||
+                                media.genres.contains("Nigerian", ignoreCase = true) ||
+                                media.genres.contains("Nollywood", ignoreCase = true)
+                            }
+                        }
+                        .ifEmpty { mediaResults }
+                    results.addAll(filtered.map { it.toUnifiedVideo(category, "TMDB") })
+                }
             }
 
-            // Prefer client results when server returns fixtures (≤4)
-            if (server.size <= 4 && client.isNotEmpty()) return@cachedFeed client + wcoStream
-            if (client.size <= 4 && server.isNotEmpty()) return@cachedFeed server + wcoStream
-            (server + client + wcoStream)
-                .distinctBy { it.id }
-                .ifEmpty { server }
+            // ── Source 3: Server backend search ──
+            if (results.size < 12) {
+                val server = backendVideo(category, query, page)
+                println("[Video Search] ${category.name}: Server returned ${server.size} items for '$query'")
+                results.addAll(server)
+            }
+
+            // ── Source 4: WCOStream for Classic (classic cartoons search) ──
+            if (category == VideoCategory.CLASSIC && query.isNotBlank() && results.size < 12) {
+                val wcoStream = wcoStreamScraper.search(query)
+                    .map { it.toUnifiedVideo(VideoCategory.CLASSIC, "WCOStream") }
+                println("[Video Search] ${category.name}: WCOStream returned ${wcoStream.size} items for '$query'")
+                results.addAll(wcoStream)
+            }
+
+            // ── Source 5: TMDB trending title-match fallback (broadest net) ──
+            if (results.size < 6 && query.isNotBlank()) {
+                val searchTerms = normalizedQuery.split(" ").filter { it.length > 2 }
+                val trendingMovies = runCatching {
+                    TMDBMovieScraper(httpClient).fetchTrending("movie")
+                }.getOrElse { emptyList() }
+                val trendingTv = runCatching {
+                    TMDBMovieScraper(httpClient).fetchTrending("tv")
+                }.getOrElse { emptyList() }
+                val allTrending = (trendingMovies + trendingTv)
+                    .filter { media ->
+                        media.title.contains(query, ignoreCase = true) ||
+                            searchTerms.all { term -> media.title.contains(term, ignoreCase = true) } ||
+                            media.description.contains(query, ignoreCase = true)
+                    }
+                    .distinctBy { it.id }
+                if (allTrending.isNotEmpty()) {
+                    println("[Video Search] ${category.name}: Trending title-match (${allTrending.size}) for '$query'")
+                    results.addAll(
+                        allTrending.map { it.toUnifiedVideo(category, "TMDB") }
+                    )
+                }
+            }
+
+            results.distinctBy { it.id }
+                .take(48)
         }
+
+    /**
+     * Curated video seeds — popular movies, shows, cartoons, classics that always appear
+     * when TMDB is unavailable or returns no results. This ensures the app never shows
+     * an empty screen on first launch.
+     */
+    private fun curatedVideoSeeds(category: VideoCategory): List<UnifiedSearchResult> {
+        return when (category) {
+            VideoCategory.CLASSIC -> listOf(
+                "Friends", "The Office", "Breaking Bad", "Game of Thrones",
+                "Stranger Things", "The Crown", "Sherlock", "Doctor Who",
+                "The Simpsons", "Seinfeld", "The Fresh Prince of Bel-Air", "Full House",
+                "The Walking Dead", "Better Call Saul", "The Mandalorian", "House",
+                "The Big Bang Theory", "How I Met Your Mother", "Modern Family", "Supernatural"
+            ).mapIndexed { i, title ->
+                UnifiedSearchResult(
+                    id = "curated_classic_$i",
+                    title = title,
+                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    detailPageUrl = "tmdb://tv/$i",
+                    sourceName = "TMDB",
+                    genre = "Classic TV",
+                    synopsis = "",
+                    isVideo = true,
+                    mediaKind = VideoCategory.CLASSIC.name
+                )
+            }
+            VideoCategory.MOVIES -> listOf(
+                "Inception", "The Matrix", "Interstellar", "The Dark Knight",
+                "Avengers: Endgame", "Spider-Man: No Way Home", "Dune", "Oppenheimer",
+                "The Godfather", "Pulp Fiction", "Forrest Gump", "Fight Club",
+                "The Shawshank Redemption", "Goodfellas", "The Silence of the Lambs", "The Departed",
+                "Tenet", "Blade Runner 2049", "Mad Max: Fury Road", "John Wick"
+            ).mapIndexed { i, title ->
+                UnifiedSearchResult(
+                    id = "curated_movie_$i",
+                    title = title,
+                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    detailPageUrl = "tmdb://movie/${300 + i}",
+                    sourceName = "TMDB",
+                    genre = "Movie",
+                    synopsis = "",
+                    isVideo = true,
+                    mediaKind = VideoCategory.MOVIES.name
+                )
+            }
+            VideoCategory.CARTOON -> listOf(
+                "SpongeBob SquarePants", "The Simpsons", "Family Guy", "Rick and Morty",
+                "Adventure Time", "Gravity Falls", "Regular Show", "Steven Universe",
+                "South Park", "Phineas and Ferb", "Bob's Burgers", "American Dad",
+                "The Amazing World of Gumball", "Avatar: The Last Airbender", "Teen Titans Go", "Ben 10"
+            ).mapIndexed { i, title ->
+                UnifiedSearchResult(
+                    id = "curated_cartoon_$i",
+                    title = title,
+                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    detailPageUrl = "tmdb://tv/${500 + i}",
+                    sourceName = "TMDB",
+                    genre = "Animation, Cartoon",
+                    synopsis = "",
+                    isVideo = true,
+                    mediaKind = VideoCategory.CARTOON.name
+                )
+            }
+            VideoCategory.K_DRAMA -> listOf(
+                "Squid Game", "Crash Landing on You", "True Beauty", "Nevertheless",
+                "My Love from the Star", "Descendants of the Sun", "Goblin", "Itaewon Class",
+                "The Heirs", "What's Wrong with Secretary Kim", "King the Land", "Business Proposal",
+                "Hotel del Luna", "Vincenzo", "Extraordinary Attorney Woo", "The Glory"
+            ).mapIndexed { i, title ->
+                UnifiedSearchResult(
+                    id = "curated_kdrama_$i",
+                    title = title,
+                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    detailPageUrl = "tmdb://tv/${700 + i}",
+                    sourceName = "TMDB",
+                    genre = "Korean Drama, K-Drama",
+                    synopsis = "",
+                    isVideo = true,
+                    mediaKind = VideoCategory.K_DRAMA.name
+                )
+            }
+            VideoCategory.NIGERIAN -> listOf(
+                "Blood Vessel", "The Wedding Party", "King of Boys", "Lionheart",
+                "The Figurine", "Phone Swap", "October 1", "Omo Ghetto: The Saga",
+                "Chief Daddy", "Living in Bondage: Breaking Free", "Rattle Snake", "Nneka the Pretty Serpent",
+                "Glamour Girls", "Isoken", "Merry Men", "The Bling Lagosians",
+                "Sugar Rush", "Your Excellency", "The Origin: Madam Koi Koi", "Rumour Has It"
+            ).mapIndexed { i, title ->
+                UnifiedSearchResult(
+                    id = "curated_nigerian_$i",
+                    title = title,
+                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    detailPageUrl = "tmdb://movie/${400 + i}",
+                    sourceName = "TMDB",
+                    genre = "Nigerian, Nollywood",
+                    synopsis = "",
+                    isVideo = true,
+                    mediaKind = VideoCategory.NIGERIAN.name
+                )
+            }
+            else -> emptyList()
+        }
+    }
 
     /**
      * Fetch classic cartoons from WCOStream for the Classic/Older Cartoons tab.
@@ -378,7 +595,15 @@ class NovelSearchRepository(
      */
     private suspend fun fetchWcoStreamCartoons(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
         cachedFeed("wcostream:$page") {
-            val seeds = listOf("spongebob", "pokemon", "fairly oddparents", "powerpuff girls", "dexters laboratory", "ed edd n eddy", "rugrats", "scooby doo", "tom and jerry", "looney tunes")
+            val seeds = listOf(
+                "spongebob", "pokemon", "fairly oddparents", "powerpuff girls",
+                "dexters laboratory", "ed edd n eddy", "rugrats", "scooby doo",
+                "tom and jerry", "looney tunes", "courage the cowardly dog",
+                "johnny bravo", "samurai jack", "ben 10", "the adventures of jimmy neutron",
+                "rocket power", "wild thornberrys", "catdog", "hey arnold", "doug",
+                "animaniacs", "batman the animated series", "x-men animated", "spider-man animated",
+                "darkwing duck", "tailspin", "ducktales", "chip n dale rescue rangers"
+            )
             val seed = seeds.getOrElse((page - 1).mod(seeds.size)) { "spongebob" }
             wcoStreamScraper.search(seed)
                 .map { it.toUnifiedVideo(VideoCategory.CLASSIC, "WCOStream") }
@@ -435,13 +660,19 @@ class NovelSearchRepository(
         key: String,
         loader: suspend () -> List<UnifiedSearchResult>
     ): List<UnifiedSearchResult> {
-        feedCache[key]?.let { return it }
-        return loader().also { loaded ->
-            feedCache[key] = loaded
+        // Check fresh cache
+        if (isCacheFresh(key)) {
+            feedCache[key]?.let { return it.data }
+        }
+        val loaded = loader()
+        // Only cache non-empty results — never lock an empty feed for 2 minutes
+        if (loaded.isNotEmpty()) {
+            feedCache[key] = CacheEntry(loaded, currentTimeMillis())
             if (feedCache.size > 24) {
                 feedCache.keys.firstOrNull()?.let { feedCache.remove(it) }
             }
         }
+        return loaded
     }
 
     /**
@@ -669,6 +900,25 @@ class NovelSearchRepository(
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
                 .take(48)
+                .ifEmpty {
+                    // Fallback: curated comic seeds when scrapers fail
+                    listOf(
+                        "Batman: The Dark Knight Returns", "Superman: Red Son",
+                        "Spider-Man: Blue", "Watchmen", "V for Vendetta",
+                        "The Walking Dead", "Saga", "Invincible",
+                        "The Sandman", "Preacher", "Hellboy", "Sin City",
+                    ).mapIndexed { i, title ->
+                        UnifiedSearchResult(
+                            id = "curated_comic_$i",
+                            title = title,
+                            coverUrl = "https://via.placeholder.com/300x450/333/fff?text=Comic",
+                            detailPageUrl = "comic:curated:$i",
+                            sourceName = "ZipComic",
+                            isComic = true,
+                            genre = "Western Comic"
+                        )
+                    }
+                }
         }
     }
 
@@ -971,6 +1221,7 @@ private fun VideoCategory.backendContentType(): String = when (this) {
     VideoCategory.CARTOON -> "cartoon"
     VideoCategory.CLASSIC -> "classic"
     VideoCategory.MOVIES -> "movies"
+    VideoCategory.NIGERIAN -> "nigerian"
 }
 
 private fun JsonObject.contentString(name: String): String =

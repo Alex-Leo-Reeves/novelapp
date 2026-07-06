@@ -44,7 +44,8 @@ enum class VideoCategory(val label: String) {
     K_DRAMA("K-Drama"),
     CARTOON("Cartoon"),
     CLASSIC("Classic"),
-    MOVIES("Movies")
+    MOVIES("Movies"),
+    NIGERIAN("Nigerian")
 }
 
 // ───────────────────────────────────────────────

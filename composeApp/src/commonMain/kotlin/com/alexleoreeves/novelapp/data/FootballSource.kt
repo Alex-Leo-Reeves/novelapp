@@ -78,6 +78,23 @@ class FootballApiSource(private val httpClient: HttpClient) {
     }
 
     /**
+     * Fetch upcoming fixtures (next 5 days) for the Upcoming tab.
+     */
+    suspend fun fetchUpcomingFixtures(): List<FootballMatch> = runCatching {
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures") {
+            parameter("upcoming", "true")
+        }.bodyAsText()
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        root["data"]
+            ?.jsonArray
+            ?.mapNotNull { it.jsonObject.toFootballMatch() }
+            .orEmpty()
+    }.getOrElse { error ->
+        println("[FootballAPI] Upcoming fixtures failed: ${error.message}")
+        emptyList()
+    }
+
+    /**
      * Fetch live matches only (for auto-refresh).
      */
     suspend fun fetchLiveFixtures(): List<FootballMatch> = runCatching {

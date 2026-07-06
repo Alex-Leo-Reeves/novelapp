@@ -194,8 +194,8 @@ function buildAppVersionPayload() {
     const appVersionPath = path.join(SITE_DIR, "app-version.json");
     const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
     let payload = {
-        versionCode: 24,
-        versionName: "1.23",
+        versionCode: 25,
+        versionName: "1.24",
         apkUrl: `${PUBLIC_APP_URL}/downloads/novelapp-android.apk`,
         ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
         releaseNotes: [],
@@ -681,6 +681,7 @@ function normalizeContentType(type) {
     if (["kdrama", "drama", "korean"].includes(raw)) return "kdrama";
     if (["cartoon", "cartoons"].includes(raw)) return "cartoon";
     if (["classic", "classictv", "classic-tv"].includes(raw)) return "classic";
+    if (["nigerian", "nollywood", "naija"].includes(raw)) return "nigerian";
     if (["anime", "manga"].includes(raw)) return raw;
     return "novels";
 }
@@ -729,7 +730,18 @@ const KNOWN_MEDIA = [
     ["crash-landing-on-you", "Crash Landing on You", "K-Drama", "TMDB", "kdrama", "tmdb://tv/94796", "A South Korean heiress crash lands in North Korea and meets an officer.", "https://image.tmdb.org/t/p/w500/2u8I9AzgbLGGqE4JdW6uJQO0t5C.jpg"],
     ["squid-game", "Squid Game", "K-Drama", "TMDB", "kdrama", "tmdb://tv/93405", "Desperate players enter deadly games for a life-changing prize.", "https://image.tmdb.org/t/p/w500/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg"],
     ["true-beauty", "True Beauty", "K-Drama", "TMDB", "kdrama", "tmdb://tv/112888", "A high school student hides her insecurities behind makeup and finds connection.", "https://image.tmdb.org/t/p/w500/sld43SJArZqlnANJGBkZyQpXHHH.jpg"],
-    ["queen-of-tears", "Queen of Tears", "K-Drama", "TMDB", "kdrama", "tmdb://tv/215720", "A married couple faces crisis, love, and family pressure at the top of a business empire.", "https://image.tmdb.org/t/p/w500/1uEwVlg4L7QjOglfaXr0iM2ZJ48.jpg"]
+    ["queen-of-tears", "Queen of Tears", "K-Drama", "TMDB", "kdrama", "tmdb://tv/215720", "A married couple faces crisis, love, and family pressure at the top of a business empire.", "https://image.tmdb.org/t/p/w500/1uEwVlg4L7QjOglfaXr0iM2ZJ48.jpg"],
+    // ── Nigerian Nollywood Films ────────────────────────────────────────────
+    ["blood-vessel", "Blood Vessel", "Nigerian, Action", "TMDB", "movie", "tmdb://movie/964385", "Passengers on a ship in WWII face a terrifying supernatural threat in the Atlantic.", "https://image.tmdb.org/t/p/w500/A3uwsWNf7LEk2vdUErLrxxgmhG.jpg"],
+    ["the-wedding-party", "The Wedding Party", "Nigerian, Comedy, Romance", "TMDB", "movie", "tmdb://movie/423358", "A lavish Nigerian wedding brings chaos, family drama, and unexpected love.", "https://image.tmdb.org/t/p/w500/lHNAe1o1q0lM6st2j5fPALtDSgG.jpg"],
+    ["lionheart", "Lionheart", "Nigerian, Comedy, Drama", "TMDB", "movie", "tmdb://movie/544515", "A woman takes over her father's struggling transport company and must prove herself.", "https://image.tmdb.org/t/p/w500/xo1GhglfoSiVOHVH3jqffJj0iZH.jpg"],
+    ["king-of-boys", "King of Boys", "Nigerian, Crime, Drama", "TMDB", "movie", "tmdb://movie/564066", "A businesswoman and political godmother fights to maintain power in Lagos.", "https://image.tmdb.org/t/p/w500/7x3TWNv3MbFnGs3qNllW7g7OAeT.jpg"],
+    ["the-figurine", "The Figurine", "Nigerian, Thriller", "TMDB", "movie", "tmdb://movie/124410", "Two friends discover a mystical figurine that brings good fortune but demands sacrifice.", "https://image.tmdb.org/t/p/w500/pBjtLCSm83WJ6lvZ5Y13A0Hggfq.jpg"],
+    ["omo-ghetto-the-saga", "Omo Ghetto: The Saga", "Nigerian, Comedy", "TMDB", "movie", "tmdb://movie/749332", "Twins from the ghetto lead double lives in this action-comedy.", "https://image.tmdb.org/t/p/w500/nYgFXBqYd2CUqXGcWYYUVBiWHzr.jpg"],
+    ["rattlesnake", "Rattle Snake", "Nigerian, Thriller", "TMDB", "movie", "tmdb://movie/257776", "A dark supernatural thriller rooted in Nigerian folklore and urban legend.", ""],
+    ["isoken", "Isoken", "Nigerian, Romance, Comedy", "TMDB", "movie", "tmdb://movie/476543", "A Nigerian woman faces family pressure to settle down while navigating modern love.", "https://image.tmdb.org/t/p/w500/ceQxsDExHQNA6sYZqgl6TJQ6AQp.jpg"],
+    ["your-excellency", "Your Excellency", "Nigerian, Comedy", "TMDB", "movie", "tmdb://movie/594192", "A comedy about a former president who struggles to adapt to civilian life.", ""],
+    ["rumour-has-it", "Rumour Has It", "Nigerian, Drama", "TMDB", "movie", "tmdb://movie/693111", "A small-town rumor spirals out of control, threatening relationships and reputation.", ""]
 ];
 
 function fixtureItems(type, query = "") {
@@ -738,6 +750,7 @@ function fixtureItems(type, query = "") {
         normalizedType === "anime" ? KNOWN_ANIME :
         normalizedType === "kdrama" ? KNOWN_MEDIA.filter((item) => item[4] === "kdrama") :
         normalizedType === "cartoon" ? KNOWN_MEDIA.filter((item) => item[4] === "cartoon") :
+        normalizedType === "nigerian" ? KNOWN_MEDIA.filter((item) => item[3] === "TMDB" && item[2].includes("Nigerian")) :
         normalizedType === "movies" ? KNOWN_MEDIA.filter((item) => item[4] === "movie") :
         KNOWN_NOVELS;
     const q = String(query || "").trim().toLowerCase();
@@ -817,7 +830,7 @@ async function anilistItems(query, page = 1) {
 
 async function tmdbItems(type, query, page = 1) {
     const token = process.env.TMDB_READ_ACCESS_TOKEN || "";
-    const key = process.env.TMDB_API_KEY || "";
+    const key = process.env.TMDB_API_KEY || "15d2ea6d0dc1d247f33e5405d4b507cc";
     if (!token && !key) return [];
     const normalizedType = normalizeContentType(type);
     const mediaType = normalizedType === "movies" ? "movie" : "tv";
@@ -826,8 +839,15 @@ async function tmdbItems(type, query, page = 1) {
 
     let endpoint;
     if (query) {
-        // For search, use the search endpoint (same for all types)
-        endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
+        // For search with a query, use multi-search for ALL types to maximize coverage.
+        // Multi-search returns both movies and TV in one call, which is essential for
+        // finding results like "agency" (a movie) or "forever 2024" (a TV show/movie).
+        // We then filter by media_type appropriately.
+        if (normalizedType === "movies" || normalizedType === "classic" || normalizedType === "cartoon" || normalizedType === "kdrama") {
+            endpoint = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
+        } else {
+            endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
+        }
     } else if (normalizedType === "kdrama") {
         // K-Drama: Korean origin + Korean language TV shows
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=KR&with_original_language=ko&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
@@ -837,24 +857,53 @@ async function tmdbItems(type, query, page = 1) {
     } else if (normalizedType === "anime") {
         // Anime: animation genre (16) + Japanese language + anime keyword
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "classic") {
+        // Classic home: discover TV (live-action + classic animation, exclude Japanese content)
+        endpoint = `https://api.themoviedb.org/3/discover/tv?sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
     } else if (normalizedType === "movies") {
         endpoint = `https://api.themoviedb.org/3/discover/movie?sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
     } else {
         endpoint = `https://api.themoviedb.org/3/${mediaType}/popular?page=${page}${apiSuffix}`;
     }
 
-    const url = token ? endpoint : endpoint;
-    const payload = await fetchWithTimeout(url, { headers });
-    return (payload.results || []).slice(0, 24).map((item) => contentItem({
-        id: `tmdb_${mediaType}_${item.id}`,
-        title: item.title || item.name || "Untitled",
-        subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : "Movie",
-        coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
-        detailUrl: `tmdb://${mediaType}/${item.id}`,
-        sourceName: "TMDB",
-        kind: normalizedType === "movies" ? "movie" : normalizedType,
-        synopsis: item.overview || ""
-    }));
+    const payload = await fetchWithTimeout(endpoint, { headers });
+    let results = payload.results || [];
+
+    // For multi-search, include BOTH movies AND TV shows (not just movies)
+    // This ensures searching "agency" finds the movie, and "forever 2024" finds the movie too
+    if (query && endpoint.includes("/search/multi")) {
+        results = results.filter(item => item.media_type === "movie" || item.media_type === "tv");
+        // If multi-search returned fewer than 5 results, also try dedicated movie search + TV search as fallback
+        if (results.length < 5) {
+            const movieEndpoint = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&page=1${apiSuffix}`;
+            const tvEndpoint = `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(query)}&page=1${apiSuffix}`;
+            const [moviePayload, tvPayload] = await Promise.all([
+                fetchWithTimeout(movieEndpoint, { headers }).catch(() => null),
+                fetchWithTimeout(tvEndpoint, { headers }).catch(() => null)
+            ]);
+            const movieResults = (moviePayload && moviePayload.results) || [];
+            const tvResults = (tvPayload && tvPayload.results) || [];
+            results = [...results, ...movieResults, ...tvResults];
+        }
+    }
+    // For classic multi-search, filter to TV only
+    if (query && normalizedType === "classic" && endpoint.includes("/search/multi")) {
+        results = results.filter(item => item.media_type === "tv");
+    }
+
+    return results.slice(0, 24).map((item) => {
+        const itemType = item.media_type === "movie" ? "movie" : "tv";
+        return contentItem({
+            id: `tmdb_${itemType}_${item.id}`,
+            title: item.title || item.name || "Untitled",
+            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : "Movie",
+            coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
+            detailUrl: `tmdb://${itemType}/${item.id}`,
+            sourceName: "TMDB",
+            kind: normalizedType === "movies" ? "movie" : normalizedType,
+            synopsis: item.overview || ""
+        });
+    });
 }
 
 async function tmdbBestMatch(type, title) {
@@ -965,8 +1014,8 @@ async function contentHome(type, page = 1) {
         const live = await mangadexItems("", page).catch(() => []);
         return live.length ? live : fixtureItems("manga");
     }
-    // Anime, K-Drama, Cartoons, Classic TV, and Movies all go through TMDB (same pipeline)
-    if (["anime", "kdrama", "cartoon", "classic", "movies"].includes(normalizedType)) {
+    // Anime, K-Drama, Cartoons, Classic TV, Nigerian, and Movies all go through TMDB (same pipeline)
+    if (["anime", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
         const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
         return tmdb.length ? tmdb : fixtureItems(normalizedType);
     }
@@ -976,17 +1025,32 @@ async function contentHome(type, page = 1) {
 
 async function contentSearch(type, query, page = 1) {
     const normalizedType = normalizeContentType(type);
-    if (["anime", "kdrama", "cartoon", "classic", "movies"].includes(normalizedType)) {
-        const live = await tmdbItems(normalizedType, query, page).catch(() => []);
-        return live.length ? live : fixtureItems(normalizedType, query);
+    // Anime, K-Drama, Cartoon, Classic, Movies, Nigerian: all go through TMDB multi-pipeline
+    if (["anime", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
+        // Search multiple TMDB pages for better coverage (aggregate pages 1-3)
+        const pagePromises = [];
+        const maxPages = normalizedType === "movies" ? 3 : 2; // movies get deeper search
+        for (let p = page; p < page + maxPages; p++) {
+            pagePromises.push(tmdbItems(normalizedType, query, p).catch(() => []));
+        }
+        const pageResults = await Promise.all(pagePromises);
+        const combined = pageResults.flat().filter(Boolean);
+        // Deduplicate by TMDB detailUrl
+        const seen = new Set();
+        const deduped = combined.filter(item => {
+            const key = item.detailUrl || item.title;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        if (deduped.length) return deduped;
+
+        // If TMDB returned nothing, try fixture fallback
+        return fixtureItems(normalizedType, query);
     }
     if (normalizedType === "manga") {
         const live = await mangadexItems(query, page).catch(() => []);
         return live.length ? live : fixtureItems("manga", query);
-    }
-    if (["kdrama", "cartoon", "classic", "movies"].includes(normalizedType)) {
-        const live = await tmdbItems(normalizedType, query, page).catch(() => []);
-        return live.length ? live : fixtureItems(normalizedType, query);
     }
     const live = await swiftNovelScrapers.searchNovels(query, page).catch(() => []);
     return live.length ? live : fixtureItems("novels", query);
@@ -2677,11 +2741,22 @@ async function handleFootballFixtures(request, response, requestUrl) {
     } else if (date) {
       params.date = date;
     } else {
-      // Default to today's date
-      const today = new Date();
-      params.date = today.toISOString().split("T")[0];
-      // Also fetch live matches
+    const today = new Date();
+    const paramDate = requestUrl.searchParams.get("date");
+    const upcoming = requestUrl.searchParams.get("upcoming");
+    if (upcoming === "true") {
+      // Fetch next 5 days of fixtures for the Upcoming tab
+      const end = new Date(today);
+      end.setDate(end.getDate() + 5);
+      params.dateFrom = today.toISOString().split("T")[0];
+      params.dateTo = end.toISOString().split("T")[0];
+    } else if (paramDate) {
+      params.date = paramDate;
       params.live = "all";
+    } else {
+      params.date = today.toISOString().split("T")[0];
+      params.live = "all";
+    }
     }
     const payload = await sportsApiRequest("/fixtures", params);
     const fixtures = Array.isArray(payload?.response) ? payload.response : [];
