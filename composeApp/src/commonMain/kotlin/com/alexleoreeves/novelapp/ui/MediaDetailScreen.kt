@@ -120,6 +120,15 @@ fun MediaDetailScreen(
     var downloadingEpisodes by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var refreshTrigger by remember { mutableStateOf(0) }
 
+    fun contentTypeForItem(): String = when (item.mediaKind.uppercase()) {
+        "MOVIE" -> ContentType.MOVIE
+        "CARTOON" -> ContentType.CARTOON
+        "K_DRAMA" -> ContentType.K_DRAMA
+        "CLASSIC" -> ContentType.CLASSIC
+        "NIGERIAN" -> ContentType.NIGERIAN
+        else -> ContentType.ANIME
+    }
+
     fun downloadEpisode(ep: MediaEpisode) {
         requireAuth {
             if (downloadRepo.isEpisodeDownloaded(item.id, ep.episodeNumber)) {
@@ -138,7 +147,7 @@ fun MediaDetailScreen(
                                 id = item.id,
                                 title = item.title,
                                 coverUrl = item.coverUrl,
-                                type = "ANIME", // Keep it "ANIME" so it fits the video tab offline views perfectly
+                                type = contentTypeForItem(),
                                 sourceName = item.sourceName
                             )
                         )
@@ -582,7 +591,7 @@ fun MediaDetailScreen(
                                                     id = item.id,
                                                     title = item.title,
                                                     coverUrl = item.coverUrl,
-                                                    type = "ANIME",
+                                                    type = contentTypeForItem(),
                                                     sourceName = item.sourceName
                                                 )
                                             )
