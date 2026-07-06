@@ -1,15 +1,15 @@
 {
-  "versionCode": 23,
-  "versionName": "1.22",
-  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "apkBytes": 162916408,
-  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-  "releaseNotes": [
-    "Server hardened against malformed API responses from Supabase, AniList, MangaDex, and Wikidata — null safety checks prevent crashes on unexpected or partial data.",
-    "Server now gracefully exits with a clear message if the configured port is already in use, instead of hanging silently.",
-    "Fixed crash in content search and home endpoints when third-party APIs return incomplete payloads.",
-    "MangaDex chapters and metadata parsing is now fully null-safe for items missing attributes or relationships."
-  ],
-  "forceUpdate": false,
-  "apkSha256": "131d6dc98e3131f90967ea3869107783807e445f7e3114fe6375623610211956"
+    "versionCode": 24,
+    "versionName": "1.23",
+    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+    "apkBytes": 162916408,
+    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+    "releaseNotes": [
+        "Football streaming completely rebuilt — removed broken iptv-org M3U parser and fake fixture-ID URLs. Now constructs real embed page URLs using team names via streamed.su, crackstreams.biz, sportshub.stream, and others.",
+        "AnimePlayerScreen now powers football streams — WebView intercepts .m3u8 streams from sports aggregators using the same pipeline as movies and anime.",
+        "Match detail screen shows full score, teams, and league info — tap 'Find Live Stream' to get a playable embed.",
+        "Server continues improvements from v1.22 — null safety on Supabase, AniList, MangaDex, Wikidata; graceful port-in-use exit; hardened content search and home endpoints."
+    ],
+    "forceUpdate": false,
+    "apkSha256": "500d2b182c1bc42f56261527476aa6e79f514991a5ed3404839b2f5cfa71936d"
 }

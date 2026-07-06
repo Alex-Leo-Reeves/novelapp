@@ -1,1 +1,2 @@
 site/downloads/novelapp-android.apk filter=lfs diff=lfs merge=lfs -text
+site/downloads/*.apk filter=lfs diff=lfs merge=lfs -text
