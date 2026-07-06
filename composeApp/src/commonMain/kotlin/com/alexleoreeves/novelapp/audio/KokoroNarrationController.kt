@@ -457,32 +457,40 @@ class KokoroNarrationController(
     private fun prepareSegment(index: Int): Deferred<KokoroSynthesisResult> {
         return audioCache.getOrPut(index) {
             controllerScope.async {
-                val segment = segments[index]
-                val activeStatus = KokoroVoiceSetup.status.value.phase
-                if (activeStatus != KokoroVoiceSetupPhase.Downloading && activeStatus != KokoroVoiceSetupPhase.Installing) {
-                    KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                        phase = KokoroVoiceSetupPhase.Synthesizing,
-                        message = if (index == 0) {
-                            "Preparing voice."
-                        } else {
-                            "Preparing the next voice segment."
-                        }
-                    )
-                }
-                synthesizeMutex.withLock {
-                    synthesizeKokoroSpeech(segment.toRequest(_settings.value))
-                }.also { result ->
-                    KokoroVoiceSetup.status.value = if (result.isUsableNarrationResult()) {
-                        KokoroVoiceSetupStatus(
-                            phase = KokoroVoiceSetupPhase.Ready,
-                            message = "Kokoro voice is ready on this device."
-                        )
-                    } else {
-                        KokoroVoiceSetupStatus(
-                            phase = KokoroVoiceSetupPhase.Error,
-                            message = "Kokoro voice is unavailable. Check the bundled model and try again."
+                try {
+                    val segment = segments[index]
+                    val activeStatus = KokoroVoiceSetup.status.value.phase
+                    if (activeStatus != KokoroVoiceSetupPhase.Downloading && activeStatus != KokoroVoiceSetupPhase.Installing) {
+                        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                            phase = KokoroVoiceSetupPhase.Synthesizing,
+                            message = if (index == 0) {
+                                "Preparing voice."
+                            } else {
+                                "Preparing the next voice segment."
+                            }
                         )
                     }
+                    synthesizeMutex.withLock {
+                        synthesizeKokoroSpeech(segment.toRequest(_settings.value))
+                    }.also { result ->
+                        KokoroVoiceSetup.status.value = if (result.isUsableNarrationResult()) {
+                            KokoroVoiceSetupStatus(
+                                phase = KokoroVoiceSetupPhase.Ready,
+                                message = "Kokoro voice is ready on this device."
+                            )
+                        } else {
+                            KokoroVoiceSetupStatus(
+                                phase = KokoroVoiceSetupPhase.Error,
+                                message = "Kokoro voice is unavailable. Check the bundled model and try again."
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Remove from cache so a failed synthesis doesn't permanently poison
+                    // the entry — subsequent calls will retry fresh instead of rethrowing
+                    // the cached exception silently via continue in playFromSegment.
+                    audioCache.remove(index)
+                    throw e
                 }
             }
         }

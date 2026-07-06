@@ -151,20 +151,28 @@ fun ReaderScreen(
         }
     }
 
+    // Track and debounce user scroll — 3 second grace period before auto-scroll resumes
+    val userScrollGraceMs = 3_000L
     LaunchedEffect(isUserScrolling) {
-        if (isUserScrolling) lastUserScrollAt = currentTimeMillis()
+        if (isUserScrolling) {
+            lastUserScrollAt = currentTimeMillis()
+        }
     }
 
-    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, ttsWordIndex.value, paragraphs.size, isUserScrolling) {
+    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, paragraphs.size, isUserScrolling) {
         if (!isPlaying.value || !autoScrollEnabled || paragraphs.isEmpty()) return@LaunchedEffect
-        if (isUserScrolling || currentTimeMillis() - lastUserScrollAt < 900L) return@LaunchedEffect
+        if (isUserScrolling || currentTimeMillis() - lastUserScrollAt < userScrollGraceMs) return@LaunchedEffect
+
         val paragraphIndex = ttsParagraphIndex.value.takeIf { it >= 0 } ?: return@LaunchedEffect
-        if (ttsWordIndex.value > 0 && ttsWordIndex.value % 16 != 0) return@LaunchedEffect
         val listIndex = (paragraphIndex + 2).coerceIn(0, paragraphs.size + 1)
-        if (listIndex != lastAutoScrollTarget && listIndex > lazyListState.firstVisibleItemIndex + 1) {
-            lastAutoScrollTarget = listIndex
-            lazyListState.scrollToItem(listIndex)
-        }
+
+        // Only auto-scroll when the target is at least 3 paragraphs below visible area
+        val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (listIndex <= lastVisible + 2) return@LaunchedEffect
+        if (listIndex == lastAutoScrollTarget) return@LaunchedEffect
+
+        lastAutoScrollTarget = listIndex
+        lazyListState.animateScrollToItem(listIndex)
         onProgress(paragraphIndex)
     }
 

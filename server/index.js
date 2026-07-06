@@ -6,9 +6,9 @@ const { URL } = require("url");
 const swiftNovelScrapers = require("./swift-novel-scrapers");
 let consumetExtensions = null;
 try {
-  consumetExtensions = require("@consumet/extensions");
+    consumetExtensions = require("@consumet/extensions");
 } catch (error) {
-  console.warn("[content] Consumet extensions unavailable:", error.message || error);
+    console.warn("[content] Consumet extensions unavailable:", error.message || error);
 }
 
 const PORT = Number(process.env.PORT || 3000);
@@ -37,963 +37,987 @@ const MOVIE_FREE_PREVIEW_MS = 20 * 60 * 1000;
 const EPISODIC_FREE_FRACTION = 0.2;
 let legacySupabaseMigrationDone = false;
 
-const BILLING_PLANS = {
-  free: {
-    id: "free",
-    label: "Free",
-    amount: 0,
-    currency: "NGN",
-    maxDevices: 2,
-    premium: false,
-    description: "Free preview access and up to 2 signed-in devices."
-  },
-  premium_3_devices: {
-    id: "premium_3_devices",
-    label: "Premium 3 devices",
-    amount: 1000,
-    currency: "NGN",
-    maxDevices: 3,
-    premium: true,
-    description: "Full movies, cartoons, K-drama, and up to 3 signed-in devices."
-  },
-  premium_unlimited: {
-    id: "premium_unlimited",
-    label: "Premium unlimited",
-    amount: 4000,
-    currency: "NGN",
-    maxDevices: null,
-    premium: true,
-    description: "Full access and unlimited signed-in devices."
-  },
-  ai_creator_20: {
-    id: "ai_creator_20",
-    label: "AI Creator 20",
-    amount: 2000,
-    currency: "NGN",
-    maxDevices: 2,
-    premium: true,
-    description: "20 AI creations per month and full premium access."
-  },
-  ai_creator_unlimited: {
-    id: "ai_creator_unlimited",
-    label: "AI Creator Unlimited",
-    amount: 4000,
-    currency: "NGN",
-    maxDevices: null,
-    premium: true,
-    description: "Unlimited AI creations and unlimited signed-in devices."
-  }
+const AI_SOURCE_MAX_FREE = 3;
+const AI_SOURCE_MAX_PLAN_MAP = {
+    free: 3,
+    premium_3_devices: 3,
+    premium_unlimited: 3,
+    ai_novel_4: 4,
+    ai_novel_5: 5,
+    ai_creator_20: 5,
+    ai_creator_unlimited: 5
 };
 
+function aiNovelSourceLimit(user) {
+    const plan = String((user && user.plan) || "free").trim().toLowerCase();
+    return AI_SOURCE_MAX_PLAN_MAP[plan] || AI_SOURCE_MAX_FREE;
+}
+
+const BILLING_PLANS = {
+    free: {
+        id: "free",
+        label: "Free",
+        amount: 0,
+        currency: "NGN",
+        maxDevices: 2,
+        premium: false,
+        description: "Free preview access and up to 2 signed-in devices."
+    },
+    premium_3_devices: {
+        id: "premium_3_devices",
+        label: "Premium 3 devices",
+        amount: 1000,
+        currency: "NGN",
+        maxDevices: 3,
+        premium: true,
+        description: "Full movies, cartoons, K-drama, and up to 3 signed-in devices."
+    },
+    premium_unlimited: {
+        id: "premium_unlimited",
+        label: "Premium unlimited",
+        amount: 4000,
+        currency: "NGN",
+        maxDevices: null,
+        premium: true,
+        description: "Full access and unlimited signed-in devices."
+    },
+    ai_creator_20: {
+        id: "ai_creator_20",
+        label: "AI Creator 20",
+        amount: 2000,
+        currency: "NGN",
+        maxDevices: 2,
+        premium: true,
+        description: "20 AI creations per month and full premium access."
+    },
+    ai_creator_unlimited: {
+        id: "ai_creator_unlimited",
+        label: "AI Creator Unlimited",
+        amount: 4000,
+        currency: "NGN",
+        maxDevices: null,
+        premium: true,
+        description: "Unlimited AI creations and unlimited signed-in devices."
+    }
+};
+
+const SPORTS_API_KEY = String(process.env.SPORTS_API_KEY || "").trim();
+const SPORTS_API_HOST = "v3.football.api-sports.io";
+
 const MIME_TYPES = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".onnx": "application/octet-stream",
-  ".svg": "image/svg+xml",
-  ".apk": "application/vnd.android.package-archive",
-  ".ipa": "application/octet-stream",
-  ".msi": "application/octet-stream",
-  ".txt": "text/plain; charset=utf-8"
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".onnx": "application/octet-stream",
+    ".svg": "image/svg+xml",
+    ".apk": "application/vnd.android.package-archive",
+    ".ipa": "application/octet-stream",
+    ".msi": "application/octet-stream",
+    ".txt": "text/plain; charset=utf-8"
 };
 
 const CONSUMET_ANIME_PROVIDERS = {
-  gogoanime: {
-    label: "Gogoanime",
-    path: "gogoanime",
-    className: "Gogoanime",
-    servers: ["VidStreaming", "GogoPlay", "StreamSB", "StreamTape"]
-  },
-  hianime: {
-    label: "HiAnime",
-    path: "hianime",
-    className: "Hianime",
-    servers: ["VidCloud", "MegaCloud", "VidStreaming", "StreamSB", "StreamTape", "UpCloud"]
-  },
-  animekai: {
-    label: "AnimeKai",
-    path: "animekai",
-    className: "AnimeKai",
-    servers: ["MegaCloud", "VidCloud", "VidStreaming", "StreamSB", "StreamTape", "UpCloud"]
-  },
-  kickassanime: {
-    label: "KickAssAnime",
-    path: "kickassanime",
-    className: "KickAssAnime",
-    servers: ["BirdStream", "DuckStream", "VidStreaming"]
-  },
-  animesaturn: {
-    label: "AnimeSaturn",
-    path: "animesaturn",
-    className: "AnimeSaturn",
-    servers: []
-  },
-  animeunity: {
-    label: "AnimeUnity",
-    path: "animeunity",
-    className: "AnimeUnity",
-    servers: []
-  },
-  animesama: {
-    label: "AnimeSama",
-    path: "animesama",
-    className: "AnimeSama",
-    servers: []
-  },
-  consumetpahe: {
-    label: "Consumet Pahe",
-    path: "animepahe",
-    className: "AnimePahe",
-    servers: []
-  }
+    gogoanime: {
+        label: "Gogoanime",
+        path: "gogoanime",
+        className: "Gogoanime",
+        servers: ["VidStreaming", "GogoPlay", "StreamSB", "StreamTape"]
+    },
+    hianime: {
+        label: "HiAnime",
+        path: "hianime",
+        className: "Hianime",
+        servers: ["VidCloud", "MegaCloud", "VidStreaming", "StreamSB", "StreamTape", "UpCloud"]
+    },
+    animekai: {
+        label: "AnimeKai",
+        path: "animekai",
+        className: "AnimeKai",
+        servers: ["MegaCloud", "VidCloud", "VidStreaming", "StreamSB", "StreamTape", "UpCloud"]
+    },
+    kickassanime: {
+        label: "KickAssAnime",
+        path: "kickassanime",
+        className: "KickAssAnime",
+        servers: ["BirdStream", "DuckStream", "VidStreaming"]
+    },
+    animesaturn: {
+        label: "AnimeSaturn",
+        path: "animesaturn",
+        className: "AnimeSaturn",
+        servers: []
+    },
+    animeunity: {
+        label: "AnimeUnity",
+        path: "animeunity",
+        className: "AnimeUnity",
+        servers: []
+    },
+    animesama: {
+        label: "AnimeSama",
+        path: "animesama",
+        className: "AnimeSama",
+        servers: []
+    },
+    consumetpahe: {
+        label: "Consumet Pahe",
+        path: "animepahe",
+        className: "AnimePahe",
+        servers: []
+    }
 };
 
 const CONSUMET_ANIME_ALIASES = {
-  gogo: "gogoanime",
-  gogoplay: "gogoanime",
-  zoro: "hianime",
-  "zoro/hianime": "hianime",
-  "zoro-hianime": "hianime",
-  aniwatch: "hianime",
-  anix: "animekai",
-  saturn: "animesaturn",
-  unity: "animeunity",
-  sama: "animesama",
-  pahe: "consumetpahe",
-  animepaheconsumet: "consumetpahe",
-  "consumet-pahe": "consumetpahe",
-  kaa: "kickassanime",
-  "kickass-anime": "kickassanime"
+    gogo: "gogoanime",
+    gogoplay: "gogoanime",
+    zoro: "hianime",
+    "zoro/hianime": "hianime",
+    "zoro-hianime": "hianime",
+    aniwatch: "hianime",
+    anix: "animekai",
+    saturn: "animesaturn",
+    unity: "animeunity",
+    sama: "animesama",
+    pahe: "consumetpahe",
+    animepaheconsumet: "consumetpahe",
+    "consumet-pahe": "consumetpahe",
+    kaa: "kickassanime",
+    "kickass-anime": "kickassanime"
 };
 
 function cleanBaseUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
+    return String(value || "").trim().replace(/\/+$/, "");
 }
 
 function buildAppVersionPayload() {
-  const appVersionPath = path.join(SITE_DIR, "app-version.json");
-  const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
-  let payload = {
-    versionCode: 22,
-    versionName: "1.21",
-    apkUrl: `${PUBLIC_APP_URL}/downloads/novelapp-android.apk`,
-    ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
-    releaseNotes: [],
-    forceUpdate: false
-  };
+    const appVersionPath = path.join(SITE_DIR, "app-version.json");
+    const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
+    let payload = {
+        versionCode: 23,
+        versionName: "1.22",
+        apkUrl: `${PUBLIC_APP_URL}/downloads/novelapp-android.apk`,
+        ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
+        releaseNotes: [],
+        forceUpdate: false
+    };
 
-  if (fs.existsSync(appVersionPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(appVersionPath, "utf8"));
-      if (parsed && typeof parsed === "object") {
-        payload = { ...payload, ...parsed };
-      }
-    } catch (error) {
-      console.warn(`[app-version] Failed to parse ${appVersionPath}: ${error.message || error}`);
+    if (fs.existsSync(appVersionPath)) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(appVersionPath, "utf8"));
+            if (parsed && typeof parsed === "object") {
+                payload = {...payload, ...parsed };
+            }
+        } catch (error) {
+            console.warn(`[app-version] Failed to parse ${appVersionPath}: ${error.message || error}`);
+        }
     }
-  }
 
-  if (fs.existsSync(apkPath) && fs.statSync(apkPath).isFile()) {
-    const stat = fs.statSync(apkPath);
-    const buffer = fs.readFileSync(apkPath);
-    payload.apkBytes = stat.size;
-    payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-  }
+    if (fs.existsSync(apkPath) && fs.statSync(apkPath).isFile()) {
+        const stat = fs.statSync(apkPath);
+        const buffer = fs.readFileSync(apkPath);
+        payload.apkBytes = stat.size;
+        payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+    }
 
-  return payload;
+    return payload;
 }
 
 function ensureDataFile() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DATA_FILE)) {
-    writeData({ users: [], sessions: [] });
-  }
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(DATA_FILE)) {
+        writeData({ users: [], sessions: [] });
+    }
 }
 
 function readData() {
-  ensureDataFile();
-  return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    ensureDataFile();
+    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
 }
 
 function writeData(data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmpFile = `${DATA_FILE}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
-  fs.renameSync(tmpFile, DATA_FILE);
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmpFile = `${DATA_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
+    fs.renameSync(tmpFile, DATA_FILE);
 }
 
 function supabaseEnabled() {
-  return Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
+    return Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
 }
 
 async function supabaseRequest(pathname, { method = "GET", body, prefer } = {}) {
-  const headers = {
-    apikey: SUPABASE_SECRET_KEY,
-    authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
-    accept: "application/json"
-  };
-  if (body !== undefined) headers["content-type"] = "application/json";
-  if (prefer) headers.prefer = prefer;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`Supabase ${method} ${pathname} failed (${response.status}): ${text || response.statusText}`);
-  }
-  return text ? JSON.parse(text) : null;
+    const headers = {
+        apikey: SUPABASE_SECRET_KEY,
+        authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+        accept: "application/json"
+    };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (prefer) headers.prefer = prefer;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+        throw new Error(`Supabase ${method} ${pathname} failed (${response.status}): ${text || response.statusText}`);
+    }
+    return text ? JSON.parse(text) : null;
 }
 
 function dbUserToApp(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    username: row.username,
-    email: row.email,
-    passwordSalt: row.password_salt,
-    passwordHash: row.password_hash,
-    recoverySecretHash: row.recovery_secret_hash,
-    plan: row.plan || "free",
-    billingStatus: row.billing_status || "none",
-    paidUntil: row.paid_until || null,
-    createdAt: row.created_at
-  };
+    if (!row) return null;
+    return {
+        id: row.id,
+        username: row.username,
+        email: row.email,
+        passwordSalt: row.password_salt,
+        passwordHash: row.password_hash,
+        recoverySecretHash: row.recovery_secret_hash,
+        plan: row.plan || "free",
+        billingStatus: row.billing_status || "none",
+        paidUntil: row.paid_until || null,
+        createdAt: row.created_at
+    };
 }
 
 function appUserToDb(user) {
-  return {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    password_salt: user.passwordSalt,
-    password_hash: user.passwordHash,
-    recovery_secret_hash: user.recoverySecretHash || null,
-    plan: user.plan || "free",
-    billing_status: user.billingStatus || "none",
-    paid_until: user.paidUntil || null,
-    created_at: user.createdAt || new Date().toISOString()
-  };
+    return {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        password_salt: user.passwordSalt,
+        password_hash: user.passwordHash,
+        recovery_secret_hash: user.recoverySecretHash || null,
+        plan: user.plan || "free",
+        billing_status: user.billingStatus || "none",
+        paid_until: user.paidUntil || null,
+        created_at: user.createdAt || new Date().toISOString()
+    };
 }
 
 async function findSupabaseUserByEmail(email) {
-  const rows = await supabaseRequest(`novel_users?email=eq.${encodeURIComponent(email)}&select=*`);
-  return dbUserToApp(rows?.[0]);
+    const rows = await supabaseRequest(`novel_users?email=eq.${encodeURIComponent(email)}&select=*`);
+    return dbUserToApp(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
 }
 
 async function findSupabaseUserByRecoveryHash(recoverySecretHash) {
-  const rows = await supabaseRequest(`novel_users?recovery_secret_hash=eq.${encodeURIComponent(recoverySecretHash)}&select=*`);
-  return dbUserToApp(rows?.[0]);
+    const rows = await supabaseRequest(`novel_users?recovery_secret_hash=eq.${encodeURIComponent(recoverySecretHash)}&select=*`);
+    return dbUserToApp(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
 }
 
 async function findSupabaseUserById(id) {
-  const rows = await supabaseRequest(`novel_users?id=eq.${encodeURIComponent(id)}&select=*`);
-  return dbUserToApp(rows?.[0]);
+    const rows = await supabaseRequest(`novel_users?id=eq.${encodeURIComponent(id)}&select=*`);
+    return dbUserToApp(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
 }
 
 async function insertSupabaseUser(user) {
-  const rows = await supabaseRequest("novel_users", {
-    method: "POST",
-    prefer: "return=representation",
-    body: appUserToDb(user)
-  });
-  await supabaseRequest("novel_user_states?on_conflict=user_id", {
-    method: "POST",
-    prefer: "resolution=merge-duplicates",
-    body: {
-      user_id: user.id,
-      state: normalizeUserState(user.state),
-      updated_at: new Date().toISOString()
-    }
-  });
-  return dbUserToApp(rows?.[0]);
+    const rows = await supabaseRequest("novel_users", {
+        method: "POST",
+        prefer: "return=representation",
+        body: appUserToDb(user)
+    });
+    await supabaseRequest("novel_user_states?on_conflict=user_id", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates",
+        body: {
+            user_id: user.id,
+            state: normalizeUserState(user.state),
+            updated_at: new Date().toISOString()
+        }
+    });
+    return dbUserToApp(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
 }
 
 async function updateSupabaseUser(id, patch) {
-  const rows = await supabaseRequest(`novel_users?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    prefer: "return=representation",
-    body: patch
-  });
-  return dbUserToApp(rows?.[0]);
+    const rows = await supabaseRequest(`novel_users?id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        prefer: "return=representation",
+        body: patch
+    });
+    return dbUserToApp(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
 }
 
 async function createSupabaseSession(userId) {
-  const token = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  const now = Date.now();
-  const expiresAt = new Date(now + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  await supabaseRequest("novel_sessions", {
-    method: "POST",
-    body: {
-      token_hash: tokenHash,
-      user_id: userId,
-      created_at: new Date(now).toISOString(),
-      expires_at: expiresAt
-    }
-  });
-  return token;
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const now = Date.now();
+    const expiresAt = new Date(now + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await supabaseRequest("novel_sessions", {
+        method: "POST",
+        body: {
+            token_hash: tokenHash,
+            user_id: userId,
+            created_at: new Date(now).toISOString(),
+            expires_at: expiresAt
+        }
+    });
+    return token;
 }
 
 async function countSupabaseActiveSessions(userId) {
-  const rows = await supabaseRequest(
-    `novel_sessions?user_id=eq.${encodeURIComponent(userId)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=token_hash`
-  );
-  return Array.isArray(rows) ? rows.length : 0;
+    const rows = await supabaseRequest(
+        `novel_sessions?user_id=eq.${encodeURIComponent(userId)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=token_hash`
+    );
+    return Array.isArray(rows) ? rows.length : 0;
 }
 
 async function findSupabaseSessionUser(token) {
-  if (!token) return null;
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  const rows = await supabaseRequest(
-    `novel_sessions?token_hash=eq.${encodeURIComponent(tokenHash)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=user_id`
-  );
-  const userId = rows?.[0]?.user_id;
-  return userId ? findSupabaseUserById(userId) : null;
+    if (!token) return null;
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const rows = await supabaseRequest(
+        `novel_sessions?token_hash=eq.${encodeURIComponent(tokenHash)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=user_id`
+    );
+    const userId = Array.isArray(rows) && rows.length > 0 && rows[0].user_id ? rows[0].user_id : null;
+    return userId ? findSupabaseUserById(userId) : null;
 }
 
 async function removeSupabaseSession(token) {
-  if (!token) return;
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  await supabaseRequest(`novel_sessions?token_hash=eq.${encodeURIComponent(tokenHash)}`, { method: "DELETE" });
+    if (!token) return;
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    await supabaseRequest(`novel_sessions?token_hash=eq.${encodeURIComponent(tokenHash)}`, { method: "DELETE" });
 }
 
 async function getSupabaseUserState(userId) {
-  const rows = await supabaseRequest(`novel_user_states?user_id=eq.${encodeURIComponent(userId)}&select=state`);
-  return normalizeUserState(rows?.[0]?.state);
+    const rows = await supabaseRequest(`novel_user_states?user_id=eq.${encodeURIComponent(userId)}&select=state`);
+    const state = Array.isArray(rows) && rows.length > 0 && rows[0].state ? rows[0].state : {};
+    return normalizeUserState(state);
 }
 
 async function putSupabaseUserState(userId, state) {
-  const merged = normalizeUserState(state);
-  await supabaseRequest("novel_user_states?on_conflict=user_id", {
-    method: "POST",
-    prefer: "resolution=merge-duplicates",
-    body: {
-      user_id: userId,
-      state: merged,
-      updated_at: new Date().toISOString()
-    }
-  });
-  return merged;
+    const merged = normalizeUserState(state);
+    await supabaseRequest("novel_user_states?on_conflict=user_id", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates",
+        body: {
+            user_id: userId,
+            state: merged,
+            updated_at: new Date().toISOString()
+        }
+    });
+    return merged;
 }
 
 function seedPremiumUserInFile(data) {
-  const email = PREMIUM_SEED_EMAIL;
-  const existing = data.users.find((user) => user.email === email);
-  if (existing) {
-    existing.username = existing.username || PREMIUM_SEED_USERNAME;
-    existing.plan = "premium";
-    existing.billingStatus = "active";
-    existing.paidUntil = null;
-    return existing;
-  }
-  const passwordRecord = hashPassword(PREMIUM_SEED_PASSWORD);
-  const user = {
-    id: crypto.randomUUID(),
-    username: PREMIUM_SEED_USERNAME,
-    email,
-    passwordSalt: passwordRecord.salt,
-    passwordHash: passwordRecord.hash,
-    recoverySecretHash: null,
-    plan: "premium",
-    billingStatus: "active",
-    paidUntil: null,
-    state: normalizeUserState({}),
-    createdAt: new Date().toISOString()
-  };
-  data.users.push(user);
-  return user;
+    const email = PREMIUM_SEED_EMAIL;
+    const existing = data.users.find((user) => user.email === email);
+    if (existing) {
+        existing.username = existing.username || PREMIUM_SEED_USERNAME;
+        existing.plan = "premium";
+        existing.billingStatus = "active";
+        existing.paidUntil = null;
+        return existing;
+    }
+    const passwordRecord = hashPassword(PREMIUM_SEED_PASSWORD);
+    const user = {
+        id: crypto.randomUUID(),
+        username: PREMIUM_SEED_USERNAME,
+        email,
+        passwordSalt: passwordRecord.salt,
+        passwordHash: passwordRecord.hash,
+        recoverySecretHash: null,
+        plan: "premium",
+        billingStatus: "active",
+        paidUntil: null,
+        state: normalizeUserState({}),
+        createdAt: new Date().toISOString()
+    };
+    data.users.push(user);
+    return user;
 }
 
 async function ensurePremiumSeedUser() {
-  if (supabaseEnabled()) {
-    await migrateFileUsersToSupabase();
-    const existing = await findSupabaseUserByEmail(PREMIUM_SEED_EMAIL);
-    if (existing) {
-      if (!isPremiumUser(existing)) {
-        await updateSupabaseUser(existing.id, { plan: "premium", billing_status: "active", paid_until: null });
-      }
-      return;
+    if (supabaseEnabled()) {
+        await migrateFileUsersToSupabase();
+        const existing = await findSupabaseUserByEmail(PREMIUM_SEED_EMAIL);
+        if (existing) {
+            if (!isPremiumUser(existing)) {
+                await updateSupabaseUser(existing.id, { plan: "premium", billing_status: "active", paid_until: null });
+            }
+            return;
+        }
+        const passwordRecord = hashPassword(PREMIUM_SEED_PASSWORD);
+        await insertSupabaseUser({
+            id: crypto.randomUUID(),
+            username: PREMIUM_SEED_USERNAME,
+            email: PREMIUM_SEED_EMAIL,
+            passwordSalt: passwordRecord.salt,
+            passwordHash: passwordRecord.hash,
+            recoverySecretHash: null,
+            plan: "premium",
+            billingStatus: "active",
+            paidUntil: null,
+            state: normalizeUserState({}),
+            createdAt: new Date().toISOString()
+        });
+        return;
     }
-    const passwordRecord = hashPassword(PREMIUM_SEED_PASSWORD);
-    await insertSupabaseUser({
-      id: crypto.randomUUID(),
-      username: PREMIUM_SEED_USERNAME,
-      email: PREMIUM_SEED_EMAIL,
-      passwordSalt: passwordRecord.salt,
-      passwordHash: passwordRecord.hash,
-      recoverySecretHash: null,
-      plan: "premium",
-      billingStatus: "active",
-      paidUntil: null,
-      state: normalizeUserState({}),
-      createdAt: new Date().toISOString()
-    });
-    return;
-  }
-  const data = readData();
-  seedPremiumUserInFile(data);
-  writeData(data);
+    const data = readData();
+    seedPremiumUserInFile(data);
+    writeData(data);
 }
 
 async function migrateFileUsersToSupabase() {
-  if (legacySupabaseMigrationDone) return;
-  if (!fs.existsSync(DATA_FILE)) {
-    legacySupabaseMigrationDone = true;
-    return;
-  }
-  const data = readData();
-  if (!Array.isArray(data.users) || data.users.length === 0) {
-    legacySupabaseMigrationDone = true;
-    return;
-  }
-  for (const fileUser of data.users) {
-    const email = normalizeEmail(fileUser.email);
-    if (!email) continue;
-    if (!fileUser.passwordSalt || !fileUser.passwordHash) continue;
-    const existing = await findSupabaseUserByEmail(email);
-    if (existing) {
-      const existingState = await getSupabaseUserState(existing.id);
-      await putSupabaseUserState(existing.id, mergeUserState(existingState, fileUser.state || {}));
-      continue;
+    if (legacySupabaseMigrationDone) return;
+    if (!fs.existsSync(DATA_FILE)) {
+        legacySupabaseMigrationDone = true;
+        return;
     }
-    await insertSupabaseUser({
-      id: fileUser.id || crypto.randomUUID(),
-      username: fileUser.username || email.split("@")[0] || "Reader",
-      email,
-      passwordSalt: fileUser.passwordSalt,
-      passwordHash: fileUser.passwordHash,
-      recoverySecretHash: fileUser.recoverySecretHash || null,
-      plan: fileUser.plan || "free",
-      billingStatus: fileUser.billingStatus || "none",
-      paidUntil: fileUser.paidUntil || null,
-      state: normalizeUserState(fileUser.state || {}),
-      createdAt: fileUser.createdAt || new Date().toISOString()
-    });
-  }
-  legacySupabaseMigrationDone = true;
+    const data = readData();
+    if (!Array.isArray(data.users) || data.users.length === 0) {
+        legacySupabaseMigrationDone = true;
+        return;
+    }
+    for (const fileUser of data.users) {
+        const email = normalizeEmail(fileUser.email);
+        if (!email) continue;
+        if (!fileUser.passwordSalt || !fileUser.passwordHash) continue;
+        const existing = await findSupabaseUserByEmail(email);
+        if (existing) {
+            const existingState = await getSupabaseUserState(existing.id);
+            await putSupabaseUserState(existing.id, mergeUserState(existingState, fileUser.state || {}));
+            continue;
+        }
+        await insertSupabaseUser({
+            id: fileUser.id || crypto.randomUUID(),
+            username: fileUser.username || email.split("@")[0] || "Reader",
+            email,
+            passwordSalt: fileUser.passwordSalt,
+            passwordHash: fileUser.passwordHash,
+            recoverySecretHash: fileUser.recoverySecretHash || null,
+            plan: fileUser.plan || "free",
+            billingStatus: fileUser.billingStatus || "none",
+            paidUntil: fileUser.paidUntil || null,
+            state: normalizeUserState(fileUser.state || {}),
+            createdAt: fileUser.createdAt || new Date().toISOString()
+        });
+    }
+    legacySupabaseMigrationDone = true;
 }
 
 function normalizeEmail(email) {
-  return String(email || "").trim().toLowerCase();
+    return String(email || "").trim().toLowerCase();
 }
 
 function publicUser(user) {
-  const plan = billingPlanFor(user?.plan);
-  return {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    plan: plan.id,
-    billingStatus: user.billingStatus || "none",
-    paidUntil: user.paidUntil || null,
-    createdAt: user.createdAt,
-    maxDevices: userMaxDevices(user)
-  };
+    const plan = billingPlanFor(user && user.plan ? user.plan : "free");
+    return {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        plan: plan.id,
+        billingStatus: user.billingStatus || "none",
+        paidUntil: user.paidUntil || null,
+        createdAt: user.createdAt,
+        maxDevices: userMaxDevices(user)
+    };
 }
 
 function billingPlanFor(planId) {
-  const clean = String(planId || "free").trim().toLowerCase();
-  if (clean === "premium") return BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID];
-  return BILLING_PLANS[clean] || BILLING_PLANS.free;
+    const clean = String(planId || "free").trim().toLowerCase();
+    if (clean === "premium") return BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID];
+    return BILLING_PLANS[clean] || BILLING_PLANS.free;
 }
 
 function availableBillingPlans() {
-  return [
-    BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID],
-    BILLING_PLANS.premium_unlimited
-  ];
+    return [
+        BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID],
+        BILLING_PLANS.premium_unlimited
+    ];
 }
 
 function isPremiumUser(user) {
-  if (!user) return false;
-  if (user.email === PREMIUM_SEED_EMAIL) return true;
-  if (!billingPlanFor(user.plan).premium) return false;
-  if ((user.billingStatus || "none") !== "active") return false;
-  if (!user.paidUntil) return true;
-  return Date.parse(user.paidUntil) > Date.now();
+    if (!user) return false;
+    if (user.email === PREMIUM_SEED_EMAIL) return true;
+    if (!billingPlanFor(user.plan).premium) return false;
+    if ((user.billingStatus || "none") !== "active") return false;
+    if (!user.paidUntil) return true;
+    return Date.parse(user.paidUntil) > Date.now();
 }
 
 function userMaxDevices(user) {
-  if (!user) return BILLING_PLANS.free.maxDevices;
-  if (user.email === PREMIUM_SEED_EMAIL) return null;
-  return billingPlanFor(user.plan).maxDevices;
+    if (!user) return BILLING_PLANS.free.maxDevices;
+    if (user.email === PREMIUM_SEED_EMAIL) return null;
+    return billingPlanFor(user.plan).maxDevices;
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("base64")) {
-  const hash = crypto
-    .pbkdf2Sync(String(password), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
-    .toString("base64");
+    const hash = crypto
+        .pbkdf2Sync(String(password), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
+        .toString("base64");
 
-  return { salt, hash };
+    return { salt, hash };
 }
 
 function hashRecoverySecret(secret) {
-  return crypto
-    .createHash("sha256")
-    .update(`novelapp-recovery-v1:${String(secret || "").trim().toLowerCase()}`)
-    .digest("hex");
+    return crypto
+        .createHash("sha256")
+        .update(`novelapp-recovery-v1:${String(secret || "").trim().toLowerCase()}`)
+        .digest("hex");
 }
 
 function passwordMatches(password, salt, expectedHash) {
-  const actual = Buffer.from(hashPassword(password, salt).hash, "base64");
-  const expected = Buffer.from(expectedHash, "base64");
+    const actual = Buffer.from(hashPassword(password, salt).hash, "base64");
+    const expected = Buffer.from(expectedHash, "base64");
 
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
 function createSession(data, userId) {
-  const token = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  const now = Date.now();
-  const expiresAt = now + SESSION_DAYS * 24 * 60 * 60 * 1000;
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const now = Date.now();
+    const expiresAt = now + SESSION_DAYS * 24 * 60 * 60 * 1000;
 
-  data.sessions = data.sessions.filter((session) => session.expiresAt > now);
-  data.sessions.push({
-    tokenHash,
-    userId,
-    createdAt: new Date(now).toISOString(),
-    expiresAt
-  });
+    data.sessions = data.sessions.filter((session) => session.expiresAt > now);
+    data.sessions.push({
+        tokenHash,
+        userId,
+        createdAt: new Date(now).toISOString(),
+        expiresAt
+    });
 
-  return token;
+    return token;
 }
 
 function countActiveFileSessions(data, userId) {
-  const now = Date.now();
-  data.sessions = data.sessions.filter((session) => session.expiresAt > now);
-  return data.sessions.filter((session) => session.userId === userId).length;
+    const now = Date.now();
+    data.sessions = data.sessions.filter((session) => session.expiresAt > now);
+    return data.sessions.filter((session) => session.userId === userId).length;
 }
 
 async function assertCanCreateSession(user) {
-  const limit = userMaxDevices(user);
-  if (limit == null) return;
-  const activeCount = supabaseEnabled()
-    ? await countSupabaseActiveSessions(user.id)
-    : countActiveFileSessions(readData(), user.id);
-  if (activeCount >= limit) {
-    const upgradeHint = limit < 3
-      ? "Upgrade to the ₦1,000 plan for 3 devices or ₦4,000 for unlimited devices."
-      : "Upgrade to the ₦4,000 unlimited device plan.";
-    const error = new Error(`This account is already signed in on ${activeCount} device(s). ${upgradeHint}`);
-    error.statusCode = 402;
-    throw error;
-  }
+    const limit = userMaxDevices(user);
+    if (limit == null) return;
+    const activeCount = supabaseEnabled() ?
+        await countSupabaseActiveSessions(user.id) :
+        countActiveFileSessions(readData(), user.id);
+    if (activeCount >= limit) {
+        const upgradeHint = limit < 3 ?
+            "Upgrade to the ₦1,000 plan for 3 devices or ₦4,000 for unlimited devices." :
+            "Upgrade to the ₦4,000 unlimited device plan.";
+        const error = new Error(`This account is already signed in on ${activeCount} device(s). ${upgradeHint}`);
+        error.statusCode = 402;
+        throw error;
+    }
 }
 
 function getBearerToken(request) {
-  const header = request.headers.authorization || "";
-  const [scheme, token] = header.split(" ");
-  return scheme && scheme.toLowerCase() === "bearer" ? token : null;
+    const header = request.headers.authorization || "";
+    const [scheme, token] = header.split(" ");
+    return scheme && scheme.toLowerCase() === "bearer" ? token : null;
 }
 
 function findSessionUser(data, token) {
-  if (!token) return null;
+    if (!token) return null;
 
-  const now = Date.now();
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  const session = data.sessions.find(
-    (item) => item.tokenHash === tokenHash && item.expiresAt > now
-  );
+    const now = Date.now();
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const session = data.sessions.find(
+        (item) => item.tokenHash === tokenHash && item.expiresAt > now
+    );
 
-  if (!session) return null;
-  return data.users.find((user) => user.id === session.userId) || null;
+    if (!session) return null;
+    return data.users.find((user) => user.id === session.userId) || null;
 }
 
 function removeSession(data, token) {
-  if (!token) return;
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  data.sessions = data.sessions.filter((session) => session.tokenHash !== tokenHash);
+    if (!token) return;
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    data.sessions = data.sessions.filter((session) => session.tokenHash !== tokenHash);
 }
 
 function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store"
-  });
-  response.end(JSON.stringify(payload));
+    response.writeHead(statusCode, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+    });
+    response.end(JSON.stringify(payload));
 }
 
 function sendError(response, statusCode, message) {
-  sendJson(response, statusCode, { error: message });
+    sendJson(response, statusCode, { error: message });
 }
 
 function sendApiData(response, statusCode, data) {
-  sendJson(response, statusCode, { ok: statusCode >= 200 && statusCode < 300, data, error: null });
+    sendJson(response, statusCode, { ok: statusCode >= 200 && statusCode < 300, data, error: null });
 }
 
 function sendApiError(response, statusCode, message) {
-  sendJson(response, statusCode, { ok: false, data: null, error: message });
+    sendJson(response, statusCode, { ok: false, data: null, error: message });
 }
 
 function readBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = "";
+    return new Promise((resolve, reject) => {
+        let body = "";
 
-    request.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 512 * 1024) {
-        request.destroy();
-        reject(new Error("Request body is too large."));
-      }
+        request.on("data", (chunk) => {
+            body += chunk;
+            if (body.length > 512 * 1024) {
+                request.destroy();
+                reject(new Error("Request body is too large."));
+            }
+        });
+
+        request.on("end", () => {
+            try {
+                resolve(body ? JSON.parse(body) : {});
+            } catch {
+                reject(new Error("Invalid JSON body."));
+            }
+        });
+
+        request.on("error", reject);
     });
-
-    request.on("end", () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch {
-        reject(new Error("Invalid JSON body."));
-      }
-    });
-
-    request.on("error", reject);
-  });
 }
 
 function normalizeContentType(type) {
-  const raw = String(type || "novels")
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s-]+/g, "");
-  if (["movie", "movies", "film", "films"].includes(raw)) return "movies";
-  if (["kdrama", "drama", "korean"].includes(raw)) return "kdrama";
-  if (["cartoon", "cartoons"].includes(raw)) return "cartoon";
-  if (["anime", "manga"].includes(raw)) return raw;
-  return "novels";
+    const raw = String(type || "novels")
+        .trim()
+        .toLowerCase()
+        .replace(/[_\s-]+/g, "");
+    if (["movie", "movies", "film", "films"].includes(raw)) return "movies";
+    if (["kdrama", "drama", "korean"].includes(raw)) return "kdrama";
+    if (["cartoon", "cartoons"].includes(raw)) return "cartoon";
+    if (["classic", "classictv", "classic-tv"].includes(raw)) return "classic";
+    if (["anime", "manga"].includes(raw)) return raw;
+    return "novels";
 }
 
 function contentItem({ id, title, subtitle = "", coverUrl = "", detailUrl = "", sourceName = "", kind = "novel", synopsis = "" }) {
-  return { id, title, subtitle, coverUrl, detailUrl, sourceName, kind, synopsis };
+    return { id, title, subtitle, coverUrl, detailUrl, sourceName, kind, synopsis };
 }
 
 const KNOWN_NOVELS = [
-  ["my-vampire-system", "My Vampire System", "JKSManga", "WebNovel", "A weak student gains a vampire system and must survive school, war, and monsters."],
-  ["renegade-immortal", "Renegade Immortal", "Er Gen", "Wuxiaworld", "Wang Lin walks a ruthless path through cultivation, revenge, and immortality.", "https://www.wuxiaworld.com/novel/renegade-immortal"],
-  ["pursuit-of-truth", "Pursuit of Truth", "Er Gen", "Wuxiaworld", "Su Ming searches for identity and truth in a world of ancient power.", "https://www.wuxiaworld.com/novel/pursuit-of-the-truth"],
-  ["a-will-eternal", "A Will Eternal", "Er Gen", "Wuxiaworld", "Bai Xiaochun wants to live forever and somehow keeps changing the world around him.", "https://www.wuxiaworld.com/novel/a-will-eternal"],
-  ["lord-of-the-mysteries", "Lord of the Mysteries", "Cuttlefish That Loves Diving", "WebNovel", "A Victorian mystery of potions, gods, secret orders, and madness."],
-  ["shadow-slave", "Shadow Slave", "Guiltythree", "WebNovel", "Sunny survives nightmare worlds while carrying a dangerous shadow bond."],
-  ["omniscient-readers-viewpoint", "Omniscient Reader's Viewpoint", "Sing Shong", "WebNovel", "A reader becomes the only person who knows how the apocalypse story ends."],
-  ["martial-peak", "Martial Peak", "Momo", "BoxNovel", "Yang Kai rises through martial worlds in a long cultivation journey."],
-  ["coiling-dragon", "Coiling Dragon", "I Eat Tomatoes", "Wuxiaworld", "Linley trains from noble heir to world-shaking warrior and mage.", "https://www.wuxiaworld.com/novel/coiling-dragon-preview"],
-  ["the-beginning-after-the-end", "The Beginning After The End", "TurtleMe", "Tapas", "A reincarnated king grows up in a magical world with new bonds and old burdens."],
-  ["mother-of-learning", "Mother of Learning", "nobody103", "RoyalRoad", "A time-loop fantasy about a young mage uncovering a dangerous conspiracy.", "https://www.royalroad.com/fiction/21220/mother-of-learning"]
+    ["my-vampire-system", "My Vampire System", "JKSManga", "WebNovel", "A weak student gains a vampire system and must survive school, war, and monsters."],
+    ["renegade-immortal", "Renegade Immortal", "Er Gen", "Wuxiaworld", "Wang Lin walks a ruthless path through cultivation, revenge, and immortality.", "https://www.wuxiaworld.com/novel/renegade-immortal"],
+    ["pursuit-of-truth", "Pursuit of Truth", "Er Gen", "Wuxiaworld", "Su Ming searches for identity and truth in a world of ancient power.", "https://www.wuxiaworld.com/novel/pursuit-of-the-truth"],
+    ["a-will-eternal", "A Will Eternal", "Er Gen", "Wuxiaworld", "Bai Xiaochun wants to live forever and somehow keeps changing the world around him.", "https://www.wuxiaworld.com/novel/a-will-eternal"],
+    ["lord-of-the-mysteries", "Lord of the Mysteries", "Cuttlefish That Loves Diving", "WebNovel", "A Victorian mystery of potions, gods, secret orders, and madness."],
+    ["shadow-slave", "Shadow Slave", "Guiltythree", "WebNovel", "Sunny survives nightmare worlds while carrying a dangerous shadow bond."],
+    ["omniscient-readers-viewpoint", "Omniscient Reader's Viewpoint", "Sing Shong", "WebNovel", "A reader becomes the only person who knows how the apocalypse story ends."],
+    ["martial-peak", "Martial Peak", "Momo", "BoxNovel", "Yang Kai rises through martial worlds in a long cultivation journey."],
+    ["coiling-dragon", "Coiling Dragon", "I Eat Tomatoes", "Wuxiaworld", "Linley trains from noble heir to world-shaking warrior and mage.", "https://www.wuxiaworld.com/novel/coiling-dragon-preview"],
+    ["the-beginning-after-the-end", "The Beginning After The End", "TurtleMe", "Tapas", "A reincarnated king grows up in a magical world with new bonds and old burdens."],
+    ["mother-of-learning", "Mother of Learning", "nobody103", "RoyalRoad", "A time-loop fantasy about a young mage uncovering a dangerous conspiracy.", "https://www.royalroad.com/fiction/21220/mother-of-learning"]
 ];
 
 const KNOWN_MANGA = [
-  ["solo-leveling", "Solo Leveling", "Chugong", "MangaDex", "The weakest hunter becomes the only player of a hidden leveling system.", "https://uploads.mangadex.org/covers/32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e/cover.jpg", "mangadex:32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e"],
-  ["one-piece", "One Piece", "Eiichiro Oda", "MangaDex", "Luffy sails with his crew to find the One Piece.", ""],
-  ["jujutsu-kaisen", "Jujutsu Kaisen", "Gege Akutami", "MangaDex", "Curses, sorcerers, and the dangerous vessel of Sukuna.", ""],
-  ["chainsaw-man", "Chainsaw Man", "Tatsuki Fujimoto", "MangaDex", "Denji becomes Chainsaw Man and enters a brutal devil-hunting world.", ""]
+    ["solo-leveling", "Solo Leveling", "Chugong", "MangaDex", "The weakest hunter becomes the only player of a hidden leveling system.", "https://uploads.mangadex.org/covers/32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e/cover.jpg", "mangadex:32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e"],
+    ["one-piece", "One Piece", "Eiichiro Oda", "MangaDex", "Luffy sails with his crew to find the One Piece.", ""],
+    ["jujutsu-kaisen", "Jujutsu Kaisen", "Gege Akutami", "MangaDex", "Curses, sorcerers, and the dangerous vessel of Sukuna.", ""],
+    ["chainsaw-man", "Chainsaw Man", "Tatsuki Fujimoto", "MangaDex", "Denji becomes Chainsaw Man and enters a brutal devil-hunting world.", ""]
 ];
 
 const KNOWN_ANIME = [
-  ["solo-leveling-anime", "Solo Leveling", "Action, Fantasy", "AniList", "anime", "anilist:151807", "Hunters fight in gates while Sung Jinwoo receives a leveling system.", "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-2dkqG6YlBXsP.jpg"],
-  ["one-piece-anime", "One Piece", "Adventure", "AniList", "anime", "anilist:21", "Luffy and the Straw Hats sail the Grand Line.", "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg"],
-  ["dragon-ball-z", "Dragon Ball Z", "Action", "AniList", "anime", "anilist:813", "Goku and friends defend Earth from powerful enemies.", ""],
-  ["my-hero-academia", "My Hero Academia", "Superhero", "AniList", "anime", "anilist:21459", "Izuku Midoriya trains to become a hero in a superpowered world.", ""]
+    ["solo-leveling-anime", "Solo Leveling", "Action, Fantasy", "AniList", "anime", "anilist:151807", "Hunters fight in gates while Sung Jinwoo receives a leveling system.", "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-2dkqG6YlBXsP.jpg"],
+    ["one-piece-anime", "One Piece", "Adventure", "AniList", "anime", "anilist:21", "Luffy and the Straw Hats sail the Grand Line.", "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg"],
+    ["dragon-ball-z", "Dragon Ball Z", "Action", "AniList", "anime", "anilist:813", "Goku and friends defend Earth from powerful enemies.", ""],
+    ["my-hero-academia", "My Hero Academia", "Superhero", "AniList", "anime", "anilist:21459", "Izuku Midoriya trains to become a hero in a superpowered world.", ""]
 ];
 
 const KNOWN_MEDIA = [
-  ["toy-story", "Toy Story", "Movie", "TMDB", "movie", "tmdb://movie/862", "A cowboy doll feels threatened when a space ranger toy arrives.", "https://image.tmdb.org/t/p/w500/uXDfjJbdP4ijW5hWSBrPrlKpxab.jpg"],
-  ["inception", "Inception", "Movie", "TMDB", "movie", "tmdb://movie/27205", "A thief enters dreams to plant an idea inside a corporate heir's mind.", "https://image.tmdb.org/t/p/w500/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg"],
-  ["the-matrix", "The Matrix", "Movie", "TMDB", "movie", "tmdb://movie/603", "A hacker discovers the world he knows is a simulated reality.", "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"],
-  ["spider-verse", "Spider-Man: Into the Spider-Verse", "Movie", "TMDB", "movie", "tmdb://movie/324857", "Miles Morales becomes Spider-Man and meets heroes from across the multiverse.", "https://image.tmdb.org/t/p/w500/iiZZdoQBEYBv6id8su7ImL0oCbD.jpg"],
-  ["teen-titans", "Teen Titans", "Cartoon", "TMDB", "cartoon", "tmdb://tv/604", "Young heroes protect Jump City while growing as a team.", "https://image.tmdb.org/t/p/w500/8JfwXjP3iLjyfDfF0ECmS2rN0aA.jpg"],
-  ["avatar-last-airbender", "Avatar: The Last Airbender", "Cartoon", "TMDB", "cartoon", "tmdb://tv/246", "A young Avatar must master the elements and stop a war.", "https://image.tmdb.org/t/p/w500/cHFZA8Tlv03nKTGXhLOYOLtqoSm.jpg"],
-  ["adventure-time", "Adventure Time", "Cartoon", "TMDB", "cartoon", "tmdb://tv/15260", "Finn and Jake explore a strange magical land full of danger and jokes.", "https://image.tmdb.org/t/p/w500/qk3eQ8jW4opJ48gFWYUXWaMT4l.jpg"],
-  ["spongebob-squarepants", "SpongeBob SquarePants", "Cartoon", "TMDB", "cartoon", "tmdb://tv/387", "SpongeBob works, plays, and creates chaos under the sea.", "https://image.tmdb.org/t/p/w500/8v5zQ9FJ6V4t4TYNDfLSk7R4hzG.jpg"],
-  ["crash-landing-on-you", "Crash Landing on You", "K-Drama", "TMDB", "kdrama", "tmdb://tv/94796", "A South Korean heiress crash lands in North Korea and meets an officer.", "https://image.tmdb.org/t/p/w500/2u8I9AzgbLGGqE4JdW6uJQO0t5C.jpg"],
-  ["squid-game", "Squid Game", "K-Drama", "TMDB", "kdrama", "tmdb://tv/93405", "Desperate players enter deadly games for a life-changing prize.", "https://image.tmdb.org/t/p/w500/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg"],
-  ["true-beauty", "True Beauty", "K-Drama", "TMDB", "kdrama", "tmdb://tv/112888", "A high school student hides her insecurities behind makeup and finds connection.", "https://image.tmdb.org/t/p/w500/sld43SJArZqlnANJGBkZyQpXHHH.jpg"],
-  ["queen-of-tears", "Queen of Tears", "K-Drama", "TMDB", "kdrama", "tmdb://tv/215720", "A married couple faces crisis, love, and family pressure at the top of a business empire.", "https://image.tmdb.org/t/p/w500/1uEwVlg4L7QjOglfaXr0iM2ZJ48.jpg"]
+    ["toy-story", "Toy Story", "Movie", "TMDB", "movie", "tmdb://movie/862", "A cowboy doll feels threatened when a space ranger toy arrives.", "https://image.tmdb.org/t/p/w500/uXDfjJbdP4ijW5hWSBrPrlKpxab.jpg"],
+    ["inception", "Inception", "Movie", "TMDB", "movie", "tmdb://movie/27205", "A thief enters dreams to plant an idea inside a corporate heir's mind.", "https://image.tmdb.org/t/p/w500/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg"],
+    ["the-matrix", "The Matrix", "Movie", "TMDB", "movie", "tmdb://movie/603", "A hacker discovers the world he knows is a simulated reality.", "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"],
+    ["spider-verse", "Spider-Man: Into the Spider-Verse", "Movie", "TMDB", "movie", "tmdb://movie/324857", "Miles Morales becomes Spider-Man and meets heroes from across the multiverse.", "https://image.tmdb.org/t/p/w500/iiZZdoQBEYBv6id8su7ImL0oCbD.jpg"],
+    ["teen-titans", "Teen Titans", "Cartoon", "TMDB", "cartoon", "tmdb://tv/604", "Young heroes protect Jump City while growing as a team.", "https://image.tmdb.org/t/p/w500/8JfwXjP3iLjyfDfF0ECmS2rN0aA.jpg"],
+    ["avatar-last-airbender", "Avatar: The Last Airbender", "Cartoon", "TMDB", "cartoon", "tmdb://tv/246", "A young Avatar must master the elements and stop a war.", "https://image.tmdb.org/t/p/w500/cHFZA8Tlv03nKTGXhLOYOLtqoSm.jpg"],
+    ["adventure-time", "Adventure Time", "Cartoon", "TMDB", "cartoon", "tmdb://tv/15260", "Finn and Jake explore a strange magical land full of danger and jokes.", "https://image.tmdb.org/t/p/w500/qk3eQ8jW4opJ48gFWYUXWaMT4l.jpg"],
+    ["spongebob-squarepants", "SpongeBob SquarePants", "Cartoon", "TMDB", "cartoon", "tmdb://tv/387", "SpongeBob works, plays, and creates chaos under the sea.", "https://image.tmdb.org/t/p/w500/8v5zQ9FJ6V4t4TYNDfLSk7R4hzG.jpg"],
+    ["crash-landing-on-you", "Crash Landing on You", "K-Drama", "TMDB", "kdrama", "tmdb://tv/94796", "A South Korean heiress crash lands in North Korea and meets an officer.", "https://image.tmdb.org/t/p/w500/2u8I9AzgbLGGqE4JdW6uJQO0t5C.jpg"],
+    ["squid-game", "Squid Game", "K-Drama", "TMDB", "kdrama", "tmdb://tv/93405", "Desperate players enter deadly games for a life-changing prize.", "https://image.tmdb.org/t/p/w500/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg"],
+    ["true-beauty", "True Beauty", "K-Drama", "TMDB", "kdrama", "tmdb://tv/112888", "A high school student hides her insecurities behind makeup and finds connection.", "https://image.tmdb.org/t/p/w500/sld43SJArZqlnANJGBkZyQpXHHH.jpg"],
+    ["queen-of-tears", "Queen of Tears", "K-Drama", "TMDB", "kdrama", "tmdb://tv/215720", "A married couple faces crisis, love, and family pressure at the top of a business empire.", "https://image.tmdb.org/t/p/w500/1uEwVlg4L7QjOglfaXr0iM2ZJ48.jpg"]
 ];
 
 function fixtureItems(type, query = "") {
-  const normalizedType = normalizeContentType(type);
-  const raw = normalizedType === "manga" ? KNOWN_MANGA
-    : normalizedType === "anime" ? KNOWN_ANIME
-    : normalizedType === "kdrama" ? KNOWN_MEDIA.filter((item) => item[4] === "kdrama")
-    : normalizedType === "cartoon" ? KNOWN_MEDIA.filter((item) => item[4] === "cartoon")
-    : normalizedType === "movies" ? KNOWN_MEDIA.filter((item) => item[4] === "movie")
-    : KNOWN_NOVELS;
-  const q = String(query || "").trim().toLowerCase();
-  return raw
-    .filter((item) => !q || `${item[1]} ${item[2]} ${item[3]}`.toLowerCase().includes(q))
-    .map((item) => {
-      if (normalizedType === "novels") {
-        return contentItem({
-          id: item[0],
-          title: item[1],
-          subtitle: item[2],
-          sourceName: item[3],
-          kind: "novel",
-          detailUrl: item[5] || `novel://${item[0]}`,
-          synopsis: item[4],
-          coverUrl: `https://dummyimage.com/600x840/111827/42d6b5.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
+    const normalizedType = normalizeContentType(type);
+    const raw = normalizedType === "manga" ? KNOWN_MANGA :
+        normalizedType === "anime" ? KNOWN_ANIME :
+        normalizedType === "kdrama" ? KNOWN_MEDIA.filter((item) => item[4] === "kdrama") :
+        normalizedType === "cartoon" ? KNOWN_MEDIA.filter((item) => item[4] === "cartoon") :
+        normalizedType === "movies" ? KNOWN_MEDIA.filter((item) => item[4] === "movie") :
+        KNOWN_NOVELS;
+    const q = String(query || "").trim().toLowerCase();
+    return raw
+        .filter((item) => !q || `${item[1]} ${item[2]} ${item[3]}`.toLowerCase().includes(q))
+        .map((item) => {
+            if (normalizedType === "novels") {
+                return contentItem({
+                    id: item[0],
+                    title: item[1],
+                    subtitle: item[2],
+                    sourceName: item[3],
+                    kind: "novel",
+                    detailUrl: item[5] || `novel://${item[0]}`,
+                    synopsis: item[4],
+                    coverUrl: `https://dummyimage.com/600x840/111827/42d6b5.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
+                });
+            }
+            if (normalizedType === "manga") {
+                return contentItem({
+                    id: item[0],
+                    title: item[1],
+                    subtitle: item[2],
+                    sourceName: item[3],
+                    kind: "manga",
+                    detailUrl: item[6] || `manga://${item[0]}`,
+                    synopsis: item[4],
+                    coverUrl: item[5] || `https://dummyimage.com/600x840/111827/e84d8a.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
+                });
+            }
+            return contentItem({
+                id: item[0],
+                title: item[1],
+                subtitle: item[2],
+                sourceName: item[3],
+                kind: item[4],
+                detailUrl: item[5],
+                synopsis: item[6],
+                coverUrl: item[7] || `https://dummyimage.com/600x840/111827/fbbf24.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
+            });
         });
-      }
-      if (normalizedType === "manga") {
-        return contentItem({
-          id: item[0],
-          title: item[1],
-          subtitle: item[2],
-          sourceName: item[3],
-          kind: "manga",
-          detailUrl: item[6] || `manga://${item[0]}`,
-          synopsis: item[4],
-          coverUrl: item[5] || `https://dummyimage.com/600x840/111827/e84d8a.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
-        });
-      }
-      return contentItem({
-        id: item[0],
-        title: item[1],
-        subtitle: item[2],
-        sourceName: item[3],
-        kind: item[4],
-        detailUrl: item[5],
-        synopsis: item[6],
-        coverUrl: item[7] || `https://dummyimage.com/600x840/111827/fbbf24.png&text=${encodeURIComponent(item[1].slice(0, 20))}`
-      });
-    });
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMillis = 9000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMillis);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMillis);
+    try {
+        const response = await fetch(url, {...options, signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 async function anilistItems(query, page = 1) {
-  const gql = query
-    ? `query ($search: String, $page: Int) { Page(page: $page, perPage: 24) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id title { romaji english } coverImage { large } genres description(asHtml: false) } } }`
-    : `query ($page: Int) { Page(page: $page, perPage: 24) { media(type: ANIME, sort: TRENDING_DESC) { id title { romaji english } coverImage { large } genres description(asHtml: false) } } }`;
-  const payload = await fetchWithTimeout("https://graphql.anilist.co", {
-    method: "POST",
-    headers: { "content-type": "application/json", "accept": "application/json" },
-    body: JSON.stringify({ query: gql, variables: { search: query || undefined, page } })
-  });
-  return (payload.data?.Page?.media || []).map((anime) => contentItem({
-    id: `anilist_${anime.id}`,
-    title: anime.title?.english || anime.title?.romaji || "Untitled anime",
-    subtitle: (anime.genres || []).slice(0, 3).join(", "),
-    coverUrl: anime.coverImage?.large || "",
-    detailUrl: `anilist:${anime.id}`,
-    sourceName: "AniList",
-    kind: "anime",
-    synopsis: String(anime.description || "").replace(/<[^>]+>/g, "")
-  }));
+    const gql = query ?
+        `query ($search: String, $page: Int) { Page(page: $page, perPage: 24) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id title { romaji english } coverImage { large } genres description(asHtml: false) } } }` :
+        `query ($page: Int) { Page(page: $page, perPage: 24) { media(type: ANIME, sort: TRENDING_DESC) { id title { romaji english } coverImage { large } genres description(asHtml: false) } } }`;
+    const payload = await fetchWithTimeout("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "content-type": "application/json", "accept": "application/json" },
+        body: JSON.stringify({ query: gql, variables: { search: query || undefined, page } })
+    });
+    const mediaList = (payload && payload.data && payload.data.Page && Array.isArray(payload.data.Page.media)) ? payload.data.Page.media : [];
+    return mediaList.map((anime) => contentItem({
+        id: `anilist_${anime.id}`,
+        title: (anime.title && (anime.title.english || anime.title.romaji)) ? (anime.title.english || anime.title.romaji) : "Untitled anime",
+        subtitle: (anime.genres || []).slice(0, 3).join(", "),
+        coverUrl: (anime.coverImage && anime.coverImage.large) ? anime.coverImage.large : "",
+        detailUrl: `anilist:${anime.id}`,
+        sourceName: "AniList",
+        kind: "anime",
+        synopsis: String(anime.description || "").replace(/<[^>]+>/g, "")
+    }));
 }
 
 async function tmdbItems(type, query, page = 1) {
-  const token = process.env.TMDB_READ_ACCESS_TOKEN || "";
-  const key = process.env.TMDB_API_KEY || "";
-  if (!token && !key) return [];
-  const normalizedType = normalizeContentType(type);
-  const mediaType = normalizedType === "movies" ? "movie" : "tv";
-  const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
-  const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
+    const token = process.env.TMDB_READ_ACCESS_TOKEN || "";
+    const key = process.env.TMDB_API_KEY || "";
+    if (!token && !key) return [];
+    const normalizedType = normalizeContentType(type);
+    const mediaType = normalizedType === "movies" ? "movie" : "tv";
+    const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
+    const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
 
-  let endpoint;
-  if (query) {
-    // For search, use the search endpoint (same for all types)
-    endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
-  } else if (normalizedType === "kdrama") {
-    // K-Drama: Korean origin + Korean language TV shows
-    endpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=KR&with_original_language=ko&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
-  } else if (normalizedType === "cartoon") {
-    // Cartoon: animation genre (16), exclude anime keyword (210024 = anime)
-    endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&without_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
-  } else if (normalizedType === "movies") {
-    endpoint = `https://api.themoviedb.org/3/discover/movie?sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
-  } else {
-    endpoint = `https://api.themoviedb.org/3/${mediaType}/popular?page=${page}${apiSuffix}`;
-  }
+    let endpoint;
+    if (query) {
+        // For search, use the search endpoint (same for all types)
+        endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "kdrama") {
+        // K-Drama: Korean origin + Korean language TV shows
+        endpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=KR&with_original_language=ko&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "cartoon") {
+        // Cartoon: animation genre (16), exclude anime keyword (210024 = anime)
+        endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&without_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "anime") {
+        // Anime: animation genre (16) + Japanese language + anime keyword
+        endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "movies") {
+        endpoint = `https://api.themoviedb.org/3/discover/movie?sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else {
+        endpoint = `https://api.themoviedb.org/3/${mediaType}/popular?page=${page}${apiSuffix}`;
+    }
 
-  const url = token ? endpoint : endpoint;
-  const payload = await fetchWithTimeout(url, { headers });
-  return (payload.results || []).slice(0, 24).map((item) => contentItem({
-    id: `tmdb_${mediaType}_${item.id}`,
-    title: item.title || item.name || "Untitled",
-    subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : "Movie",
-    coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
-    detailUrl: `tmdb://${mediaType}/${item.id}`,
-    sourceName: "TMDB",
-    kind: normalizedType === "movies" ? "movie" : normalizedType,
-    synopsis: item.overview || ""
-  }));
+    const url = token ? endpoint : endpoint;
+    const payload = await fetchWithTimeout(url, { headers });
+    return (payload.results || []).slice(0, 24).map((item) => contentItem({
+        id: `tmdb_${mediaType}_${item.id}`,
+        title: item.title || item.name || "Untitled",
+        subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : "Movie",
+        coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
+        detailUrl: `tmdb://${mediaType}/${item.id}`,
+        sourceName: "TMDB",
+        kind: normalizedType === "movies" ? "movie" : normalizedType,
+        synopsis: item.overview || ""
+    }));
 }
 
 async function tmdbBestMatch(type, title) {
-  const query = String(title || "").trim();
-  if (!query) return null;
-  const items = await tmdbItems(type, query, 1).catch(() => []);
-  return items.find((item) => /^tmdb:\/\//.test(item.detailUrl)) || null;
+    const query = String(title || "").trim();
+    if (!query) return null;
+    const items = await tmdbItems(type, query, 1).catch(() => []);
+    return items.find((item) => /^tmdb:\/\//.test(item.detailUrl)) || null;
 }
 
 async function wikidataTmdbMatch(type, title) {
-  const query = String(title || "").trim();
-  if (!query) return null;
-  const normalizedType = normalizeContentType(type);
-  const mediaType = normalizedType === "movies" ? "movie" : "tv";
-  const property = mediaType === "movie" ? "P4947" : "P4983";
-  const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=5&origin=*`;
-  const search = await fetchWithTimeout(searchUrl, {
-    headers: { "user-agent": "NovelApp/1.0 content resolver", accept: "application/json" }
-  }, 9000).catch(() => null);
-  const candidates = (search?.search || []).filter((item) => item.id);
-  for (const candidate of candidates) {
-    const entityUrl = `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(candidate.id)}.json`;
-    const entityPayload = await fetchWithTimeout(entityUrl, {
-      headers: { "user-agent": "NovelApp/1.0 content resolver", accept: "application/json" }
+    const query = String(title || "").trim();
+    if (!query) return null;
+    const normalizedType = normalizeContentType(type);
+    const mediaType = normalizedType === "movies" ? "movie" : "tv";
+    const property = mediaType === "movie" ? "P4947" : "P4983";
+    const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=5&origin=*`;
+    const search = await fetchWithTimeout(searchUrl, {
+        headers: { "user-agent": "NovelApp/1.0 content resolver", accept: "application/json" }
     }, 9000).catch(() => null);
-    const entity = entityPayload?.entities?.[candidate.id];
-    const claim = entity?.claims?.[property]?.find((item) => item?.mainsnak?.datavalue?.value);
-    const id = String(claim?.mainsnak?.datavalue?.value || "").trim();
-    if (/^\d+$/.test(id)) {
-      return contentItem({
-        id: `wikidata_tmdb_${mediaType}_${id}`,
-        title: candidate.label || query,
-        subtitle: "Wikidata TMDB",
-        detailUrl: `tmdb://${mediaType}/${id}`,
-        sourceName: "Wikidata",
-        kind: mediaType === "movie" ? "movie" : normalizedType,
-        synopsis: candidate.description || ""
-      });
+    const candidates = Array.isArray(search && search.search) ? (search.search.filter((item) => item && item.id)) : [];
+    for (const candidate of candidates) {
+        const entityUrl = `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(candidate.id)}.json`;
+        const entityPayload = await fetchWithTimeout(entityUrl, {
+            headers: { "user-agent": "NovelApp/1.0 content resolver", accept: "application/json" }
+        }, 9000).catch(() => null);
+        const entity = entityPayload && entityPayload.entities && entityPayload.entities[candidate.id] ? entityPayload.entities[candidate.id] : null;
+        const claim = entity && entity.claims && entity.claims[property] ? entity.claims[property].find((item) => item && item.mainsnak && item.mainsnak.datavalue && item.mainsnak.datavalue.value) : null;
+        const id = String((claim && claim.mainsnak && claim.mainsnak.datavalue && claim.mainsnak.datavalue.value) ? claim.mainsnak.datavalue.value : "").trim();
+        if (/^\d+$/.test(id)) {
+            return contentItem({
+                id: `wikidata_tmdb_${mediaType}_${id}`,
+                title: candidate.label || query,
+                subtitle: "Wikidata TMDB",
+                detailUrl: `tmdb://${mediaType}/${id}`,
+                sourceName: "Wikidata",
+                kind: mediaType === "movie" ? "movie" : normalizedType,
+                synopsis: candidate.description || ""
+            });
+        }
     }
-  }
-  return null;
+    return null;
 }
 
 async function mangadexItems(query, page = 1) {
-  const title = String(query || "").trim();
-  const order = title ? "order[relevance]=desc" : "order[followedCount]=desc";
-  const titleParam = title ? `&title=${encodeURIComponent(title)}` : "";
-  const url = `https://api.mangadex.org/manga?limit=24&offset=${(page - 1) * 24}${titleParam}&includes[]=cover_art&availableTranslatedLanguage[]=en&${order}`;
-  const payload = await fetchWithTimeout(url);
-  return (payload.data || []).map((item) => {
-    const title = item.attributes?.title?.en || Object.values(item.attributes?.title || {})[0] || "Untitled manga";
-    const coverRel = (item.relationships || []).find((rel) => rel.type === "cover_art");
-    const fileName = coverRel?.attributes?.fileName || "";
-    return contentItem({
-      id: `mangadex_${item.id}`,
-      title,
-      subtitle: "MangaDex",
-      coverUrl: fileName ? `https://uploads.mangadex.org/covers/${item.id}/${fileName}.256.jpg` : "",
-      detailUrl: `mangadex:${item.id}`,
-      sourceName: "MangaDex",
-      kind: "manga",
-      synopsis: item.attributes?.description?.en || ""
+    const title = String(query || "").trim();
+    const order = title ? "order[relevance]=desc" : "order[followedCount]=desc";
+    const titleParam = title ? `&title=${encodeURIComponent(title)}` : "";
+    const url = `https://api.mangadex.org/manga?limit=24&offset=${(page - 1) * 24}${titleParam}&includes[]=cover_art&availableTranslatedLanguage[]=en&${order}`;
+    const payload = await fetchWithTimeout(url);
+    return (payload && payload.data && Array.isArray(payload.data) ? payload.data : []).map((item) => {
+        const title = (item.attributes && item.attributes.title && (item.attributes.title.en || Object.values(item.attributes.title || {})[0])) ? (item.attributes.title.en || Object.values(item.attributes.title || {})[0]) : "Untitled manga";
+        const coverRel = (item.relationships || []).find((rel) => rel.type === "cover_art");
+        const fileName = (coverRel && coverRel.attributes && coverRel.attributes.fileName) ? coverRel.attributes.fileName : "";
+        return contentItem({
+            id: `mangadex_${item.id}`,
+            title,
+            subtitle: "MangaDex",
+            coverUrl: fileName ? `https://uploads.mangadex.org/covers/${item.id}/${fileName}.256.jpg` : "",
+            detailUrl: `mangadex:${item.id}`,
+            sourceName: "MangaDex",
+            kind: "manga",
+            synopsis: (item.attributes && item.attributes.description && (item.attributes.description.en || "")) ? (item.attributes.description.en || "") : ""
+        });
     });
-  });
 }
 
 async function mangadexChapters(detailUrl, page = 1) {
-  const id = String(detailUrl || "").startsWith("mangadex:")
-    ? String(detailUrl).replace("mangadex:", "")
-    : "";
-  if (!id) return [];
-  const limit = 100;
-  const offset = (Math.max(1, Number(page) || 1) - 1) * limit;
-  const url = `https://api.mangadex.org/manga/${encodeURIComponent(id)}/feed?limit=${limit}&offset=${offset}&translatedLanguage[]=en&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`;
-  const payload = await fetchWithTimeout(url);
-  return (payload.data || []).filter((item) => !item.attributes?.externalUrl).map((item, index) => {
-    const attributes = item.attributes || {};
-    const chapterNumber = Number.parseInt(String(attributes.chapter || ""), 10) || (offset + index + 1);
-    const title = attributes.title
-      ? `Chapter ${attributes.chapter || chapterNumber} - ${attributes.title}`
-      : `Chapter ${attributes.chapter || chapterNumber}`;
-    return {
-      title,
-      url: `mangadex-chapter://${item.id}`,
-      chapterNumber
-    };
-  });
+    const id = String(detailUrl || "").startsWith("mangadex:") ?
+        String(detailUrl).replace("mangadex:", "") :
+        "";
+    if (!id) return [];
+    const limit = 100;
+    const offset = (Math.max(1, Number(page) || 1) - 1) * limit;
+    const url = `https://api.mangadex.org/manga/${encodeURIComponent(id)}/feed?limit=${limit}&offset=${offset}&translatedLanguage[]=en&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`;
+    const payload = await fetchWithTimeout(url);
+    const dataArray = payload && payload.data && Array.isArray(payload.data) ? payload.data : [];
+    return dataArray.filter((item) => !(item.attributes && item.attributes.externalUrl)).map((item, index) => {
+        const attributes = item.attributes || {};
+        const chapterNumber = Number.parseInt(String(attributes.chapter || ""), 10) || (offset + index + 1);
+        const title = attributes.title ?
+            `Chapter ${attributes.chapter || chapterNumber} - ${attributes.title}` :
+            `Chapter ${attributes.chapter || chapterNumber}`;
+        return {
+            title,
+            url: `mangadex-chapter://${item.id}`,
+            chapterNumber
+        };
+    });
 }
 
 async function mangadexPages(chapterUrl) {
-  const chapterId = String(chapterUrl || "").replace("mangadex-chapter://", "");
-  if (!chapterId || chapterId === chapterUrl) return [];
-  const payload = await fetchWithTimeout(`https://api.mangadex.org/at-home/server/${encodeURIComponent(chapterId)}`);
-  const baseUrl = payload.baseUrl;
-  const chapter = payload.chapter || {};
-  const hash = chapter.hash || "";
-  const pages = Array.isArray(chapter.dataSaver) && chapter.dataSaver.length
-    ? chapter.dataSaver
-    : chapter.data || [];
-  if (!baseUrl || !hash || !pages.length) return [];
-  return pages.map((page) => `${baseUrl}/data-saver/${hash}/${page}`);
+    const chapterId = String(chapterUrl || "").replace("mangadex-chapter://", "");
+    if (!chapterId || chapterId === chapterUrl) return [];
+    const payload = await fetchWithTimeout(`https://api.mangadex.org/at-home/server/${encodeURIComponent(chapterId)}`);
+    const baseUrl = payload.baseUrl;
+    const chapter = payload.chapter || {};
+    const hash = chapter.hash || "";
+    const pages = Array.isArray(chapter.dataSaver) && chapter.dataSaver.length ?
+        chapter.dataSaver :
+        chapter.data || [];
+    if (!baseUrl || !hash || !pages.length) return [];
+    return pages.map((page) => `${baseUrl}/data-saver/${hash}/${page}`);
 }
 
 async function contentHome(type, page = 1) {
-  const normalizedType = normalizeContentType(type);
-  if (normalizedType === "anime") {
-    return anilistItems("", page).catch(() => fixtureItems("anime"));
-  }
-  if (normalizedType === "manga") {
-    const live = await mangadexItems("", page).catch(() => []);
-    return live.length ? live : fixtureItems("manga");
-  }
-  if (["kdrama", "cartoon", "movies"].includes(normalizedType)) {
-    const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
-    return tmdb.length ? tmdb : fixtureItems(normalizedType);
-  }
-  const live = await swiftNovelScrapers.popularNovels(page).catch(() => []);
-  return live.length ? live : fixtureItems("novels");
+    const normalizedType = normalizeContentType(type);
+    if (normalizedType === "manga") {
+        const live = await mangadexItems("", page).catch(() => []);
+        return live.length ? live : fixtureItems("manga");
+    }
+    // Anime, K-Drama, Cartoons, Classic TV, and Movies all go through TMDB (same pipeline)
+    if (["anime", "kdrama", "cartoon", "classic", "movies"].includes(normalizedType)) {
+        const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
+        return tmdb.length ? tmdb : fixtureItems(normalizedType);
+    }
+    const live = await swiftNovelScrapers.popularNovels(page).catch(() => []);
+    return live.length ? live : fixtureItems("novels");
 }
 
 async function contentSearch(type, query, page = 1) {
-  const normalizedType = normalizeContentType(type);
-  if (normalizedType === "anime") {
-    const live = await anilistItems(query, page).catch(() => []);
-    return live.length ? live : fixtureItems("anime", query);
-  }
-  if (normalizedType === "manga") {
-    const live = await mangadexItems(query, page).catch(() => []);
-    return live.length ? live : fixtureItems("manga", query);
-  }
-  if (["kdrama", "cartoon", "movies"].includes(normalizedType)) {
-    const live = await tmdbItems(normalizedType, query, page).catch(() => []);
-    return live.length ? live : fixtureItems(normalizedType, query);
-  }
-  const live = await swiftNovelScrapers.searchNovels(query, page).catch(() => []);
-  return live.length ? live : fixtureItems("novels", query);
+    const normalizedType = normalizeContentType(type);
+    if (["anime", "kdrama", "cartoon", "classic", "movies"].includes(normalizedType)) {
+        const live = await tmdbItems(normalizedType, query, page).catch(() => []);
+        return live.length ? live : fixtureItems(normalizedType, query);
+    }
+    if (normalizedType === "manga") {
+        const live = await mangadexItems(query, page).catch(() => []);
+        return live.length ? live : fixtureItems("manga", query);
+    }
+    if (["kdrama", "cartoon", "classic", "movies"].includes(normalizedType)) {
+        const live = await tmdbItems(normalizedType, query, page).catch(() => []);
+        return live.length ? live : fixtureItems(normalizedType, query);
+    }
+    const live = await swiftNovelScrapers.searchNovels(query, page).catch(() => []);
+    return live.length ? live : fixtureItems("novels", query);
 }
 
 async function contentChapters(kind, detailUrl, title, sourceName) {
-  if (normalizeContentType(kind) === "novels" || normalizeContentType(kind) === "novel") {
-    const live = await swiftNovelScrapers.novelChapters({ detailUrl, sourceName }).catch(() => []);
-    return live;
-  }
-  if (normalizeContentType(kind) === "manga") {
-    const live = await mangadexChapters(detailUrl).catch(() => []);
-    return live;
-  }
-  return syntheticChapters(kind, detailUrl, title);
+    if (normalizeContentType(kind) === "novels" || normalizeContentType(kind) === "novel") {
+        const live = await swiftNovelScrapers.novelChapters({ detailUrl, sourceName }).catch(() => []);
+        return live;
+    }
+    if (normalizeContentType(kind) === "manga") {
+        const live = await mangadexChapters(detailUrl).catch(() => []);
+        return live;
+    }
+    return syntheticChapters(kind, detailUrl, title);
 }
 
 async function contentChapterText(chapterUrl, title, sourceName) {
-  const live = await swiftNovelScrapers.novelChapterText({ chapterUrl, sourceName }).catch(() => "");
-  if (live && live.trim().length > 200) return live;
-  if (String(chapterUrl || "").startsWith("novel-chapter://")) {
-    return "Real chapter text is unavailable for this source right now. Try another result from Wuxiaworld or RoyalRoad.";
-  }
-  return "This chapter is unavailable from the provider right now. It may be locked, moved, or blocked by the source.";
+    const live = await swiftNovelScrapers.novelChapterText({ chapterUrl, sourceName }).catch(() => "");
+    if (live && live.trim().length > 200) return live;
+    if (String(chapterUrl || "").startsWith("novel-chapter://")) {
+        return "Real chapter text is unavailable for this source right now. Try another result from Wuxiaworld or RoyalRoad.";
+    }
+    return "This chapter is unavailable from the provider right now. It may be locked, moved, or blocked by the source.";
 }
 
 function syntheticChapters(kind, detailUrl, title = "") {
-  const isManga = normalizeContentType(kind) === "manga";
-  const count = isManga ? 15 : 100;
-  return Array.from({ length: count }, (_, index) => ({
-    title: `Chapter ${index + 1}${title ? ` — ${title}` : ""}`,
+    const isManga = normalizeContentType(kind) === "manga";
+    const count = isManga ? 15 : 100;
+    return Array.from({ length: count }, (_, index) => ({
+                    title: `Chapter ${index + 1}${title ? ` — ${title}` : ""}`,
     url: `${isManga ? "manga-chapter" : "novel-chapter"}://${encodeURIComponent(detailUrl || title || "item")}/${index + 1}`,
     chapterNumber: index + 1
   }));
@@ -2623,9 +2647,353 @@ async function handlePublishAiNovel(request, response) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Football / API-Football Proxy Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sportsApiRequest(endpoint, params = {}) {
+  if (!SPORTS_API_KEY) {
+    throw new Error("SPORTS_API_KEY is not configured on the server.");
+  }
+  const query = new URLSearchParams(params).toString();
+  const url = `https://${SPORTS_API_HOST}${endpoint}${query ? "?" + query : ""}`;
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      "x-rapidapi-key": SPORTS_API_KEY,
+      "x-rapidapi-host": SPORTS_API_HOST,
+      "accept": "application/json"
+    }
+  }, 12000);
+  return response;
+}
+
+async function handleFootballFixtures(request, response, requestUrl) {
+  try {
+    const live = requestUrl.searchParams.get("live");
+    const date = requestUrl.searchParams.get("date");
+    const params = {};
+    if (live === "all") {
+      params.live = "all";
+    } else if (date) {
+      params.date = date;
+    } else {
+      // Default to today's date
+      const today = new Date();
+      params.date = today.toISOString().split("T")[0];
+      // Also fetch live matches
+      params.live = "all";
+    }
+    const payload = await sportsApiRequest("/fixtures", params);
+    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+    // Sort: live first, then in-progress, then scheduled
+    fixtures.sort((a, b) => {
+      const statusA = a?.fixture?.status?.short || "";
+      const statusB = b?.fixture?.status?.short || "";
+      const liveOrder = (s) => s === "LIVE" ? 0 : s === "HT" || s === "1H" || s === "2H" ? 1 : s === "NS" ? 2 : 3;
+      return liveOrder(statusA) - liveOrder(statusB);
+    });
+    return sendApiData(response, 200, fixtures.slice(0, 50));
+  } catch (error) {
+    console.error("[Football] Fixtures error:", error.message || error);
+    return sendApiData(response, 200, []);
+  }
+}
+
+async function handleFootballLeagues(request, response) {
+  try {
+    const payload = await sportsApiRequest("/leagues", { current: "true" });
+    const leagues = Array.isArray(payload?.response) ? payload.response : [];
+    // Return only the league metadata the client needs
+    const mapped = leagues.slice(0, 50).map((item) => ({
+      id: item?.league?.id,
+      name: item?.league?.name || "Unknown",
+      logo: item?.league?.logo || "",
+      season: item?.seasons?.[0]?.year || 0,
+      country: item?.country?.name || ""
+    }));
+    return sendApiData(response, 200, mapped);
+  } catch (error) {
+    console.error("[Football] Leagues error:", error.message || error);
+    return sendApiData(response, 200, []);
+  }
+}
+
+async function handleFootballStream(request, response, requestUrl) {
+  try {
+    const fixtureId = parseInt(requestUrl.searchParams.get("fixture"), 10);
+    if (!fixtureId || isNaN(fixtureId)) {
+      return sendApiError(response, 400, "fixture parameter is required.");
+    }
+    // Fetch the fixture to get team + league info
+    const fixturePayload = await sportsApiRequest("/fixtures", { id: fixtureId });
+    const fixture = Array.isArray(fixturePayload?.response) ? fixturePayload?.response?.[0] : null;
+    if (!fixture) {
+      return sendApiData(response, 200, "");
+    }
+
+    const homeTeam = fixture?.teams?.home?.name || "";
+    const awayTeam = fixture?.teams?.away?.name || "";
+    const leagueName = fixture?.league?.name || "";
+
+    // Try to find a VidLink stream or embed for this match
+    // We search iptv-org or construct an embed URL based on league
+    const leagueMap = {
+      "Premier League": "premier-league",
+      "La Liga": "la-liga",
+      "Serie A": "serie-a",
+      "Bundesliga": "bundesliga",
+      "Ligue 1": "ligue-1",
+      "UEFA Champions League": "uefa-champions-league",
+      "UEFA Europa League": "uefa-europa-league",
+      "UEFA Conference League": "uefa-conference-league",
+      "World Cup": "fifa-world-cup",
+      "African Cup of Nations": "africa-cup-of-nations",
+      "FA Cup": "fa-cup",
+      "EFL Cup": "efl-cup",
+      "MLS": "mls",
+      "Saudi Pro League": "saudi-pro-league",
+      "Brazilian Serie A": "brazilian-serie-a",
+      "Liga MX": "liga-mx",
+      "Eredivisie": "eredivisie",
+      "Primeira Liga": "primeira-liga",
+      "Scottish Premiership": "scottish-premiership",
+      "Süper Lig": "super-lig",
+      "Belgian Pro League": "belgian-pro-league",
+      "Swiss Super League": "swiss-super-league",
+      "Jupiler Pro League": "jupiler-pro-league",
+      "Greek Super League": "greek-super-league",
+      "Russian Premier League": "russian-premier-league",
+      "Chinese Super League": "chinese-super-league",
+      "J1 League": "j1-league",
+      "K League 1": "k-league-1",
+      "Indian Super League": "indian-super-league",
+      "A-League": "a-league",
+      "CAF Champions League": "caf-champions-league"
+    };
+    const leagueSlug = leagueMap[leagueName] || leagueName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+    // Generate multiple possible stream URLs
+    const searchTerms = [
+      `${homeTeam} vs ${awayTeam}`,
+      `${homeTeam} ${awayTeam}`,
+      leagueName,
+      `${leagueSlug} live`
+    ].map(s => encodeURIComponent(s));
+
+    // We use the iptv-org GitHub repository as our video source.
+    // iptv-org is a community-maintained open-source database of live TV channels
+    // from around the world. Their sports category index contains direct .m3u8
+    // streams for thousands of global sports networks (Sky Sports, SuperSport,
+    // beIN Sports, ESPN, etc.).
+    //
+    // Architecture:
+    //   1. Fetch the fixture details from API-Football (already done above) to get
+    //      the league name and participating teams.
+    //   2. Fetch the iptv-org sports.m3u playlist, which is a plain-text file
+    //      containing channel metadata (tvg-id, tvg-logo, channel name) followed
+    //      by a direct .m3u8 streaming URL on the next line.
+    //   3. Parse the M3U text → build list of { channelName, tvgId, logo, streamUrl }.
+    //   4. Match the fixture's league name to known broadcast channel names.
+    //   5. Return the first matching direct .m3u8 URL.
+    //
+    // Because these streams are direct CDN links (no website, no ads, no pop-ups),
+    // the client can feed the URL straight into ExoPlayer without any headless
+    // WebView extraction step.
+
+    // ── Step 1: Build a league → channel name mapping ─────────────────────
+    // These are the major broadcasters per league. The iptv-org m3u lists
+    // channels under names like "Sky Sports Main Event", "SuperSport Premier League",
+    // "beIN Sports 1", etc. We map each league to likely channel name keywords.
+    const leagueChannelMap = [
+      { leagues: ["Premier League", "English Premier League", "EPL", "FA Cup", "EFL Cup", "Community Shield"], channels: ["Sky Sports Main Event", "Sky Sports Premier League", "TNT Sports", "BBC One", "SuperSport Premier League"] },
+      { leagues: ["La Liga", "Spanish La Liga", "Copa del Rey", "Supercopa"], channels: ["Movistar LaLiga", "LaLiga TV", "ESPN Deportes", "beIN Sports", "SuperSport LaLiga"] },
+      { leagues: ["Serie A", "Italian Serie A", "Coppa Italia", "Supercoppa"], channels: ["DAZN Serie A", "Sky Sport Serie A", "Italia 1", "SuperSport"] },
+      { leagues: ["Bundesliga", "German Bundesliga", "DFB Pokal", "DFL Supercup"], channels: ["Sky Sport Bundesliga", "DAZN Bundesliga", "ARD", "ZDF"] },
+      { leagues: ["Ligue 1", "French Ligue 1", "Coupe de France", "Trophee"], channels: ["Canal+ Sport", "Prime Video Ligue 1", "beIN Sports"] },
+      { leagues: ["UEFA Champions League", "Champions League", "UCL"], channels: ["TNT Sports 1", "TNT Sports 2", "CBS Sports", "SuperSport", "beIN Sports", "DAZN"] },
+      { leagues: ["UEFA Europa League", "Europa League", "UEL"], channels: ["TNT Sports", "SuperSport", "DAZN", "CBS Sports"] },
+      { leagues: ["UEFA Conference League", "Europa Conference League", "UECL"], channels: ["TNT Sports", "SuperSport"] },
+      { leagues: ["World Cup", "FIFA World Cup"], channels: ["BBC One", "ITV 1", "Fox Sports", "Telemundo", "SuperSport", "beIN Sports"] },
+      { leagues: ["African Cup of Nations", "AFCON", "Africa Cup"], channels: ["SuperSport", "beIN Sports", "Canal+ Sport"] },
+      { leagues: ["CAF Champions League", "CAF CL"], channels: ["SuperSport", "beIN Sports"] },
+      { leagues: ["MLS", "Major League Soccer", "Leagues Cup"], channels: ["Apple TV", "Fox Sports", "TSN"] },
+      { leagues: ["Saudi Pro League", "Roshn Saudi League"], channels: ["SSC", "beIN Sports"] },
+      { leagues: ["Brazilian Serie A", "Brasileirao", "Campeonato Brasileiro"], channels: ["Globo", "Sportv", "ESPN Brasil"] },
+      { leagues: ["Argentine Primera Division", "Liga Profesional"], channels: ["ESPN", "TyC Sports", "Fox Sports"] },
+      { leagues: ["Eredivisie", "Dutch Eredivisie"], channels: ["ESPN", "Ziggo Sport"] },
+      { leagues: ["Primeira Liga", "Portuguese Liga"], channels: ["Sport TV", "Benfica TV"] },
+      { leagues: ["Scottish Premiership", "Scottish Cup"], channels: ["Sky Sports", "BBC Scotland"] },
+      { leagues: ["Süper Lig", "Turkish Super Lig"], channels: ["beIN Sports"] },
+      { leagues: ["Liga MX", "Mexican Liga"], channels: ["TUDN", "Azteca", "Fox Sports"] },
+      { leagues: ["J1 League", "J.League"], channels: ["DAZN"] }
+    ];
+
+    // ── Step 2: Fetch and parse the iptv-org sports.m3u playlist ──────────
+    let channelStreams = [];
+    try {
+      const m3uResponse = await fetch(
+        "https://iptv-org.github.io/iptv/categories/sports.m3u",
+        { signal: AbortSignal.timeout(10000) }
+      );
+      if (m3uResponse.ok) {
+        const m3uText = await m3uResponse.text();
+        // Parse the M3U file: each entry is #EXTINF line with metadata, followed by URL line
+        const lines = m3uText.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line.startsWith("#EXTINF")) {
+            // Extract channel name (after the last comma)
+            const commaIdx = line.lastIndexOf(",");
+            const channelName = commaIdx >= 0 ? line.substring(commaIdx + 1).trim() : "";
+            // Extract tvg-id if present
+            const tvgMatch = /tvg-id="([^"]*)"/.exec(line);
+            const tvgId = tvgMatch ? tvgMatch[1] : "";
+            // Next non-empty, non-comment line is the stream URL
+            for (let j = i + 1; j < lines.length; j++) {
+              const nextLine = lines[j].trim();
+              if (nextLine && !nextLine.startsWith("#")) {
+                if (nextLine.startsWith("http")) {
+                  channelStreams.push({
+                    channelName: channelName.toLowerCase(),
+                    tvgId: tvgId.toLowerCase(),
+                    url: nextLine
+                  });
+                }
+                i = j; // advance outer loop past the URL line
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (m3uError) {
+      console.warn("[Football] iptv-org m3u fetch failed:", m3uError.message || m3uError);
+    }
+
+    // ── Step 3: Match the fixture's league to a channel stream ────────────
+    const leagueLower = (leagueName || "").toLowerCase();
+    // Find matching channel keywords
+    let candidates = [];
+    for (const entry of leagueChannelMap) {
+      if (entry.leagues.some(l => leagueLower.includes(l.toLowerCase()) || l.toLowerCase().includes(leagueLower))) {
+        candidates.push(...entry.channels);
+      }
+    }
+
+    // Search the parsed channel list using the candidate keywords
+    let matchedStream = null;
+    if (candidates.length > 0 && channelStreams.length > 0) {
+      for (const candidate of candidates) {
+        const keyword = candidate.toLowerCase();
+        const found = channelStreams.find(cs =>
+          cs.channelName.includes(keyword) || cs.tvgId.includes(keyword)
+        );
+        if (found) {
+          matchedStream = found.url;
+          break;
+        }
+      }
+      // Fallback: if no exact match, try partial keyword matching
+      if (!matchedStream) {
+        for (const candidate of candidates) {
+          const words = candidate.toLowerCase().split(/\s+/);
+          const found = channelStreams.find(cs =>
+            words.some(w => w.length > 2 && (cs.channelName.includes(w) || cs.tvgId.includes(w)))
+          );
+          if (found) {
+            matchedStream = found.url;
+            break;
+          }
+        }
+      }
+    }
+
+    // ── Step 4: Return the direct stream URL ───────────────────────────────
+    if (matchedStream) {
+      return sendApiData(response, 200, matchedStream);
+    }
+
+    // If no channel match found via league, try matching by team name
+    // (some teams have dedicated channels or are covered by generic sports channels)
+    if (homeTeam || awayTeam) {
+      const genericSports = channelStreams.filter(cs =>
+        cs.channelName.includes("sports") || cs.channelName.includes("sport") ||
+        cs.tvgId.includes("sports") || cs.tvgId.includes("sport")
+      );
+      // Return a random generic sports channel as best-effort
+      if (genericSports.length > 0) {
+        const randomIdx = Math.floor(Math.random() * Math.min(genericSports.length, 3));
+        return sendApiData(response, 200, genericSports[randomIdx].url);
+      }
+    }
+
+    // ── Fallback: Return a sports embed URL for the Android WebView interceptor ──
+    // The existing AnimePlayerScreen on Android has a headless WebView pipeline
+    // (shouldInterceptRequest) that loads embed pages, catches the .m3u8 from
+    // network traffic, and plays it — same system that already works for movies.
+    // These sports embed aggregator sites work the same way: they embed live
+    // .m3u8 streams on a page, and our WebView interceptor grabs them.
+    const embedUrls = [];
+    // Sports-specific streaming aggregators that embed live .m3u8 for football
+    const sportsEmbeds = [
+      `https://sportsembed.net/embed/${fixtureId}`,
+      `https://streamed.su/embed/football/${fixtureId}`,
+      `https://sportsdark.com/embed/football/${fixtureId}`,
+      `https://embed.su/embed/sports/${fixtureId}`
+    ];
+    // Also try search-based aggregators using team names for better matching
+    if (homeTeam || awayTeam) {
+      const query = encodeURIComponent(`${homeTeam || ""} ${awayTeam || ""} live football stream`.trim());
+      sportsEmbeds.push(`https://sportsembed.net/embed/search?q=${query}`);
+      sportsEmbeds.push(`https://streamed.su/embed/search?q=${query}`);
+    }
+    // Return all embed URLs as a backup
+    return sendApiData(response, 200, sportsEmbeds[0]);
+  } catch (error) {
+    console.error("[Football] Stream error:", error.message || error);
+    return sendApiData(response, 200, "");
+  }
+}
+
+async function handleFootballSearch(request, response, requestUrl) {
+  try {
+    const query = String(requestUrl.searchParams.get("q") || "").trim();
+    if (!query) {
+      return sendApiData(response, 200, []);
+    }
+    const payload = await sportsApiRequest("/fixtures", { search: query });
+    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+    fixtures.sort((a, b) => {
+      const statusA = a?.fixture?.status?.short || "";
+      const statusB = b?.fixture?.status?.short || "";
+      const liveOrder = (s) => s === "LIVE" ? 0 : s === "HT" || s === "1H" || s === "2H" ? 1 : s === "NS" ? 2 : 3;
+      return liveOrder(statusA) - liveOrder(statusB);
+    });
+    return sendApiData(response, 200, fixtures.slice(0, 30));
+  } catch (error) {
+    console.error("[Football] Search error:", error.message || error);
+    return sendApiData(response, 200, []);
+  }
+}
+
 async function handleApi(request, response, pathname) {
   try {
     const requestUrl = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+
+    // ── Football API routes ─────────────────────────────────────────────
+    if (pathname === "/api/football/fixtures") {
+      return await handleFootballFixtures(request, response, requestUrl);
+    }
+    if (pathname === "/api/football/leagues") {
+      return await handleFootballLeagues(request, response);
+    }
+    if (pathname === "/api/football/stream") {
+      return await handleFootballStream(request, response, requestUrl);
+    }
+    if (pathname === "/api/football/search") {
+      return await handleFootballSearch(request, response, requestUrl);
+    }
+
     if (pathname.startsWith("/api/content/")) {
       return await handleContentApi(request, response, pathname, requestUrl);
     }
@@ -2830,6 +3198,15 @@ ensurePremiumSeedUser()
     console.warn(`Premium seed account could not be prepared: ${error.message || error}`);
   })
   .finally(() => {
+    server.on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Another process is listening on that port.`);
+        process.exit(1);
+      }
+      console.error('Server error:', err && err.stack ? err.stack : err);
+      // For non-listen errors let the process decide; do not throw here to avoid uncaught exceptions
+    });
+
     server.listen(PORT, () => {
       console.log(`NovelApp server listening on ${PORT}`);
     });

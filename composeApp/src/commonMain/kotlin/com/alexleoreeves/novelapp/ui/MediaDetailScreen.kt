@@ -58,6 +58,7 @@ fun MediaDetailScreen(
     val tmdbScraper = remember { TMDBMovieScraper(httpClient) }
     val dramaScraper = remember { DramaCoolScraper(httpClient) }
     val cartoonScraper = remember { KimCartoonScraper(httpClient) }
+    val wcoStreamScraper = remember { WcoStreamScraper(httpClient) }
 
     val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
@@ -73,6 +74,7 @@ fun MediaDetailScreen(
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
+    val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
     val embedServerNames = listOf("Web fallback: VidLink", "Web fallback: AutoEmbed", "Web fallback: VidSrc.me", "Web fallback: EmbedSu", "Web fallback: VidSrc.cc", "Web fallback: 2Embed")
     val embedServerKeys = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
     val serverNames = listOf("Direct first") + embedServerNames
@@ -255,31 +257,21 @@ fun MediaDetailScreen(
             statusText = ""
             return direct.url
         }
-        if (type == "movie") {
-            // Movies: fall back to web embed page (VidLink etc.)
-            val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
-            if (fallback != null) {
-                val selected = serverNames.getOrNull(selectedServer).orEmpty()
-                statusText = if (selectedServer == 0) {
-                    "Direct stream unavailable; opening Web fallback: VidLink."
-                } else {
-                    "Direct stream unavailable; opening $selected."
-                }
-                return fallback
+        // Both movies and TV (K-Drama/Cartoon/Anime): fall back to web embed page
+        // (VidLink, AutoEmbed, embed.su, etc.) — same pipeline, respecting user's server selection.
+        val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
+        if (fallback != null) {
+            val selected = serverNames.getOrNull(selectedServer).orEmpty()
+            statusText = if (selectedServer == 0) {
+                "Direct stream unavailable; opening Web fallback: VidLink."
+            } else {
+                "Direct stream unavailable; opening $selected."
             }
-        } else {
-            // TV (K-Drama / Cartoon): silently scrape embed.su — the player will
-            // extract the .m3u8 in background via EmbedSuStreamScraper.
-            if (id.isNotBlank()) {
-                // Build embed.su URL — this will be intercepted by the hidden WebView scraper
-                val embedUrl = buildEmbedSuUrl(id, type, season, episode)
-                statusText = "Loading via embed.su stream extraction..."
-                return embedUrl
-            }
-            statusText = direct?.message
-                ?.takeIf { it.isNotBlank() }
-                ?: "Direct stream unavailable. Try a different episode."
+            return fallback
         }
+        statusText = direct?.message
+            ?.takeIf { it.isNotBlank() }
+            ?: "Direct stream unavailable. Try a different episode."
         return null
     }
 
@@ -302,9 +294,13 @@ fun MediaDetailScreen(
             isKimCartoonDetail -> {
                 cartoonScraper.fetchEpisodes(item.detailPageUrl)
             }
+            isWcoStreamDetail -> {
+                wcoStreamScraper.fetchEpisodes(item.detailPageUrl)
+            }
             else -> emptyList()
         }
-        if (!isTmdbDetail) {
+        // For WCOStream items, don't try TMDB matching — we use the WCOStream episode URLs directly
+        if (!isTmdbDetail && !isWcoStreamDetail) {
             val tmdbMatch = runCatching {
                 tmdbScraper.search(item.title)
                     .sortedWith(
@@ -334,15 +330,14 @@ fun MediaDetailScreen(
         scope.launch {
             statusText = "Resolving stream link..."
             val playUrl = when {
-                // TMDB TV content (K-Drama / Cartoon): go straight to embed.su
-                // The platform's EmbedSuStreamScraper extracts the .m3u8 in the background.
+                // TMDB TV content (K-Drama / Cartoon / Anime): try server backend first,
+                // then fall back to embed.su stream extraction.
                 isTmdbDetail && mediaType == "tv" -> {
                     val urlParts = ep.url.split(":")
                     val tvId = urlParts.getOrNull(1) ?: tmdbId
                     val s = urlParts.getOrNull(2) ?: "1"
                     val e = urlParts.getOrNull(3) ?: "1"
-                    statusText = "Loading via embed.su stream extraction..."
-                    buildEmbedSuUrl(tvId, "tv", s, e)
+                    resolvePlayableRoute("tv", tvId, s, e) ?: return@launch
                 }
                 isTmdbDetail -> {
                     val urlParts = ep.url.split(":")
@@ -384,6 +379,15 @@ fun MediaDetailScreen(
                         }
                         extracted
                     }
+                }
+                isWcoStreamDetail -> {
+                    val extracted = wcoStreamScraper.extractStreamUrl(ep.url)
+                        ?.takeIf { it.isDirectPlayableStreamUrl() }
+                    if (extracted == null) {
+                        statusText = "This episode stream is unavailable from the cartoon provider. Try a different episode or check back later."
+                        return@launch
+                    }
+                    extracted
                 }
                 else -> ep.url
             }

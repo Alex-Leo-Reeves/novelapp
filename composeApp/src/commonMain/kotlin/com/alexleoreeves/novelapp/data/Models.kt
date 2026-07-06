@@ -16,6 +16,7 @@ data class UnifiedSearchResult(
     val genre: String = "",
     val synopsis: String = "",
     val isManga: Boolean = false,
+    val isComic: Boolean = false,
     val isAnime: Boolean = false,
     val isVideo: Boolean = false,
     val mediaKind: String = "",
@@ -39,8 +40,10 @@ enum class MangaScrollMode(val displayName: String) {
 }
 
 enum class VideoCategory(val label: String) {
+    ANIME("Anime"),
     K_DRAMA("K-Drama"),
     CARTOON("Cartoon"),
+    CLASSIC("Classic"),
     MOVIES("Movies")
 }
 
@@ -126,7 +129,7 @@ data class AnimeResult(
     val genres: List<String> = emptyList(),
     val sourceName: String = "AniList"
 ) {
-    val displayTitle: String get() = titleEnglish.ifEmpty { titleRomaji }
+    val displayTitle: String get() = titleEnglish.ifBlank { titleRomaji }
 }
 
 @Serializable

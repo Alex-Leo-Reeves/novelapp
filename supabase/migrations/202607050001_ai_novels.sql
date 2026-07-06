@@ -8,6 +8,7 @@ create table if not exists public.novel_ai_generated (
   author_id     uuid references public.novel_users(id) on delete set null,
   author_name   text not null default 'Anonymous',
   title         text not null,
+  cover_prompt  text not null default '',
   cover_url     text not null default '',
   content       text not null default '',
   type          text not null default 'short',      -- 'short' | 'long'

@@ -60,7 +60,7 @@ class ZipComicScraper(private val httpClient: HttpClient) : ComicSource {
                 coverUrl = absoluteComicUrl(base, cover),
                 detailPageUrl = absoluteComicUrl(base, href),
                 sourceName = sourceName,
-                isManga = true, // Reuse manga infrastructure for page/chapter views
+                isComic = true,
                 genre = el.select("span.genre, .cat:not(a)").joinToString(", ") { it.text() }.ifBlank { "Western Comic" }
             )
         }.distinctBy { it.detailPageUrl }.take(30)
@@ -96,7 +96,7 @@ class ZipComicScraper(private val httpClient: HttpClient) : ComicSource {
                     url = href,
                     chapterNumber = idx + 1
                 )
-            }.normalizedMangaChapterOrder()
+            }.normalizedComicChapterOrder()
         } catch (e: Exception) {
         println("[ZipComic] Chapters failed: ${e.message}")
         emptyList()
@@ -136,8 +136,9 @@ class ZipComicScraper(private val httpClient: HttpClient) : ComicSource {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ReadAllComics.com Scraper — backup mirror for major comics
-//  Loads entire issue sequentially on a single page by default.
+//  Loads entire issue sequentially using a scrollable page container.
 //  Domain auto-heals via resolveLiveDomain().
+//  Image extraction targets: div.scrolling-box img
 // ─────────────────────────────────────────────────────────────────────────────
 class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
 
@@ -176,7 +177,7 @@ class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
                 coverUrl = absoluteComicUrl(base, cover),
                 detailPageUrl = absoluteComicUrl(base, href),
                 sourceName = sourceName,
-                isManga = true,
+                isComic = true,
                 genre = "Western Comic"
             )
         }.distinctBy { it.detailPageUrl }.take(30)
@@ -206,7 +207,7 @@ class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
                     url = absoluteComicUrl(base, el.attr("href")),
                     chapterNumber = idx + 1
                 )
-            }.normalizedMangaChapterOrder()
+            }.normalizedComicChapterOrder()
         } catch (e: Exception) {
         println("[ReadAllComics] Chapters failed: ${e.message}")
         emptyList()
@@ -224,11 +225,21 @@ class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
         if (html.isBlockedOrErrorPage()) return emptyList()
 
         val doc = Ksoup.parse(html)
-        doc.select("div.entry-content img, div.reader img, div.comic img, div.thecontent img, img[src*=/comic/]")
-            .map { it.attr("data-src").ifBlank { it.attr("src") } }
+        // ReadAllComics.com loads all sequential comic panels inside:
+        //   <div class="scrolling-box"><img src="..." /><img src="..." />...</div>
+        doc.select("div.scrolling-box img")
+            .map { it.attr("src") }
             .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) }
             .map { absoluteComicUrl(base, it) }
             .distinct()
+            .ifEmpty {
+                // Fallback: broad <img> extraction if scrolling-box isn't found
+                doc.select("div.entry-content img, div.reader img, div.comic img, div.thecontent img, img[src*=/comic/]")
+                    .map { it.attr("data-src").ifBlank { it.attr("src") } }
+                    .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) }
+                    .map { absoluteComicUrl(base, it) }
+                    .distinct()
+            }
             .ifEmpty {
                 Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
                     .findAll(html)
@@ -284,7 +295,7 @@ class BatCaveScraper(private val httpClient: HttpClient) : ComicSource {
                 coverUrl = absoluteComicUrl(base, cover),
                 detailPageUrl = absoluteComicUrl(base, href),
                 sourceName = sourceName,
-                isManga = true,
+                isComic = true,
                 genre = "Western Comic"
             )
         }.distinctBy { it.detailPageUrl }.take(30)
@@ -314,7 +325,7 @@ class BatCaveScraper(private val httpClient: HttpClient) : ComicSource {
                     url = absoluteComicUrl(base, el.attr("href")),
                     chapterNumber = idx + 1
                 )
-            }.normalizedMangaChapterOrder()
+            }.normalizedComicChapterOrder()
         } catch (e: Exception) {
         println("[BatCave] Chapters failed: ${e.message}")
         emptyList()

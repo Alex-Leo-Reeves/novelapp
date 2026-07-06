@@ -75,7 +75,7 @@ class NovelSearchRepository(
         WeebCentralScraper(httpClient)  // replaces MangaSeeScraper (mangasee123.com → weebcentral.com)
     )
 
-    /** Comic sources */
+    /** Comic sources — Western comics from ReadAllComics, ZipComic, BatCave */
     private val comicSources: List<ComicSource> = listOf(
         ZipComicScraper(httpClient),
         ReadAllComicsScraper(httpClient),
@@ -94,6 +94,7 @@ class NovelSearchRepository(
     )
     private val dramaCoolScraper = DramaCoolScraper(httpClient)
     private val kimCartoonScraper = KimCartoonScraper(httpClient)
+    private val wcoStreamScraper = WcoStreamScraper(httpClient)
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Unified Search — Novels + Manga + Anime all simultaneously
@@ -320,25 +321,77 @@ class NovelSearchRepository(
             .ifEmpty { backendAnimeSearch(query) }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Video feed (K-Drama, Cartoon, Movies) — same TMDB pipeline as movies
+    //  Merge server backend + client TMDB so we always get results even if
+    //  one source returns fixture stubs or hits a rate limit.
+    // ─────────────────────────────────────────────────────────────────────────
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
         cachedFeed("video:${category.name}:$page") {
-            tmdbSource.fetchVideo(category, page)
-                .ifEmpty { backendVideo(category, page = page) }
+            val server = backendVideo(category, page = page)
+            val client = tmdbSource.fetchVideo(category, page)
+
+            // For the Classic/Old Cartoon tab, also fetch WCOStream classic cartoons
+            val wcoStream = if (category == VideoCategory.CLASSIC) {
+                fetchWcoStreamCartoons(page)
+            } else {
+                emptyList()
+            }
+
+            // Prefer client TMDB results when server returns fixture stubs (≤4 items)
+            // but server results are real TMDB data (>4 items). This handles the case
+            // where server TMDB credentials are missing but client has a working API key.
+            if (server.size <= 4 && client.isNotEmpty()) {
+                return@cachedFeed client + wcoStream
+            }
+            if (client.size <= 4 && server.isNotEmpty()) {
+                return@cachedFeed server + wcoStream
+            }
+            (server + client + wcoStream)
+                .distinctBy { it.id }
+                .ifEmpty { server }
         }
 
-    suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
-        val tmdb = async { tmdbSource.searchVideo(category, query, page) }
-        val source = async {
-            when (category) {
-                VideoCategory.K_DRAMA -> dramaCoolScraper.search(query).map { it.toUnifiedVideo(VideoCategory.K_DRAMA, "DramaCool") }
-                VideoCategory.CARTOON -> kimCartoonScraper.search(query).map { it.toUnifiedVideo(VideoCategory.CARTOON, "KimCartoon") }
-                VideoCategory.MOVIES -> emptyList()
+    suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
+        cachedFeed("video_search:${category.name}:$query:$page") {
+            val server = backendVideo(category, query, page)
+            val client = tmdbSource.searchVideo(category, query, page)
+
+            // For Classic tab, also search WCOStream for the query
+            val wcoStream = if (category == VideoCategory.CLASSIC && query.isNotBlank()) {
+                wcoStreamScraper.search(query).map { it.toUnifiedVideo(category, "WCOStream") }
+            } else {
+                emptyList()
             }
+
+            // Prefer client results when server returns fixtures (≤4)
+            if (server.size <= 4 && client.isNotEmpty()) return@cachedFeed client + wcoStream
+            if (client.size <= 4 && server.isNotEmpty()) return@cachedFeed server + wcoStream
+            (server + client + wcoStream)
+                .distinctBy { it.id }
+                .ifEmpty { server }
         }
-        val combined = (source.await() + tmdb.await())
-            .distinctBy { it.detailPageUrl.ifBlank { it.id } }
-        combined.ifEmpty { backendVideo(category, query, page) }
+
+    /**
+     * Fetch classic cartoons from WCOStream for the Classic/Older Cartoons tab.
+     * Searches popular seeds that cover 90s/2000s Nickelodeon, Cartoon Network, Disney Channel legacy animation.
+     */
+    private suspend fun fetchWcoStreamCartoons(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
+        cachedFeed("wcostream:$page") {
+            val seeds = listOf("spongebob", "pokemon", "fairly oddparents", "powerpuff girls", "dexters laboratory", "ed edd n eddy", "rugrats", "scooby doo", "tom and jerry", "looney tunes")
+            val seed = seeds.getOrElse((page - 1).mod(seeds.size)) { "spongebob" }
+            wcoStreamScraper.search(seed)
+                .map { it.toUnifiedVideo(VideoCategory.CLASSIC, "WCOStream") }
+                .distinctBy { it.id }
+                .take(24)
+        }
     }
+
+    suspend fun fetchWcoStreamEpisodes(detailUrl: String): List<MediaEpisode> =
+        wcoStreamScraper.fetchEpisodes(detailUrl)
+
+    suspend fun extractWcoStreamUrl(episodeUrl: String): String? =
+        wcoStreamScraper.extractStreamUrl(episodeUrl)
 
     private suspend fun backendAnime(page: Int = 1): List<AnimeResult> =
         backendContentItems("anime", page = page).mapNotNull { it.toBackendAnimeResult() }
@@ -557,13 +610,76 @@ class NovelSearchRepository(
     }
 
     suspend fun fetchMangaChapters(mangaUrl: String, sourceName: String): List<MangaChapter> {
+        // Check comic sources first (ReadAllComics, ZipComic, BatCave)
+        val comicSource = comicSources.find { it.sourceName == sourceName }
+        if (comicSource != null) return try { comicSource.fetchChapters(mangaUrl).normalizedComicChapterOrder() } catch (e: Exception) { emptyList() }
+        // Fall back to manga sources
         val scraper = mangaSources.find { it.sourceName == sourceName } ?: mangaSources.first()
         return try { scraper.fetchMangaChapters(mangaUrl).normalizedMangaChapterOrder() } catch (e: Exception) { emptyList() }
     }
 
     suspend fun fetchMangaPages(chapterUrl: String, sourceName: String): List<String> {
+        // Check comic sources first (ReadAllComics, ZipComic, BatCave)
+        val comicSource = comicSources.find { it.sourceName == sourceName }
+        if (comicSource != null) return try { comicSource.fetchPages(chapterUrl) } catch (e: Exception) { emptyList() }
+        // Fall back to manga sources
         val scraper = mangaSources.find { it.sourceName == sourceName } ?: mangaSources.first()
         return try { scraper.fetchMangaPages(chapterUrl) } catch (e: Exception) { emptyList() }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Comic helpers — Western comics from ReadAllComics, ZipComic, BatCave
+    // ─────────────────────────────────────────────────────────────────────────
+    suspend fun searchComics(query: String): List<UnifiedSearchResult> = coroutineScope {
+        comicSources.map { source ->
+            async {
+                try {
+                    sourceSemaphore.withPermit {
+                        withTimeoutOrNull(8_000) { source.search(query) }.orEmpty()
+                    }
+                } catch (e: Exception) {
+                    println("[Comic Search] ${source.sourceName} failed silently: ${e.message}")
+                    emptyList()
+                }
+            }
+        }.awaitAll()
+            .flatten()
+            .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+            .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+            .take(72)
+    }
+
+    suspend fun fetchPopularComics(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
+        cachedFeed("comics:$page") {
+            val seed = listOf("batman", "superman", "spider-man", "x-men", "avengers", "justice")
+                .getOrElse((page - 1).mod(6)) { "batman" }
+            comicSources.map { source ->
+                async {
+                    try {
+                        sourceSemaphore.withPermit {
+                            withTimeoutOrNull(8_000) { source.search(seed) }.orEmpty()
+                        }
+                    } catch (e: Exception) {
+                        println("[Comic Feed] ${source.sourceName} failed: ${e.message}")
+                        emptyList()
+                    }
+                }
+            }.awaitAll()
+                .flatten()
+                .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
+                .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+                .take(48)
+        }
+    }
+
+    suspend fun fetchComicChapters(comicUrl: String, sourceName: String): List<MangaChapter> {
+        val source = comicSources.find { it.sourceName == sourceName } ?: comicSources.first()
+        return try { source.fetchChapters(comicUrl).normalizedComicChapterOrder() } catch (e: Exception) { emptyList() }
+    }
+
+    suspend fun fetchComicPages(chapterUrl: String, sourceName: String): List<String> {
+        val source = comicSources.find { it.sourceName == sourceName } ?: comicSources.first()
+        return try { source.fetchPages(chapterUrl) } catch (e: Exception) { emptyList() }
     }
 }
 
@@ -850,8 +966,10 @@ private fun MediaResult.toUnifiedVideo(category: VideoCategory, sourceLabel: Str
     )
 
 private fun VideoCategory.backendContentType(): String = when (this) {
+    VideoCategory.ANIME -> "anime"
     VideoCategory.K_DRAMA -> "kdrama"
     VideoCategory.CARTOON -> "cartoon"
+    VideoCategory.CLASSIC -> "classic"
     VideoCategory.MOVIES -> "movies"
 }
 

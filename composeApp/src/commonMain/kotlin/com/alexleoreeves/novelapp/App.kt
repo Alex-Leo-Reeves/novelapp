@@ -82,6 +82,11 @@ fun App(
     val animeEpisodeNumber = remember { mutableStateOf(0) }
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
 
+    // Football navigation state
+    val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
+    val footballStreamUrl = remember { mutableStateOf<String?>(null) }
+    val footballStreamTitle = remember { mutableStateOf("") }
+
     val repository = remember {
         NovelSearchRepository(
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
@@ -333,6 +338,8 @@ fun App(
 
         val canNavigateBack =
             animeStreamUrl.value != null ||
+                footballStreamUrl.value != null ||
+                selectedFootballMatch.value != null ||
                 selectedChapterUrl.value != null ||
                 selectedAnime.value != null ||
                 selectedMedia.value != null ||
@@ -345,6 +352,11 @@ fun App(
                     animeStreamUrl.value = null
                     animePreviewLimitMs.value = null
                 }
+                footballStreamUrl.value != null -> {
+                    footballStreamUrl.value = null
+                    footballStreamTitle.value = ""
+                }
+                selectedFootballMatch.value != null -> selectedFootballMatch.value = null
                 selectedChapterUrl.value != null -> selectedChapterUrl.value = null
                 selectedAnime.value != null -> selectedAnime.value = null
                 selectedMedia.value != null -> selectedMedia.value = null
@@ -359,6 +371,32 @@ fun App(
                 .background(appTheme.value.backgroundColor())
         ) {
             when {
+                // ── 0. Football full-screen player ─────────────────────────
+                footballStreamUrl.value != null -> {
+                    AnimePlayerScreen(
+                        streamUrl = footballStreamUrl.value!!,
+                        episodeTitle = footballStreamTitle.value,
+                        currentTheme = appTheme.value,
+                        onBack = {
+                            footballStreamUrl.value = null
+                            footballStreamTitle.value = ""
+                        }
+                    )
+                }
+
+                // ── 0b. Football match detail screen ───────────────────────
+                selectedFootballMatch.value != null -> {
+                    FootballMatchScreen(
+                        match = selectedFootballMatch.value!!,
+                        currentTheme = appTheme.value,
+                        onPlayStream = { url, title ->
+                            footballStreamUrl.value = url
+                            footballStreamTitle.value = title
+                        },
+                        onBack = { selectedFootballMatch.value = null }
+                    )
+                }
+
                 // ── 1. Anime full-screen player ────────────────────────────
                 animeStreamUrl.value != null -> {
                     AnimePlayerScreen(
@@ -412,9 +450,9 @@ fun App(
                     )
                 }
 
-                // ── 3. Chapter / manga viewer ──────────────────────────────
+                // ── 3. Chapter / manga / comic viewer ──────────────────────
                 selectedChapterUrl.value != null -> {
-                    if (selectedNovel.value?.isManga == true) {
+                    if (selectedNovel.value?.isManga == true || selectedNovel.value?.isComic == true) {
                         MangaViewerScreen(
                             chapterUrl = selectedChapterUrl.value!!,
                             mangaTitle = selectedNovelTitle.value,
@@ -582,7 +620,15 @@ fun App(
                                     ttsController = ttsController,
                                     requireAuth = requireAuth,
                                     account = account,
-                                    downloadRepo = downloadRepo
+                                    downloadRepo = downloadRepo,
+                                    favorites = favorites.toList(),
+                                    onSubscribePlan = { planId -> beginPremiumCheckout(planId) }
+                                )
+                                BottomTab.FOOTBALL -> FootballHomeScreen(
+                                    currentTheme = appTheme.value,
+                                    onMatchSelected = { match ->
+                                        selectedFootballMatch.value = match
+                                    }
                                 )
                                 BottomTab.YOU -> {
                                     if (account == null) {
@@ -896,6 +942,7 @@ fun App(
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.Home),
     FAVORITES("Favorites", Icons.Default.Favorite),
+    FOOTBALL("Football", Icons.Default.SportsSoccer),
     READ("Read", Icons.Default.MenuBook),
     YOU("You", Icons.Default.Person)
 }
