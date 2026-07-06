@@ -1,37 +1,110 @@
 package com.alexleoreeves.novelapp.data
 
+import android.content.ContentValues
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 
-private fun getNovelDownloadsDir(novelId: String): File {
-    val ctx = AppContextHolder.applicationContext ?: return File("/tmp")
-    // Try public Downloads directory first so users can find saved files
-    val publicDir = try {
-        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
-            android.os.Environment.DIRECTORY_DOWNLOADS
+// ─────────────────────────────────────────────────────────────────────────────
+//  Public Downloads directory helper — uses MediaStore on API ≥ 29 for
+//  maximum compatibility with user-facing file managers.
+//  Falls back to DIRECTORY_DOWNLOADS on older APIs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns a File pointing to the public NovelApp directory under Downloads.
+ * On API < 29 this is DIRECTORY_DOWNLOADS/NovelApp/
+ * On API ≥ 29 we still use a File for novel text (since it's just text),
+ * but video downloads go through MediaStore.
+ */
+private fun getPublicNovelDir(novelId: String): File {
+    return try {
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS
         )
         if (downloadsDir != null) {
             val dir = File(downloadsDir, "NovelApp/novels/$novelId")
-            if (dir.mkdirs() || dir.exists()) dir else null
-        } else null
-    } catch (e: Exception) { null }
-    
-    if (publicDir != null) return publicDir
-    
-    // Fallback to app-internal storage
-    val dir = File(ctx.filesDir, "downloads/novels/$novelId")
+            dir.mkdirs()
+            dir
+        } else {
+            // Fallback to internal
+            val ctx = AppContextHolder.applicationContext ?: return File("/tmp")
+            val dir = File(ctx.filesDir, "downloads/novels/$novelId")
+            dir.mkdirs()
+            dir
+        }
+    } catch (e: Exception) {
+        // Fallback to internal
+        val ctx = AppContextHolder.applicationContext ?: return File("/tmp")
+        val dir = File(ctx.filesDir, "downloads/novels/$novelId")
+        dir.mkdirs()
+        dir
+    }
+}
+
+/**
+ * Returns internal-storage path for video downloads (these are large .mp4/.m3u8
+ * files). Also saves a copy to public Downloads/NovelApp/ for user access.
+ */
+private fun getInternalVideoDir(parentId: String, episodeNumber: Int): File {
+    val ctx = AppContextHolder.applicationContext ?: return File("/tmp")
+    val dir = File(ctx.filesDir, "downloads/videos/${parentId.safePathPart()}/ep_$episodeNumber")
     dir.mkdirs()
     return dir
 }
 
+/**
+ * Saves a downloaded video to the Android MediaStore (public Downloads) so the
+ * user can find it in their file manager. Returns the content:// URI.
+ */
+private fun saveVideoToMediaStore(
+    context: Context,
+    displayName: String,
+    mimeType: String,
+    dataSource: File
+): Uri? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        // Pre-Q: file is already at DIRECTORY_DOWNLOADS/NovelApp/ if we copied it there
+        return null
+    }
+
+    val contentValues = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+        put(MediaStore.Downloads.MIME_TYPE, mimeType)
+        put(MediaStore.Downloads.RELATIVE_PATH, "Download/NovelApp")
+        put(MediaStore.Downloads.IS_PENDING, 1)
+    }
+
+    val resolver = context.contentResolver
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+
+    uri?.let {
+        resolver.openOutputStream(it)?.use { output ->
+            dataSource.inputStream().use { input ->
+                input.copyTo(output)
+            }
+        }
+        contentValues.clear()
+        contentValues.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(it, contentValues, null, null)
+    }
+
+    return uri
+}
+
 actual fun saveDownloadedText(novelId: String, chapterNumber: Int, text: String): String {
     return try {
-        val file = File(getNovelDownloadsDir(novelId), "ch_$chapterNumber.txt")
+        val file = File(getPublicNovelDir(novelId), "ch_$chapterNumber.txt")
         file.writeText(text)
         file.absolutePath
     } catch (e: Exception) {
@@ -71,20 +144,44 @@ actual suspend fun saveDownloadedVideo(
             }
         }
 
-        val dir = getVideoDownloadsDir(parentId, episodeNumber)
-        dir.deleteRecursively()
-        dir.mkdirs()
+        // 1. Download to internal storage (works everywhere, fast path)
+        val internalDir = getInternalVideoDir(parentId, episodeNumber)
+        internalDir.deleteRecursively()
+        internalDir.mkdirs()
+
+        val mediaTitle = "${parentId.safePathPart()}_EP${episodeNumber}"
 
         if (sourceUrl.isHlsLikeUrl()) {
-            saveHlsDownload(sourceUrl, dir)
+            val saved = saveHlsDownload(sourceUrl, internalDir)
+            // Copy to public MediaStore as a playlist marker
+            val ctx = AppContextHolder.applicationContext
+            if (ctx != null && saved.success) {
+                saveVideoToMediaStore(ctx, "$mediaTitle.m3u8", "application/vnd.apple.mpegurl", File(internalDir, "playlist.m3u8"))
+            }
+            saved
         } else {
             val extension = sourceUrl.substringBefore("?")
                 .substringBefore("#")
                 .substringAfterLast(".", "mp4")
                 .takeIf { it.length in 2..5 }
                 ?: "mp4"
-            val file = File(dir, "episode.$extension")
+            val file = File(internalDir, "episode.$extension")
             val size = downloadToFile(sourceUrl, file)
+
+            // Copy to public MediaStore for user access
+            val ctx = AppContextHolder.applicationContext
+            if (ctx != null) {
+                val mimeType = when (extension.lowercase()) {
+                    "mp4" -> "video/mp4"
+                    "webm" -> "video/webm"
+                    "mkv" -> "video/x-matroska"
+                    "avi" -> "video/x-msvideo"
+                    "mov" -> "video/quicktime"
+                    else -> "video/mp4"
+                }
+                saveVideoToMediaStore(ctx, "$mediaTitle.$extension", mimeType, file)
+            }
+
             DownloadedVideoFile(file.toURI().toString(), size)
         }
     }.getOrElse { error ->

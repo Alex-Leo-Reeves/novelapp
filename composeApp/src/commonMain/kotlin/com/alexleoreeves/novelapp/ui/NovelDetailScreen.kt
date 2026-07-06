@@ -401,12 +401,17 @@ fun NovelDetailScreen(
                                     downloadingChapters = downloadingChapters + chapter.chapterNumber
                                     scope.launch {
                                         try {
+                                            val contentType = when {
+                                                novel.isComic -> ContentType.COMIC
+                                                novel.isManga -> ContentType.MANGA
+                                                else -> ContentType.NOVEL
+                                            }
                                             downloadRepo.addItem(
                                                 DownloadedItem(
                                                     id = novel.id,
                                                     title = novel.title,
                                                     coverUrl = novel.coverUrl,
-                                                    type = if (novel.isManga) "MANGA" else "NOVEL",
+                                                    type = contentType,
                                                     sourceName = novel.sourceName
                                                 )
                                             )

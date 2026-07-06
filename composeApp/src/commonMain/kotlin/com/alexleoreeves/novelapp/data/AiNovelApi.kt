@@ -116,7 +116,7 @@ class AiNovelApi(
 
     suspend fun fetchQuota(token: String): AiQuota {
         val response = client.get("$baseUrl/ai/quota") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
         }
         if (response.status != HttpStatusCode.OK) {
@@ -127,8 +127,8 @@ class AiNovelApi(
 
     suspend fun generateStart(type: String, token: String): AiNovelStartResponse {
         val response = client.post("$baseUrl/ai/generate/start") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(AiNovelStartRequest(type = type))
         }
@@ -140,8 +140,8 @@ class AiNovelApi(
 
     suspend fun generateChunk(chunkText: String, sourceName: String, token: String): AiNovelChunkResponse {
         val response = client.post("$baseUrl/ai/generate/chunk") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(AiNovelChunkRequest(chunkText = chunkText, sourceName = sourceName))
         }
@@ -159,8 +159,8 @@ class AiNovelApi(
         token: String
     ): AiNovelCompleteResponse {
         val response = client.post("$baseUrl/ai/generate/complete") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(
                 AiNovelCompleteRequest(
@@ -179,7 +179,7 @@ class AiNovelApi(
 
     suspend fun fetchCommunityNovels(page: Int, token: String): List<AiNovel> {
         val response = client.get("$baseUrl/ai-novels") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
             parameter("page", page)
         }
@@ -192,7 +192,7 @@ class AiNovelApi(
 
     suspend fun fetchNovelById(id: String, token: String): AiNovel {
         val response = client.get("$baseUrl/ai-novels/$id") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
         }
         if (response.status != HttpStatusCode.OK) {
@@ -212,8 +212,8 @@ class AiNovelApi(
         token: String
     ): AiNovelPublishResponse {
         val response = client.post("$baseUrl/ai-novels/publish") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(
                 AiNovelPublishRequest(

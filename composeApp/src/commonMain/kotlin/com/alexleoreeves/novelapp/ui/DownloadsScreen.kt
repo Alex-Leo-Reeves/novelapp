@@ -25,9 +25,35 @@ import com.alexleoreeves.novelapp.ui.theme.*
 import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Downloads Root Screen — three type-cards: Anime / Manga / Novels
+//  Downloads Root Screen — dynamic sections for all content types
 // ─────────────────────────────────────────────────────────────────────────────
-enum class DownloadSection { NONE, ANIME, MANGA, NOVEL }
+enum class DownloadSection(val type: String, val label: String, val icon: ImageVector) {
+    ANIME(ContentType.ANIME, "Anime", Icons.Default.PlayCircle),
+    MOVIE(ContentType.MOVIE, "Movies", Icons.Default.Movie),
+    K_DRAMA(ContentType.K_DRAMA, "K-Drama", Icons.Default.LiveTv),
+    CARTOON(ContentType.CARTOON, "Cartoons", Icons.Default.Animation),
+    CLASSIC(ContentType.CLASSIC, "Classic", Icons.Default.Theaters),
+    NIGERIAN(ContentType.NIGERIAN, "Nollywood", Icons.Default.Flag),
+    MANGA(ContentType.MANGA, "Manga", Icons.Default.Collections),
+    NOVEL(ContentType.NOVEL, "Novels", Icons.Default.AutoStories),
+    COMIC(ContentType.COMIC, "Comics", Icons.Default.ImportContacts);
+
+    companion object {
+        fun fromType(type: String): DownloadSection? = values().find { it.type.equals(type, ignoreCase = true) }
+    }
+}
+
+private fun sectionAccentColor(section: DownloadSection, currentTheme: AppTheme): Color = when (section) {
+    DownloadSection.ANIME -> Color(0xFFFF5722)
+    DownloadSection.MOVIE -> Color(0xFF7C4DFF)
+    DownloadSection.K_DRAMA -> Color(0xFFE53935)
+    DownloadSection.CARTOON -> Color(0xFF00A8A8)
+    DownloadSection.CLASSIC -> Color(0xFF6D4C41)
+    DownloadSection.NIGERIAN -> Color(0xFF008751)
+    DownloadSection.MANGA -> Color(0xFFE91E8C)
+    DownloadSection.NOVEL -> currentTheme.accentColor()
+    DownloadSection.COMIC -> Color(0xFFFF6D00)
+}
 
 @Composable
 fun DownloadsScreen(
@@ -38,7 +64,7 @@ fun DownloadsScreen(
     onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
     onRootBack: (() -> Unit)? = null
 ) {
-    var activeSection by remember { mutableStateOf(DownloadSection.NONE) }
+    var activeSection by remember { mutableStateOf<DownloadSection?>(null) }
     var selectedItem by remember { mutableStateOf<DownloadedItem?>(null) }
 
     AnimatedContent(
@@ -52,39 +78,54 @@ fun DownloadsScreen(
         when {
             // Episode / Chapter list for a specific title
             item != null -> {
-                when (item.type) {
-                    "ANIME" -> DownloadedEpisodesScreen(
-                        item = item,
-                        downloadRepo = downloadRepo,
-                        currentTheme = currentTheme,
-                        onPlay = onPlayEpisode,
-                        onBack = { selectedItem = null }
-                    )
-                    "MANGA" -> DownloadedChaptersScreen(
-                        item = item,
-                        downloadRepo = downloadRepo,
-                        currentTheme = currentTheme,
-                        onRead = onReadMangaChapter,
-                        onBack = { selectedItem = null }
-                    )
-                    else -> DownloadedNovelChaptersScreen(
-                        item = item,
-                        downloadRepo = downloadRepo,
-                        currentTheme = currentTheme,
-                        onRead = onReadNovelChapter,
-                        onBack = { selectedItem = null }
-                    )
+                when (item.type.uppercase()) {
+                    ContentType.ANIME, ContentType.MOVIE, ContentType.CARTOON,
+                    ContentType.K_DRAMA, ContentType.CLASSIC, ContentType.NIGERIAN -> {
+                        DownloadedEpisodesScreen(
+                            item = item,
+                            downloadRepo = downloadRepo,
+                            currentTheme = currentTheme,
+                            accent = sectionAccentColor(
+                                DownloadSection.fromType(item.type) ?: DownloadSection.ANIME,
+                                currentTheme
+                            ),
+                            onPlay = onPlayEpisode,
+                            onBack = { selectedItem = null }
+                        )
+                    }
+                    ContentType.MANGA, ContentType.COMIC -> {
+                        DownloadedChaptersScreen(
+                            item = item,
+                            downloadRepo = downloadRepo,
+                            currentTheme = currentTheme,
+                            accent = sectionAccentColor(
+                                DownloadSection.fromType(item.type) ?: DownloadSection.MANGA,
+                                currentTheme
+                            ),
+                            onRead = onReadMangaChapter,
+                            onBack = { selectedItem = null }
+                        )
+                    }
+                    else -> {
+                        DownloadedNovelChaptersScreen(
+                            item = item,
+                            downloadRepo = downloadRepo,
+                            currentTheme = currentTheme,
+                            onRead = onReadNovelChapter,
+                            onBack = { selectedItem = null }
+                        )
+                    }
                 }
             }
             // Section list screen
-            section != DownloadSection.NONE -> DownloadedItemsListScreen(
+            section != null -> DownloadedItemsListScreen(
                 section = section,
                 downloadRepo = downloadRepo,
                 currentTheme = currentTheme,
                 onItemClick = { selectedItem = it },
-                onBack = { activeSection = DownloadSection.NONE }
+                onBack = { activeSection = null }
             )
-            // Root screen with 3 type cards
+            // Root screen with all type cards
             else -> DownloadsRootScreen(
                 currentTheme = currentTheme,
                 downloadRepo = downloadRepo,
@@ -96,7 +137,7 @@ fun DownloadsScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Root: Three category cards
+//  Root: Dynamic category cards for each content type with content
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun DownloadsRootScreen(
@@ -105,9 +146,8 @@ private fun DownloadsRootScreen(
     onSectionClick: (DownloadSection) -> Unit,
     onBack: (() -> Unit)? = null
 ) {
-    val animeCount = remember { downloadRepo.getAnimeItems().size }
-    val mangaCount = remember { downloadRepo.getMangaItems().size }
-    val novelCount = remember { downloadRepo.getNovelItems().size }
+    // Get counts for all types dynamically
+    val itemsByType = remember { downloadRepo.getItemsByType() }
 
     Column(
         modifier = Modifier
@@ -151,39 +191,73 @@ private fun DownloadsRootScreen(
 
         Spacer(Modifier.height(8.dp))
 
+        // Filter to only sections that have content (plus keep sections that user might have)
+        val sectionsWithContent = DownloadSection.values()
+            .filter { itemsByType.containsKey(it.type.uppercase()) }
+
         LazyColumn(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Show sections that have downloaded items
+            if (sectionsWithContent.isNotEmpty()) {
+                item {
+                    Text(
+                        "Downloaded content",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = currentTheme.textColor(),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+                sectionsWithContent.forEach { section ->
+                    val count = itemsByType[section.type.uppercase()]?.size ?: 0
+                    if (count > 0) {
+                        item(key = section.type) {
+                            DownloadTypeCard(
+                                icon = section.icon,
+                                title = section.label,
+                                subtitle = when (section) {
+                                    DownloadSection.ANIME, DownloadSection.MOVIE,
+                                    DownloadSection.K_DRAMA, DownloadSection.CARTOON,
+                                    DownloadSection.CLASSIC, DownloadSection.NIGERIAN ->
+                                        "$count series downloaded"
+                                    else -> "$count titles downloaded"
+                                },
+                                accentColor = sectionAccentColor(section, currentTheme),
+                                currentTheme = currentTheme,
+                                onClick = { onSectionClick(section) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Always show all available sections for browsing (even if empty)
             item {
-                DownloadTypeCard(
-                    icon = Icons.Default.PlayCircle,
-                    title = "Anime",
-                    subtitle = "$animeCount series downloaded",
-                    accentColor = Color(0xFFFF5722),
-                    currentTheme = currentTheme,
-                    onClick = { onSectionClick(DownloadSection.ANIME) }
+                Text(
+                    "Browse sections",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = currentTheme.textColor(),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                 )
             }
-            item {
-                DownloadTypeCard(
-                    icon = Icons.Default.Collections,
-                    title = "Manga",
-                    subtitle = "$mangaCount manga downloaded",
-                    accentColor = Color(0xFFE91E8C),
-                    currentTheme = currentTheme,
-                    onClick = { onSectionClick(DownloadSection.MANGA) }
-                )
-            }
-            item {
-                DownloadTypeCard(
-                    icon = Icons.Default.AutoStories,
-                    title = "Novels",
-                    subtitle = "$novelCount novels downloaded · AI reader requires internet",
-                    accentColor = currentTheme.accentColor(),
-                    currentTheme = currentTheme,
-                    onClick = { onSectionClick(DownloadSection.NOVEL) }
-                )
+
+            DownloadSection.values().forEach { section ->
+                val count = itemsByType[section.type.uppercase()]?.size ?: 0
+                item(key = "browse_${section.type}") {
+                    DownloadTypeCard(
+                        icon = section.icon,
+                        title = section.label,
+                        subtitle = if (count > 0) "$count items downloaded" else "No downloads yet",
+                        accentColor = sectionAccentColor(section, currentTheme).let { c ->
+                            if (count > 0) c else c.copy(alpha = 0.5f)
+                        },
+                        currentTheme = currentTheme,
+                        onClick = { onSectionClick(section) }
+                    )
+                }
             }
 
             item {
@@ -207,7 +281,7 @@ private fun DownloadsRootScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            "Downloads are stored locally on your device. Anime episodes require significant storage space.",
+                            "Downloads are stored locally on your device. Video episodes require significant storage space.",
                             style = MaterialTheme.typography.bodySmall,
                             color = currentTheme.subTextColor()
                         )
@@ -276,7 +350,7 @@ private fun DownloadTypeCard(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Downloaded Items Grid (Anime / Manga / Novel)
+//  Downloaded Items Grid (any type)
 // ─────────────────────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -288,24 +362,11 @@ private fun DownloadedItemsListScreen(
     onBack: () -> Unit
 ) {
     val items = remember {
-        when (section) {
-            DownloadSection.ANIME -> downloadRepo.getAnimeItems()
-            DownloadSection.MANGA -> downloadRepo.getMangaItems()
-            DownloadSection.NOVEL -> downloadRepo.getNovelItems()
-            else -> emptyList()
-        }.sortedBy { it.title }
+        downloadRepo.getAllItems()
+            .filter { it.type.equals(section.type, ignoreCase = true) }
+            .sortedBy { it.title.lowercase() }
     }
-    val sectionLabel = when (section) {
-        DownloadSection.ANIME -> "Downloaded Anime"
-        DownloadSection.MANGA -> "Downloaded Manga"
-        DownloadSection.NOVEL -> "Downloaded Novels"
-        else -> ""
-    }
-    val sectionColor = when (section) {
-        DownloadSection.ANIME -> Color(0xFFFF5722)
-        DownloadSection.MANGA -> Color(0xFFE91E8C)
-        else -> currentTheme.accentColor()
-    }
+    val sectionColor = sectionAccentColor(section, currentTheme)
 
     Column(
         modifier = Modifier
@@ -325,7 +386,7 @@ private fun DownloadedItemsListScreen(
             }
             Spacer(Modifier.width(4.dp))
             Text(
-                sectionLabel,
+                "Downloaded ${section.label}",
                 style = MaterialTheme.typography.headlineSmall,
                 color = currentTheme.textColor(),
                 fontWeight = FontWeight.Bold
@@ -345,7 +406,7 @@ private fun DownloadedItemsListScreen(
                         modifier = Modifier.size(64.dp)
                     )
                     Text(
-                        "No downloads yet",
+                        "No ${section.label.lowercase()} downloads yet",
                         style = MaterialTheme.typography.titleMedium,
                         color = currentTheme.subTextColor()
                     )
@@ -445,7 +506,7 @@ private fun DownloadedItemsListScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    "${item.totalItems} ${if (item.type == "ANIME") "episodes" else "chapters"}",
+                                    "${item.totalItems} ${if (section in listOf(DownloadSection.ANIME, DownloadSection.MOVIE, DownloadSection.K_DRAMA, DownloadSection.CARTOON, DownloadSection.CLASSIC, DownloadSection.NIGERIAN)) "episodes" else "chapters"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = currentTheme.subTextColor()
                                 )
@@ -459,7 +520,7 @@ private fun DownloadedItemsListScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Downloaded Episodes Screen (Anime)
+//  Downloaded Episodes Screen (Anime / Movie / K-Drama / Cartoon / etc.)
 // ─────────────────────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -467,6 +528,7 @@ private fun DownloadedEpisodesScreen(
     item: DownloadedItem,
     downloadRepo: LocalDownloadRepository,
     currentTheme: AppTheme,
+    accent: Color,
     onPlay: (localPath: String, title: String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -478,7 +540,6 @@ private fun DownloadedEpisodesScreen(
             .background(currentTheme.backgroundColor())
             .statusBarsPadding()
     ) {
-        // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -526,12 +587,12 @@ private fun DownloadedEpisodesScreen(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFFFF5722).copy(0.2f)
+                                color = accent.copy(0.2f)
                             ) {
                                 Text(
                                     "EP\n${ep.episodeNumber}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFFFF5722),
+                                    color = accent,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(8.dp)
                                 )
@@ -552,7 +613,7 @@ private fun DownloadedEpisodesScreen(
                             Icon(
                                 Icons.Default.PlayCircle,
                                 null,
-                                tint = Color(0xFFFF5722),
+                                tint = accent,
                                 modifier = Modifier.size(32.dp)
                             )
                         }
@@ -564,7 +625,7 @@ private fun DownloadedEpisodesScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Downloaded Chapters Screen (Manga)
+//  Downloaded Chapters Screen (Manga / Comic)
 // ─────────────────────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -572,6 +633,7 @@ private fun DownloadedChaptersScreen(
     item: DownloadedItem,
     downloadRepo: LocalDownloadRepository,
     currentTheme: AppTheme,
+    accent: Color,
     onRead: (localPath: String, title: String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -584,9 +646,7 @@ private fun DownloadedChaptersScreen(
             .statusBarsPadding()
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
@@ -612,9 +672,9 @@ private fun DownloadedChaptersScreen(
                 ) {
                     Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFE91E8C).copy(0.2f)) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = accent.copy(0.2f)) {
                             Text("CH\n${ch.chapterNumber}", style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFE91E8C), fontWeight = FontWeight.Bold,
+                                color = accent, fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(8.dp))
                         }
                         Column(modifier = Modifier.weight(1f)) {
@@ -624,7 +684,7 @@ private fun DownloadedChaptersScreen(
                             Text("${ch.pageCount} pages · Offline", style = MaterialTheme.typography.labelSmall,
                                 color = currentTheme.subTextColor())
                         }
-                        Icon(Icons.Default.MenuBook, null, tint = Color(0xFFE91E8C), modifier = Modifier.size(28.dp))
+                        Icon(Icons.Default.MenuBook, null, tint = accent, modifier = Modifier.size(28.dp))
                     }
                 }
             }
@@ -665,20 +725,6 @@ private fun DownloadedNovelChaptersScreen(
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${chapters.size} chapters downloaded", style = MaterialTheme.typography.labelMedium,
                     color = currentTheme.subTextColor())
-            }
-        }
-
-        // AI reader notice
-        Card(
-            shape = RoundedCornerShape(10.dp),
-            colors = CardDefaults.cardColors(containerColor = currentTheme.accentColor().copy(0.1f)),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp)
-        ) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Default.Wifi, null, tint = currentTheme.accentColor(), modifier = Modifier.size(18.dp))
-                Text("On-device voice narration works after the Kokoro model is installed",
-                    style = MaterialTheme.typography.labelMedium, color = currentTheme.accentColor())
             }
         }
         Divider(color = currentTheme.subTextColor().copy(0.1f))
