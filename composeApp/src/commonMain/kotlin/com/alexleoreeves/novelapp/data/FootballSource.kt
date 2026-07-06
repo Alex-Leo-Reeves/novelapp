@@ -111,17 +111,56 @@ class FootballApiSource(private val httpClient: HttpClient) {
 
     /**
      * Returns a playable stream URL (or embed URL) for the given fixture.
-     * Our server resolves the match → league → broadcast channel → stream.
+     * Our server returns pipe-delimited embed URLs (e.g. "url1|url2|url3").
+     * The app's AnimePlayerScreen loads these via WebView and intercepts .m3u8.
      */
     suspend fun resolveStreamUrl(fixtureId: Int): String? = runCatching {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/stream") {
             parameter("fixture", fixtureId)
         }.bodyAsText()
         val root = footballJson.parseToJsonElement(raw).jsonObject
-        root["data"]?.jsonPrimitive?.contentOrNull
+        val data = root["data"]
+        when {
+            data?.jsonPrimitive?.contentOrNull != null -> {
+                data.jsonPrimitive.content
+            }
+            data?.jsonArray != null -> {
+                data.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .filter { it.isNotBlank() }
+                    .firstOrNull()
+            }
+            else -> null
+        }
     }.getOrElse { error ->
         println("[FootballAPI] Stream resolve failed for fixture $fixtureId: ${error.message}")
         null
+    }
+
+    /**
+     * Returns all available embed URLs for this fixture as a list.
+     * The app can try each one sequentially until one plays.
+     */
+    suspend fun resolveStreamUrls(fixtureId: Int): List<String> = runCatching {
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/stream") {
+            parameter("fixture", fixtureId)
+        }.bodyAsText()
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        val data = root["data"]
+        when {
+            data?.jsonPrimitive?.contentOrNull != null -> {
+                val content = data.jsonPrimitive.content
+                // Server returns pipe-delimited URLs
+                content.split("|").map { it.trim() }.filter { it.isNotBlank() }
+            }
+            data?.jsonArray != null -> {
+                data.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .filter { it.isNotBlank() }
+            }
+            else -> emptyList()
+        }
+    }.getOrElse { error ->
+        println("[FootballAPI] Stream URLs resolve failed for fixture $fixtureId: ${error.message}")
+        emptyList()
     }
 
     /**

@@ -2718,6 +2718,42 @@ async function handleFootballLeagues(request, response) {
   }
 }
 
+function footballTeamSlug(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function footballLeagueSlug(leagueName) {
+  const map = {
+    "Premier League": "premier-league",
+    "La Liga": "la-liga",
+    "Serie A": "serie-a",
+    "Bundesliga": "bundesliga",
+    "Ligue 1": "ligue-1",
+    "UEFA Champions League": "champions-league",
+    "UEFA Europa League": "europa-league",
+    "UEFA Conference League": "conference-league",
+    "World Cup": "world-cup",
+    "African Cup of Nations": "africa-cup-of-nations",
+    "CAF Champions League": "caf-champions-league",
+    "FA Cup": "fa-cup",
+    "EFL Cup": "efl-cup",
+    "MLS": "mls",
+    "Saudi Pro League": "saudi-pro-league",
+    "Eredivisie": "eredivisie",
+    "Primeira Liga": "primeira-liga",
+    "Scottish Premiership": "scottish-premiership",
+    "Süper Lig": "super-lig",
+    "Liga MX": "liga-mx",
+    "J1 League": "j1-league",
+    "K League 1": "k-league-1"
+  };
+  return map[leagueName] || footballTeamSlug(leagueName);
+}
+
 async function handleFootballStream(request, response, requestUrl) {
   try {
     const fixtureId = parseInt(requestUrl.searchParams.get("fixture"), 10);
@@ -2735,220 +2771,60 @@ async function handleFootballStream(request, response, requestUrl) {
     const awayTeam = fixture?.teams?.away?.name || "";
     const leagueName = fixture?.league?.name || "";
 
-    // Try to find a VidLink stream or embed for this match
-    // We search iptv-org or construct an embed URL based on league
-    const leagueMap = {
-      "Premier League": "premier-league",
-      "La Liga": "la-liga",
-      "Serie A": "serie-a",
-      "Bundesliga": "bundesliga",
-      "Ligue 1": "ligue-1",
-      "UEFA Champions League": "uefa-champions-league",
-      "UEFA Europa League": "uefa-europa-league",
-      "UEFA Conference League": "uefa-conference-league",
-      "World Cup": "fifa-world-cup",
-      "African Cup of Nations": "africa-cup-of-nations",
-      "FA Cup": "fa-cup",
-      "EFL Cup": "efl-cup",
-      "MLS": "mls",
-      "Saudi Pro League": "saudi-pro-league",
-      "Brazilian Serie A": "brazilian-serie-a",
-      "Liga MX": "liga-mx",
-      "Eredivisie": "eredivisie",
-      "Primeira Liga": "primeira-liga",
-      "Scottish Premiership": "scottish-premiership",
-      "Süper Lig": "super-lig",
-      "Belgian Pro League": "belgian-pro-league",
-      "Swiss Super League": "swiss-super-league",
-      "Jupiler Pro League": "jupiler-pro-league",
-      "Greek Super League": "greek-super-league",
-      "Russian Premier League": "russian-premier-league",
-      "Chinese Super League": "chinese-super-league",
-      "J1 League": "j1-league",
-      "K League 1": "k-league-1",
-      "Indian Super League": "indian-super-league",
-      "A-League": "a-league",
-      "CAF Champions League": "caf-champions-league"
-    };
-    const leagueSlug = leagueMap[leagueName] || leagueName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    // Build team slugs for URL construction
+    const homeSlug = footballTeamSlug(homeTeam);
+    const awaySlug = footballTeamSlug(awayTeam);
 
-    // Generate multiple possible stream URLs
-    const searchTerms = [
-      `${homeTeam} vs ${awayTeam}`,
-      `${homeTeam} ${awayTeam}`,
-      leagueName,
-      `${leagueSlug} live`
-    ].map(s => encodeURIComponent(s));
-
-    // We use the iptv-org GitHub repository as our video source.
-    // iptv-org is a community-maintained open-source database of live TV channels
-    // from around the world. Their sports category index contains direct .m3u8
-    // streams for thousands of global sports networks (Sky Sports, SuperSport,
-    // beIN Sports, ESPN, etc.).
+    // ── Build embed URLs that the Android WebView interceptor can process ──
+    // The AnimePlayerScreen on Android has a headless WebView with
+    // shouldInterceptRequest that loads HTML pages, intercepts network
+    // traffic for .m3u8 URLs, and feeds them to ExoPlayer. This is the
+    // same pipeline that already works for movies and anime.
     //
-    // Architecture:
-    //   1. Fetch the fixture details from API-Football (already done above) to get
-    //      the league name and participating teams.
-    //   2. Fetch the iptv-org sports.m3u playlist, which is a plain-text file
-    //      containing channel metadata (tvg-id, tvg-logo, channel name) followed
-    //      by a direct .m3u8 streaming URL on the next line.
-    //   3. Parse the M3U text → build list of { channelName, tvgId, logo, streamUrl }.
-    //   4. Match the fixture's league name to known broadcast channel names.
-    //   5. Return the first matching direct .m3u8 URL.
-    //
-    // Because these streams are direct CDN links (no website, no ads, no pop-ups),
-    // the client can feed the URL straight into ExoPlayer without any headless
-    // WebView extraction step.
+    // These sports streaming aggregators embed live .m3u8 streams on a
+    // page — our WebView interceptor loads the page and catches the
+    // actual video stream URL from network traffic.
 
-    // ── Step 1: Build a league → channel name mapping ─────────────────────
-    // These are the major broadcasters per league. The iptv-org m3u lists
-    // channels under names like "Sky Sports Main Event", "SuperSport Premier League",
-    // "beIN Sports 1", etc. We map each league to likely channel name keywords.
-    const leagueChannelMap = [
-      { leagues: ["Premier League", "English Premier League", "EPL", "FA Cup", "EFL Cup", "Community Shield"], channels: ["Sky Sports Main Event", "Sky Sports Premier League", "TNT Sports", "BBC One", "SuperSport Premier League"] },
-      { leagues: ["La Liga", "Spanish La Liga", "Copa del Rey", "Supercopa"], channels: ["Movistar LaLiga", "LaLiga TV", "ESPN Deportes", "beIN Sports", "SuperSport LaLiga"] },
-      { leagues: ["Serie A", "Italian Serie A", "Coppa Italia", "Supercoppa"], channels: ["DAZN Serie A", "Sky Sport Serie A", "Italia 1", "SuperSport"] },
-      { leagues: ["Bundesliga", "German Bundesliga", "DFB Pokal", "DFL Supercup"], channels: ["Sky Sport Bundesliga", "DAZN Bundesliga", "ARD", "ZDF"] },
-      { leagues: ["Ligue 1", "French Ligue 1", "Coupe de France", "Trophee"], channels: ["Canal+ Sport", "Prime Video Ligue 1", "beIN Sports"] },
-      { leagues: ["UEFA Champions League", "Champions League", "UCL"], channels: ["TNT Sports 1", "TNT Sports 2", "CBS Sports", "SuperSport", "beIN Sports", "DAZN"] },
-      { leagues: ["UEFA Europa League", "Europa League", "UEL"], channels: ["TNT Sports", "SuperSport", "DAZN", "CBS Sports"] },
-      { leagues: ["UEFA Conference League", "Europa Conference League", "UECL"], channels: ["TNT Sports", "SuperSport"] },
-      { leagues: ["World Cup", "FIFA World Cup"], channels: ["BBC One", "ITV 1", "Fox Sports", "Telemundo", "SuperSport", "beIN Sports"] },
-      { leagues: ["African Cup of Nations", "AFCON", "Africa Cup"], channels: ["SuperSport", "beIN Sports", "Canal+ Sport"] },
-      { leagues: ["CAF Champions League", "CAF CL"], channels: ["SuperSport", "beIN Sports"] },
-      { leagues: ["MLS", "Major League Soccer", "Leagues Cup"], channels: ["Apple TV", "Fox Sports", "TSN"] },
-      { leagues: ["Saudi Pro League", "Roshn Saudi League"], channels: ["SSC", "beIN Sports"] },
-      { leagues: ["Brazilian Serie A", "Brasileirao", "Campeonato Brasileiro"], channels: ["Globo", "Sportv", "ESPN Brasil"] },
-      { leagues: ["Argentine Primera Division", "Liga Profesional"], channels: ["ESPN", "TyC Sports", "Fox Sports"] },
-      { leagues: ["Eredivisie", "Dutch Eredivisie"], channels: ["ESPN", "Ziggo Sport"] },
-      { leagues: ["Primeira Liga", "Portuguese Liga"], channels: ["Sport TV", "Benfica TV"] },
-      { leagues: ["Scottish Premiership", "Scottish Cup"], channels: ["Sky Sports", "BBC Scotland"] },
-      { leagues: ["Süper Lig", "Turkish Super Lig"], channels: ["beIN Sports"] },
-      { leagues: ["Liga MX", "Mexican Liga"], channels: ["TUDN", "Azteca", "Fox Sports"] },
-      { leagues: ["J1 League", "J.League"], channels: ["DAZN"] }
-    ];
-
-    // ── Step 2: Fetch and parse the iptv-org sports.m3u playlist ──────────
-    let channelStreams = [];
-    try {
-      const m3uResponse = await fetch(
-        "https://iptv-org.github.io/iptv/categories/sports.m3u",
-        { signal: AbortSignal.timeout(10000) }
-      );
-      if (m3uResponse.ok) {
-        const m3uText = await m3uResponse.text();
-        // Parse the M3U file: each entry is #EXTINF line with metadata, followed by URL line
-        const lines = m3uText.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (line.startsWith("#EXTINF")) {
-            // Extract channel name (after the last comma)
-            const commaIdx = line.lastIndexOf(",");
-            const channelName = commaIdx >= 0 ? line.substring(commaIdx + 1).trim() : "";
-            // Extract tvg-id if present
-            const tvgMatch = /tvg-id="([^"]*)"/.exec(line);
-            const tvgId = tvgMatch ? tvgMatch[1] : "";
-            // Next non-empty, non-comment line is the stream URL
-            for (let j = i + 1; j < lines.length; j++) {
-              const nextLine = lines[j].trim();
-              if (nextLine && !nextLine.startsWith("#")) {
-                if (nextLine.startsWith("http")) {
-                  channelStreams.push({
-                    channelName: channelName.toLowerCase(),
-                    tvgId: tvgId.toLowerCase(),
-                    url: nextLine
-                  });
-                }
-                i = j; // advance outer loop past the URL line
-                break;
-              }
-            }
-          }
-        }
-      }
-    } catch (m3uError) {
-      console.warn("[Football] iptv-org m3u fetch failed:", m3uError.message || m3uError);
-    }
-
-    // ── Step 3: Match the fixture's league to a channel stream ────────────
-    const leagueLower = (leagueName || "").toLowerCase();
-    // Find matching channel keywords
-    let candidates = [];
-    for (const entry of leagueChannelMap) {
-      if (entry.leagues.some(l => leagueLower.includes(l.toLowerCase()) || l.toLowerCase().includes(leagueLower))) {
-        candidates.push(...entry.channels);
-      }
-    }
-
-    // Search the parsed channel list using the candidate keywords
-    let matchedStream = null;
-    if (candidates.length > 0 && channelStreams.length > 0) {
-      for (const candidate of candidates) {
-        const keyword = candidate.toLowerCase();
-        const found = channelStreams.find(cs =>
-          cs.channelName.includes(keyword) || cs.tvgId.includes(keyword)
-        );
-        if (found) {
-          matchedStream = found.url;
-          break;
-        }
-      }
-      // Fallback: if no exact match, try partial keyword matching
-      if (!matchedStream) {
-        for (const candidate of candidates) {
-          const words = candidate.toLowerCase().split(/\s+/);
-          const found = channelStreams.find(cs =>
-            words.some(w => w.length > 2 && (cs.channelName.includes(w) || cs.tvgId.includes(w)))
-          );
-          if (found) {
-            matchedStream = found.url;
-            break;
-          }
-        }
-      }
-    }
-
-    // ── Step 4: Return the direct stream URL ───────────────────────────────
-    if (matchedStream) {
-      return sendApiData(response, 200, matchedStream);
-    }
-
-    // If no channel match found via league, try matching by team name
-    // (some teams have dedicated channels or are covered by generic sports channels)
-    if (homeTeam || awayTeam) {
-      const genericSports = channelStreams.filter(cs =>
-        cs.channelName.includes("sports") || cs.channelName.includes("sport") ||
-        cs.tvgId.includes("sports") || cs.tvgId.includes("sport")
-      );
-      // Return a random generic sports channel as best-effort
-      if (genericSports.length > 0) {
-        const randomIdx = Math.floor(Math.random() * Math.min(genericSports.length, 3));
-        return sendApiData(response, 200, genericSports[randomIdx].url);
-      }
-    }
-
-    // ── Fallback: Return a sports embed URL for the Android WebView interceptor ──
-    // The existing AnimePlayerScreen on Android has a headless WebView pipeline
-    // (shouldInterceptRequest) that loads embed pages, catches the .m3u8 from
-    // network traffic, and plays it — same system that already works for movies.
-    // These sports embed aggregator sites work the same way: they embed live
-    // .m3u8 streams on a page, and our WebView interceptor grabs them.
     const embedUrls = [];
-    // Sports-specific streaming aggregators that embed live .m3u8 for football
-    const sportsEmbeds = [
-      `https://sportsembed.net/embed/${fixtureId}`,
-      `https://streamed.su/embed/football/${fixtureId}`,
-      `https://sportsdark.com/embed/football/${fixtureId}`,
-      `https://embed.su/embed/sports/${fixtureId}`
-    ];
-    // Also try search-based aggregators using team names for better matching
-    if (homeTeam || awayTeam) {
-      const query = encodeURIComponent(`${homeTeam || ""} ${awayTeam || ""} live football stream`.trim());
-      sportsEmbeds.push(`https://sportsembed.net/embed/search?q=${query}`);
-      sportsEmbeds.push(`https://streamed.su/embed/search?q=${query}`);
+
+    // 1. Streamed.su — team name based slug
+    if (homeSlug && awaySlug) {
+      embedUrls.push(`https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}-live`);
+      embedUrls.push(`https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}`);
     }
-    // Return all embed URLs as a backup
-    return sendApiData(response, 200, sportsEmbeds[0]);
+
+    // 2. Streamed.su — league-based slug
+    const lSlug = footballLeagueSlug(leagueName);
+    if (lSlug) {
+      embedUrls.push(`https://streamed.su/embed/football/${lSlug}-live`);
+    }
+
+    // 3. Crackstreams — match page
+    if (homeSlug && awaySlug) {
+      embedUrls.push(`https://crackstreams.biz/stream/embed-football/${homeSlug}-vs-${awaySlug}-live`);
+      embedUrls.push(`https://crackstreams.biz/stream/${homeSlug}-vs-${awaySlug}`);
+    }
+
+    // 4. Sportshub — team-based URL
+    if (homeSlug && awaySlug) {
+      embedUrls.push(`https://sportshub.stream/embed/football/${homeSlug}-vs-${awaySlug}`);
+      embedUrls.push(`https://sportshub.stream/football/${homeSlug}-vs-${awaySlug}-live`);
+    }
+
+    // 5. V2 Sportsurge — search-based
+    const searchQuery = encodeURIComponent(`${homeTeam} vs ${awayTeam} live stream`);
+    embedUrls.push(`https://v2.sportsurge.net/search?q=${searchQuery}`);
+
+    // 6. Generic fallback with team names for any aggregator
+    const teamQuery = encodeURIComponent(`${homeTeam} ${awayTeam} live football streaming`);
+    embedUrls.push(`https://embed.su/embed/sports?q=${teamQuery}`);
+
+    // 7. TheTVApp channel-based (league name as search)
+    if (lSlug) {
+      embedUrls.push(`https://thetvapp.to/search/${lSlug}`);
+    }
+
+    return sendApiData(response, 200, embedUrls.join("|"));
   } catch (error) {
     console.error("[Football] Stream error:", error.message || error);
     return sendApiData(response, 200, "");
