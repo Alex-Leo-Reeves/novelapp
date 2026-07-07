@@ -1,8 +1,10 @@
 package com.alexleoreeves.novelapp.platform
 
 object AppReleaseConfig {
-    const val CURRENT_VERSION_CODE = 27
-    const val CURRENT_VERSION_NAME = "1.26"
+    /** Current running version — read from platform build config, NOT hardcoded. */
+    val CURRENT_VERSION_CODE: Int get() = PlatformAppVersion.versionCode
+    val CURRENT_VERSION_NAME: String get() = PlatformAppVersion.versionName
+
     const val API_BASE_URL = "https://novelapp1.onrender.com/api"
     const val UPDATE_MANIFEST_URL = "https://novelapp1.onrender.com/app-version.json"
     const val DOWNLOAD_URL = "https://novelapp1.onrender.com/downloads/novelapp-android.apk"

@@ -2,11 +2,16 @@
     "versionCode": 28,
     "versionName": "1.27",
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "apkBytes": 162965760,
+    "apkBytes": 163047680,
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed Ktor 3.x ContentType.parse() compilation error — replaced with raw header() calls to avoid ParametersBuilder.parse name collision in AnimeScrapers.kt and MangaScrapers.kt"
+        "Brand new History screen — track your reading and viewing activity across novels, manga, and anime",
+        "Redesigned Downloads screen with improved layout and progress tracking",
+        "Account/You screen polished with better subscription and profile management",
+        "AI novel generation improvements — cleaner text output and better API reliability",
+        "Local storage layer rewritten for faster and more reliable offline downloads",
+        "Auth system hardened with improved token handling and refresh logic"
     ],
     "forceUpdate": false,
-    "apkSha256": "ee859af35110154719eab3a4d4e686363accfbed8221a2454936216ba3ef7c17"
+    "apkSha256": "9b266216076bee22b5d9345b2d4b5282a97a21136514c67b93359e8ba8a521b8"
 }

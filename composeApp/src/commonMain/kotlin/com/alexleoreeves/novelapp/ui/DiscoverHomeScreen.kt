@@ -38,6 +38,7 @@ enum class ContentTab(val label: String, val icon: ImageVector) {
     MANGA("Manga", Icons.Default.Collections),
     COMIC("Comics", Icons.Default.ImportContacts),
     ANIME("Anime", Icons.Default.PlayCircle),
+    DONGHUA("Donghua", Icons.Default.Language),
     K_DRAMA("K-Drama", Icons.Default.LiveTv),
     CARTOON("Cartoon", Icons.Default.Animation),
     OLDER_CARTOON("Classic", Icons.Default.Theaters),
@@ -47,6 +48,7 @@ enum class ContentTab(val label: String, val icon: ImageVector) {
 
 // Tab accent colors
 private val animeAccent = Color(0xFFFF5722)
+private val donghuaAccent = Color(0xFFFF6F00)
 private val kDramaAccent = Color(0xFFE53935)
 private val cartoonAccent = Color(0xFF00A8A8)
 private val comicAccent = Color(0xFFFF6D00)    // orange — Western comics
@@ -56,6 +58,7 @@ private val nigerianAccent = Color(0xFF008751)  // Nollywood green (Nigeria flag
 
 private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
     ContentTab.ANIME -> VideoCategory.ANIME
+    ContentTab.DONGHUA -> VideoCategory.DONGHUA
     ContentTab.K_DRAMA -> VideoCategory.K_DRAMA
     ContentTab.CARTOON -> VideoCategory.CARTOON
     ContentTab.OLDER_CARTOON -> VideoCategory.CLASSIC
@@ -66,6 +69,7 @@ private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
 
 private fun ContentTab.tabAccent(currentTheme: AppTheme): Color = when (this) {
     ContentTab.ANIME -> animeAccent
+    ContentTab.DONGHUA -> donghuaAccent
     ContentTab.K_DRAMA -> kDramaAccent
     ContentTab.CARTOON -> cartoonAccent
     ContentTab.COMIC -> comicAccent
@@ -149,18 +153,10 @@ fun DiscoverHomeScreen(
         pullDistance = 0f
     }
 
-    // Observe scroll position for top area visibility without fighting the scroll
-    LaunchedEffect(gridState) {
-        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                val atTop = index == 0 && offset < 10
-                val scrollingDown = offset > 20 && gridState.firstVisibleItemIndex > 0
-                showTopArea = when {
-                    atTop -> true
-                    scrollingDown -> false
-                    else -> true
-                }
-            }
+    // Keep the header always visible to prevent layout oscillation that fights user scrolling.
+    // The header is compact enough that auto-hiding is not worth the scroll jank.
+    LaunchedEffect(Unit) {
+        showTopArea = true
     }
 
     // ── Lazy popular content load for the active tab only ──────────────────
@@ -205,6 +201,7 @@ fun DiscoverHomeScreen(
                 ContentTab.MANGA -> activePopularItems.filter { it.isManga }
                 ContentTab.COMIC -> activePopularItems.filter { it.isComic }
                 ContentTab.ANIME -> activePopularItems.filter { it.isAnime }
+                ContentTab.DONGHUA,
                 ContentTab.K_DRAMA,
                 ContentTab.CARTOON,
                 ContentTab.OLDER_CARTOON,
@@ -236,6 +233,7 @@ fun DiscoverHomeScreen(
                 ContentTab.MANGA -> searchResults.filter { it.isManga }
                 ContentTab.COMIC -> searchResults.filter { it.isComic }
                 ContentTab.ANIME,
+                ContentTab.DONGHUA,
                 ContentTab.K_DRAMA,
                 ContentTab.CARTOON,
                 ContentTab.OLDER_CARTOON,
@@ -260,6 +258,7 @@ fun DiscoverHomeScreen(
         val tab = activeTab
         when (tab) {
             ContentTab.ANIME,
+            ContentTab.DONGHUA,
             ContentTab.K_DRAMA,
             ContentTab.CARTOON,
             ContentTab.OLDER_CARTOON,
@@ -299,6 +298,7 @@ fun DiscoverHomeScreen(
                 if (searchQuery.length >= 2) {
                     when (activeTab) {
                         ContentTab.ANIME,
+                        ContentTab.DONGHUA,
                         ContentTab.K_DRAMA,
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
@@ -330,6 +330,7 @@ fun DiscoverHomeScreen(
                             isLoadingPopular = false
                         }
                         ContentTab.ANIME,
+                        ContentTab.DONGHUA,
                         ContentTab.K_DRAMA,
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
@@ -422,6 +423,7 @@ fun DiscoverHomeScreen(
                                     ContentTab.MANGA -> "Search manga titles..."
                                     ContentTab.COMIC -> "Search western comics..."
                                     ContentTab.ANIME -> "Search anime..."
+                                    ContentTab.DONGHUA -> "Search donghua..."
                                     ContentTab.K_DRAMA -> "Search K-drama..."
                                     ContentTab.CARTOON -> "Search cartoons..."
                                     ContentTab.OLDER_CARTOON -> "Search classic cartoons..."
@@ -708,6 +710,7 @@ fun DiscoverHomeScreen(
                             ContentTab.MANGA -> "Popular Manga"
                             ContentTab.COMIC -> "Western Comics"
                             ContentTab.ANIME -> "Currently Airing"
+                            ContentTab.DONGHUA -> "Popular Donghua"
                             ContentTab.K_DRAMA -> "Popular K-Drama"
                             ContentTab.CARTOON -> "Popular Cartoons"
                             ContentTab.OLDER_CARTOON -> "Classic Cartoons"
@@ -728,74 +731,61 @@ fun DiscoverHomeScreen(
         val novelCols = if (isDesktop) 4 else 2
         val mediaCols = if (isDesktop) 4 else 2
 
-        // Pull-to-refresh: only activates when the grid is at the top AND not scrolling.
-        // gridState.isScrollInProgress gates it so drag events are NOT consumed while
-        // the user is scrolling the grid — this fixes the scroll fighting issue.
-        val isGridScrolling = gridState.isScrollInProgress
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(activeTab, isRefreshing, isGridScrolling) {
-                    detectVerticalDragGestures(
-                        onDragEnd = {
-                            val shouldRefresh =
-                                pullDistance > 120f &&
-                                    gridState.firstVisibleItemIndex == 0 &&
-                                    gridState.firstVisibleItemScrollOffset == 0
-                            if (shouldRefresh) refreshActiveTab() else pullDistance = 0f
-                        },
-                        onDragCancel = { pullDistance = 0f },
-                        onVerticalDrag = { change, dragAmount ->
-                            // Skip if grid is actively scrolling — pass the event through
-                            if (isGridScrolling) return@detectVerticalDragGestures
-                            val atTop = gridState.firstVisibleItemIndex == 0 &&
-                                gridState.firstVisibleItemScrollOffset == 0
-                            if (atTop && dragAmount > 0f && !isRefreshing) {
-                                pullDistance = (pullDistance + dragAmount).coerceAtMost(180f)
-                                change.consume()
-                            } else if (dragAmount < 0f) {
-                                pullDistance = 0f
-                            }
+    // Pull-to-refresh: uses grid overscroll detection via scroll offset.
+    // Only triggers when the user is actively scrolling past the top — ignores layout shifts.
+    Box(modifier = Modifier.fillMaxSize()) {
+        LaunchedEffect(gridState) {
+            snapshotFlow { gridState.isScrollInProgress }
+                .collect { scrolling ->
+                    if (!scrolling) {
+                        if (gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset > 140 && !isRefreshing) {
+                            refreshActiveTab()
                         }
-                    )
-                }
-        ) {
-            if (isRefreshing || pullDistance > 24f) {
-                Surface(
-                    color = currentTheme.cardColor().copy(alpha = 0.96f),
-                    shape = RoundedCornerShape(18.dp),
-                    tonalElevation = 4.dp,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(2f)
-                        .padding(top = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = tabAccent,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, null, tint = tabAccent, modifier = Modifier.size(16.dp))
-                        }
-                        Text(
-                            if (isRefreshing) "Refreshing" else "Release to refresh",
-                            color = currentTheme.textColor(),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
                     }
                 }
-            }
+        }
+        LaunchedEffect(gridState) {
+            snapshotFlow { gridState.firstVisibleItemScrollOffset }
+                .collect { offset ->
+                    if (gridState.isScrollInProgress && gridState.firstVisibleItemIndex == 0) {
+                        pullDistance = offset.toFloat().coerceAtMost(200f)
+                    } else if (gridState.firstVisibleItemIndex > 0 || offset <= 0) {
+                        pullDistance = 0f
+                    }
+                }
+        }
 
-            when {
-                // TMDB-backed video tabs (includes Anime, K-Drama, Cartoon, Movies)
+        if (isRefreshing) {
+            Surface(
+                color = currentTheme.cardColor().copy(alpha = 0.96f),
+                shape = RoundedCornerShape(18.dp),
+                tonalElevation = 4.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .zIndex(2f)
+                    .padding(top = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = tabAccent,
+                        strokeWidth = 2.dp
+                    )
+                    Text(
+                        "Refreshing",
+                        color = currentTheme.textColor(),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        when {
                 activeTab.videoCategory() != null -> {
                     if (isLoadingVideo && searchQuery.isEmpty()) {
                         LoadingShimmerGrid(currentTheme)
@@ -821,7 +811,6 @@ fun DiscoverHomeScreen(
                         }
                     }
                 }
-                // Novel / Manga / All tabs
                 isLoadingPopular && searchQuery.isEmpty() -> LoadingShimmerGrid(currentTheme)
                 displayItems.isEmpty() && !isSearching -> EmptyStateView(
                     currentTheme = currentTheme,
@@ -857,9 +846,7 @@ fun DiscoverHomeScreen(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Anime Card — with AIRING badge + countdown timer to next episode
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Anime Card (unchanged, omitted for brevity - kept below)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimeCard(
@@ -867,7 +854,6 @@ fun AnimeCard(
     currentTheme: AppTheme,
     onClick: () -> Unit
 ) {
-    // Compute countdown from nextAiringAt (unix seconds)
     val countdown by produceState(initialValue = "") {
         while (true) {
             if (anime.nextAiringAt > 0L) {
@@ -879,7 +865,7 @@ fun AnimeCard(
                     if (h > 0) "EP${anime.nextEpisode} in ${h}h ${m}m" else "EP${anime.nextEpisode} in ${m}m"
                 } else "EP${anime.nextEpisode} airing soon"
             }
-            kotlinx.coroutines.delay(60_000L) // update every minute
+            kotlinx.coroutines.delay(60_000L)
         }
     }
 
@@ -912,7 +898,6 @@ fun AnimeCard(
                             )
                         )
                 )
-                // ANIME badge
                 Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = animeAccent,
@@ -926,7 +911,6 @@ fun AnimeCard(
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
-                // AIRING status indicator
                 if (anime.status == "RELEASING") {
                     Row(
                         modifier = Modifier
@@ -948,7 +932,6 @@ fun AnimeCard(
                         }
                     }
                 }
-                // Countdown at bottom
                 if (countdown.isNotEmpty()) {
                     Surface(
                         shape = RoundedCornerShape(4.dp),
@@ -968,7 +951,6 @@ fun AnimeCard(
                 }
             }
 
-            // Title below cover
             Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(
                     anime.displayTitle,
@@ -992,9 +974,7 @@ fun AnimeCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Unified Content Card
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Unified Content Card
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContentCard(
@@ -1032,22 +1012,22 @@ fun ContentCard(
                             )
                         )
                 )
-                // Type badge
                 Surface(
                     shape = RoundedCornerShape(4.dp),
-                color = when {
-                    item.isAnime -> animeAccent
-                    item.isManga -> Color(0xFFE91E8C)
-                    item.isVideo -> when (item.mediaKind) {
-                        VideoCategory.ANIME.name -> animeAccent
-                        VideoCategory.K_DRAMA.name -> kDramaAccent
-                        VideoCategory.CARTOON.name -> cartoonAccent
-                        VideoCategory.MOVIES.name -> moviesAccent
-                        VideoCategory.NIGERIAN.name -> nigerianAccent
-                        else -> moviesAccent
-                    }
-                    else -> currentTheme.accentColor()
-                },
+                    color = when {
+                        item.isAnime -> animeAccent
+                        item.isManga -> Color(0xFFE91E8C)
+                        item.isVideo -> when (item.mediaKind) {
+                            VideoCategory.ANIME.name -> animeAccent
+                            VideoCategory.DONGHUA.name -> donghuaAccent
+                            VideoCategory.K_DRAMA.name -> kDramaAccent
+                            VideoCategory.CARTOON.name -> cartoonAccent
+                            VideoCategory.MOVIES.name -> moviesAccent
+                            VideoCategory.NIGERIAN.name -> nigerianAccent
+                            else -> moviesAccent
+                        }
+                        else -> currentTheme.accentColor()
+                    },
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
                 ) {
                     Text(
@@ -1055,6 +1035,7 @@ fun ContentCard(
                             item.isAnime -> "A"
                             item.isManga -> "M"
                             item.isVideo -> when (item.mediaKind) {
+                                VideoCategory.DONGHUA.name -> "D"
                                 VideoCategory.K_DRAMA.name -> "K"
                                 VideoCategory.CARTOON.name -> "C"
                                 VideoCategory.MOVIES.name -> "V"
@@ -1134,9 +1115,7 @@ fun ContentCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Empty State View
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Empty State View
 @Composable
 fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1149,6 +1128,7 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     hasSearch -> Icons.Default.SearchOff
                     tab == ContentTab.MANGA -> Icons.Default.Collections
                     tab == ContentTab.ANIME -> Icons.Default.PlayCircle
+                    tab == ContentTab.DONGHUA -> Icons.Default.Language
                     tab == ContentTab.K_DRAMA -> Icons.Default.LiveTv
                     tab == ContentTab.CARTOON -> Icons.Default.Animation
                     tab == ContentTab.MOVIES -> Icons.Default.Movie
@@ -1166,6 +1146,7 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     ContentTab.COMIC -> "No comics loaded yet"
                     ContentTab.NOVELS -> "No novels loaded yet"
                     ContentTab.ANIME -> "Loading anime schedule..."
+                    ContentTab.DONGHUA -> "No donghua loaded yet"
                     ContentTab.K_DRAMA -> "No K-drama loaded yet"
                     ContentTab.CARTOON -> "No cartoons loaded yet"
                     ContentTab.OLDER_CARTOON -> "No classic cartoons loaded yet"
@@ -1185,9 +1166,7 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Shimmer Loading Grid
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Shimmer Loading Grid
 @Composable
 fun LoadingShimmerGrid(currentTheme: AppTheme) {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")

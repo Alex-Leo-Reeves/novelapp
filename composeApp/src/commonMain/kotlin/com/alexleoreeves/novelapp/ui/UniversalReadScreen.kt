@@ -220,6 +220,7 @@ private fun AiNovelCreatorTab(
     var isSavingLocally by remember { mutableStateOf(false) }
     var feedbackMessage by remember { mutableStateOf("") }
     var activeReadingNovel by remember { mutableStateOf<AiNovel?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val scope = rememberCoroutineScope()
     val httpClient = remember { HttpClient() }
@@ -259,156 +260,184 @@ private fun AiNovelCreatorTab(
         return
     }
 
-    // Main layout
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(currentTheme.cardColor(), RoundedCornerShape(10.dp)).padding(4.dp)) {
-            listOf("Community", "Create Mashup").forEachIndexed { idx, title ->
-                Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(if (innerTab == idx) currentTheme.accentColor() else Color.Transparent)
-                    .clickable { if (idx == 1) requireAuth { innerTab = idx } else innerTab = idx }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                    Text(title, color = if (innerTab == idx) Color.White else currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                }
-            }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Max source novels: $sourceLimit", style = MaterialTheme.typography.labelSmall, color = currentTheme.subTextColor())
-            if (upgradeOptions.isNotEmpty()) TextButton(onClick = { showPaymentDropdown = true }) { Icon(Icons.Default.Upgrade, null, modifier = Modifier.size(14.dp), tint = currentTheme.accentColor()); Spacer(Modifier.width(4.dp)); Text("Unlock more", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall) }
-        }
-
-        quota?.let { q -> Text(if (q.limitShort == -1) "Unlimited creations" else "Short: ${q.limitShort} · Long: ${q.limitLong} left", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) }
-
-        if (innerTab == 0) {
-            // ── Community Tab ──
-            if (isLoadingCommunity && communityNovels.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = currentTheme.accentColor()) } }
-            else if (communityNovels.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No community AI novels yet. Be the first to publish!", color = currentTheme.subTextColor(), textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp)) } }
-            else { LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(communityNovels) { novel -> Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable { activeReadingNovel = novel }) {
-                    Column {
-                        Box(modifier = Modifier.fillMaxWidth().height(160.dp).background(Color.DarkGray)) { if (novel.cover_url.isNotBlank()) AsyncImage(model = novel.cover_url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) else Icon(Icons.Default.AutoStories, null, modifier = Modifier.align(Alignment.Center).size(40.dp), tint = Color.Gray) }
-                        Column(modifier = Modifier.padding(8.dp)) { Text(novel.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("By ${novel.author_name}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${novel.word_count} words · ${novel.type.uppercase()}", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) }
+    // Main layout — wrapped in Box for SnackbarHost overlay
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(currentTheme.cardColor(), RoundedCornerShape(10.dp)).padding(4.dp)) {
+                listOf("Community", "Create Mashup").forEachIndexed { idx, title ->
+                    Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(if (innerTab == idx) currentTheme.accentColor() else Color.Transparent)
+                        .clickable { if (idx == 1) requireAuth { innerTab = idx } else innerTab = idx }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(title, color = if (innerTab == idx) Color.White else currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                     }
-                } } } }
-        } else if (isGenerating) {
-            // ── Generation Loading ──
-            Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(progress = { generationProgress }, color = currentTheme.accentColor(), strokeWidth = 6.dp, modifier = Modifier.size(80.dp))
-                Spacer(Modifier.height(24.dp)); Text("Generating Mashup Novel...", style = MaterialTheme.typography.titleLarge, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp)); Text(generationStatusText, style = MaterialTheme.typography.bodyMedium, color = currentTheme.subTextColor(), textAlign = TextAlign.Center)
-                if (generationCountdownSeconds > 0) { Spacer(Modifier.height(16.dp)); Text("Estimated time remaining: ${generationCountdownSeconds / 60}m ${generationCountdownSeconds % 60}s", style = MaterialTheme.typography.bodyMedium, color = currentTheme.accentColor(), fontWeight = FontWeight.Bold) }
-            }
-        } else if (generatedResult != null) {
-            // ── Generated Result ──
-            val result = generatedResult!!
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(16.dp)).background(currentTheme.cardColor())) { AsyncImage(model = result.coverUrl, contentDescription = "Cover", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-                Text(result.title, style = MaterialTheme.typography.headlineMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Black)
-                Text("Generated with Gemini 2.5 Flash", style = MaterialTheme.typography.labelSmall, color = currentTheme.subTextColor())
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { scope.launch { try { val novelId = "ai_${currentTimeMillis()}"; downloadRepo?.addItem(DownloadedItem(id = novelId, title = result.title, coverUrl = result.coverUrl, type = "NOVEL", sourceName = "AI Generated")); val savedPath = saveDownloadedText(novelId, 1, result.content); downloadRepo?.addChapter(DownloadedChapter(parentId = novelId, chapterNumber = 1, chapterTitle = "Crossover Fusion", localFilePath = savedPath)); feedbackMessage = if (savedPath.isNotBlank()) "Saved offline! Check your Downloads/NovelApp folder." else "Saved offline!" } catch (e: Exception) { feedbackMessage = "Save failed: ${e.message}" } } },
-                        modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())) { Icon(Icons.Outlined.Download, null); Spacer(Modifier.width(4.dp)); Text("Save Offline") }
-                    Button(onClick = { scope.launch { try { api.publishNovel(result.title, result.coverPrompt, result.coverUrl, result.content, if (isLongNovel) "long" else "short", selectedSources, "Crossover", token); feedbackMessage = "Published to community!" } catch (e: Exception) { feedbackMessage = "Publish failed: ${e.message}" } } },
-                        modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) { Icon(Icons.Outlined.CloudUpload, null); Spacer(Modifier.width(4.dp)); Text("Publish") }
                 }
-                if (feedbackMessage.isNotBlank()) Text(feedbackMessage, color = currentTheme.accentColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                Button(onClick = { ttsController.playText(result.content, result.title) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.cardColor())) { Icon(Icons.Default.VolumeUp, null, tint = currentTheme.textColor()); Spacer(Modifier.width(6.dp)); Text("Listen with Kokoro", color = currentTheme.textColor()) }
-                Divider(color = currentTheme.textColor().copy(alpha = 0.1f))
-                Text(result.content, style = MaterialTheme.typography.bodyLarge, color = currentTheme.textColor())
-                Spacer(Modifier.height(24.dp))
-                Button(onClick = { generatedResult = null; feedbackMessage = "" }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.cardColor())) { Text("Create Another", color = currentTheme.textColor()) }
             }
-        } else {
-            // ── Config Form ──
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Source limit card
-                if (upgradeOptions.isNotEmpty()) {
+
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Max source novels: $sourceLimit", style = MaterialTheme.typography.labelSmall, color = currentTheme.subTextColor())
+                if (upgradeOptions.isNotEmpty()) TextButton(onClick = { showPaymentDropdown = true }) { Icon(Icons.Default.Upgrade, null, modifier = Modifier.size(14.dp), tint = currentTheme.accentColor()); Spacer(Modifier.width(4.dp)); Text("Unlock more", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall) }
+            }
+
+            quota?.let { q -> Text(if (q.limitShort == -1) "Unlimited creations" else "Short: ${q.limitShort} · Long: ${q.limitLong} left", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) }
+
+            if (innerTab == 0) {
+                // ── Community Tab ──
+                if (isLoadingCommunity && communityNovels.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = currentTheme.accentColor()) } }
+                else if (communityNovels.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No community AI novels yet. Be the first to publish!", color = currentTheme.subTextColor(), textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp)) } }
+                else { LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(communityNovels) { novel -> Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable { activeReadingNovel = novel }) {
+                        Column {
+                            Box(modifier = Modifier.fillMaxWidth().height(160.dp).background(Color.DarkGray)) { if (novel.cover_url.isNotBlank()) AsyncImage(model = novel.cover_url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) else Icon(Icons.Default.AutoStories, null, modifier = Modifier.align(Alignment.Center).size(40.dp), tint = Color.Gray) }
+                            Column(modifier = Modifier.padding(8.dp)) { Text(novel.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("By ${novel.author_name}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${novel.word_count} words · ${novel.type.uppercase()}", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) }
+                        }
+                    } } } }
+            } else if (isGenerating) {
+                // ── Generation Loading ──
+                Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(progress = { generationProgress }, color = currentTheme.accentColor(), strokeWidth = 6.dp, modifier = Modifier.size(80.dp))
+                    Spacer(Modifier.height(24.dp)); Text("Generating Mashup Novel...", style = MaterialTheme.typography.titleLarge, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp)); Text(generationStatusText, style = MaterialTheme.typography.bodyMedium, color = currentTheme.subTextColor(), textAlign = TextAlign.Center)
+                    if (generationCountdownSeconds > 0) { Spacer(Modifier.height(16.dp)); Text("Estimated time remaining: ${generationCountdownSeconds / 60}m ${generationCountdownSeconds % 60}s", style = MaterialTheme.typography.bodyMedium, color = currentTheme.accentColor(), fontWeight = FontWeight.Bold) }
+                }
+            } else if (generatedResult != null) {
+                // ── Generated Result ──
+                val result = generatedResult!!
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(16.dp)).background(currentTheme.cardColor())) { AsyncImage(model = result.coverUrl, contentDescription = "Cover", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                    Text(result.title, style = MaterialTheme.typography.headlineMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Black)
+                    Text("Generated with Gemini 2.5 Flash", style = MaterialTheme.typography.labelSmall, color = currentTheme.subTextColor())
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { scope.launch { try { val novelId = "ai_${currentTimeMillis()}"; downloadRepo?.addItem(DownloadedItem(id = novelId, title = result.title, coverUrl = result.coverUrl, type = "NOVEL", sourceName = "AI Generated")); val savedPath = saveDownloadedText(novelId, 1, result.content); downloadRepo?.addChapter(DownloadedChapter(parentId = novelId, chapterNumber = 1, chapterTitle = "Crossover Fusion", localFilePath = savedPath)); feedbackMessage = if (savedPath.isNotBlank()) "Saved offline! Check your Downloads/NovelApp folder." else "Saved offline!" } catch (e: Exception) { feedbackMessage = "Save failed: ${e.message}" } } },
+                            modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())) { Icon(Icons.Outlined.Download, null); Spacer(Modifier.width(4.dp)); Text("Save Offline") }
+                        Button(onClick = { scope.launch { try { api.publishNovel(result.title, result.coverPrompt, result.coverUrl, result.content, if (isLongNovel) "long" else "short", selectedSources, "Crossover", token); feedbackMessage = "Published to community!" } catch (e: Exception) { feedbackMessage = "Publish failed: ${e.message}" } } },
+                            modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) { Icon(Icons.Outlined.CloudUpload, null); Spacer(Modifier.width(4.dp)); Text("Publish") }
+                    }
+                    if (feedbackMessage.isNotBlank()) Text(feedbackMessage, color = currentTheme.accentColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Button(onClick = { ttsController.playText(result.content, result.title) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.cardColor())) { Icon(Icons.Default.VolumeUp, null, tint = currentTheme.textColor()); Spacer(Modifier.width(6.dp)); Text("Listen with Kokoro", color = currentTheme.textColor()) }
+                    Divider(color = currentTheme.textColor().copy(alpha = 0.1f))
+                    Text(result.content, style = MaterialTheme.typography.bodyLarge, color = currentTheme.textColor())
+                    Spacer(Modifier.height(24.dp))
+                    Button(onClick = { generatedResult = null; feedbackMessage = "" }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.cardColor())) { Text("Create Another", color = currentTheme.textColor()) }
+                }
+            } else {
+                // ── Config Form ──
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Source limit card
+                    if (upgradeOptions.isNotEmpty()) {
+                        Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
+                            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column(modifier = Modifier.weight(1f)) { Text("Your Limit: $sourceLimit novels", color = currentTheme.textColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold); Text("Free users can fuse up to 3 sources.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
+                                Button(onClick = { showPaymentDropdown = true }, colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()), shape = RoundedCornerShape(8.dp)) { Icon(Icons.Default.Upgrade, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Upgrade", style = MaterialTheme.typography.labelSmall) }
+                            }
+                        }
+                    }
+                    // Type selector
                     Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
-                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(modifier = Modifier.weight(1f)) { Text("Your Limit: $sourceLimit novels", color = currentTheme.textColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold); Text("Free users can fuse up to 3 sources.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
-                            Button(onClick = { showPaymentDropdown = true }, colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()), shape = RoundedCornerShape(8.dp)) { Icon(Icons.Default.Upgrade, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Upgrade", style = MaterialTheme.typography.labelSmall) }
-                        }
-                    }
-                }
-                // Type selector
-                Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("1. Choose Generation Type", color = currentTheme.textColor(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold); Spacer(Modifier.height(12.dp))
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (!isLongNovel) currentTheme.accentColor().copy(alpha = 0.2f) else Color.Transparent).border(1.dp, if (!isLongNovel) currentTheme.accentColor() else currentTheme.textColor().copy(alpha = 0.1f), RoundedCornerShape(8.dp)).clickable { isLongNovel = false }.padding(12.dp), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Short Novel", color = currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium); Text("Quick summary", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (isLongNovel) currentTheme.accentColor().copy(alpha = 0.2f) else Color.Transparent).border(1.dp, if (isLongNovel) currentTheme.accentColor() else currentTheme.textColor().copy(alpha = 0.1f), RoundedCornerShape(8.dp)).clickable { isLongNovel = true }.padding(12.dp), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Long Novel", color = currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium); Text("Reads chapters", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
-                            }
-                        }
-                    }
-                }
-                // Sources
-                Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("2. Select Fused Universes (Max $sourceLimit)", color = currentTheme.textColor(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        if (selectedSources.isEmpty()) Text("No source universes added yet.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodySmall)
-                        selectedSources.forEach { src ->
-                            Row(modifier = Modifier.fillMaxWidth().background(currentTheme.backgroundColor().copy(alpha = 0.5f), RoundedCornerShape(8.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                AsyncImage(model = src.coverUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
-                                Spacer(Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) { Text(src.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(src.sourceName, color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
-                                IconButton(onClick = { selectedSources = selectedSources - src }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
-                            }
-                        }
-                        if (selectedSources.size < sourceLimit) { Button(onClick = { showSourcePicker = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add Universe / Novel Source") } }
-                        else Text("Source limit reached. Upgrade to add more.", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    }
-                }
-                // Description
-                Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("3. Add Your Plot Direction / Description", color = currentTheme.textColor(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold); Spacer(Modifier.height(10.dp))
-                        TextField(value = userDescription, onValueChange = { userDescription = it }, placeholder = { Text("Include specific characters, setting descriptions, or plot twists...") }, modifier = Modifier.fillMaxWidth().height(120.dp), colors = TextFieldDefaults.colors(), shape = RoundedCornerShape(8.dp))
-                    }
-                }
-                if (generationError.isNotBlank()) Text(generationError, color = Color.Red, style = MaterialTheme.typography.bodySmall)
-                // Generate Button
-                Button(onClick = {
-                    if (selectedSources.size < 2) { generationError = "Please select at least 2 source novels/shows."; return@Button }
-                    if (selectedSources.size > sourceLimit) { generationError = "You can only use $sourceLimit source novels."; return@Button }
-                    generationError = ""; isGenerating = true; generationProgress = 0.05f; generationStatusText = "Initiating server connection & checking quota..."
-                    scope.launch {
-                        runCatching { api.generateStart(if (isLongNovel) "long" else "short", token) }
-                            .onSuccess {
-                                scope.launch {
-                                    try {
-                                        if (!isLongNovel) {
-                                            generationProgress = 0.5f; generationStatusText = "Generating crossover story..."
-                                            val comp = api.generateComplete("short", selectedSources, userDescription, emptyList(), token)
-                                            generatedResult = comp; quota = api.fetchQuota(token)
-                                        } else {
-                                            val allChunks = mutableListOf<Pair<String, String>>()
-                                            generationStatusText = "Gathering chapters and summaries..."
-                                            selectedSources.forEach { src ->
-                                                if (src.detailPageUrl.startsWith("tmdb://")) {
-                                                    val parts = src.detailPageUrl.removePrefix("tmdb://").split("/")
-                                                    val mediaType = parts.getOrNull(0) ?: "tv"; val tmdbId = parts.getOrNull(1) ?: ""
-                                                    if (mediaType == "tv") { val eps = tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId); eps.take(5).forEach { ep -> if (ep.title.isNotBlank()) allChunks.add(Pair("Episode ${ep.episodeNumber}: ${ep.title}. Plot: ${src.synopsis}", src.title)) } }
-                                                    else allChunks.add(Pair(src.synopsis, src.title))
-                                                } else { downloadRepo?.getChaptersFor(src.id)?.take(3)?.forEach { ch -> val txt = loadDownloadedText(ch.localFilePath); if (txt.isNotBlank()) allChunks.add(Pair("Chapter ${ch.chapterNumber}: ${ch.chapterTitle}. Content:\n$txt", src.title)) } }
-                                            }
-                                            if (allChunks.isEmpty()) allChunks.add(Pair("No chapters available.", "Lore Reference"))
-                                            val summaries = mutableListOf<String>()
-                                            val totalSteps = allChunks.size
-                                            for (i in allChunks.indices) { val currentChunk = allChunks[i]; generationProgress = 0.1f + ((i.toFloat() / totalSteps) * 0.6f); generationStatusText = "Reading chunk ${i + 1} of $totalSteps from ${currentChunk.second}..."; generationCountdownSeconds = (totalSteps - i) * 20; val chunkRes = api.generateChunk(currentChunk.first.take(5000), currentChunk.second, token); summaries.add(chunkRes.summary); if (i < totalSteps - 1) { for (cd in 20 downTo 1) { generationCountdownSeconds = (totalSteps - i - 1) * 20 + cd; generationStatusText = "Cooldown... (${cd}s)"; delay(1000) } } }
-                                            generationProgress = 0.85f; generationCountdownSeconds = 0; generationStatusText = "Synthesizing final novel..."
-                                            val comp = api.generateComplete("long", selectedSources, userDescription, summaries, token)
-                                            generatedResult = comp; quota = api.fetchQuota(token)
-                                        }
-                                    } catch (e: Exception) { generationError = e.message ?: "Generation pipeline failed."; e.printStackTrace() } finally { isGenerating = false }
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text("1. Choose Generation Type", color = currentTheme.textColor(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold); Spacer(Modifier.height(12.dp))
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (!isLongNovel) currentTheme.accentColor().copy(alpha = 0.2f) else Color.Transparent).border(1.dp, if (!isLongNovel) currentTheme.accentColor() else currentTheme.textColor().copy(alpha = 0.1f), RoundedCornerShape(8.dp)).clickable { isLongNovel = false }.padding(12.dp), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Short Novel", color = currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium); Text("Quick summary", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
                                 }
-                            }.onFailure { generationError = it.message ?: "Failed to verify quota."; isGenerating = false }
+                                Spacer(Modifier.width(12.dp))
+                                Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (isLongNovel) currentTheme.accentColor().copy(alpha = 0.2f) else Color.Transparent).border(1.dp, if (isLongNovel) currentTheme.accentColor() else currentTheme.textColor().copy(alpha = 0.1f), RoundedCornerShape(8.dp)).clickable { isLongNovel = true }.padding(12.dp), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Long Novel", color = currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium); Text("Reads chapters", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
+                                }
+                            }
+                        }
                     }
-                }, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())) {
-                    Icon(Icons.Default.Bolt, null); Spacer(Modifier.width(6.dp)); Text("FUSE & GENERATE NOVEL")
+                    // Sources
+                    Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("2. Select Fused Universes (Max $sourceLimit)", color = currentTheme.textColor(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            if (selectedSources.isEmpty()) Text("No source universes added yet.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodySmall)
+                            selectedSources.forEach { src ->
+                                Row(modifier = Modifier.fillMaxWidth().background(currentTheme.backgroundColor().copy(alpha = 0.5f), RoundedCornerShape(8.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    AsyncImage(model = src.coverUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) { Text(src.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(src.sourceName, color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
+                                    IconButton(onClick = { selectedSources = selectedSources - src }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
+                                }
+                            }
+                            if (selectedSources.size < sourceLimit) { Button(onClick = { showSourcePicker = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add Universe / Novel Source") } }
+                            else Text("Source limit reached. Upgrade to add more.", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    // Description
+                    Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text("3. Add Your Plot Direction / Description", color = currentTheme.textColor(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold); Spacer(Modifier.height(10.dp))
+                            TextField(value = userDescription, onValueChange = { userDescription = it }, placeholder = { Text("Include specific characters, setting descriptions, or plot twists...") }, modifier = Modifier.fillMaxWidth().height(120.dp), colors = TextFieldDefaults.colors(), shape = RoundedCornerShape(8.dp))
+                        }
+                    }
+                    if (generationError.isNotBlank()) Text(generationError, color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    // Generate Button
+                    Button(onClick = {
+                        if (selectedSources.size < 2) { generationError = "Please select at least 2 source novels/shows."; return@Button }
+                        if (selectedSources.size > sourceLimit) { generationError = "You can only use $sourceLimit source novels."; return@Button }
+                        generationError = ""; isGenerating = true; generationProgress = 0.05f; generationStatusText = "Initiating server connection & checking quota..."
+                        scope.launch {
+                            runCatching { api.generateStart(if (isLongNovel) "long" else "short", token) }
+                                .onSuccess {
+                                    scope.launch {
+                                        try {
+                                            if (!isLongNovel) {
+                                                generationProgress = 0.5f; generationStatusText = "Generating crossover story..."
+                                                val comp = api.generateComplete("short", selectedSources, userDescription, emptyList(), token)
+                                                generatedResult = comp; quota = api.fetchQuota(token)
+                                            } else {
+                                                val allChunks = mutableListOf<Pair<String, String>>()
+                                                generationStatusText = "Gathering chapters and summaries..."
+                                                selectedSources.forEach { src ->
+                                                    if (src.detailPageUrl.startsWith("tmdb://")) {
+                                                        val parts = src.detailPageUrl.removePrefix("tmdb://").split("/")
+                                                        val mediaType = parts.getOrNull(0) ?: "tv"; val tmdbId = parts.getOrNull(1) ?: ""
+                                                        if (mediaType == "tv") { val eps = tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId); eps.take(5).forEach { ep -> if (ep.title.isNotBlank()) allChunks.add(Pair("Episode ${ep.episodeNumber}: ${ep.title}. Plot: ${src.synopsis}", src.title)) } }
+                                                        else allChunks.add(Pair(src.synopsis, src.title))
+                                                    } else { downloadRepo?.getChaptersFor(src.id)?.take(3)?.forEach { ch -> val txt = loadDownloadedText(ch.localFilePath); if (txt.isNotBlank()) allChunks.add(Pair("Chapter ${ch.chapterNumber}: ${ch.chapterTitle}. Content:\n$txt", src.title)) } }
+                                                }
+                                                if (allChunks.isEmpty()) allChunks.add(Pair("No chapters available.", "Lore Reference"))
+                                                val summaries = mutableListOf<String>()
+                                                val totalSteps = allChunks.size
+                                                for (i in allChunks.indices) { val currentChunk = allChunks[i]; generationProgress = 0.1f + ((i.toFloat() / totalSteps) * 0.6f); generationStatusText = "Reading chunk ${i + 1} of $totalSteps from ${currentChunk.second}..."; generationCountdownSeconds = (totalSteps - i) * 20; val chunkRes = api.generateChunk(currentChunk.first.take(5000), currentChunk.second, token); summaries.add(chunkRes.summary); if (i < totalSteps - 1) { for (cd in 20 downTo 1) { generationCountdownSeconds = (totalSteps - i - 1) * 20 + cd; generationStatusText = "Cooldown... (${cd}s)"; delay(1000) } } }
+                                                generationProgress = 0.85f; generationCountdownSeconds = 0; generationStatusText = "Synthesizing final novel..."
+                                                val comp = api.generateComplete("long", selectedSources, userDescription, summaries, token)
+                                                generatedResult = comp; quota = api.fetchQuota(token)
+                                            }
+                                        } catch (e: Exception) { generationError = e.message ?: "Generation pipeline failed."; e.printStackTrace() } finally { isGenerating = false }
+                                    }
+                                }.onFailure { generationError = it.message ?: "Failed to verify quota."; isGenerating = false }
+                        }
+                    }, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())) {
+                        Icon(Icons.Default.Bolt, null); Spacer(Modifier.width(6.dp)); Text("FUSE & GENERATE NOVEL")
+                    }
                 }
             }
+        }
+
+        // SnackbarHost overlay for generation-complete notification
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .align(Alignment.BottomCenter),
+            snackbar = { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = currentTheme.accentColor(),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(14.dp)
+                )
+            }
+        )
+    }
+
+    // Show snackbar when generation finishes successfully
+    LaunchedEffect(generatedResult) {
+        if (generatedResult != null) {
+            snackbarHostState.showSnackbar(
+                message = "\u2728 \"${generatedResult!!.title}\" is ready! Scroll down to read it.",
+                duration = SnackbarDuration.Short
+            )
         }
     }
 

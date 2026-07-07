@@ -26,8 +26,8 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 
 @Composable
-fun FootballMatchScreen(
-    match: FootballMatch,
+fun WweMatchScreen(
+    event: WweEvent,
     currentTheme: AppTheme,
     onPlayStream: (streamUrl: String, title: String) -> Unit,
     onBack: () -> Unit
@@ -43,7 +43,7 @@ fun FootballMatchScreen(
             }
         }
     }
-    val footballApi = remember { FootballApiSource(httpClient) }
+    val wweApi = remember { WweApiSource(httpClient) }
 
     var isLoadingStream by remember { mutableStateOf(false) }
     var streamUrl by remember { mutableStateOf<String?>(null) }
@@ -60,21 +60,16 @@ fun FootballMatchScreen(
             streamUrl = null
             streamUrls = emptyList()
             currentFallbackIndex = 0
-            val urls = footballApi.resolveStreamUrls(
-                fixtureId = match.fixtureId,
-                homeTeam = match.homeTeam,
-                awayTeam = match.awayTeam,
-                leagueName = match.leagueName
-            )
+            val urls = wweApi.resolveStreamUrls(event)
             streamUrls = urls
             if (urls.isEmpty()) {
-                streamError = "No stream available for this match yet. Try again closer to kickoff."
+                streamError = "No stream available for this event yet. Try again later."
                 isLoadingStream = false
                 return@launch
             }
             currentFallbackIndex = 0
             streamUrl = urls[0]
-            onPlayStream(urls[0], "${match.homeTeam} vs ${match.awayTeam}")
+            onPlayStream(urls[0], event.title)
             isLoadingStream = false
         }
     }
@@ -93,7 +88,13 @@ fun FootballMatchScreen(
         val nextUrl = streamUrls[nextIndex]
         streamUrl = nextUrl
         streamError = null
-        onPlayStream(nextUrl, "${match.homeTeam} vs ${match.awayTeam}")
+        onPlayStream(nextUrl, event.title)
+    }
+
+    val eventBgColor = when {
+        event.isLive -> Color(0xFF2D1B3E)
+        event.eventType == "ppv" -> Color(0xFF1F1A2E)
+        else -> Color(0xFF1A1A2E)
     }
 
     Column(
@@ -112,7 +113,7 @@ fun FootballMatchScreen(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color(0xFF003300), currentTheme.backgroundColor()),
+                            listOf(eventBgColor, currentTheme.backgroundColor()),
                             startY = 50f
                         )
                     )
@@ -134,88 +135,55 @@ fun FootballMatchScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Badge
                 Surface(
-                    color = currentTheme.surfaceColor().copy(alpha = 0.86f),
+                    color = when (event.eventType) {
+                        "raw" -> Color(0xFFE94560)
+                        "smackdown" -> Color(0xFF4361EE)
+                        "ppv" -> Color(0xFFF72585)
+                        else -> Color(0xFFE94560)
+                    },
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        match.leagueName,
-                        color = currentTheme.subTextColor(),
+                        event.eventType.uppercase(),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                     )
                 }
-                Spacer(Modifier.height(24.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text(
-                            match.homeTeam,
-                            color = if (match.homeGoals != null && match.awayGoals != null &&
-                                match.homeGoals > match.awayGoals && match.isFinished
-                            ) footballAccent else currentTheme.textColor(),
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleLarge,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            match.scoreDisplay,
-                            color = when {
-                                match.isLive -> Color.White
-                                match.isFinished -> currentTheme.subTextColor()
-                                else -> currentTheme.textColor()
-                            },
-                            fontWeight = FontWeight.Black,
-                            style = MaterialTheme.typography.displayLarge
-                        )
-                        if (match.elapsed != null && match.isLive) {
-                            Surface(color = Color(0xFF1B5E20), shape = RoundedCornerShape(6.dp)) {
-                                Text(
-                                    "${match.elapsed}'",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text(
-                            match.awayTeam,
-                            color = if (match.homeGoals != null && match.awayGoals != null &&
-                                match.awayGoals > match.homeGoals && match.isFinished
-                            ) footballAccent else currentTheme.textColor(),
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleLarge,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    event.title,
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.displayMedium,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(8.dp))
+                if (event.subtitle.isNotEmpty()) {
+                    Text(
+                        event.subtitle,
+                        color = currentTheme.subTextColor(),
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center
+                    )
                 }
                 Spacer(Modifier.height(16.dp))
                 Surface(
                     color = when {
-                        match.isLive -> Color(0xFF1B5E20)
-                        match.isFinished -> Color(0xFF333333)
-                        else -> Color(0xFF1A237E)
+                        event.isLive -> Color(0xFFB71C1C)
+                        event.isUpcoming -> Color(0XFF6A1B9A)
+                        else -> Color(0xFF333333)
                     },
                     shape = RoundedCornerShape(20.dp)
                 ) {
                     Text(
                         when {
-                            match.isLive -> "LIVE • Watch now"
-                            match.isFinished -> "FULL TIME"
-                            match.isNotStarted -> "Starts at ${match.matchTime}"
-                            else -> match.status
+                            event.isLive -> "LIVE • Watch now"
+                            event.isUpcoming -> "Upcoming"
+                            else -> "WATCH REPLAY"
                         },
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
@@ -230,19 +198,36 @@ fun FootballMatchScreen(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Event info
             Surface(
                 color = currentTheme.cardColor(),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    InfoRow("League", match.leagueName, currentTheme)
-                    InfoRow("Season", match.leagueSeason.toString(), currentTheme)
-                    InfoRow("Date", match.matchDate.take(10), currentTheme)
-                    InfoRow("Kickoff", match.matchTime.ifBlank { match.statusDisplay }, currentTheme)
+                    Text(
+                        "Event Details",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = currentTheme.textColor(),
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    WweInfoRow("Event", event.title, currentTheme)
+                    WweInfoRow("Type", event.eventType.uppercase(), currentTheme)
+                    if (event.date.isNotEmpty()) WweInfoRow("Date", event.date, currentTheme)
+                    if (event.matchCount > 0) WweInfoRow("Matches", "${event.matchCount}", currentTheme)
+                    if (event.description.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            event.description,
+                            color = currentTheme.subTextColor(),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
 
+            // Watch section
             Surface(
                 color = currentTheme.cardColor(),
                 shape = RoundedCornerShape(14.dp),
@@ -252,21 +237,21 @@ fun FootballMatchScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("Watch Match", style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
+                    Text("Watch Event", style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
 
                     when {
                         isLoadingStream -> {
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = footballAccent)
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = wweAccent)
                                     Text("Resolving stream link...", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
                         streamUrl != null -> {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Default.Check, null, tint = footballAccent, modifier = Modifier.size(18.dp))
-                                Text("Stream ready!", color = footballAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Check, null, tint = wweAccent, modifier = Modifier.size(18.dp))
+                                Text("Stream ready!", color = wweAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                                 if (streamUrls.size > 1) {
                                     Spacer(Modifier.weight(1f))
                                     Text("Server ${currentFallbackIndex + 1}/${streamUrls.size}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
@@ -284,14 +269,14 @@ fun FootballMatchScreen(
                     Button(
                         onClick = {
                             if (streamUrl != null) {
-                                onPlayStream(streamUrl!!, "${match.homeTeam} vs ${match.awayTeam}")
+                                onPlayStream(streamUrl!!, event.title)
                             } else {
                                 resolveStream()
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (match.isLive) Color(0xFF1B5E20) else footballAccent),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (event.isLive) Color(0xFFB71C1C) else wweAccent),
                         enabled = !isLoadingStream
                     ) {
                         Icon(if (isLoadingStream) Icons.Default.HourglassEmpty else Icons.Default.PlayArrow, null, modifier = Modifier.size(22.dp))
@@ -300,15 +285,14 @@ fun FootballMatchScreen(
                             when {
                                 isLoadingStream -> "Resolving..."
                                 streamUrl != null -> "Launch Stream"
-                                match.isLive -> "Find Live Stream"
-                                match.isFinished -> "Find Replay"
-                                else -> "Check Stream"
+                                event.isLive -> "Watch Live"
+                                else -> "Watch Event"
                             },
                             fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge
                         )
                     }
 
-                    // Try another server button (shown when streams exist but user needs to cycle)
+                    // Try another server
                     if (streamUrls.isNotEmpty()) {
                         OutlinedButton(
                             onClick = { tryNextServer() },
@@ -342,7 +326,7 @@ fun FootballMatchScreen(
 }
 
 @Composable
-private fun InfoRow(label: String, value: String, currentTheme: AppTheme) {
+private fun WweInfoRow(label: String, value: String, currentTheme: AppTheme) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
         Text(value, color = currentTheme.textColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)

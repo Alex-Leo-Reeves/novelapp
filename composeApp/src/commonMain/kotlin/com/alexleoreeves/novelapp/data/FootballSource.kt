@@ -67,11 +67,7 @@ class FootballApiSource(private val httpClient: HttpClient) {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures") {
             if (date.isNotBlank()) parameter("date", date)
         }.bodyAsText()
-        val root = footballJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toFootballMatch() }
-            .orEmpty()
+        parseFixtureResponse(raw)
     }.getOrElse { error ->
         println("[FootballAPI] Fixtures fetch failed: ${error.message}")
         emptyList()
@@ -84,11 +80,7 @@ class FootballApiSource(private val httpClient: HttpClient) {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures") {
             parameter("upcoming", "true")
         }.bodyAsText()
-        val root = footballJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toFootballMatch() }
-            .orEmpty()
+        parseFixtureResponse(raw)
     }.getOrElse { error ->
         println("[FootballAPI] Upcoming fixtures failed: ${error.message}")
         emptyList()
@@ -101,11 +93,7 @@ class FootballApiSource(private val httpClient: HttpClient) {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures") {
             parameter("live", "all")
         }.bodyAsText()
-        val root = footballJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toFootballMatch() }
-            .orEmpty()
+        parseFixtureResponse(raw)
     }.getOrElse { error ->
         println("[FootballAPI] Live fixtures failed: ${error.message}")
         emptyList()
@@ -128,12 +116,20 @@ class FootballApiSource(private val httpClient: HttpClient) {
 
     /**
      * Returns a playable stream URL (or embed URL) for the given fixture.
-     * Our server returns pipe-delimited embed URLs (e.g. "url1|url2|url3").
-     * The app's AnimePlayerScreen loads these via WebView and intercepts .m3u8.
+     * Passes team/league metadata so the server can build embed URLs
+     * even without a SportsAPI lookup.
      */
-    suspend fun resolveStreamUrl(fixtureId: Int): String? = runCatching {
+    suspend fun resolveStreamUrl(
+        fixtureId: Int,
+        homeTeam: String = "",
+        awayTeam: String = "",
+        leagueName: String = ""
+    ): String? = runCatching {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/stream") {
             parameter("fixture", fixtureId)
+            if (homeTeam.isNotBlank()) parameter("home", homeTeam)
+            if (awayTeam.isNotBlank()) parameter("away", awayTeam)
+            if (leagueName.isNotBlank()) parameter("league", leagueName)
         }.bodyAsText()
         val root = footballJson.parseToJsonElement(raw).jsonObject
         val data = root["data"]
@@ -155,11 +151,20 @@ class FootballApiSource(private val httpClient: HttpClient) {
 
     /**
      * Returns all available embed URLs for this fixture as a list.
-     * The app can try each one sequentially until one plays.
+     * Passes team/league metadata so the server can build embed URLs
+     * even without a SportsAPI lookup.
      */
-    suspend fun resolveStreamUrls(fixtureId: Int): List<String> = runCatching {
+    suspend fun resolveStreamUrls(
+        fixtureId: Int,
+        homeTeam: String = "",
+        awayTeam: String = "",
+        leagueName: String = ""
+    ): List<String> = runCatching {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/stream") {
             parameter("fixture", fixtureId)
+            if (homeTeam.isNotBlank()) parameter("home", homeTeam)
+            if (awayTeam.isNotBlank()) parameter("away", awayTeam)
+            if (leagueName.isNotBlank()) parameter("league", leagueName)
         }.bodyAsText()
         val root = footballJson.parseToJsonElement(raw).jsonObject
         val data = root["data"]
@@ -187,14 +192,18 @@ class FootballApiSource(private val httpClient: HttpClient) {
         val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/search") {
             parameter("q", query)
         }.bodyAsText()
-        val root = footballJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toFootballMatch() }
-            .orEmpty()
+        parseFixtureResponse(raw)
     }.getOrElse { error ->
         println("[FootballAPI] Search failed: ${error.message}")
         emptyList()
+    }
+
+    private fun parseFixtureResponse(raw: String): List<FootballMatch> {
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        return root["data"]
+            ?.jsonArray
+            ?.mapNotNull { it.jsonObject.toFootballMatch() }
+            .orEmpty()
     }
 
     private fun JsonObject.toFootballMatch(): FootballMatch? {

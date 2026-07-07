@@ -53,7 +53,7 @@ fun NovelDetailScreen(
 
     LaunchedEffect(novel.detailPageUrl) {
         isLoadingChapters = true
-        chapters = if (novel.isManga) {
+        chapters = if (novel.isManga || novel.isComic) {
             repository.fetchMangaChapters(novel.detailPageUrl, novel.sourceName).map {
                 Chapter(
                     title = it.title,
@@ -415,7 +415,7 @@ fun NovelDetailScreen(
                                                     sourceName = novel.sourceName
                                                 )
                                             )
-                                            if (novel.isManga) {
+                                            if (novel.isManga || novel.isComic) {
                                                 val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
                                                 if (pages.isNotEmpty()) {
                                                     val localPages = cacheMangaChapterPages(
