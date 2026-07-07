@@ -87,6 +87,11 @@ fun App(
     val footballStreamUrl = remember { mutableStateOf<String?>(null) }
     val footballStreamTitle = remember { mutableStateOf("") }
 
+    // WWE navigation state
+    val selectedWweEvent = remember { mutableStateOf<WweEvent?>(null) }
+    val wweStreamUrl = remember { mutableStateOf<String?>(null) }
+    val wweStreamTitle = remember { mutableStateOf("") }
+
     val repository = remember {
         NovelSearchRepository(
             rapidApiKey = BuildKonfig.RAPID_API_KEY,
@@ -339,6 +344,8 @@ fun App(
         val canNavigateBack =
             animeStreamUrl.value != null ||
                 footballStreamUrl.value != null ||
+                wweStreamUrl.value != null ||
+                selectedWweEvent.value != null ||
                 selectedFootballMatch.value != null ||
                 selectedChapterUrl.value != null ||
                 selectedAnime.value != null ||
@@ -352,6 +359,11 @@ fun App(
                     animeStreamUrl.value = null
                     animePreviewLimitMs.value = null
                 }
+                wweStreamUrl.value != null -> {
+                    wweStreamUrl.value = null
+                    wweStreamTitle.value = ""
+                }
+                selectedWweEvent.value != null -> selectedWweEvent.value = null
                 footballStreamUrl.value != null -> {
                     footballStreamUrl.value = null
                     footballStreamTitle.value = ""
@@ -394,6 +406,32 @@ fun App(
                             footballStreamTitle.value = title
                         },
                         onBack = { selectedFootballMatch.value = null }
+                    )
+                }
+
+                // ── 0c. WWE full-screen player ────────────────────────────
+                wweStreamUrl.value != null -> {
+                    AnimePlayerScreen(
+                        streamUrl = wweStreamUrl.value!!,
+                        episodeTitle = wweStreamTitle.value,
+                        currentTheme = appTheme.value,
+                        onBack = {
+                            wweStreamUrl.value = null
+                            wweStreamTitle.value = ""
+                        }
+                    )
+                }
+
+                // ── 0d. WWE event detail screen ───────────────────────────
+                selectedWweEvent.value != null -> {
+                    WweMatchScreen(
+                        event = selectedWweEvent.value!!,
+                        currentTheme = appTheme.value,
+                        onPlayStream = { url, title ->
+                            wweStreamUrl.value = url
+                            wweStreamTitle.value = title
+                        },
+                        onBack = { selectedWweEvent.value = null }
                     )
                 }
 
@@ -624,10 +662,13 @@ fun App(
                                     favorites = favorites.toList(),
                                     onSubscribePlan = { planId -> beginPremiumCheckout(planId) }
                                 )
-                                BottomTab.FOOTBALL -> FootballHomeScreen(
+                                BottomTab.SPORTS -> SportsHomeScreen(
                                     currentTheme = appTheme.value,
-                                    onMatchSelected = { match ->
+                                    onFootballMatchSelected = { match ->
                                         selectedFootballMatch.value = match
+                                    },
+                                    onWweEventSelected = { event ->
+                                        selectedWweEvent.value = event
                                     }
                                 )
                                 BottomTab.YOU -> {
@@ -942,7 +983,7 @@ fun App(
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.Home),
     FAVORITES("Favorites", Icons.Default.Favorite),
-    FOOTBALL("Football", Icons.Default.SportsSoccer),
+    SPORTS("Sports", Icons.Default.SportsSoccer),
     READ("Read", Icons.Default.MenuBook),
     YOU("You", Icons.Default.Person)
 }

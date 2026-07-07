@@ -2,30 +2,25 @@ package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
-import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import com.alexleoreeves.novelapp.ui.theme.cardColor
-import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
+import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.launch
 
@@ -38,20 +33,48 @@ fun MovieDetailScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val httpClient = remember { platformHttpClient() }
     // Parse ID and type from tmdb://{mediaType}/{id}
     val parts = media.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
     val tmdbId = parts.getOrNull(1) ?: ""
 
-    val scraper = remember { TMDBMovieScraper(platformHttpClient()) }
+    val scraper = remember { TMDBMovieScraper(httpClient) }
     var episodesList by remember { mutableStateOf<List<MediaEpisode>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(false) }
+    var selectedServer by remember { mutableStateOf(0) }
+    var statusText by remember { mutableStateOf("") }
+    val serverNames = listOf(
+        "CinePro (Direct)",
+        "SuperEmbed (Direct)",
+        "VidLink",
+        "AutoEmbed",
+        "VidSrc.me",
+        "EmbedSu",
+        "VidSrc.cc",
+        "2Embed"
+    )
 
     LaunchedEffect(tmdbId) {
         if (mediaType == "tv") {
             isLoadingEpisodes = true
             episodesList = scraper.fetchTVSeasonsAndEpisodes(tmdbId)
             isLoadingEpisodes = false
+        }
+    }
+
+    fun buildMoviePlayUrl(type: String, id: String, season: String = "1", episode: String = "1"): String {
+        if (id.isBlank()) return ""
+        return when (selectedServer) {
+            0 -> { statusText = "Resolving via CinePro..."; return@buildMoviePlayUrl "" }  // handled by CinePro coroutine
+            1 -> buildSuperEmbedUrl(id, type, season, episode)
+            2 -> buildVidLinkUrl(id, type, season, episode)
+            3 -> if (type == "movie") "https://player.autoembed.cc/movie/$id" else "https://player.autoembed.cc/tv/$id/$season/$episode"
+            4 -> if (type == "movie") "https://vidsrc.me/embed/movie?tmdb=$id" else "https://vidsrc.me/embed/tv?tmdb=$id&season=$season&episode=$episode"
+            5 -> buildEmbedSuUrl(id, type, season, episode)
+            6 -> if (type == "movie") "https://vidsrc.cc/v2/embed/movie/$id" else "https://vidsrc.cc/v2/embed/tv/$id/$season/$episode"
+            7 -> if (type == "movie") "https://2embed.cc/embed/$id" else "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
+            else -> buildVidLinkUrl(id, type, season, episode)
         }
     }
 
@@ -162,6 +185,37 @@ fun MovieDetailScreen(
                 )
             }
 
+            // Server Selector
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                Text("Streaming Server", color = currentTheme.textColor(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    serverNames.forEachIndexed { idx, name ->
+                        FilterChip(
+                            selected = selectedServer == idx,
+                            onClick = { selectedServer = idx },
+                            label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = currentTheme.accentColor(),
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (statusText.isNotEmpty()) {
+                Text(
+                    text = statusText,
+                    color = currentTheme.accentColor(),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                )
+            }
+
             // Playback controls (TV vs Movie)
             if (mediaType == "movie") {
                 Box(
@@ -172,8 +226,20 @@ fun MovieDetailScreen(
                 ) {
                     Button(
                         onClick = {
-                            val playUrl = "https://vidlink.pro/movie/$tmdbId"
-                            onPlayEpisode(playUrl, media.title)
+                            scope.launch {
+                                statusText = "Resolving ${serverNames.getOrNull(selectedServer) ?: "server"}..."
+                                val playUrl = if (selectedServer == 0) {
+                                    resolveCineProStream(httpClient, "movie", tmdbId)
+                                } else {
+                                    buildMoviePlayUrl("movie", tmdbId)
+                                }
+                                if (playUrl.isNullOrBlank()) {
+                                    statusText = "Stream unavailable for selected server. Try a different server."
+                                    return@launch
+                                }
+                                statusText = ""
+                                onPlayEpisode(playUrl, media.title)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()),
                         modifier = Modifier
@@ -215,11 +281,23 @@ fun MovieDetailScreen(
                             episodesList.forEach { ep ->
                                 Card(
                                     onClick = {
-                                        val parts = ep.url.split(":")
-                                        val s = parts.getOrNull(2) ?: "1"
-                                        val e = parts.getOrNull(3) ?: "1"
-                                        val playUrl = "https://vidlink.pro/tv/$tmdbId/$s/$e"
-                                        onPlayEpisode(playUrl, "${media.title} - ${ep.title}")
+                                        scope.launch {
+                                            statusText = "Resolving ${serverNames.getOrNull(selectedServer) ?: "server"}..."
+                                            val epParts = ep.url.split(":")
+                                            val s = epParts.getOrNull(2) ?: "1"
+                                            val e = epParts.getOrNull(3) ?: "1"
+                                            val playUrl = if (selectedServer == 0) {
+                                                resolveCineProStream(httpClient, "tv", tmdbId, s, e)
+                                            } else {
+                                                buildMoviePlayUrl("tv", tmdbId, s, e).takeIf { it.isNotBlank() } ?: buildVidLinkUrl(tmdbId, "tv", s, e)
+                                            }
+                                            if (playUrl.isNullOrBlank()) {
+                                                statusText = "Stream unavailable for selected server. Try a different server."
+                                                return@launch
+                                            }
+                                            statusText = ""
+                                            onPlayEpisode(playUrl, "${media.title} - ${ep.title}")
+                                        }
                                     },
                                     shape = RoundedCornerShape(10.dp),
                                     colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),

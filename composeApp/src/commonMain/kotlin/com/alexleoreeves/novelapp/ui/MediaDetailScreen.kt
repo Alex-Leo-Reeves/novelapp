@@ -59,6 +59,7 @@ fun MediaDetailScreen(
     val dramaScraper = remember { DramaCoolScraper(httpClient) }
     val cartoonScraper = remember { KimCartoonScraper(httpClient) }
     val wcoStreamScraper = remember { WcoStreamScraper(httpClient) }
+    val youtubeNollywoodScraper = remember { YouTubeNollywoodScraper(httpClient) }
 
     val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
@@ -77,7 +78,8 @@ fun MediaDetailScreen(
     val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
     val embedServerNames = listOf("Web fallback: VidLink", "Web fallback: AutoEmbed", "Web fallback: VidSrc.me", "Web fallback: EmbedSu", "Web fallback: VidSrc.cc", "Web fallback: 2Embed")
     val embedServerKeys = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
-    val serverNames = listOf("Direct first") + embedServerNames
+    val directServerNames = listOf("CinePro (Direct)", "SuperEmbed (Direct)")
+    val serverNames = listOf("Direct first") + embedServerNames + directServerNames
     val freeMoviePreviewMs = 20 * 60 * 1000L
     val freeEpisodeCount = remember(episodesList, isPremium) {
         if (isPremium || episodesList.isEmpty()) episodesList.size
@@ -125,8 +127,64 @@ fun MediaDetailScreen(
         "CARTOON" -> ContentType.CARTOON
         "K_DRAMA" -> ContentType.K_DRAMA
         "CLASSIC" -> ContentType.CLASSIC
+        "DONGHUA" -> ContentType.MOVIE
         "NIGERIAN" -> ContentType.NIGERIAN
         else -> ContentType.ANIME
+    }
+
+    suspend fun resolvePlayableRoute(
+        type: String,
+        id: String,
+        season: String = "1",
+        episode: String = "1"
+    ): String? {
+        if (id.isBlank()) {
+            statusText = "Provider match unavailable for this title."
+            return null
+        }
+        val cineproIndex = serverNames.indexOfFirst { it.contains("CinePro", ignoreCase = true) }
+        val superembedIndex = serverNames.indexOfFirst { it.contains("SuperEmbed", ignoreCase = true) }
+
+        // CinePro selected: resolve via CinePro API directly
+        if (selectedServer == cineproIndex) {
+            statusText = "Resolving via CinePro..."
+            val cineproUrl = resolveCineProStream(httpClient, type, id, season, episode)
+            if (cineproUrl != null) {
+                statusText = ""
+                return cineproUrl
+            }
+            statusText = "CinePro stream unavailable. Try another server."
+            return null
+        }
+
+        // SuperEmbed selected: build SuperEmbed URL directly
+        if (selectedServer == superembedIndex) {
+            statusText = "Opening via SuperEmbed..."
+            return buildSuperEmbedUrl(id, type, season, episode)
+        }
+
+        // Default path (server index 0) or web fallback embed server: try backend first
+        val direct = resolveBackendMediaStream(httpClient, type, id, season, episode)
+        if (direct?.isDirect == true) {
+            statusText = ""
+            return direct.url
+        }
+        // Both movies and TV (K-Drama/Cartoon/Anime): fall back to web embed page
+        // (VidLink, AutoEmbed, embed.su, etc.) — same pipeline, respecting user's server selection.
+        val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
+        if (fallback != null) {
+            val selected = serverNames.getOrNull(selectedServer).orEmpty()
+            statusText = if (selectedServer == 0) {
+                "Direct stream unavailable; opening Web fallback: VidLink."
+            } else {
+                "Direct stream unavailable; opening $selected."
+            }
+            return fallback
+        }
+        statusText = direct?.message
+            ?.takeIf { it.isNotBlank() }
+            ?: "Direct stream unavailable. Try a different episode."
+        return null
     }
 
     fun downloadEpisode(ep: MediaEpisode) {
@@ -158,19 +216,12 @@ fun MediaDetailScreen(
                                 val tvId = urlParts.getOrNull(1) ?: tmdbId
                                 val s = urlParts.getOrNull(2) ?: "1"
                                 val e = urlParts.getOrNull(3) ?: "1"
-                                resolveBackendMediaStream(httpClient, "tv", tvId, s, e)?.url
-                                    ?: buildWebFallbackStream("tv", tvId, s, e, selectedServer)
+                                resolvePlayableRoute("tv", tvId, s, e)
                             }
                             isDramaCoolDetail -> {
                                 if (providerTmdbId.isNotBlank()) {
-                                    if (providerTmdbType == "movie") {
-                                        resolveBackendMediaStream(httpClient, "movie", providerTmdbId, "1", "1")?.url
-                                            ?: buildWebFallbackStream("movie", providerTmdbId, server = selectedServer)
-                                    } else {
-                                        val episodeNumber = ep.episodeNumber.coerceAtLeast(1).toString()
-                                        resolveBackendMediaStream(httpClient, "tv", providerTmdbId, "1", episodeNumber)?.url
-                                            ?: buildWebFallbackStream("tv", providerTmdbId, "1", episodeNumber, selectedServer)
-                                    }
+                                    val epNum = ep.episodeNumber.coerceAtLeast(1).toString()
+                                    resolvePlayableRoute(providerTmdbType, providerTmdbId, "1", epNum)
                                 } else {
                                     dramaScraper.extractStreamUrl(ep.url)
                                         ?.takeIf { it.isDirectPlayableStreamUrl() }
@@ -178,18 +229,16 @@ fun MediaDetailScreen(
                             }
                             isKimCartoonDetail -> {
                                 if (providerTmdbId.isNotBlank()) {
-                                    if (providerTmdbType == "movie") {
-                                        resolveBackendMediaStream(httpClient, "movie", providerTmdbId, "1", "1")?.url
-                                            ?: buildWebFallbackStream("movie", providerTmdbId, server = selectedServer)
-                                    } else {
-                                        val episodeNumber = ep.episodeNumber.coerceAtLeast(1).toString()
-                                        resolveBackendMediaStream(httpClient, "tv", providerTmdbId, "1", episodeNumber)?.url
-                                            ?: buildWebFallbackStream("tv", providerTmdbId, "1", episodeNumber, selectedServer)
-                                    }
+                                    val epNum = ep.episodeNumber.coerceAtLeast(1).toString()
+                                    resolvePlayableRoute(providerTmdbType, providerTmdbId, "1", epNum)
                                 } else {
                                     cartoonScraper.extractStreamUrl(ep.url)
                                         ?.takeIf { it.isDirectPlayableStreamUrl() }
                                 }
+                            }
+                            isWcoStreamDetail -> {
+                                wcoStreamScraper.extractStreamUrl(ep.url)
+                                    ?.takeIf { it.isDirectPlayableStreamUrl() }
                             }
                             else -> ep.url
                         }
@@ -250,39 +299,7 @@ fun MediaDetailScreen(
     }
 
     val isMovieContent = mediaType == "movie"
-
-    suspend fun resolvePlayableRoute(
-        type: String,
-        id: String,
-        season: String = "1",
-        episode: String = "1"
-    ): String? {
-        if (id.isBlank()) {
-            statusText = "Provider match unavailable for this title."
-            return null
-        }
-        val direct = resolveBackendMediaStream(httpClient, type, id, season, episode)
-        if (direct?.isDirect == true) {
-            statusText = ""
-            return direct.url
-        }
-        // Both movies and TV (K-Drama/Cartoon/Anime): fall back to web embed page
-        // (VidLink, AutoEmbed, embed.su, etc.) — same pipeline, respecting user's server selection.
-        val fallback = resolveWebFallbackStream(type, id, season, episode, selectedServer)
-        if (fallback != null) {
-            val selected = serverNames.getOrNull(selectedServer).orEmpty()
-            statusText = if (selectedServer == 0) {
-                "Direct stream unavailable; opening Web fallback: VidLink."
-            } else {
-                "Direct stream unavailable; opening $selected."
-            }
-            return fallback
-        }
-        statusText = direct?.message
-            ?.takeIf { it.isNotBlank() }
-            ?: "Direct stream unavailable. Try a different episode."
-        return null
-    }
+    val isYouTubeNollywood = item.id.startsWith("youtube_nollywood_")
 
     LaunchedEffect(item.detailPageUrl) {
         selectedServer = 0
@@ -522,6 +539,41 @@ fun MediaDetailScreen(
                     text = statusText,
                     color = currentTheme.accentColor(),
                     style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            // YouTube Nollywood: Single Play button using Piped API
+            if (isYouTubeNollywood) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            statusText = "Resolving ad-free stream via Piped..."
+                            val prefix = "youtube_nollywood_"
+                            val videoId = item.id.removePrefix(prefix)
+                            val streamUrl = youtubeNollywoodScraper.extractStreamUrl(videoId)
+                            if (streamUrl != null) {
+                                onPlayStream(streamUrl, item.title, null)
+                            } else {
+                                statusText = "Could not resolve stream. The video may be unavailable or Piped instance may be down."
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor())
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Watch on ExoPlayer (Piped)", fontWeight = FontWeight.Bold)
+                }
+
+                Text(
+                    text = "📺 Ad-free playback via Piped API. No YouTube redirects or ads.",
+                    color = currentTheme.subTextColor(),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
 
@@ -867,14 +919,4 @@ private fun resolveWebFallbackStream(
             else -> "https://vidlink.pro/tv/$id/$season/$episode"
         }
     }
-}
-
-private fun String.isDirectPlayableStreamUrl(): Boolean {
-    val clean = substringBefore("?").substringBefore("#").lowercase()
-    return clean.endsWith(".m3u8") ||
-        clean.endsWith(".mp4") ||
-        clean.endsWith(".mpd") ||
-        clean.endsWith(".webm") ||
-        Regex("""/(playlist|manifest|hls|dash)(/|$)""").containsMatchIn(clean) ||
-        startsWith("file:", ignoreCase = true)
 }

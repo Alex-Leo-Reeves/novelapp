@@ -1,7 +1,8 @@
-# Fix Issues
+# YouTubeNollywoodScraper Integration Todo
 
-- [ ] 1. Fix update loop bug - bump versionCode to 25, versionName to "1.24" in both app-version.json and AppReleaseConfig.kt, build.gradle.kts
-- [ ] 2. Fix Kokoro not playing - copy ONNX model to kokoro-assets-runtime/
-- [ ] 3. Fix Football "No matches found" on Upcoming tab - better fallback + error message
-- [ ] 4. Improve Football stream fallback - add more sources beyond streamed.su
-- [ ] 5. Verify Nigerian Films tab is fully wired (already implemented)
+- [x] YouTubeNollywoodScraper class already defined in MovieScrapers.kt
+- [x] isNonPlayableVideoProviderUrl() already updated (no longer blocks piped URLs)
+- [x] Wire YouTubeNollywoodScraper into NovelSearchRepository.kt (fetchVideo + searchVideo for NIGERIAN)
+- [x] Add MediaResult → UnifiedSearchResult conversion helper
+- [x] Wire MediaDetailScreen.kt to handle YOUTUBE_NOLLY playback
+- [x] Verify build compiles

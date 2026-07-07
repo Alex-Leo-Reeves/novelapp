@@ -63,9 +63,10 @@ class TmdbSource(
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
         when (category) {
             VideoCategory.ANIME -> fetchAnime(page)
+            VideoCategory.DONGHUA -> fetchDonghua(page)
             VideoCategory.K_DRAMA -> fetchKDrama(page)
             VideoCategory.CARTOON -> fetchCartoons(page)
-            VideoCategory.CLASSIC -> fetchClassicTv(page)  // classic live-action TV + non-anime cartoons
+            VideoCategory.CLASSIC -> fetchClassicTv(page)
             VideoCategory.MOVIES -> fetchMovies(page)
             VideoCategory.NIGERIAN -> fetchNigerian(page)
         }
@@ -89,6 +90,16 @@ class TmdbSource(
                         item.genre.contains("Korean", ignoreCase = true) ||
                             item.genre.contains("South Korea", ignoreCase = true)
                     }.ifEmpty { results }
+                }
+            VideoCategory.DONGHUA -> (searchMovie(query, page, category) + searchTv(query, page, category))
+                .filter { item ->
+                    item.genre.contains("Chinese", ignoreCase = true) ||
+                        item.genre.contains("zh", ignoreCase = true)
+                }
+                .ifEmpty { (searchMovie(query, page, category) + searchTv(query, page, category)) }
+                .distinctBy { it.id }
+                .map { item ->
+                    item.copy(genre = "Donghua, Chinese, ${item.genre}")
                 }
             VideoCategory.CARTOON -> (searchMovie(query, page, category) + searchTv(query, page, category))
                 .filter { item ->
@@ -121,6 +132,47 @@ class TmdbSource(
                 }
                 .ifEmpty { searchMulti(query, page, category) }
         }
+
+    /** Donghua: Chinese anime — fetch popular TV + Movie and filter for Chinese language + animation */
+    private suspend fun fetchDonghua(page: Int): List<UnifiedSearchResult> = runCatching {
+        val tvResults = discover("tv", page, VideoCategory.DONGHUA) {
+            parameter("with_original_language", "zh")
+            parameter("with_genres", "16")  // Animation genre
+            parameter("sort_by", "popularity.desc")
+            parameter("include_adult", "false")
+        }
+        val movieResults = discover("movie", page, VideoCategory.DONGHUA) {
+            parameter("with_original_language", "zh")
+            parameter("with_genres", "16")  // Animation genre
+            parameter("sort_by", "popularity.desc")
+            parameter("include_adult", "false")
+        }
+        val chineseMoviesNoAnim = if (tvResults.size + movieResults.size < 16) {
+            // Broader search: Chinese movies (non-animation) for variety
+            discover("movie", page, VideoCategory.DONGHUA) {
+                parameter("with_original_language", "zh")
+                parameter("sort_by", "popularity.desc")
+                parameter("include_adult", "false")
+            }.filter { item ->
+                val genre = item.genre.lowercase()
+                !genre.contains("japanese") && !genre.contains("korean")
+            }
+        } else {
+            emptyList()
+        }
+        // Deduplicate and add donghua/chinese label
+        (tvResults + movieResults + chineseMoviesNoAnim)
+            .distinctBy { it.id }
+            .map { item ->
+                val genreLabel = if (item.genre.contains("Animation", ignoreCase = true)) {
+                    "Donghua, Chinese, ${item.genre}"
+                } else {
+                    "Chinese Movie, ${item.genre}"
+                }
+                item.copy(genre = genreLabel)
+            }
+            .take(48)
+    }.getOrElse { emptyList() }
 
     /** K-Drama: fetch popular/weekly trending TV and filter for Korean */
     private suspend fun fetchKDrama(page: Int): List<UnifiedSearchResult> = runCatching {
@@ -166,21 +218,53 @@ class TmdbSource(
             .distinctBy { it.id }
     }.getOrElse { emptyList() }
 
-    /** Anime: fetch popular/weekly trending TV and filter for Japanese + animation */
+    /** Anime: fetch popular/weekly trending TV and filter for Japanese + animation
+     *  Also includes live-action adaptations of anime/manga (tagged with keyword
+     *  "anime-live-action" or matching known live-action titles).
+     */
     private suspend fun fetchAnime(page: Int): List<UnifiedSearchResult> = runCatching {
-        val result = trending("tv", page)
+        // Source 1: Pure Japanese animation
+        val anime = trending("tv", page)
             .filter { item ->
                 item.genre.contains("Japanese", ignoreCase = true) &&
                     item.genre.contains("Animation", ignoreCase = true)
             }
-        (result + discover("tv", page, VideoCategory.ANIME) {
+        (anime + discover("tv", page, VideoCategory.ANIME) {
             parameter("with_genres", "16")
             parameter("with_original_language", "ja")
             parameter("sort_by", "popularity.desc")
         })
             .filter { item -> item.genre.contains("Japanese", ignoreCase = true) && item.genre.contains("Animation", ignoreCase = true) }
+
+        // Source 2: Anime live-action adaptations — search known keywords
+        val liveActionTitles = listOf(
+            "One Piece", "Death Note", "Fullmetal Alchemist", "Rurouni Kenshin",
+            "Gintama", "Erased", "Parasyte", "Bleach", "Attack on Titan",
+            "Alice in Borderland", "High & Low", "Kamen Rider", "Super Sentai",
+            "Boys Over Flowers", "Hana Yori Dango", "Itazura na Kiss",
+            "Good Morning Call", "From Me to You", "Ao Haru Ride",
+            "Your Lie in April", "Tokyo Ghoul", "JoJo's Bizarre Adventure",
+            "The Promised Neverland", "Ghost in the Shell", "Alita",
+            "Speed Racer", "Dragonball Evolution", "Cowboy Bebop",
+            "Samurai X", "Lupin III", "Crows Zero", "Terra Formars"
+        )
+        val liveActionResults = searchMulti("anime live action", page, VideoCategory.ANIME)
+            .filter { item ->
+                val title = item.title.lowercase()
+                liveActionTitles.any { knownTitle ->
+                    title.contains(knownTitle.lowercase()) || knownTitle.lowercase().contains(title)
+                }
+            }
+            .map { item -> item.copy(genre = "Anime Live-Action, ${item.genre}") }
+
+        (anime + liveActionResults)
             .distinctBy { it.id }
-    }.getOrElse { emptyList() }
+            .take(48)
+    }.getOrElse {
+        // Fallback: trending TV filtered for Japanese
+        trending("tv", page)
+            .filter { item -> item.genre.contains("Japanese", ignoreCase = true) }
+    }
 
     private suspend fun fetchMovies(page: Int): List<UnifiedSearchResult> =
         discover("movie", page, VideoCategory.MOVIES) {
@@ -326,27 +410,98 @@ class TmdbSource(
 
     /** Nigerian Films: fetch popular movies with Nigerian/Nollywood connection */
     private suspend fun fetchNigerian(page: Int): List<UnifiedSearchResult> = runCatching {
-        // Strategy 1: Discover movies/TV with Nigerian origin country
-        val movies = discover("movie", page, VideoCategory.NIGERIAN) {
-            parameter("with_origin_country", "NG")
-            parameter("sort_by", "popularity.desc")
-            parameter("include_adult", "false")
-        }
-        val tv = discover("tv", page, VideoCategory.NIGERIAN) {
-            parameter("with_origin_country", "NG")
-            parameter("sort_by", "popularity.desc")
-            parameter("include_adult", "false")
-        }
-        val results = (movies + tv).distinctBy { it.id }
+        val results = mutableListOf<UnifiedSearchResult>()
 
-        // Strategy 2: If Nigerian origin returns little, search for Nollywood
+        // Strategy 1: Known Nollywood titles with verified TMDB IDs (direct lookup)
+        // Each entry has a real TMDB ID — fetches the current poster/overview from TMDB API
+        val nollywoodScraper = NollywoodScraper(client)
+        val knownResults = nollywoodScraper.fetchNollywoodFeed(page)
+        if (knownResults.isNotEmpty()) {
+            results.addAll(knownResults.map { toUnifiedNollywood(it) })
+        }
+        println("[TMDB Nollywood] Known titles returned ${knownResults.size} items for page $page")
+
+        // Strategy 2: Nollywood-specific keyword search on movies (TMDB multi-search)
+        if (results.size < 18) {
+            val nollywoodMovies = searchMulti("Nollywood", page, VideoCategory.NIGERIAN)
+            results.addAll(nollywoodMovies)
+        }
+
+        // Strategy 3: Discover movies/TV with Nigerian origin country
+        if (results.size < 12) {
+            val movies = discover("movie", page, VideoCategory.NIGERIAN) {
+                parameter("with_origin_country", "NG")
+                parameter("sort_by", "popularity.desc")
+                parameter("include_adult", "false")
+            }
+            results.addAll(movies)
+        }
+        if (results.size < 12) {
+            val tv = discover("tv", page, VideoCategory.NIGERIAN) {
+                parameter("with_origin_country", "NG")
+                parameter("sort_by", "popularity.desc")
+                parameter("include_adult", "false")
+            }
+            results.addAll(tv)
+        }
+
+        // Strategy 4: Nollywood keyword TV search
         if (results.size < 8) {
-            val nollywood = searchMulti("Nollywood", page, VideoCategory.NIGERIAN)
-            results + nollywood
-        } else results
+            val tvNollywood = searchMulti("Nollywood TV", page, VideoCategory.NIGERIAN)
+            results.addAll(tvNollywood)
+        }
+
+        // Strategy 5: Nigerian TV shows (for series like "The Johnsons")
+        if (results.size < 6) {
+            val nigeriaTv = searchMulti("Nigeria TV", page, VideoCategory.NIGERIAN)
+            results.addAll(nigeriaTv)
+        }
+
+        // Strategy 6: African films (broader net — catches more Nollywood via tags)
+        if (results.size < 5) {
+            val africanFilms = searchMulti("African film", page, VideoCategory.NIGERIAN)
+            results.addAll(africanFilms)
+        }
+
+        // Strategy 7: Additional keyword searches for more variety
+        if (results.size < 10 && page <= 2) {
+            val extraKeywords = listOf("Lagos", "Yoruba", "Naija", "Ghana")
+            for (kw in extraKeywords) {
+                if (results.size >= 20) break
+                val extra = searchMulti(kw, page, VideoCategory.NIGERIAN)
+                results.addAll(extra)
+            }
+        }
+
+        println("[TMDB Nollywood] Total ${results.size} items for page $page")
+        results.distinctBy { it.id }.take(48)
     }.getOrElse {
         // Ultimate fallback: just search "Nollywood"
-        searchMulti("Nollywood", page, VideoCategory.NIGERIAN)
+        searchMulti("Nollywood", page, VideoCategory.NIGERIAN).take(48)
+    }
+
+    /**
+     * Convert a MediaResult from NollywoodScraper into UnifiedSearchResult
+     * using the TMDB-based ID format that the existing embed servers handle.
+     */
+    private fun toUnifiedNollywood(media: MediaResult): UnifiedSearchResult {
+        // Extract tmdbType and tmdbId from the media result id ("tmdb_movie_408380" → "movie", "408380")
+        val (tmdbType, tmdbId) = media.id.removePrefix("tmdb_").split("_", limit = 2).let { parts ->
+            Pair(parts.getOrNull(0) ?: "movie", parts.getOrNull(1) ?: "")
+        }
+        val detailUrl = "tmdb://$tmdbType/$tmdbId"
+        return UnifiedSearchResult(
+            id = media.id,
+            title = media.title,
+            coverUrl = media.coverUrl,
+            detailPageUrl = detailUrl,
+            sourceName = "TMDB",
+            genre = media.genres.ifBlank { "Nigerian, Nollywood" },
+            synopsis = media.description,
+            isVideo = true,
+            mediaKind = VideoCategory.NIGERIAN.name,
+            url = detailUrl
+        )
     }
 
     private suspend fun searchTv(
