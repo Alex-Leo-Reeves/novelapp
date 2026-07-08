@@ -191,9 +191,22 @@ function cleanBaseUrl(value) {
     return String(value || "").trim().replace(/\/+$/, "");
 }
 
+const APP_VERSION_CACHE = { payload: null, mtimeMs: 0, apkMtimeMs: 0 };
+
 function buildAppVersionPayload() {
     const appVersionPath = path.join(SITE_DIR, "app-version.json");
     const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
+    const now = Date.now();
+
+    // Check if files have changed
+    const appVersionMtime = fs.existsSync(appVersionPath) ? fs.statSync(appVersionPath).mtimeMs : 0;
+    const apkMtime = fs.existsSync(apkPath) ? fs.statSync(apkPath).mtimeMs : 0;
+    const cache = APP_VERSION_CACHE;
+
+    if (cache.payload !== null && appVersionMtime === cache.mtimeMs && apkMtime === cache.apkMtimeMs) {
+        return JSON.parse(JSON.stringify(cache.payload));
+    }
+
     let payload = {
         versionCode: 25,
         versionName: "1.24",
@@ -220,6 +233,10 @@ function buildAppVersionPayload() {
         payload.apkBytes = stat.size;
         payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
     }
+
+    cache.payload = JSON.parse(JSON.stringify(payload));
+    cache.mtimeMs = appVersionMtime;
+    cache.apkMtimeMs = apkMtime;
 
     return payload;
 }
