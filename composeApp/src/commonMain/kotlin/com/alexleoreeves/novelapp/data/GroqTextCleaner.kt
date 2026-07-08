@@ -47,8 +47,8 @@ object GroqTextCleaner {
         }
         return try {
             val response = client.post("https://api.groq.com/openai/v1/chat/completions") {
-                accept(ContentType.Application.Json)
-                contentType(ContentType.Application.Json)
+                accept(ContentType.parse("application/json"))
+                contentType(ContentType.parse("application/json"))
                 bearerAuth(apiKey)
                 setBody(
                     buildJsonObject {

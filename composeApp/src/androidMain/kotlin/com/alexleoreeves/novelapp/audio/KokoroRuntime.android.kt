@@ -37,24 +37,23 @@ actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): Koko
             .getOrElse { error ->
                 val diagnostics = AndroidKokoroEngine.diagnosticsFor(request, error)
                 println("[Kokoro] Android ONNX synthesis failed: $diagnostics")
+                println("[Kokoro] Falling back to Android TTS synthesizeToFile for segment=${request.segmentIndex}")
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Error,
-                    message = "Kokoro ONNX failed: ${error.message ?: "unknown error"}"
+                    phase = KokoroVoiceSetupPhase.Fallback,
+                    message = "Using Android system speech (ONNX unavailable)."
                 )
-                throw error
+                try {
+                    AndroidSystemTtsEngine.synthesizeToFile(request)
+                } catch (ttsError: Exception) {
+                    println("[Kokoro] Android TTS fallback also failed: ${ttsError.message}")
+                    KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                        phase = KokoroVoiceSetupPhase.Error,
+                        message = "Kokoro ONNX failed: ${error.message ?: "unknown error"}"
+                    )
+                    throw error
+                }
             }
     }
-
-private suspend fun androidSpeechFallback(
-    request: KokoroSynthesisRequest,
-    message: String
-): KokoroSynthesisResult {
-    KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-        phase = KokoroVoiceSetupPhase.Fallback,
-        message = message
-    )
-    return AndroidSystemTtsEngine.estimate(request)
-}
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {
     if (result.engineName == AndroidSystemTtsEngine.ENGINE_NAME) {
@@ -480,13 +479,19 @@ private object AndroidKokoroEngine {
         request: KokoroSynthesisRequest,
         phonemization: KokoroPhonemization
     ): KokoroSynthesisResult {
+        println("[Kokoro] SYNTHESIZE segment=${request.segmentIndex} voice=${request.voiceId} " +
+            "textChars=${request.text.length} tokens=${phonemization.tokenIds.size}")
         val assetDir = ensureAssets()
-        val activeSession = session ?: createSession(File(assetDir, "model_quantized.onnx")).also { session = it }
+        val activeSession = session ?: createSession(File(assetDir, "model_quantized.onnx")).also {
+            session = it
+            println("[Kokoro] Session created successfully")
+        }
         val paddedTokens = LongArray(phonemization.tokenIds.size + 2)
         paddedTokens[0] = 0L
         phonemization.tokenIds.forEachIndexed { index, token -> paddedTokens[index + 1] = token.toLong() }
         paddedTokens[paddedTokens.lastIndex] = 0L
         val style = voiceStyle(assetDir, request.voiceId, phonemization.tokenIds.size)
+        println("[Kokoro] Voice style loaded: voice=${request.voiceId} frameCount=${style.size / 256} tokenCount=${phonemization.tokenIds.size}")
 
         OnnxTensor.createTensor(environment, arrayOf(paddedTokens)).use { inputIds ->
             OnnxTensor.createTensor(environment, arrayOf(style)).use { styleTensor ->
@@ -835,11 +840,20 @@ private object AndroidKokoroEngine {
                 error("Kokoro voice '$voiceId' is missing from bundled assets.")
             }
             val bytes = file.readBytes()
+            if (bytes.size % 4 != 0) {
+                error("Kokoro voice '$voiceId' file size ${bytes.size} is not aligned to 4 bytes.")
+            }
             val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-            FloatArray(bytes.size / 4) { buffer.float }
+            val floats = FloatArray(bytes.size / 4) { buffer.float }
+            if (floats.size % 256 != 0) {
+                error("Kokoro voice '$voiceId' has ${floats.size} floats, not divisible by 256 (frameSize).")
+            }
+            println("[Kokoro] Loaded voice '$voiceId': ${floats.size} floats, ${floats.size / 256} frames")
+            floats
         }
         val frameCount = voice.size / 256
         val frame = tokenCount.coerceIn(0, frameCount - 1)
+        println("[Kokoro] Selected voice frame $frame of $frameCount for $tokenCount tokens")
         return voice.copyOfRange(frame * 256, frame * 256 + 256)
     }
 

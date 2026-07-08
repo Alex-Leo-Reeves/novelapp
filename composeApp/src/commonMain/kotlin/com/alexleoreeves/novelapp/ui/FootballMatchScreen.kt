@@ -60,7 +60,12 @@ fun FootballMatchScreen(
             streamUrl = null
             streamUrls = emptyList()
             currentFallbackIndex = 0
-            val urls = footballApi.resolveStreamUrls(match.fixtureId)
+            val urls = footballApi.resolveStreamUrls(
+                fixtureId = match.fixtureId,
+                homeTeam = match.homeTeam,
+                awayTeam = match.awayTeam,
+                leagueName = match.leagueName
+            )
             streamUrls = urls
             if (urls.isEmpty()) {
                 streamError = "No stream available for this match yet. Try again closer to kickoff."
