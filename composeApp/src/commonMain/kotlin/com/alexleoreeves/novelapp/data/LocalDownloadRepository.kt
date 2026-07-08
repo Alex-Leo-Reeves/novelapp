@@ -34,31 +34,58 @@ class LocalDownloadRepository {
 
     // ── Read ──────────────────────────────────────────────────────────────
     fun getAllItems(): List<DownloadedItem> = loadIndex().items
-    fun getAnimeItems(): List<DownloadedItem> {
+
+    /** Returns only items whose episodes/chapters are all present on disk. */
+    private fun getItemsWithAvailableContent(
+        predicate: (DownloadedItem) -> Boolean,
+        checkEpisode: Boolean = false,
+        checkChapter: Boolean = false
+    ): List<DownloadedItem> {
         val idx = loadIndex()
-        val offlineEpisodeParents = idx.episodes
-            .filter { isDownloadedLocalFileAvailable(it.localFilePath) }
-            .map { it.parentId }
-            .toSet()
-        return idx.items.filter { it.type == "ANIME" && it.id in offlineEpisodeParents }
-    }
-    fun getMangaItems(): List<DownloadedItem> {
-        val idx = loadIndex()
-        val offlineChapterParents = idx.chapters
-            .filter { isChapterLocalAvailable(it) }
-            .map { it.parentId }
-            .toSet()
-        return idx.items.filter { it.type == "MANGA" && it.id in offlineChapterParents }
+        val offlineEpisodeParents = if (checkEpisode) {
+            idx.episodes
+                .filter { isDownloadedLocalFileAvailable(it.localFilePath) }
+                .map { it.parentId }
+                .toSet()
+        } else emptySet()
+        val offlineChapterParents = if (checkChapter) {
+            idx.chapters
+                .filter { isChapterLocalAvailable(it) }
+                .map { it.parentId }
+                .toSet()
+        } else emptySet()
+        return idx.items.filter { item ->
+            predicate(item) &&
+                (offlineEpisodeParents.isEmpty() || item.id in offlineEpisodeParents) &&
+                (offlineChapterParents.isEmpty() || item.id in offlineChapterParents)
+        }
     }
 
-    fun getNovelItems(): List<DownloadedItem> {
+    /** Get all downloaded items grouped by their content type */
+    fun getItemsByType(): Map<String, List<DownloadedItem>> {
         val idx = loadIndex()
-        val offlineChapterParents = idx.chapters
-            .filter { isChapterLocalAvailable(it) }
-            .map { it.parentId }
-            .toSet()
-        return idx.items.filter { it.type == "NOVEL" && it.id in offlineChapterParents }
+        return idx.items.groupBy { it.type.uppercase() }
+            .mapValues { (_, items) -> items.sortedByDescending { it.totalItems } }
     }
+
+    /** Get downloaded items of a specific type (episode-based: anime, movie, etc.) */
+    fun getEpisodeTypeItems(type: String): List<DownloadedItem> =
+        getItemsWithAvailableContent({ it.type.equals(type, ignoreCase = true) }, checkEpisode = true)
+
+    /** Get downloaded items of a specific type (chapter-based: manga, novel, comic) */
+    fun getChapterTypeItems(type: String): List<DownloadedItem> =
+        getItemsWithAvailableContent({ it.type.equals(type, ignoreCase = true) }, checkChapter = true)
+
+    // Legacy accessors — delegate to generic versions
+    fun getAnimeItems(): List<DownloadedItem> = getEpisodeTypeItems(ContentType.ANIME)
+    fun getMangaItems(): List<DownloadedItem> = getChapterTypeItems(ContentType.MANGA)
+    fun getNovelItems(): List<DownloadedItem> = getChapterTypeItems(ContentType.NOVEL)
+    fun getMovieItems(): List<DownloadedItem> = getEpisodeTypeItems(ContentType.MOVIE)
+    fun getCartoonItems(): List<DownloadedItem> = getEpisodeTypeItems(ContentType.CARTOON)
+    fun getKDramaItems(): List<DownloadedItem> = getEpisodeTypeItems(ContentType.K_DRAMA)
+    fun getComicItems(): List<DownloadedItem> = getChapterTypeItems(ContentType.COMIC)
+    fun getClassicItems(): List<DownloadedItem> = getEpisodeTypeItems(ContentType.CLASSIC)
+    fun getNigerianItems(): List<DownloadedItem> = getEpisodeTypeItems(ContentType.NIGERIAN)
 
     fun getEpisodesFor(parentId: String): List<DownloadedEpisode> =
         loadIndex().episodes.filter {

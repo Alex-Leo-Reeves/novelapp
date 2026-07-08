@@ -102,6 +102,7 @@ class NovelSearchRepository(
     private val dramaCoolScraper = DramaCoolScraper(httpClient)
     private val kimCartoonScraper = KimCartoonScraper(httpClient)
     private val wcoStreamScraper = WcoStreamScraper(httpClient)
+    private val youtubeNollywoodScraper = YouTubeNollywoodScraper(httpClient)
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Unified Search — Novels + Manga + Anime all simultaneously
@@ -349,7 +350,21 @@ class NovelSearchRepository(
                 results.addAll(server)
             }
 
-            // Source 3: TMDB multi-page for movies (fetch more pages for richer results)
+            // Source 3: TMDB multi-page for donghua (fetch more pages for richer results)
+    if (category == VideoCategory.DONGHUA && results.size < 18) {
+        val more = tmdbSource.fetchVideo(VideoCategory.DONGHUA, page.coerceIn(1, 5) + 1)
+        results.addAll(more)
+        println("[Video Feed] Donghua: ${results.size} items after extra page")
+    }
+
+    // Source 4: Curated Chinese donghua/movie seeds as fallback
+    if (category == VideoCategory.DONGHUA && results.size < 12) {
+        val seeds = curatedChineseContentSeeds(page)
+        println("[Video Feed] Donghua: Curated Chinese seeds (${seeds.size})")
+        results.addAll(seeds)
+    }
+
+    // Source 3 (original): TMDB multi-page for movies
             if (category == VideoCategory.MOVIES && results.size < 18) {
                 for (extraPage in (page.coerceIn(1, 5) + 1)..(page.coerceIn(1, 5) + 2)) {
                     if (results.size >= 36) break
@@ -377,7 +392,16 @@ class NovelSearchRepository(
                 results.addAll(wcoStream)
             }
 
-            // Source 6: Curated fallback seeds when everything else fails
+            // Source 6: YouTube Nollywood via Piped API (for NIGERIAN category)
+            // This brings in fresh YouTube-based Nigerian movie content alongside TMDB.
+            // Piped returns ad-free direct .mp4 streams that play in ExoPlayer.
+            if (category == VideoCategory.NIGERIAN && results.size < 24) {
+                val youtubeNollywood = youtubeNollywoodScraper.fetchYouTubeNollywoodFeed(page)
+                println("[Video Feed] ${category.name}: YouTube Nollywood returned ${youtubeNollywood.size} items")
+                results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
+            }
+
+            // Source 7: Curated fallback seeds when everything else fails
             if (results.isEmpty()) {
                 val seeds = curatedVideoSeeds(category)
                 println("[Video Feed] ${category.name}: Using curated seeds (${seeds.size})")
@@ -428,6 +452,8 @@ class NovelSearchRepository(
                             VideoCategory.ANIME -> media.genres.contains("Animation", ignoreCase = true) &&
                                 media.genres.contains("Japanese", ignoreCase = true)
                             VideoCategory.K_DRAMA -> media.genres.contains("Korean", ignoreCase = true)
+                            VideoCategory.DONGHUA -> media.genres.contains("Animation", ignoreCase = true) &&
+                                media.genres.contains("Chinese", ignoreCase = true)
                             VideoCategory.CARTOON -> media.genres.contains("Animation", ignoreCase = true) &&
                                 !media.genres.contains("Japanese", ignoreCase = true)
                             VideoCategory.CLASSIC -> !media.genres.contains("Japanese", ignoreCase = true) &&
@@ -458,7 +484,16 @@ class NovelSearchRepository(
                 results.addAll(wcoStream)
             }
 
-            // ── Source 5: TMDB trending title-match fallback (broadest net) ──
+            // ── Source 5b: YouTube Nollywood via Piped API (for NIGERIAN category)
+            // Searches YouTube for Nigerian movie content when TMDB returns thin results.
+            // Piped returns ad-free direct .mp4 streams, no ads or tracking.
+            if (category == VideoCategory.NIGERIAN && query.isNotBlank() && results.size < 12) {
+                val youtubeNollywood = youtubeNollywoodScraper.search(query, page)
+                println("[Video Search] ${category.name}: YouTube Nollywood returned ${youtubeNollywood.size} items for '$query'")
+                results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
+            }
+
+            // ── Source 6: TMDB trending title-match fallback (broadest net) ──
             if (results.size < 6 && query.isNotBlank()) {
                 val searchTerms = normalizedQuery.split(" ").filter { it.length > 2 }
                 val trendingMovies = runCatching {
@@ -503,7 +538,7 @@ class NovelSearchRepository(
                 UnifiedSearchResult(
                     id = "curated_classic_$i",
                     title = title,
-                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    coverUrl = "",
                     detailPageUrl = "tmdb://tv/$i",
                     sourceName = "TMDB",
                     genre = "Classic TV",
@@ -522,7 +557,7 @@ class NovelSearchRepository(
                 UnifiedSearchResult(
                     id = "curated_movie_$i",
                     title = title,
-                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    coverUrl = "",
                     detailPageUrl = "tmdb://movie/${300 + i}",
                     sourceName = "TMDB",
                     genre = "Movie",
@@ -540,7 +575,7 @@ class NovelSearchRepository(
                 UnifiedSearchResult(
                     id = "curated_cartoon_$i",
                     title = title,
-                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    coverUrl = "",
                     detailPageUrl = "tmdb://tv/${500 + i}",
                     sourceName = "TMDB",
                     genre = "Animation, Cartoon",
@@ -558,7 +593,7 @@ class NovelSearchRepository(
                 UnifiedSearchResult(
                     id = "curated_kdrama_$i",
                     title = title,
-                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+                    coverUrl = "",
                     detailPageUrl = "tmdb://tv/${700 + i}",
                     sourceName = "TMDB",
                     genre = "Korean Drama, K-Drama",
@@ -567,26 +602,74 @@ class NovelSearchRepository(
                     mediaKind = VideoCategory.K_DRAMA.name
                 )
             }
-            VideoCategory.NIGERIAN -> listOf(
-                "Blood Vessel", "The Wedding Party", "King of Boys", "Lionheart",
-                "The Figurine", "Phone Swap", "October 1", "Omo Ghetto: The Saga",
-                "Chief Daddy", "Living in Bondage: Breaking Free", "Rattle Snake", "Nneka the Pretty Serpent",
-                "Glamour Girls", "Isoken", "Merry Men", "The Bling Lagosians",
-                "Sugar Rush", "Your Excellency", "The Origin: Madam Koi Koi", "Rumour Has It"
-            ).mapIndexed { i, title ->
-                UnifiedSearchResult(
-                    id = "curated_nigerian_$i",
-                    title = title,
-                    coverUrl = "https://image.tmdb.org/t/p/w500/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
-                    detailPageUrl = "tmdb://movie/${400 + i}",
-                    sourceName = "TMDB",
-                    genre = "Nigerian, Nollywood",
-                    synopsis = "",
-                    isVideo = true,
-                    mediaKind = VideoCategory.NIGERIAN.name
-                )
+            VideoCategory.NIGERIAN -> {
+                // Use the known Nollywood titles with real TMDB IDs for fallback seeds.
+                // These come directly from the NollywoodScraper companion object.
+                NollywoodScraper.KNOWN_NOLLYWOOD_TITLES.take(20).mapIndexed { i, entry ->
+                    UnifiedSearchResult(
+                        id = "nollywood_fallback_$i",
+                        title = entry.title,
+                        coverUrl = "",
+                        detailPageUrl = "tmdb://${entry.tmdbType}/${entry.tmdbId}",
+                        sourceName = "TMDB",
+                        genre = entry.genres.ifBlank { "Nigerian, Nollywood" },
+                        synopsis = "",
+                        isVideo = true,
+                        mediaKind = VideoCategory.NIGERIAN.name
+                    )
+                }
             }
             else -> emptyList()
+        }
+    }
+
+    /**
+     * Curated Chinese donghua/movie seeds — popular donghua titles that always appear
+     * when TMDB returns no results. These have relatively stable TMDB IDs.
+     */
+    private fun curatedChineseContentSeeds(page: Int = 1, query: String = ""): List<UnifiedSearchResult> {
+        val allSeeds = listOf(
+            "The King's Avatar", "Mo Dao Zu Shi", "Heaven Official's Blessing",
+            "Scissor Seven", "Fog Hill of Five Elements", "Link Click",
+            "The Daily Life of the Immortal King", "A Will Eternal",
+            "Battle Through the Heavens", "Soul Land", "Douluo Continent",
+            "Perfect World", "Swallowed Star", "Martial Master",
+            "Against the Sky Supreme", "Release That Witch",
+            "The Legend of Hei", "Fairies Albums", "Grandmaster of Demonic Cultivation",
+            "Spare Me Great Lord", "Reverend Insanity", "Tales of Demons and Gods",
+            "Fights Break Sphere", "Throne of Seal", "Dragon Raja",
+            "The Outcast", "The Silver Guardian", "To Be Heroine",
+            "The Guardian", "Psychic Princess", "Fox Spirit Matchmaker",
+            "Big Fish & Begonia", "Ne Zha", "Ne Zha Reborn",
+            "White Snake", "Green Snake", "Jiang Ziya",
+            "The Wandering Earth", "The Wandering Earth 2",
+            "Creation of the Gods I", "No More Bets",
+            "YOLO", "Article 20", "Pegasus 2", "The Battle at Lake Changjin",
+            "Hi, Mom", "Detective Chinatown 3",
+            "The Taking of Tiger Mountain", "Operation Red Sea",
+            "Wolf Warrior 2", "Lost in Russia"
+        )
+        val pageSize = 24
+        val skip = ((page - 1) * pageSize).coerceAtMost(allSeeds.size)
+        val seeds = if (query.isNotBlank()) {
+            allSeeds.filter { it.contains(query, ignoreCase = true) || query.contains(it, ignoreCase = true) }
+                .takeIf { it.isNotEmpty() }
+                ?: allSeeds
+        } else {
+            allSeeds
+        }
+        return seeds.drop(skip).take(pageSize).mapIndexed { i, title ->
+            UnifiedSearchResult(
+                id = "donghua_seed_${page}_$i",
+                title = title,
+                coverUrl = "",
+                detailPageUrl = "tmdb://tv/${10000 + skip + i}",
+                sourceName = "TMDB",
+                genre = "Donghua, Chinese, Animation",
+                synopsis = "",
+                isVideo = true,
+                mediaKind = VideoCategory.DONGHUA.name
+            )
         }
     }
 
@@ -613,11 +696,37 @@ class NovelSearchRepository(
         }
     }
 
-    suspend fun fetchWcoStreamEpisodes(detailUrl: String): List<MediaEpisode> =
-        wcoStreamScraper.fetchEpisodes(detailUrl)
+    // ─────────────────────────────────────────────────────────────────────────
+    //  YouTube Nollywood (Piped API) — public helpers for playback
+    // ─────────────────────────────────────────────────────────────────────────
 
-    suspend fun extractWcoStreamUrl(episodeUrl: String): String? =
-        wcoStreamScraper.extractStreamUrl(episodeUrl)
+    /**
+     * Extract the YouTube video ID from a YOUTUBE_NOLLY unified result.
+     * ID format: "youtube_nollywood_<videoId>"
+     */
+    fun extractYouTubeNollywoodVideoId(item: UnifiedSearchResult): String? {
+        val prefix = "youtube_nollywood_"
+        return item.id
+            .removePrefix(prefix)
+            .takeIf { it != item.id && it.isNotBlank() }
+    }
+
+    /**
+     * Get the ad-free direct .mp4 stream URL for a YouTube Nollywood video
+     * via the Piped API. Returns null if the stream cannot be resolved.
+     */
+    suspend fun extractYouTubeNollywoodStream(videoId: String): String? =
+        youtubeNollywoodScraper.extractStreamUrl(videoId)
+
+    /**
+     * Convenience: resolve a YOUTUBE_NOLLY UnifiedSearchResult to a direct
+     * playable stream URL. Returns null if the item type is not YOUTUBE_NOLLY
+     * or if Piped cannot resolve the stream.
+     */
+    suspend fun resolveYouTubeNollywoodStream(item: UnifiedSearchResult): String? {
+        val videoId = extractYouTubeNollywoodVideoId(item) ?: return null
+        return extractYouTubeNollywoodStream(videoId)
+    }
 
     private suspend fun backendAnime(page: Int = 1): List<AnimeResult> =
         backendContentItems("anime", page = page).mapNotNull { it.toBackendAnimeResult() }
@@ -912,7 +1021,7 @@ class NovelSearchRepository(
                         UnifiedSearchResult(
                             id = "curated_comic_$i",
                             title = title,
-                            coverUrl = "https://via.placeholder.com/300x450/333/fff?text=Comic",
+                            coverUrl = "",
                             detailPageUrl = "comic:curated:$i",
                             sourceName = "ZipComic",
                             isComic = true,
@@ -1218,6 +1327,7 @@ private fun MediaResult.toUnifiedVideo(category: VideoCategory, sourceLabel: Str
 
 private fun VideoCategory.backendContentType(): String = when (this) {
     VideoCategory.ANIME -> "anime"
+    VideoCategory.DONGHUA -> "donghua"
     VideoCategory.K_DRAMA -> "kdrama"
     VideoCategory.CARTOON -> "cartoon"
     VideoCategory.CLASSIC -> "classic"

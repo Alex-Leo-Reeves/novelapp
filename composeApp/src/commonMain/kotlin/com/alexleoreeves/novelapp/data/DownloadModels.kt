@@ -8,16 +8,63 @@ import kotlinx.serialization.Serializable
 
 enum class DownloadType { ANIME, MANGA, NOVEL }
 
+/** Standardised content-type keys for downloads — maps to DownloadItem.type */
+object ContentType {
+    const val ANIME = "ANIME"
+    const val MANGA = "MANGA"
+    const val NOVEL = "NOVEL"
+    const val MOVIE = "MOVIE"
+    const val CARTOON = "CARTOON"
+    const val K_DRAMA = "K_DRAMA"
+    const val COMIC = "COMIC"
+    const val CLASSIC = "CLASSIC"
+    const val NIGERIAN = "NIGERIAN"
+
+    /** Human-readable label for a given type key */
+    fun label(type: String): String = when (type.uppercase()) {
+        ANIME -> "Anime"
+        MANGA -> "Manga"
+        NOVEL -> "Novels"
+        MOVIE -> "Movies"
+        CARTOON -> "Cartoons"
+        K_DRAMA -> "K-Drama"
+        COMIC -> "Comics"
+        CLASSIC -> "Classic"
+        NIGERIAN -> "Nollywood"
+        else -> type
+    }
+
+    /** Display icon descriptor (used for section accent colour) */
+    fun accentName(type: String): String = when (type.uppercase()) {
+        ANIME -> "anime"
+        MANGA -> "manga"
+        NOVEL -> "novel"
+        MOVIE -> "movie"
+        CARTOON -> "cartoon"
+        K_DRAMA -> "k_drama"
+        COMIC -> "comic"
+        CLASSIC -> "classic"
+        NIGERIAN -> "nigerian"
+        else -> "default"
+    }
+
+    /** All downloadable content types in display order */
+    val ALL_TYPES = listOf(ANIME, MANGA, NOVEL, MOVIE, CARTOON, K_DRAMA, COMIC, CLASSIC, NIGERIAN)
+}
+
 @Serializable
 data class DownloadedItem(
     val id: String,                    // unique key (e.g. "anilist_12345")
     val title: String,
     val coverUrl: String,
-    val type: String,                  // "ANIME", "MANGA", "NOVEL"
+    val type: String,                  // "ANIME", "MANGA", "NOVEL", "MOVIE", "CARTOON", "K_DRAMA", "COMIC" etc.
     val sourceName: String,
     val downloadedAt: Long = 0L,
     val totalItems: Int = 0            // episodes or chapters downloaded
-)
+) {
+    /** Convenience: returns the human-readable section label */
+    val typeLabel: String get() = ContentType.label(type)
+}
 
 @Serializable
 data class DownloadedEpisode(
@@ -48,9 +95,17 @@ data class ReadHistoryItem(
     val chapterTitle: String,
     val chapterUrl: String,
     val isManga: Boolean = false,
+    val isComic: Boolean = false,
     val positionIndex: Int = 0,
     val updatedAt: Long = 0L
-)
+) {
+    /** Content-type derived from flags */
+    val contentType: String get() = when {
+        isComic -> ContentType.COMIC
+        isManga -> ContentType.MANGA
+        else -> ContentType.NOVEL
+    }
+}
 
 @Serializable
 data class WatchHistoryItem(
@@ -61,8 +116,19 @@ data class WatchHistoryItem(
     val streamUrl: String,
     val episodeNumber: Int = 0,
     val positionMs: Long = 0L,
-    val updatedAt: Long = 0L
-)
+    val updatedAt: Long = 0L,
+    val mediaKind: String = ""         // "ANIME", "MOVIE", "CARTOON", "K_DRAMA", "CLASSIC", "NIGERIAN"
+) {
+    /** Content-type derived from kind */
+    val contentType: String get() = when (mediaKind.uppercase()) {
+        "MOVIE" -> ContentType.MOVIE
+        "CARTOON" -> ContentType.CARTOON
+        "K_DRAMA" -> ContentType.K_DRAMA
+        "CLASSIC" -> ContentType.CLASSIC
+        "NIGERIAN" -> ContentType.NIGERIAN
+        else -> ContentType.ANIME
+    }
+}
 
 @Serializable
 data class SearchHistoryItem(

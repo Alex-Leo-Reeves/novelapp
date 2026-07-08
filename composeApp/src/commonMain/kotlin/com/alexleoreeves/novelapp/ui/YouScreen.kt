@@ -109,6 +109,7 @@ fun YouScreen(
     }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
     var showDownloads by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     val authApi = remember { AuthApi() }
     var billingStatus by remember(account.authToken) { mutableStateOf<BillingStatus?>(null) }
     var billingMessage by remember(account.authToken) { mutableStateOf("") }
@@ -142,6 +143,17 @@ fun YouScreen(
 
     DisposableEffect(Unit) {
         onDispose { client.close() }
+    }
+
+    if (showHistory) {
+        HistoryScreen(
+            currentTheme = currentTheme,
+            downloadRepo = downloadRepo,
+            onResumeRead = onResumeRead,
+            onResumeWatch = onResumeWatch,
+            onBack = { showHistory = false }
+        )
+        return
     }
 
     if (showDownloads) {
@@ -203,39 +215,19 @@ fun YouScreen(
                 onSubscribePlan = onSubscribePlan
             )
 
+            SectionTitle("History", currentTheme)
+            HistoryEntryCard(
+                watchCount = downloadRepo.getWatchHistory().size,
+                readCount = downloadRepo.getReadHistory().size,
+                currentTheme = currentTheme,
+                onOpen = { showHistory = true }
+            )
+
             SectionTitle("Downloads", currentTheme)
             DownloadsEntryCard(
                 downloadRepo = downloadRepo,
                 currentTheme = currentTheme,
                 onOpen = { showDownloads = true }
-            )
-
-            SectionTitle("Continue watching", currentTheme)
-            HistoryList(
-                items = downloadRepo.getWatchHistory().take(5),
-                emptyText = "No watch history yet.",
-                currentTheme = currentTheme,
-                row = { item ->
-                    WatchHistoryCard(
-                        item = item,
-                        currentTheme = currentTheme,
-                        onClick = { onResumeWatch(item) }
-                    )
-                }
-            )
-
-            SectionTitle("Continue reading", currentTheme)
-            HistoryList(
-                items = downloadRepo.getReadHistory().take(5),
-                emptyText = "No read history yet.",
-                currentTheme = currentTheme,
-                row = { item ->
-                    ReadHistoryCard(
-                        item = item,
-                        currentTheme = currentTheme,
-                        onClick = { onResumeRead(item) }
-                    )
-                }
             )
 
             SectionTitle("Contact Mike", currentTheme)
@@ -290,6 +282,51 @@ fun YouScreen(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun HistoryEntryCard(
+    watchCount: Int,
+    readCount: Int,
+    currentTheme: AppTheme,
+    onOpen: () -> Unit
+) {
+    Card(
+        onClick = onOpen,
+        colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.History,
+                contentDescription = null,
+                tint = currentTheme.accentColor(),
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "History",
+                    color = currentTheme.textColor(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "$watchCount watched · $readCount read",
+                    color = currentTheme.subTextColor(),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = currentTheme.subTextColor())
         }
     }
 }

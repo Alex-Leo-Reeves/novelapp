@@ -32,8 +32,8 @@ class AuthApi(
 
     suspend fun register(username: String, email: String, password: String, recoverySecret: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/register") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             setBody(AuthRequest(username = username, email = email, password = password, recoverySecret = recoverySecret))
         }
         return response.toSavedUserAccount()
@@ -41,8 +41,8 @@ class AuthApi(
 
     suspend fun login(email: String, password: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/login") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             setBody(AuthRequest(email = email, password = password))
         }
         return response.toSavedUserAccount()
@@ -50,8 +50,8 @@ class AuthApi(
 
     suspend fun recoverAccount(recoverySecret: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/recover") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             setBody(RecoveryRequest(recoverySecret = recoverySecret))
         }
         return response.toSavedUserAccount()
@@ -59,8 +59,8 @@ class AuthApi(
 
     suspend fun resetPassword(token: String, password: String): SavedUserAccount {
         val response = client.post("$baseUrl/auth/reset-password") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(PasswordResetRequest(password = password))
         }
@@ -69,7 +69,7 @@ class AuthApi(
 
     suspend fun me(token: String): SavedUserAccount {
         val response = client.get("$baseUrl/auth/me") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
         }
         return response.toSavedUserAccount(existingToken = token)
@@ -77,14 +77,14 @@ class AuthApi(
 
     suspend fun logout(token: String) {
         client.post("$baseUrl/auth/logout") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
         }
     }
 
     suspend fun getUserState(token: String): UserSyncState {
         val response = client.get("$baseUrl/user/state") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
         }
         val rawBody = response.bodyAsText()
@@ -96,8 +96,8 @@ class AuthApi(
 
     suspend fun putUserState(token: String, state: UserSyncState): UserSyncState {
         val response = client.put("$baseUrl/user/state") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(UserStateRequest(state = state))
         }
@@ -110,7 +110,7 @@ class AuthApi(
 
     suspend fun billingStatus(token: String): BillingStatus {
         val response = client.get("$baseUrl/billing/status") {
-            accept(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
             bearerAuth(token)
         }
         val rawBody = response.bodyAsText()
@@ -132,8 +132,8 @@ class AuthApi(
 
     suspend fun createBillingCheckout(token: String, planId: String = "premium_3_devices"): BillingCheckout {
         val response = client.post("$baseUrl/billing/checkout") {
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
             bearerAuth(token)
             setBody(BillingCheckoutRequest(planId = planId))
         }
