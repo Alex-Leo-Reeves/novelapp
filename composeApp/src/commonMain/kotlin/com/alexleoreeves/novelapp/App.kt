@@ -82,10 +82,13 @@ fun App(
     val animeEpisodeNumber = remember { mutableStateOf(0) }
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
 
-    // Football navigation state
+    // Football & WWE navigation states
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
     val footballStreamUrl = remember { mutableStateOf<String?>(null) }
     val footballStreamTitle = remember { mutableStateOf("") }
+    val selectedWweEvent = remember { mutableStateOf<WweEvent?>(null) }
+    val wweStreamUrl = remember { mutableStateOf<String?>(null) }
+    val wweStreamTitle = remember { mutableStateOf("") }
 
     val repository = remember {
         NovelSearchRepository(
@@ -624,10 +627,13 @@ fun App(
                                     favorites = favorites.toList(),
                                     onSubscribePlan = { planId -> beginPremiumCheckout(planId) }
                                 )
-                                BottomTab.FOOTBALL -> FootballHomeScreen(
+                                BottomTab.SPORTS -> SportsHomeScreen(
                                     currentTheme = appTheme.value,
-                                    onMatchSelected = { match ->
+                                    onFootballMatchSelected = { match ->
                                         selectedFootballMatch.value = match
+                                    },
+                                    onWweEventSelected = { event ->
+                                        selectedWweEvent.value = event
                                     }
                                 )
                                 BottomTab.YOU -> {
@@ -942,7 +948,7 @@ fun App(
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.Home),
     FAVORITES("Favorites", Icons.Default.Favorite),
-    FOOTBALL("Football", Icons.Default.SportsSoccer),
+    SPORTS("Sports", Icons.Default.SportsEsports),
     READ("Read", Icons.Default.MenuBook),
     YOU("You", Icons.Default.Person)
 }

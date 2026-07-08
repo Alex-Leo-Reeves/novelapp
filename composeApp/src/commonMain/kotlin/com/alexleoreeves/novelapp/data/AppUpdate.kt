@@ -18,6 +18,8 @@ data class AppUpdateManifest(
 ) {
     val isAvailable: Boolean
         get() = versionCode > AppReleaseConfig.CURRENT_VERSION_CODE
+                && versionCode > 0
+                && versionName != AppReleaseConfig.CURRENT_VERSION_NAME
 }
 
 suspend fun fetchAppUpdateManifest(client: HttpClient): AppUpdateManifest? =

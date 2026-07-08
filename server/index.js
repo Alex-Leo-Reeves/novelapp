@@ -4,6 +4,7 @@ const http = require("http");
 const path = require("path");
 const { URL } = require("url");
 const swiftNovelScrapers = require("./swift-novel-scrapers");
+const wweHandlers = require("./wwe-handlers");
 let consumetExtensions = null;
 try {
     consumetExtensions = require("@consumet/extensions");
@@ -2943,6 +2944,23 @@ async function handleApi(request, response, pathname) {
     }
     if (pathname === "/api/football/search") {
       return await handleFootballSearch(request, response, requestUrl);
+    }
+
+    // ── WWE API routes ──────────────────────────────────────────────────
+    if (pathname === "/api/wwe/events") {
+      return await wweHandlers.handleWweEvents(request, response, requestUrl);
+    }
+    if (pathname === "/api/wwe/matches") {
+      return await wweHandlers.handleWweMatches(request, response, requestUrl);
+    }
+    if (pathname === "/api/wwe/brands") {
+      return await wweHandlers.handleWweBrands(request, response);
+    }
+    if (pathname === "/api/wwe/search") {
+      return await wweHandlers.handleWweSearch(request, response, requestUrl);
+    }
+    if (pathname === "/api/wwe/stream") {
+      return await wweHandlers.handleWweStream(request, response, requestUrl);
     }
 
     if (pathname.startsWith("/api/content/")) {

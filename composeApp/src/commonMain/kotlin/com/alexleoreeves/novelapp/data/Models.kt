@@ -41,6 +41,7 @@ enum class MangaScrollMode(val displayName: String) {
 
 enum class VideoCategory(val label: String) {
     ANIME("Anime"),
+    DONGHUA("Donghua"),
     K_DRAMA("K-Drama"),
     CARTOON("Cartoon"),
     CLASSIC("Classic"),

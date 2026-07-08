@@ -435,8 +435,9 @@ class NovelSearchRepository(
                             VideoCategory.NIGERIAN -> media.genres.contains("Nigeria", ignoreCase = true) ||
                                 media.genres.contains("Nigerian", ignoreCase = true) ||
                                 media.genres.contains("Nollywood", ignoreCase = true)
-                            }
+                            VideoCategory.DONGHUA -> true
                         }
+                    }
                         .ifEmpty { mediaResults }
                     results.addAll(filtered.map { it.toUnifiedVideo(category, "TMDB") })
                 }
@@ -1222,6 +1223,7 @@ private fun VideoCategory.backendContentType(): String = when (this) {
     VideoCategory.CLASSIC -> "classic"
     VideoCategory.MOVIES -> "movies"
     VideoCategory.NIGERIAN -> "nigerian"
+    VideoCategory.DONGHUA -> "donghua"
 }
 
 private fun JsonObject.contentString(name: String): String =

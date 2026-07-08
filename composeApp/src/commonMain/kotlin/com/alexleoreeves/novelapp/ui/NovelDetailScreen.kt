@@ -53,7 +53,7 @@ fun NovelDetailScreen(
 
     LaunchedEffect(novel.detailPageUrl) {
         isLoadingChapters = true
-        chapters = if (novel.isManga) {
+        chapters = if (novel.isManga || novel.isComic) {
             repository.fetchMangaChapters(novel.detailPageUrl, novel.sourceName).map {
                 Chapter(
                     title = it.title,

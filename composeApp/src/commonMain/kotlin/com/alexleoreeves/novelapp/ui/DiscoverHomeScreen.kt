@@ -38,6 +38,7 @@ enum class ContentTab(val label: String, val icon: ImageVector) {
     MANGA("Manga", Icons.Default.Collections),
     COMIC("Comics", Icons.Default.ImportContacts),
     ANIME("Anime", Icons.Default.PlayCircle),
+    DONGHUA("Donghua", Icons.Default.Videocam),         // Chinese anime
     K_DRAMA("K-Drama", Icons.Default.LiveTv),
     CARTOON("Cartoon", Icons.Default.Animation),
     OLDER_CARTOON("Classic", Icons.Default.Theaters),
@@ -47,6 +48,7 @@ enum class ContentTab(val label: String, val icon: ImageVector) {
 
 // Tab accent colors
 private val animeAccent = Color(0xFFFF5722)
+private val donghuaAccent = Color(0xFFE91E63)  // pinkish-red for Chinese anime
 private val kDramaAccent = Color(0xFFE53935)
 private val cartoonAccent = Color(0xFF00A8A8)
 private val comicAccent = Color(0xFFFF6D00)    // orange — Western comics
@@ -56,6 +58,7 @@ private val nigerianAccent = Color(0xFF008751)  // Nollywood green (Nigeria flag
 
 private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
     ContentTab.ANIME -> VideoCategory.ANIME
+    ContentTab.DONGHUA -> VideoCategory.DONGHUA
     ContentTab.K_DRAMA -> VideoCategory.K_DRAMA
     ContentTab.CARTOON -> VideoCategory.CARTOON
     ContentTab.OLDER_CARTOON -> VideoCategory.CLASSIC
@@ -66,6 +69,7 @@ private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
 
 private fun ContentTab.tabAccent(currentTheme: AppTheme): Color = when (this) {
     ContentTab.ANIME -> animeAccent
+    ContentTab.DONGHUA -> donghuaAccent
     ContentTab.K_DRAMA -> kDramaAccent
     ContentTab.CARTOON -> cartoonAccent
     ContentTab.COMIC -> comicAccent
@@ -204,12 +208,13 @@ fun DiscoverHomeScreen(
                 ContentTab.NOVELS -> activePopularItems.filter { !it.isManga && !it.isAnime && !it.isComic }
                 ContentTab.MANGA -> activePopularItems.filter { it.isManga }
                 ContentTab.COMIC -> activePopularItems.filter { it.isComic }
-                ContentTab.ANIME -> activePopularItems.filter { it.isAnime }
-                ContentTab.K_DRAMA,
-                ContentTab.CARTOON,
-                ContentTab.OLDER_CARTOON,
-                ContentTab.MOVIES,
-                ContentTab.NIGERIAN_FILMS -> emptyList()
+            ContentTab.ANIME -> activePopularItems.filter { it.isAnime }
+            ContentTab.DONGHUA,
+            ContentTab.K_DRAMA,
+            ContentTab.CARTOON,
+            ContentTab.OLDER_CARTOON,
+            ContentTab.MOVIES,
+            ContentTab.NIGERIAN_FILMS -> emptyList()
             }
             if (activeTab == ContentTab.NOVELS && selectedCategory != NovelCategory.ALL) {
                 val genreFiltered = list.filter {
@@ -236,6 +241,7 @@ fun DiscoverHomeScreen(
                 ContentTab.MANGA -> searchResults.filter { it.isManga }
                 ContentTab.COMIC -> searchResults.filter { it.isComic }
                 ContentTab.ANIME,
+                ContentTab.DONGHUA,
                 ContentTab.K_DRAMA,
                 ContentTab.CARTOON,
                 ContentTab.OLDER_CARTOON,
@@ -260,6 +266,7 @@ fun DiscoverHomeScreen(
         val tab = activeTab
         when (tab) {
             ContentTab.ANIME,
+            ContentTab.DONGHUA,
             ContentTab.K_DRAMA,
             ContentTab.CARTOON,
             ContentTab.OLDER_CARTOON,
@@ -299,6 +306,7 @@ fun DiscoverHomeScreen(
                 if (searchQuery.length >= 2) {
                     when (activeTab) {
                         ContentTab.ANIME,
+                        ContentTab.DONGHUA,
                         ContentTab.K_DRAMA,
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
@@ -330,6 +338,7 @@ fun DiscoverHomeScreen(
                             isLoadingPopular = false
                         }
                         ContentTab.ANIME,
+                        ContentTab.DONGHUA,
                         ContentTab.K_DRAMA,
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
@@ -427,6 +436,7 @@ fun DiscoverHomeScreen(
                                     ContentTab.OLDER_CARTOON -> "Search classic cartoons..."
                                     ContentTab.MOVIES -> "Search movies..."
                                     ContentTab.NIGERIAN_FILMS -> "Search Nollywood..."
+                                    ContentTab.DONGHUA -> "Search donghua..."
                                 },
                                 color = currentTheme.subTextColor()
                             )
@@ -708,6 +718,7 @@ fun DiscoverHomeScreen(
                             ContentTab.MANGA -> "Popular Manga"
                             ContentTab.COMIC -> "Western Comics"
                             ContentTab.ANIME -> "Currently Airing"
+                            ContentTab.DONGHUA -> "Popular Donghua"
                             ContentTab.K_DRAMA -> "Popular K-Drama"
                             ContentTab.CARTOON -> "Popular Cartoons"
                             ContentTab.OLDER_CARTOON -> "Classic Cartoons"
@@ -1170,6 +1181,7 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     ContentTab.CARTOON -> "No cartoons loaded yet"
                     ContentTab.OLDER_CARTOON -> "No classic cartoons loaded yet"
                     ContentTab.MOVIES -> "No movies loaded yet"
+            ContentTab.DONGHUA -> "No donghua loaded yet"
                     ContentTab.NIGERIAN_FILMS -> "No Nollywood films loaded yet"
                 },
                 style = MaterialTheme.typography.titleMedium,
