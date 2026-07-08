@@ -1,12 +1,14 @@
 {
-    "versionCode": 29,
-    "versionName": "1.29",
+    "versionCode": 31,
+    "versionName": "1.31",
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "apkBytes": 162998528,
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Added Donghua tab, WWE sports section, enhanced Nollywood scraper, improved search"
+        "Fixed APK download timeout on slow networks — 120s read timeout + 3x retry",
+        "Server-side APK manifest caching to prevent download stalls",
+        "Mobile-responsive landing page with inline critical CSS"
     ],
     "forceUpdate": false,
-    "apkSha256": "263ffe39d4095a44f5ee773a019ad5db8298f794daf05857520006ec94c75a5f"
+    "apkBytes": 0,
+    "apkSha256": ""
 }
