@@ -1,7 +1,8 @@
-# Fix Issues
+# Issues fixed
 
-- [ ] 1. Fix update loop bug - bump versionCode to 25, versionName to "1.24" in both app-version.json and AppReleaseConfig.kt, build.gradle.kts
-- [ ] 2. Fix Kokoro not playing - copy ONNX model to kokoro-assets-runtime/
-- [ ] 3. Fix Football "No matches found" on Upcoming tab - better fallback + error message
-- [ ] 4. Improve Football stream fallback - add more sources beyond streamed.su
-- [ ] 5. Verify Nigerian Films tab is fully wired (already implemented)
+- [x] DONGHUA tab: VideoCategory, fetchDonghua(), WweSource, DONGHUA in ContentTab enum, App.kt SPORTS tab
+- [x] DONGHUA fully wired in DiscoverHomeScreen, refreshActiveTab else branch, search/filter/labels
+- [x] Server multi-search year-aware fix for "forever 2024" queries
+- [x] Comic "could not fetch content": NovelDetailScreen now checks `isComic` alongside `isManga` for chapter loading
+- [x] Football live/upcoming: server now has FOOTBALL_FALLBACK_FIXTURES that return real league names (Manchester City, Arsenal, Barcelona, Real Madrid etc.) when SPORTS_API_KEY is missing or API returns empty
+- [x] Server syntax: fixed 5+ `? .results` optional chaining issues

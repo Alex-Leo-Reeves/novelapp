@@ -24,3 +24,5 @@ iosApp/*.xcodeproj/
 iosApp/*.xcworkspace/
 *.xcarchive
 !debug.keystore
+novelapp.backup.src/
+tmp/

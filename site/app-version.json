@@ -1,12 +1,12 @@
 {
-    "versionCode": 28,
-    "versionName": "1.27",
+    "versionCode": 29,
+    "versionName": "1.29",
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "apkBytes": 162965760,
+    "apkBytes": 162998528,
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed Ktor 3.x ContentType.parse() compilation error — replaced with raw header() calls to avoid ParametersBuilder.parse name collision in AnimeScrapers.kt and MangaScrapers.kt"
+        "Added Donghua tab, WWE sports section, enhanced Nollywood scraper, improved search"
     ],
     "forceUpdate": false,
-    "apkSha256": "ee859af35110154719eab3a4d4e686363accfbed8221a2454936216ba3ef7c17"
+    "apkSha256": "263ffe39d4095a44f5ee773a019ad5db8298f794daf05857520006ec94c75a5f"
 }

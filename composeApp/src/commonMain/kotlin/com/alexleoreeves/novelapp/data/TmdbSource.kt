@@ -63,12 +63,54 @@ class TmdbSource(
     suspend fun fetchVideo(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
         when (category) {
             VideoCategory.ANIME -> fetchAnime(page)
+            VideoCategory.DONGHUA -> fetchDonghua(page)
             VideoCategory.K_DRAMA -> fetchKDrama(page)
             VideoCategory.CARTOON -> fetchCartoons(page)
             VideoCategory.CLASSIC -> fetchClassicTv(page)  // classic live-action TV + non-anime cartoons
             VideoCategory.MOVIES -> fetchMovies(page)
             VideoCategory.NIGERIAN -> fetchNigerian(page)
         }
+
+    /** Donghua: Chinese anime — fetch popular TV + Movie and filter for Chinese language + animation */
+    private suspend fun fetchDonghua(page: Int): List<UnifiedSearchResult> = runCatching {
+        val tvResults = discover("tv", page, VideoCategory.DONGHUA) {
+            parameter("with_original_language", "zh")
+            parameter("with_genres", "16")  // Animation genre
+            parameter("sort_by", "popularity.desc")
+            parameter("include_adult", "false")
+        }
+        val movieResults = discover("movie", page, VideoCategory.DONGHUA) {
+            parameter("with_original_language", "zh")
+            parameter("with_genres", "16")  // Animation genre
+            parameter("sort_by", "popularity.desc")
+            parameter("include_adult", "false")
+        }
+        val chineseMoviesNoAnim = if (tvResults.size + movieResults.size < 16) {
+            // Broader search: Chinese movies (non-animation) for variety
+            discover("movie", page, VideoCategory.DONGHUA) {
+                parameter("with_original_language", "zh")
+                parameter("sort_by", "popularity.desc")
+                parameter("include_adult", "false")
+            }.filter { item ->
+                val genre = item.genre.lowercase()
+                !genre.contains("japanese") && !genre.contains("korean")
+            }
+        } else {
+            emptyList()
+        }
+        // Deduplicate and add donghua/chinese label
+        (tvResults + movieResults + chineseMoviesNoAnim)
+            .distinctBy { it.id }
+            .map { item ->
+                val genreLabel = if (item.genre.contains("Animation", ignoreCase = true)) {
+                    "Donghua, Chinese, ${item.genre}"
+                } else {
+                    "Chinese Movie, ${item.genre}"
+                }
+                item.copy(genre = genreLabel)
+            }
+            .take(48)
+    }.getOrElse { emptyList() }
 
     suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
         when (category) {
@@ -120,6 +162,7 @@ class TmdbSource(
                         item.genre.contains("Nollywood", ignoreCase = true)
                 }
                 .ifEmpty { searchMulti(query, page, category) }
+            VideoCategory.DONGHUA -> searchMulti(query, page, category)
         }
 
     /** K-Drama: fetch popular/weekly trending TV and filter for Korean */

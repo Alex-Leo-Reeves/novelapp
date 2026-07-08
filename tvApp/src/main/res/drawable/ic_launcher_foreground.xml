@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- Left page (pink) -->
+  <rect x="16" y="12" width="42" height="76" rx="8" ry="8" fill="#E84D8A"/>
+  <!-- Right page (teal) -->
+  <rect x="50" y="12" width="42" height="76" rx="8" ry="8" fill="#42D6B5"/>
+  <!-- Left page text lines -->
+  <rect x="24" y="24" width="26" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="24" y="34" width="24" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="24" y="44" width="26" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="24" y="54" width="22" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="24" y="64" width="20" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <!-- Right page text lines -->
+  <rect x="58" y="24" width="26" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="58" y="34" width="24" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="58" y="44" width="26" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <rect x="60" y="54" width="22" height="4" rx="2" fill="#F4F1EC" opacity="0.88"/>
+  <!-- Spine -->
+  <rect x="48" y="10" width="12" height="88" rx="6" fill="white" opacity="0.2"/>
+  <!-- Play triangle -->
+  <polygon points="44,56 68,70 44,84" fill="#F2C766"/>
+  <!-- Stars -->
+  <polygon points="22,10 23.4,14 27,15.4 23.4,16.8 22,21 20.6,16.8 17,15.4 20.6,14" fill="#F2C766"/>
+  <circle cx="52" cy="6" r="2" fill="#42D6B5"/>
+  <polygon points="86,10 87.4,14 91,15.4 87.4,16.8 86,21 84.6,16.8 81,15.4 84.6,14" fill="#E84D8A"/>
+</svg>
