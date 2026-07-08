@@ -1,185 +1,442 @@
 <!doctype html>
 <html lang="en">
-  <head>
+
+<head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Anime/Novel/Manga - All in One</title>
-    <meta
-      name="description"
-      content="Anime/Novel/Manga - All in One is a mobile entertainment app for novels, manga, anime, K-drama, cartoons, movies, saved accounts, in-app updates, AI narration, and manga OCR."
-    />
+    <meta name="description" content="Anime/Novel/Manga - All in One is a mobile entertainment app for novels, manga, anime, K-drama, cartoons, movies, saved accounts, in-app updates, AI narration, and manga OCR." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/assets/novelapp-icon.svg" />
+    <style>
+        /* ── Critical inline styles (loads instantly even on slow mobile) ── */
+        
+         :root {
+            color-scheme: dark;
+            --bg: #0b0d10;
+            --text: #f4f1ec;
+            --muted: #a9b1bf;
+            --line: rgba(255, 255, 255, 0.11);
+            --accent: #e84d8a;
+            --accent-2: #42d6b5;
+            --gold: #f2c766
+        }
+        
+        *,
+        :after,
+        :before {
+            box-sizing: border-box
+        }
+        
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
+        }
+        
+        .site-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 16px clamp(18px, 4vw, 48px);
+            background: rgba(11, 13, 16, 0.86);
+            border-bottom: 1px solid var(--line);
+            backdrop-filter: blur(18px)
+        }
+        
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            font-weight: 800
+        }
+        
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            display: block
+        }
+        
+        nav {
+            display: flex;
+            gap: 18px;
+            color: var(--muted);
+            font-size: .94rem
+        }
+        
+        nav a {
+            text-decoration: none;
+            color: inherit
+        }
+        
+        .hero {
+            display: grid;
+            min-height: calc(100vh - 67px);
+            grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
+            gap: clamp(28px, 6vw, 72px);
+            align-items: center;
+            padding: clamp(36px, 7vw, 92px) clamp(18px, 5vw, 72px)
+        }
+        
+        h1 {
+            font-size: clamp(3.25rem, 8vw, 7rem);
+            line-height: .92;
+            margin: 0 0 16px;
+            letter-spacing: 0
+        }
+        
+        h2 {
+            font-size: clamp(2rem, 4vw, 3.75rem);
+            line-height: 1;
+            letter-spacing: 0;
+            max-width: 780px;
+            margin: 0
+        }
+        
+        .lede {
+            max-width: 620px;
+            color: var(--muted);
+            font-size: clamp(1rem, 1.8vw, 1.22rem);
+            line-height: 1.72;
+            margin: 0
+        }
+        
+        .eyebrow {
+            margin: 0 0 10px;
+            color: var(--accent-2);
+            font-weight: 800;
+            text-transform: uppercase;
+            font-size: .78rem
+        }
+        
+        .button {
+            display: inline-flex;
+            min-height: 48px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            padding: 0 18px;
+            text-decoration: none;
+            font-weight: 800
+        }
+        
+        .button.primary {
+            background: var(--accent);
+            color: #fff
+        }
+        
+        .button.secondary {
+            border: 1px solid var(--line);
+            color: var(--text)
+        }
+        
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 28px 0 18px
+        }
+        
+        .developer {
+            color: var(--gold);
+            font-weight: 800
+        }
+        
+        .phone-preview {
+            display: flex;
+            justify-content: center
+        }
+        
+        .phone-shell {
+            width: min(100%, 360px);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 36px;
+            padding: 12px;
+            background: #050607
+        }
+        
+        .app-screen {
+            min-height: 640px;
+            border-radius: 26px;
+            padding: 18px;
+            background: linear-gradient(180deg, #1c2030 0%, #10131b 44%, #0c0e13 100%);
+            overflow: hidden
+        }
+        
+        .section,
+        .release-panel,
+        .download-panel,
+        footer {
+            margin: 0 auto;
+            width: min(1120px, calc(100% - 36px))
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px
+        }
+        
+        .feature-grid article,
+        .release-panel,
+        .download-panel {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel, #151922)
+        }
+        
+        .release-panel {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+            gap: 24px;
+            margin-bottom: 18px;
+            padding: clamp(22px, 4vw, 36px)
+        }
+        
+        .download-panel {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 72px;
+            padding: clamp(22px, 4vw, 36px)
+        }
+        
+        footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            border-top: 1px solid var(--line);
+            padding: 28px 0 38px
+        }
+        
+        @media(max-width:900px) {
+            .hero {
+                grid-template-columns: 1fr;
+                min-height: auto
+            }
+            .feature-grid {
+                grid-template-columns: repeat(2, 1fr)
+            }
+            .release-panel {
+                grid-template-columns: 1fr
+            }
+            .download-panel,
+            footer {
+                flex-direction: column;
+                align-items: flex-start
+            }
+        }
+        
+        @media(max-width:620px) {
+            .site-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                padding: 12px 16px
+            }
+            nav {
+                width: 100%;
+                gap: 10px;
+                overflow-x: auto;
+                white-space: nowrap
+            }
+            .hero-actions,
+            .button {
+                width: 100%
+            }
+            .feature-grid {
+                grid-template-columns: 1fr
+            }
+            .app-screen {
+                min-height: 380px
+            }
+            h1 {
+                font-size: clamp(2.75rem, 18vw, 4.4rem)
+            }
+            h2 {
+                font-size: clamp(1.75rem, 9vw, 2.35rem)
+            }
+        }
+    </style>
     <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
+</head>
+
+<body>
     <header class="site-header">
-      <a class="brand" href="#top" aria-label="Anime Novel Manga home">
-        <img class="brand-mark" src="/assets/novelapp-icon.svg" alt="" />
-        <span>Anime/Novel/Manga</span>
-      </a>
-      <nav aria-label="Main navigation">
-        <a href="#features">Features</a>
-        <a href="#download">Download</a>
-        <a href="#release">Release</a>
-        <a href="#contact">Contact</a>
-      </nav>
+        <a class="brand" href="#top" aria-label="Anime Novel Manga home">
+            <img class="brand-mark" src="/assets/novelapp-icon.svg" alt="" />
+            <span>Anime/Novel/Manga</span>
+        </a>
+        <nav aria-label="Main navigation">
+            <a href="#features">Features</a>
+            <a href="#download">Download</a>
+            <a href="#release">Release</a>
+            <a href="#contact">Contact</a>
+        </nav>
     </header>
 
     <main id="top">
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Version 1.11 is live on Render</p>
-          <h1>Anime/Novel/Manga</h1>
-          <p class="lede">
-            A focused entertainment app for novels, manga, anime, K-drama,
-            cartoons, movies, saved accounts, in-app updates, and AI-assisted narration.
-          </p>
-          <div class="hero-actions" id="download">
-            <a class="button primary" href="/downloads/novelapp-android.apk" download>
+        <section class="hero">
+            <div class="hero-copy">
+                <p class="eyebrow">Version 1.11 is live on Render</p>
+                <h1>Anime/Novel/Manga</h1>
+                <p class="lede">
+                    A focused entertainment app for novels, manga, anime, K-drama, cartoons, movies, saved accounts, in-app updates, and AI-assisted narration.
+                </p>
+                <div class="hero-actions" id="download">
+                    <a class="button primary" href="/downloads/novelapp-android.apk" download>
               Download Android APK v1.11
             </a>
-            <a class="button secondary" href="/downloads/novelapp-tv.apk" download>
+                    <a class="button secondary" href="/downloads/novelapp-tv.apk" download>
               Android TV APK
             </a>
-            <a class="button secondary" href="/downloads/novelapp-ios.ipa" download>
+                    <a class="button secondary" href="/downloads/novelapp-ios.ipa" download>
               iPhone IPA unsigned
             </a>
-            <a class="button secondary" href="/downloads/novelapp-windows.msi" download>
+                    <a class="button secondary" href="/downloads/novelapp-windows.msi" download>
               Windows installer
             </a>
-            <a class="button secondary" href="/app-version.json">
+                    <a class="button secondary" href="/app-version.json">
               Update manifest
             </a>
-          </div>
-          <p class="developer">Developed by Mike · Account service: online</p>
-        </div>
-
-        <div class="phone-preview" aria-label="Anime Novel Manga interface preview">
-          <div class="phone-shell">
-            <div class="phone-status"></div>
-            <div class="app-screen">
-              <div class="app-top">
-                <span>Novels</span>
-                <img class="app-icon" src="/assets/novelapp-icon.svg" alt="" />
-              </div>
-              <div class="search-pill">Search light novels...</div>
-              <div class="tab-row">
-                <span class="active">Novels</span>
-                <span>Manga</span>
-                <span>Anime</span>
-                <span>K-Drama</span>
-                <span>Cartoon</span>
-                <span>Movies</span>
-              </div>
-              <div class="cover-grid">
-                <article>
-                  <div class="cover cover-a"></div>
-                  <p>Fantasy Gate</p>
-                </article>
-                <article>
-                  <div class="cover cover-b"></div>
-                  <p>Moon Reader</p>
-                </article>
-                <article>
-                  <div class="cover cover-c"></div>
-                  <p>Panel Flow</p>
-                </article>
-                <article>
-                  <div class="cover cover-d"></div>
-                  <p>Anime Night</p>
-                </article>
-              </div>
+                </div>
+                <p class="developer">Developed by Mike · Account service: online</p>
             </div>
-          </div>
-        </div>
-      </section>
 
-      <section class="section" id="features">
-        <div class="section-heading">
-          <p class="eyebrow">Built for story fans</p>
-          <h2>One app for reading, watching, and listening.</h2>
-        </div>
-        <div class="feature-grid">
-          <article>
-            <h3>Separate content tabs</h3>
-            <p>Novels, manga, anime, K-drama, cartoons, and movies each have their own focused space.</p>
-          </article>
-          <article>
-            <h3>Immersive reading</h3>
-            <p>Open chapters in a clean reader, switch themes, and keep favorites close.</p>
-          </article>
-          <article>
-            <h3>AI narration</h3>
-            <p>On-device Kokoro narration highlights the active word while chapters play.</p>
-          </article>
-          <article>
-            <h3>Accounts and updates</h3>
-            <p>Sign in once, keep the session saved, and receive the latest Android APK through the Render-hosted manifest.</p>
-          </article>
-        </div>
-      </section>
+            <div class="phone-preview" aria-label="Anime Novel Manga interface preview">
+                <div class="phone-shell">
+                    <div class="phone-status"></div>
+                    <div class="app-screen">
+                        <div class="app-top">
+                            <span>Novels</span>
+                            <img class="app-icon" src="/assets/novelapp-icon.svg" alt="" />
+                        </div>
+                        <div class="search-pill">Search light novels...</div>
+                        <div class="tab-row">
+                            <span class="active">Novels</span>
+                            <span>Manga</span>
+                            <span>Anime</span>
+                            <span>K-Drama</span>
+                            <span>Cartoon</span>
+                            <span>Movies</span>
+                        </div>
+                        <div class="cover-grid">
+                            <article>
+                                <div class="cover cover-a"></div>
+                                <p>Fantasy Gate</p>
+                            </article>
+                            <article>
+                                <div class="cover cover-b"></div>
+                                <p>Moon Reader</p>
+                            </article>
+                            <article>
+                                <div class="cover cover-c"></div>
+                                <p>Panel Flow</p>
+                            </article>
+                            <article>
+                                <div class="cover cover-d"></div>
+                                <p>Anime Night</p>
+                            </article>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-      <section class="release-panel" id="release">
-        <div class="release-copy">
-          <p class="eyebrow">Current release</p>
-          <h2>Anime/Novel/Manga 1.11 improves account sync, Kokoro setup, manga caching, and media playback.</h2>
-          <p>
-            This release hardens saved accounts across devices, improves the
-            Android updater, lets manga pages display while caching continues,
-            and expands movie, cartoon, and K-drama playback providers.
-          </p>
-        </div>
-        <dl class="release-list">
-          <div>
-            <dt>Version</dt>
-            <dd>1.11 · code 12</dd>
-          </div>
-          <div>
-            <dt>Service</dt>
-            <dd>novelapp1.onrender.com</dd>
-          </div>
-          <div>
-            <dt>Manifest</dt>
-            <dd><a href="/app-version.json">/app-version.json</a></dd>
-          </div>
-        </dl>
-      </section>
+        <section class="section" id="features">
+            <div class="section-heading">
+                <p class="eyebrow">Built for story fans</p>
+                <h2>One app for reading, watching, and listening.</h2>
+            </div>
+            <div class="feature-grid">
+                <article>
+                    <h3>Separate content tabs</h3>
+                    <p>Novels, manga, anime, K-drama, cartoons, and movies each have their own focused space.</p>
+                </article>
+                <article>
+                    <h3>Immersive reading</h3>
+                    <p>Open chapters in a clean reader, switch themes, and keep favorites close.</p>
+                </article>
+                <article>
+                    <h3>AI narration</h3>
+                    <p>On-device Kokoro narration highlights the active word while chapters play.</p>
+                </article>
+                <article>
+                    <h3>Accounts and updates</h3>
+                    <p>Sign in once, keep the session saved, and receive the latest Android APK through the Render-hosted manifest.</p>
+                </article>
+            </div>
+        </section>
 
-      <section class="download-panel">
-        <div>
-          <p class="eyebrow">Latest builds</p>
-          <h2>Download Anime/Novel/Manga for your device.</h2>
-          <p>
-            The Android, Android TV, Windows desktop, and unsigned iPhone builds are listed here.
-          </p>
-        </div>
-        <div class="download-actions">
-          <a class="button primary" href="/downloads/novelapp-android.apk" download>
+        <section class="release-panel" id="release">
+            <div class="release-copy">
+                <p class="eyebrow">Current release</p>
+                <h2>Anime/Novel/Manga 1.11 improves account sync, Kokoro setup, manga caching, and media playback.</h2>
+                <p>
+                    This release hardens saved accounts across devices, improves the Android updater, lets manga pages display while caching continues, and expands movie, cartoon, and K-drama playback providers.
+                </p>
+            </div>
+            <dl class="release-list">
+                <div>
+                    <dt>Version</dt>
+                    <dd>1.11 · code 12</dd>
+                </div>
+                <div>
+                    <dt>Service</dt>
+                    <dd>novelapp1.onrender.com</dd>
+                </div>
+                <div>
+                    <dt>Manifest</dt>
+                    <dd><a href="/app-version.json">/app-version.json</a></dd>
+                </div>
+            </dl>
+        </section>
+
+        <section class="download-panel">
+            <div>
+                <p class="eyebrow">Latest builds</p>
+                <h2>Download Anime/Novel/Manga for your device.</h2>
+                <p>
+                    The Android, Android TV, Windows desktop, and unsigned iPhone builds are listed here.
+                </p>
+            </div>
+            <div class="download-actions">
+                <a class="button primary" href="/downloads/novelapp-android.apk" download>
             Android APK
           </a>
-          <a class="button secondary" href="/downloads/novelapp-tv.apk" download>
+                <a class="button secondary" href="/downloads/novelapp-tv.apk" download>
             Android TV APK
           </a>
-          <a class="button secondary" href="/downloads/novelapp-ios.ipa" download>
+                <a class="button secondary" href="/downloads/novelapp-ios.ipa" download>
             iPhone IPA unsigned
           </a>
-          <a class="button secondary" href="/downloads/novelapp-windows.msi" download>
+                <a class="button secondary" href="/downloads/novelapp-windows.msi" download>
             Windows MSI
           </a>
-        </div>
-      </section>
+            </div>
+        </section>
     </main>
 
     <footer id="contact">
-      <div>
-        <strong>Developed by Mike</strong>
-        <p>Reach me here <a href="mailto:masteralexleoreevesd1@gmail.com">masteralexleoreevesd1@gmail.com</a></p>
-      </div>
-      <div class="footer-links">
-        <a href="https://t.me/developeralexd1">Telegram</a>
-        <a href="https://whatsapp.com/channel/0029Vb8fgDa2P59cCnEkWW3I">WhatsApp</a>
-      </div>
+        <div>
+            <strong>Developed by Mike</strong>
+            <p>Reach me here <a href="mailto:masteralexleoreevesd1@gmail.com">masteralexleoreevesd1@gmail.com</a></p>
+        </div>
+        <div class="footer-links">
+            <a href="https://t.me/developeralexd1">Telegram</a>
+            <a href="https://whatsapp.com/channel/0029Vb8fgDa2P59cCnEkWW3I">WhatsApp</a>
+        </div>
     </footer>
-  </body>
+</body>
+
 </html>
