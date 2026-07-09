@@ -75,7 +75,7 @@ fun buildSuperEmbedUrl(
 }
 
 /**
- * Build a VidLink embed URL (fallback).
+ * Build a VidLink embed URL.
  */
 fun buildVidLinkUrl(
     tmdbId: String,
@@ -89,20 +89,20 @@ fun buildVidLinkUrl(
 }
 
 /**
- * Build an EmbedSu embed URL.
+ * Build a VidSrc.me (vidsrcme.ru) embed URL.
  *
- * Movie: https://embed.su/embed/movie/{tmdbId}
- * TV:    https://embed.su/embed/tv/{tmdbId}/{season}/{episode}
+ * Movie: https://vidsrcme.ru/embed/movie?tmdb={tmdbId}
+ * TV:    https://vidsrcme.ru/embed/tv?tmdb={tmdbId}&season={s}&episode={e}
  */
-fun buildEmbedSuUrl(
+fun buildVidSrcMeUrl(
     tmdbId: String,
     type: String,
     season: String = "1",
     episode: String = "1"
 ): String = if (type == "movie") {
-    "https://embed.su/embed/movie/$tmdbId"
+    "https://vidsrcme.ru/embed/movie?tmdb=$tmdbId"
 } else {
-    "https://embed.su/embed/tv/$tmdbId/$season/$episode"
+    "https://vidsrcme.ru/embed/tv?tmdb=$tmdbId&season=$season&episode=$episode"
 }
 
 /**

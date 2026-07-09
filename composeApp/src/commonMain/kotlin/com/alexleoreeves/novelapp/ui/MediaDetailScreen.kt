@@ -76,8 +76,8 @@ fun MediaDetailScreen(
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
     val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
-    val embedServerNames = listOf("Web fallback: VidLink", "Web fallback: AutoEmbed", "Web fallback: VidSrc.me", "Web fallback: EmbedSu", "Web fallback: VidSrc.cc", "Web fallback: 2Embed")
-    val embedServerKeys = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
+    val embedServerNames = listOf("Web fallback: VidLink", "Web fallback: VidSrc.me", "Web fallback: SuperEmbed", "Web fallback: AutoEmbed", "Web fallback: 2Embed")
+    val embedServerKeys = listOf("vidlink", "vidsrcme", "superembed", "autoembed", "twoembed")
     val directServerNames = listOf("CinePro (Direct)", "SuperEmbed (Direct)")
     val serverNames = listOf("Direct first") + embedServerNames + directServerNames
     val freeMoviePreviewMs = 20 * 60 * 1000L
@@ -94,25 +94,23 @@ fun MediaDetailScreen(
         server: Int
     ): String? {
         if (id.isBlank()) return null
-        val providers = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
+        val providers = listOf("vidlink", "vidsrcme", "superembed", "autoembed", "twoembed")
         val provider = providers.getOrElse((server - 1).coerceAtLeast(0)) { providers.first() }
         return if (type == "movie") {
             when (provider) {
                 "vidlink" -> "https://vidlink.pro/movie/$id"
+                "vidsrcme" -> "https://vidsrcme.ru/embed/movie?tmdb=$id"
+                "superembed" -> "https://multiembed.mov/?video_id=$id&tmdb=1"
                 "autoembed" -> "https://player.autoembed.cc/movie/$id"
-                "vidsrcme" -> "https://vidsrc.me/embed/movie?tmdb=$id"
-                "embedsu" -> "https://embed.su/embed/movie/$id"
-                "vidsrccc" -> "https://vidsrc.cc/v2/embed/movie/$id"
                 "twoembed" -> "https://2embed.cc/embed/$id"
                 else -> "https://vidlink.pro/movie/$id"
             }
         } else {
             when (provider) {
                 "vidlink" -> "https://vidlink.pro/tv/$id/$season/$episode"
+                "vidsrcme" -> "https://vidsrcme.ru/embed/tv?tmdb=$id&season=$season&episode=$episode"
+                "superembed" -> "https://multiembed.mov/?video_id=$id&tmdb=1&s=$season&e=$episode"
                 "autoembed" -> "https://player.autoembed.cc/tv/$id/$season/$episode"
-                "vidsrcme" -> "https://vidsrc.me/embed/tv?tmdb=$id&season=$season&episode=$episode"
-                "embedsu" -> "https://embed.su/embed/tv/$id/$season/$episode"
-                "vidsrccc" -> "https://vidsrc.cc/v2/embed/tv/$id/$season/$episode"
                 "twoembed" -> "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
                 else -> "https://vidlink.pro/tv/$id/$season/$episode"
             }
@@ -896,25 +894,23 @@ private fun resolveWebFallbackStream(
     server: Int
 ): String? {
     if (id.isBlank()) return null
-    val providers = listOf("vidlink", "autoembed", "vidsrcme", "embedsu", "vidsrccc", "twoembed")
+    val providers = listOf("vidlink", "vidsrcme", "superembed", "autoembed", "twoembed")
     val provider = providers.getOrElse((server - 1).coerceAtLeast(0)) { providers.first() }
     return if (type == "movie") {
         when (provider) {
             "vidlink" -> "https://vidlink.pro/movie/$id"
+            "vidsrcme" -> "https://vidsrcme.ru/embed/movie?tmdb=$id"
+            "superembed" -> "https://multiembed.mov/?video_id=$id&tmdb=1"
             "autoembed" -> "https://player.autoembed.cc/movie/$id"
-            "vidsrcme" -> "https://vidsrc.me/embed/movie?tmdb=$id"
-            "embedsu" -> "https://embed.su/embed/movie/$id"
-            "vidsrccc" -> "https://vidsrc.cc/v2/embed/movie/$id"
             "twoembed" -> "https://2embed.cc/embed/$id"
             else -> "https://vidlink.pro/movie/$id"
         }
     } else {
         when (provider) {
             "vidlink" -> "https://vidlink.pro/tv/$id/$season/$episode"
+            "vidsrcme" -> "https://vidsrcme.ru/embed/tv?tmdb=$id&season=$season&episode=$episode"
+            "superembed" -> "https://multiembed.mov/?video_id=$id&tmdb=1&s=$season&e=$episode"
             "autoembed" -> "https://player.autoembed.cc/tv/$id/$season/$episode"
-            "vidsrcme" -> "https://vidsrc.me/embed/tv?tmdb=$id&season=$season&episode=$episode"
-            "embedsu" -> "https://embed.su/embed/tv/$id/$season/$episode"
-            "vidsrccc" -> "https://vidsrc.cc/v2/embed/tv/$id/$season/$episode"
             "twoembed" -> "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
             else -> "https://vidlink.pro/tv/$id/$season/$episode"
         }

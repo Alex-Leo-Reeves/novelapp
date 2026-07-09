@@ -100,6 +100,32 @@ actual fun AnimePlayerScreen(
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
     var playerError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var isPlayerBuffering by remember(streamUrl, retryKey) { mutableStateOf(true) }
+    var playerReady by remember(streamUrl, retryKey) { mutableStateOf(false) }
+    var bufferingTooLong by remember(streamUrl, retryKey) { mutableStateOf(false) }
+    val loadingTimeoutMs = 30_000L
+
+    // Buffering timeout watcher — if buffering lasts > 30s, surface error
+    LaunchedEffect(isPlayerBuffering, retryKey) {
+        if (!isPlayerBuffering || playerReady) {
+            bufferingTooLong = false
+            return@LaunchedEffect
+        }
+        // Wait for buffering to resolve with a maximum ceiling
+        var elapsed = 0L
+        val step = 2_500L
+        while (elapsed < loadingTimeoutMs) {
+            delay(step)
+            elapsed += step
+            if (!isPlayerBuffering || playerReady) {
+                bufferingTooLong = false
+                return@LaunchedEffect
+            }
+        }
+        bufferingTooLong = true
+        if (playerError == null) {
+            playerError = "Video is taking too long to load. Try a different server or episode."
+        }
+    }
 
     // ── ExoPlayer setup ───────────────────────────────────────────────────
     val exoPlayer = remember(streamUrl, retryKey) {
