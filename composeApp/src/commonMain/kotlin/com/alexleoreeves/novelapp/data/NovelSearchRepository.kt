@@ -81,9 +81,10 @@ class NovelSearchRepository(
         WeebCentralScraper(httpClient)
     )
 
-    /** Comic sources — Western comics from ReadAllComics, ZipComic, BatCave, GetComics */
+    /** Comic sources — Western comics from ReadAllComics, ZipComic, BatCave, ReadComicOnline, ViewComic */
     private val comicSources: List<ComicSource> = listOf(
-        GetComicsSource(httpClient),
+        ReadComicOnlineScraper(httpClient),
+        ViewComicScraper(httpClient),
         ZipComicScraper(httpClient),
         ReadAllComicsScraper(httpClient),
         BatCaveScraper(httpClient)
@@ -461,7 +462,6 @@ class NovelSearchRepository(
                             VideoCategory.NIGERIAN -> media.genres.contains("Nigeria", ignoreCase = true) ||
                                 media.genres.contains("Nigerian", ignoreCase = true) ||
                                 media.genres.contains("Nollywood", ignoreCase = true)
-                            VideoCategory.DONGHUA -> true
                         }
                     }
                         .ifEmpty { mediaResults }
