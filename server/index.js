@@ -191,22 +191,9 @@ function cleanBaseUrl(value) {
     return String(value || "").trim().replace(/\/+$/, "");
 }
 
-const APP_VERSION_CACHE = { payload: null, mtimeMs: 0, apkMtimeMs: 0 };
-
 function buildAppVersionPayload() {
     const appVersionPath = path.join(SITE_DIR, "app-version.json");
     const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
-    const now = Date.now();
-
-    // Check if files have changed
-    const appVersionMtime = fs.existsSync(appVersionPath) ? fs.statSync(appVersionPath).mtimeMs : 0;
-    const apkMtime = fs.existsSync(apkPath) ? fs.statSync(apkPath).mtimeMs : 0;
-    const cache = APP_VERSION_CACHE;
-
-    if (cache.payload !== null && appVersionMtime === cache.mtimeMs && apkMtime === cache.apkMtimeMs) {
-        return JSON.parse(JSON.stringify(cache.payload));
-    }
-
     let payload = {
         versionCode: 25,
         versionName: "1.24",
@@ -233,10 +220,6 @@ function buildAppVersionPayload() {
         payload.apkBytes = stat.size;
         payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
     }
-
-    cache.payload = JSON.parse(JSON.stringify(payload));
-    cache.mtimeMs = appVersionMtime;
-    cache.apkMtimeMs = apkMtime;
 
     return payload;
 }
@@ -1205,22 +1188,18 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
       url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
     },
     {
-      provider: "AutoEmbed",
-      url: movie ? `https://player.autoembed.cc/movie/${id}` : `https://player.autoembed.cc/tv/${id}/${season}/${episode}`
-    },
-    {
       provider: "VidSrc.me",
       url: movie
-        ? `https://vidsrc.me/embed/movie?tmdb=${id}`
-        : `https://vidsrc.me/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+        ? `https://vidsrcme.ru/embed/movie?tmdb=${id}`
+        : `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
     },
     {
-      provider: "EmbedSu",
-      url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
+      provider: "SuperEmbed",
+      url: movie ? `https://multiembed.mov/?video_id=${id}&tmdb=1` : `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`
     },
     {
-      provider: "VidSrc.cc",
-      url: movie ? `https://vidsrc.cc/v2/embed/movie/${id}` : `https://vidsrc.cc/v2/embed/tv/${id}/${season}/${episode}`
+      provider: "AutoEmbed",
+      url: movie ? `https://player.autoembed.cc/movie/${id}` : `https://player.autoembed.cc/tv/${id}/${season}/${episode}`
     },
     {
       provider: "2Embed",
@@ -2749,143 +2728,46 @@ async function sportsApiRequest(endpoint, params = {}) {
   return response;
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  WWE Events Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-function buildWweEvent(id, title, eventType) {
-  return { id, title, subtitle: "", eventType };
-}
-
-function buildWweStreamUrls(event) {
-  const title = event.title || "";
-  const eventType = event.eventType || "";
-  const slug = title.toLowerCase()
-    .replace("wwe ", "")
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-  const dateSlug = (event.date || "").replace(/-/g, "");
-  const searchQ = encodeURIComponent(title + " live stream");
-  const watchQ = encodeURIComponent(title);
-  const urls = [];
-
-  // Stream aggregators with known wrestling coverage
-  urls.push(`https://streamed.su/embed/wwe/${slug}-live`);
-  urls.push(`https://crackstreams.biz/stream/embed-wwe/${slug}-live`);
-  urls.push(`https://sportshub.stream/embed/wwe/${slug}`);
-  urls.push(`https://embed.su/embed/sports?q=${searchQ}`);
-  urls.push(`https://thetvapp.to/search/${slug}`);
-
-  // WatchWrestling — dedicated wrestling archive
-  if (dateSlug) {
-    urls.push(`https://watchwrestling.ch/watch/${slug}-${dateSlug}`);
-  }
-  urls.push(`https://watchwrestling.ch/search?q=${watchQ}`);
-
-  // WrestlingNetwork / AllWrestling
-  urls.push(`https://watchwrestling.news/search?q=${watchQ}`);
-  urls.push(`https://watchwrestling.news/videos/${slug}`);
-  urls.push(`https://allwrestling.live/search?q=${watchQ}`);
-
-  // Generic HLS/MP4 direct streams via embed
-  urls.push(`https://v2.sportsurge.net/search?q=${searchQ}`);
-  urls.push(`https://www.totalsportek.com/search?q=${searchQ}`);
-
-  // YouTube search as fallback (WebView loads YouTube)
-  urls.push(`https://www.youtube.com/results?search_query=${encodeURIComponent(title + " full show")}`);
-
-  return urls.filter(Boolean);
-}
-
-function curatedWweEvents() {
-  return [
-    { id: "wwe-raw-live", title: "WWE Raw", subtitle: "Live Now — Monday Night Raw", description: "The flagship show of WWE. Watch Raw live.", cover_url: "https://dummyimage.com/600x840/1a1a2e/e94560.png&text=WWE+Raw+LIVE", is_live: true, status: "LIVE", event_type: "raw", date: "", match_count: 0 },
-    { id: "wwe-smackdown-live", title: "WWE SmackDown", subtitle: "Live This Friday", description: "Friday night showdown. SmackDown live stream.", cover_url: "https://dummyimage.com/600x840/1a1a2e/4361ee.png&text=WWE+SmackDown+LIVE", is_live: true, status: "LIVE", event_type: "smackdown", date: "", match_count: 0 },
-    { id: "wwe-raw-next", title: "WWE Raw", subtitle: "Next Monday", description: "The next episode of Monday Night Raw.", cover_url: "https://dummyimage.com/600x840/1a1a2e/e94560.png&text=WWE+Raw", is_live: false, status: "UPCOMING", event_type: "raw", date: "", match_count: 5 },
-    { id: "wwe-smackdown-next", title: "WWE SmackDown", subtitle: "This Friday", description: "The next episode of Friday Night SmackDown.", cover_url: "https://dummyimage.com/600x840/1a1a2e/4361ee.png&text=WWE+SmackDown", is_live: false, status: "UPCOMING", event_type: "smackdown", date: "", match_count: 5 },
-    { id: "wwe-ppv-40", title: "WrestleMania 41", subtitle: "PPV — Latest Edition", description: "The grandest stage of them all. Watch WrestleMania 41 replays.", cover_url: "https://dummyimage.com/600x840/2d1b3e/f72585.png&text=WrestleMania+41", is_live: false, status: "PAST", event_type: "ppv", date: "2026-04-06", match_count: 14 },
-    { id: "wwe-ppv-39", title: "SummerSlam 2026", subtitle: "PPV — Replay Available", description: "The biggest party of the summer. Replays available.", cover_url: "https://dummyimage.com/600x840/2d1b3e/f72585.png&text=SummerSlam+2026", is_live: false, status: "PAST", event_type: "ppv", date: "2026-08-03", match_count: 12 },
-    { id: "wwe-ppv-38", title: "Royal Rumble 2026", subtitle: "PPV — Replay Available", description: "30-man over-the-top-rope Royal Rumble match. Relive the action.", cover_url: "https://dummyimage.com/600x840/2d1b3e/f72585.png&text=Royal+Rumble+2026", is_live: false, status: "PAST", event_type: "ppv", date: "2026-01-27", match_count: 8 },
-    { id: "wwe-ppv-37", title: "Survivor Series 2025", subtitle: "PPV — Replay Available", description: "Traditional 5-on-5 elimination matches. Watch the replays.", cover_url: "https://dummyimage.com/600x840/2d1b3e/7209b7.png&text=Survivor+Series+2025", is_live: false, status: "PAST", event_type: "ppv", date: "2025-11-30", match_count: 10 },
-    { id: "wwe-ppv-36", title: "Money in the Bank 2025", subtitle: "PPV — Replay Available", description: "The briefcase awaits. Relive the Money in the Bank ladder matches.", cover_url: "https://dummyimage.com/600x840/2d1b3e/4361ee.png&text=MITB+2025", is_live: false, status: "PAST", event_type: "ppv", date: "2025-07-06", match_count: 9 },
-    { id: "wwe-raw-past-1", title: "WWE Raw", subtitle: "March 31, 2026", description: "Monday Night Raw replay from March 31, 2026.", cover_url: "https://dummyimage.com/600x840/1a1a2e/e94560.png&text=WWE+Raw+Mar+31", is_live: false, status: "PAST", event_type: "raw", date: "2026-03-31", match_count: 6 },
-    { id: "wwe-smackdown-past-1", title: "WWE SmackDown", subtitle: "April 4, 2026", description: "Friday Night SmackDown replay from April 4, 2026.", cover_url: "https://dummyimage.com/600x840/1a1a2e/4361ee.png&text=SmackDown+Apr+4", is_live: false, status: "PAST", event_type: "smackdown", date: "2026-04-04", match_count: 5 }
-  ];
-}
-
-
-function curatedFootballFixtures() {
-  const now = new Date();
-  const today = now.toISOString().split("T")[0];
-  const timeStr = (h, m) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
-  const todayMatches = [
-    { home: "Arsenal", away: "Chelsea", league: "Premier League", h: 16, m: 0, status: "NS" },
-    { home: "Manchester City", away: "Liverpool", league: "Premier League", h: 18, m: 30, status: "NS" },
-    { home: "Barcelona", away: "Real Madrid", league: "La Liga", h: 21, m: 0, status: "NS" },
-    { home: "AC Milan", away: "Inter Milan", league: "Serie A", h: 20, m: 45, status: "NS" },
-    { home: "Bayern Munich", away: "Borussia Dortmund", league: "Bundesliga", h: 17, m: 30, status: "NS" },
-    { home: "PSG", away: "Marseille", league: "Ligue 1", h: 21, m: 0, status: "NS" },
-    { home: "Super Eagles", away: "Black Stars", league: "African Cup of Nations", h: 19, m: 0, status: "NS" },
-    { home: "Enyimba", away: "Rangers", league: "NPFL", h: 16, m: 0, status: "NS" },
-    { home: "Rivers United", away: "Remo Stars", league: "NPFL", h: 17, m: 0, status: "NS" },
-    { home: "Kaizer Chiefs", away: "Orlando Pirates", league: "South African Premier Division", h: 15, m: 30, status: "NS" },
-  ];
-  return todayMatches.map((m, idx) => ({
-    fixture: { id: 100000 + idx, date: `${today}T${timeStr(m.h, m.m)}+01:00`, status: { short: m.status, elapsed: null } },
-    league: { id: 100 + idx, name: m.league, season: 2026 },
-    teams: { home: { name: m.home }, away: { name: m.away } },
-    goals: { home: null, away: null }
-  }));
-}
-
 async function handleFootballFixtures(request, response, requestUrl) {
   try {
     const live = requestUrl.searchParams.get("live");
     const date = requestUrl.searchParams.get("date");
     const params = {};
-    
-    // Try the API first
-    if (SPORTS_API_KEY) {
-      if (live === "all") {
-        params.live = "all";
-      } else if (date) {
-        params.date = date;
-      } else {
-        const today = new Date();
-        const paramDate = requestUrl.searchParams.get("date");
-        const upcoming = requestUrl.searchParams.get("upcoming");
-        if (upcoming === "true") {
-          const end = new Date(today);
-          end.setDate(end.getDate() + 5);
-          params.dateFrom = today.toISOString().split("T")[0];
-          params.dateTo = end.toISOString().split("T")[0];
-        } else if (paramDate) {
-          params.date = paramDate;
-          params.live = "all";
-        } else {
-          params.date = today.toISOString().split("T")[0];
-          params.live = "all";
-        }
-      }
-      const payload = await sportsApiRequest("/fixtures", params);
-      const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-      if (fixtures.length > 0) {
-        fixtures.sort((a, b) => {
-          const statusA = a?.fixture?.status?.short || "";
-          const statusB = b?.fixture?.status?.short || "";
-          const liveOrder = (s) => s === "LIVE" ? 0 : s === "HT" || s === "1H" || s === "2H" ? 1 : s === "NS" ? 2 : 3;
-          return liveOrder(statusA) - liveOrder(statusB);
-        });
-        return sendApiData(response, 200, fixtures.slice(0, 50));
-      }
+    if (live === "all") {
+      params.live = "all";
+    } else if (date) {
+      params.date = date;
+    } else {
+    const today = new Date();
+    const paramDate = requestUrl.searchParams.get("date");
+    const upcoming = requestUrl.searchParams.get("upcoming");
+    if (upcoming === "true") {
+      // Fetch next 5 days of fixtures for the Upcoming tab
+      const end = new Date(today);
+      end.setDate(end.getDate() + 5);
+      params.dateFrom = today.toISOString().split("T")[0];
+      params.dateTo = end.toISOString().split("T")[0];
+    } else if (paramDate) {
+      params.date = paramDate;
+      params.live = "all";
+    } else {
+      params.date = today.toISOString().split("T")[0];
+      params.live = "all";
     }
-    // No API key or API returned empty — serve curated fixtures
-    console.log("[Football] Using curated fixture fallback (no API key or empty response)");
-    return sendApiData(response, 200, curatedFootballFixtures());
+    }
+    const payload = await sportsApiRequest("/fixtures", params);
+    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+    // Sort: live first, then in-progress, then scheduled
+    fixtures.sort((a, b) => {
+      const statusA = a?.fixture?.status?.short || "";
+      const statusB = b?.fixture?.status?.short || "";
+      const liveOrder = (s) => s === "LIVE" ? 0 : s === "HT" || s === "1H" || s === "2H" ? 1 : s === "NS" ? 2 : 3;
+      return liveOrder(statusA) - liveOrder(statusB);
+    });
+    return sendApiData(response, 200, fixtures.slice(0, 50));
   } catch (error) {
     console.error("[Football] Fixtures error:", error.message || error);
-    return sendApiData(response, 200, curatedFootballFixtures());
+    return sendApiData(response, 200, []);
   }
 }
 
@@ -2950,42 +2832,31 @@ async function handleFootballStream(request, response, requestUrl) {
     if (!fixtureId || isNaN(fixtureId)) {
       return sendApiError(response, 400, "fixture parameter is required.");
     }
-
-    // Accept team/league params from the client directly (always passed from app)
-    const homeTeam = requestUrl.searchParams.get("home") || "";
-    const awayTeam = requestUrl.searchParams.get("away") || "";
-    const leagueName = requestUrl.searchParams.get("league") || "";
-
-    // If no team names came from client params, try API lookup as fallback
-    let resolvedHome = homeTeam;
-    let resolvedAway = awayTeam;
-    let resolvedLeague = leagueName;
-
-    if (!resolvedHome || !resolvedAway) {
-      try {
-        const fixturePayload = await sportsApiRequest("/fixtures", { id: fixtureId });
-        const fixture = Array.isArray(fixturePayload?.response) ? fixturePayload?.response?.[0] : null;
-        if (fixture) {
-          resolvedHome = fixture?.teams?.home?.name || resolvedHome;
-          resolvedAway = fixture?.teams?.away?.name || resolvedAway;
-          resolvedLeague = fixture?.league?.name || resolvedLeague;
-        }
-      } catch (apiErr) {
-        // API lookup failed - continue with whatever we have from client params
-      }
-    }
-
-    // If we still don't have team names, return empty (can't build embed URLs)
-    if (!resolvedHome || !resolvedAway) {
-      console.log(`[Football] No team names available for fixture ${fixtureId}, cannot build stream URLs.`);
+    // Fetch the fixture to get team + league info
+    const fixturePayload = await sportsApiRequest("/fixtures", { id: fixtureId });
+    const fixture = Array.isArray(fixturePayload?.response) ? fixturePayload?.response?.[0] : null;
+    if (!fixture) {
       return sendApiData(response, 200, "");
     }
 
+    const homeTeam = fixture?.teams?.home?.name || "";
+    const awayTeam = fixture?.teams?.away?.name || "";
+    const leagueName = fixture?.league?.name || "";
+
     // Build team slugs for URL construction
-    const homeSlug = footballTeamSlug(resolvedHome);
-    const awaySlug = footballTeamSlug(resolvedAway);
+    const homeSlug = footballTeamSlug(homeTeam);
+    const awaySlug = footballTeamSlug(awayTeam);
 
     // ── Build embed URLs that the Android WebView interceptor can process ──
+    // The AnimePlayerScreen on Android has a headless WebView with
+    // shouldInterceptRequest that loads HTML pages, intercepts network
+    // traffic for .m3u8 URLs, and feeds them to ExoPlayer. This is the
+    // same pipeline that already works for movies and anime.
+    //
+    // These sports streaming aggregators embed live .m3u8 streams on a
+    // page — our WebView interceptor loads the page and catches the
+    // actual video stream URL from network traffic.
+
     const embedUrls = [];
 
     // 1. Streamed.su — team name based slug
@@ -2995,7 +2866,7 @@ async function handleFootballStream(request, response, requestUrl) {
     }
 
     // 2. Streamed.su — league-based slug
-    const lSlug = footballLeagueSlug(resolvedLeague);
+    const lSlug = footballLeagueSlug(leagueName);
     if (lSlug) {
       embedUrls.push(`https://streamed.su/embed/football/${lSlug}-live`);
     }
@@ -3013,11 +2884,11 @@ async function handleFootballStream(request, response, requestUrl) {
     }
 
     // 5. V2 Sportsurge — search-based
-    const searchQuery = encodeURIComponent(`${resolvedHome} vs ${resolvedAway} live stream`);
+    const searchQuery = encodeURIComponent(`${homeTeam} vs ${awayTeam} live stream`);
     embedUrls.push(`https://v2.sportsurge.net/search?q=${searchQuery}`);
 
     // 6. Generic fallback with team names for any aggregator
-    const teamQuery = encodeURIComponent(`${resolvedHome} ${resolvedAway} live football streaming`);
+    const teamQuery = encodeURIComponent(`${homeTeam} ${awayTeam} live football streaming`);
     embedUrls.push(`https://embed.su/embed/sports?q=${teamQuery}`);
 
     // 7. TheTVApp channel-based (league name as search)
@@ -3056,19 +2927,6 @@ async function handleFootballSearch(request, response, requestUrl) {
 async function handleApi(request, response, pathname) {
   try {
     const requestUrl = new URL(request.url, `http://${request.headers.host || "localhost"}`);
-
-    // ── WWE API routes ─────────────────────────────────────────────────
-    if (pathname === "/api/wwe/events") {
-      return sendApiData(response, 200, curatedWweEvents());
-    }
-    if (pathname === "/api/wwe/stream") {
-      const id = requestUrl.searchParams.get("id") || "";
-      const title = requestUrl.searchParams.get("title") || "";
-      const eventType = requestUrl.searchParams.get("eventType") || "";
-      const event = buildWweEvent(id, title, eventType);
-      const urls = buildWweStreamUrls(event);
-      return sendApiData(response, 200, urls.join("|"));
-    }
 
     // ── Football API routes ─────────────────────────────────────────────
     if (pathname === "/api/football/fixtures") {
