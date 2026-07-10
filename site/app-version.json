@@ -1,17 +1,17 @@
 {
-    "versionCode": 33,
-    "versionName": "1.33",
-    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-    "releaseNotes": [
-        "Fixed anime player loading stuck state and streaming issues (CinePro, SuStream)",
-        "Fixed Discover screen layout and media detail screen improvements",
-        "Kokoro TTS engine stability fixes for Android runtime",
-        "Improved TMDB key handling and movie/novel search reliability",
-        "Comic scrapers and WWE source fixes",
-        "Server-side WWE handler and streaming optimizations"
-    ],
-    "forceUpdate": false,
-    "apkBytes": 209087447,
-    "apkSha256": "9e64e47693cd953fa9bd4e80826fda2fe830efed02722e64111e17bafec9fea5"
+  "versionCode": 33,
+  "versionName": "1.33",
+  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+  "releaseNotes": [
+    "Fixed anime player loading stuck state and streaming issues (CinePro, SuStream)",
+    "Fixed Discover screen layout and media detail screen improvements",
+    "Kokoro TTS engine stability fixes for Android runtime",
+    "Improved TMDB key handling and movie/novel search reliability",
+    "Comic scrapers and WWE source fixes",
+    "Server-side WWE handler and streaming optimizations"
+  ],
+  "forceUpdate": false,
+  "apkBytes": 209087447,
+  "apkSha256": "f4676b45eedd69a60fbd81797be9af56ea4712515cf3f41e166c026908399b9e"
 }
