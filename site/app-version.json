@@ -1,14 +1,17 @@
 {
-    "versionCode": 32,
-    "versionName": "1.32",
+    "versionCode": 33,
+    "versionName": "1.33",
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed APK download timeout on slow networks — 120s read timeout + 3x retry",
-        "Server-side APK manifest caching to prevent download stalls",
-        "Mobile-responsive landing page with inline critical CSS"
+        "Fixed anime player loading stuck state and streaming issues (CinePro, SuStream)",
+        "Fixed Discover screen layout and media detail screen improvements",
+        "Kokoro TTS engine stability fixes for Android runtime",
+        "Improved TMDB key handling and movie/novel search reliability",
+        "Comic scrapers and WWE source fixes",
+        "Server-side WWE handler and streaming optimizations"
     ],
     "forceUpdate": false,
-    "apkBytes": 0,
-    "apkSha256": ""
+    "apkBytes": 209087447,
+    "apkSha256": "9e64e47693cd953fa9bd4e80826fda2fe830efed02722e64111e17bafec9fea5"
 }

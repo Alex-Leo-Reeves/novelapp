@@ -33,26 +33,35 @@ import org.json.JSONObject
 
 actual suspend fun synthesizeKokoroSpeech(request: KokoroSynthesisRequest): KokoroSynthesisResult =
     withContext(Dispatchers.IO) {
+        // If engine hasn't been warm-started yet, do a blocking warmup now so the
+        // session is guaranteed to exist before synthesis attempts to use it.
+        if (!AndroidKokoroEngine.isReadyForImmediateUse()) {
+            AndroidKokoroEngine.prepareInBackground(force = true)
+            AndroidKokoroEngine.awaitReady()
+        }
         runCatching { AndroidKokoroEngine.synthesize(request) }
-            .getOrElse { error ->
-                val diagnostics = AndroidKokoroEngine.diagnosticsFor(request, error)
-                println("[Kokoro] Android ONNX synthesis failed: $diagnostics")
-                println("[Kokoro] Falling back to Android TTS synthesizeToFile for segment=${request.segmentIndex}")
-                KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                    phase = KokoroVoiceSetupPhase.Fallback,
-                    message = "Using Android system speech (ONNX unavailable)."
-                )
-                try {
-                    AndroidSystemTtsEngine.synthesizeToFile(request)
-                } catch (ttsError: Exception) {
-                    println("[Kokoro] Android TTS fallback also failed: ${ttsError.message}")
-                    KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
-                        phase = KokoroVoiceSetupPhase.Error,
-                        message = "Kokoro ONNX failed: ${error.message ?: "unknown error"}"
-                    )
-                    throw error
-                }
-            }
+            .recoverCatching { firstError ->
+                // One retry — ONNX can transiently fail (NNAPI init race, memory pressure)
+                runCatching { AndroidKokoroEngine.synthesize(request) }
+                    .getOrElse { retryError ->
+                        val diagnostics = AndroidKokoroEngine.diagnosticsFor(request, retryError)
+                        println("[Kokoro] ONNX failed after retry: $diagnostics")
+                        KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                            phase = KokoroVoiceSetupPhase.Fallback,
+                            message = "Using Android system speech (ONNX unavailable)."
+                        )
+                        try {
+                            AndroidSystemTtsEngine.synthesizeToFile(request)
+                        } catch (ttsError: Exception) {
+                            println("[Kokoro] Fallback also failed: ${ttsError.message}")
+                            KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
+                                phase = KokoroVoiceSetupPhase.Error,
+                                message = "Kokoro failed: ${retryError.message ?: "unknown error"}"
+                            )
+                            throw retryError
+                        }
+                    }
+            }.getOrThrow()
     }
 
 actual suspend fun playKokoroAudio(result: KokoroSynthesisResult, request: KokoroSynthesisRequest) {
@@ -479,19 +488,17 @@ private object AndroidKokoroEngine {
         request: KokoroSynthesisRequest,
         phonemization: KokoroPhonemization
     ): KokoroSynthesisResult {
-        println("[Kokoro] SYNTHESIZE segment=${request.segmentIndex} voice=${request.voiceId} " +
-            "textChars=${request.text.length} tokens=${phonemization.tokenIds.size}")
         val assetDir = ensureAssets()
-        val activeSession = session ?: createSession(File(assetDir, "model_quantized.onnx")).also {
-            session = it
-            println("[Kokoro] Session created successfully")
+        val activeSession = synchronized(this) {
+            session ?: createSession(File(assetDir, "model_quantized.onnx")).also {
+                session = it
+            }
         }
         val paddedTokens = LongArray(phonemization.tokenIds.size + 2)
         paddedTokens[0] = 0L
         phonemization.tokenIds.forEachIndexed { index, token -> paddedTokens[index + 1] = token.toLong() }
         paddedTokens[paddedTokens.lastIndex] = 0L
         val style = voiceStyle(assetDir, request.voiceId, phonemization.tokenIds.size)
-        println("[Kokoro] Voice style loaded: voice=${request.voiceId} frameCount=${style.size / 256} tokenCount=${phonemization.tokenIds.size}")
 
         OnnxTensor.createTensor(environment, arrayOf(paddedTokens)).use { inputIds ->
             OnnxTensor.createTensor(environment, arrayOf(style)).use { styleTensor ->
@@ -507,10 +514,6 @@ private object AndroidKokoroEngine {
                         if (samples.isEmpty()) error("Kokoro returned an empty waveform.")
                         val wav = samples.toWavBytes(SAMPLE_RATE, request.narratorVolume)
                         val durationMs = max(300L, samples.size * 1000L / SAMPLE_RATE)
-                        println(
-                            "[Kokoro] Android ONNX synthesized segment=${request.segmentIndex} " +
-                                "voice=${request.voiceId} samples=${samples.size} wavBytes=${wav.size}"
-                        )
                         return KokoroSynthesisResult(
                             audioBytes = wav,
                             durationMs = durationMs,
@@ -526,8 +529,22 @@ private object AndroidKokoroEngine {
     fun isReadyForImmediateUse(): Boolean =
         session != null
 
+    @Volatile
+    private var warmupCompletable: CompletableDeferred<Unit>? = null
+
+    /** Blocking call that waits for warmup (model load + session create) to finish. */
+    suspend fun awaitReady() {
+        warmupCompletable?.await()
+    }
+
     fun prepareInBackground(force: Boolean = false) {
-        if (!force && !warmupStarted.compareAndSet(false, true)) return
+        val completable = CompletableDeferred<Unit>()
+        synchronized(this) { warmupCompletable = completable }
+        if (!force && !warmupStarted.compareAndSet(false, true)) {
+            synchronized(this) { warmupCompletable = null }
+            completable.complete(Unit)
+            return
+        }
         warmupScope.launch {
             runCatching {
                 val assetDir = ensureAssets()
@@ -538,27 +555,15 @@ private object AndroidKokoroEngine {
                     phase = KokoroVoiceSetupPhase.Ready,
                     message = "Kokoro voice is ready on this device."
                 )
+                completable.complete(Unit)
             }.onFailure { error ->
                 warmupStarted.set(false)
-                val diagnostics = diagnosticsFor(
-                    KokoroSynthesisRequest(
-                        text = "warmup",
-                        tokenIds = IntArray(0),
-                        voiceId = "am_adam",
-                        speed = 1f,
-                        narratorVolume = 1f,
-                        segmentIndex = 0,
-                        macroIndex = 0,
-                        tone = NarrationTone.Neutral,
-                        ambientCue = null
-                    ),
-                    error
-                )
+                completable.complete(Unit) // Unblock awaitReady anyway so it falls through to first-synthesis attempt
                 KokoroVoiceSetup.status.value = KokoroVoiceSetupStatus(
                     phase = KokoroVoiceSetupPhase.Error,
                     message = "Kokoro warm-up failed: ${error.message ?: "unknown error"}"
                 )
-                println("[Kokoro] Android warm-up failed: $diagnostics")
+                println("[Kokoro] Android warm-up failed: $error")
             }
         }
     }
@@ -833,6 +838,9 @@ private object AndroidKokoroEngine {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    @Volatile
+    private var voiceCacheLogged = false
+
     private fun voiceStyle(assetDir: File, voiceId: String, tokenCount: Int): FloatArray {
         val voice = voiceCache.getOrPut(voiceId) {
             val file = File(assetDir, "voices/$voiceId.bin")
@@ -848,12 +856,14 @@ private object AndroidKokoroEngine {
             if (floats.size % 256 != 0) {
                 error("Kokoro voice '$voiceId' has ${floats.size} floats, not divisible by 256 (frameSize).")
             }
-            println("[Kokoro] Loaded voice '$voiceId': ${floats.size} floats, ${floats.size / 256} frames")
+            if (!voiceCacheLogged) {
+                println("[Kokoro] Loaded voice '$voiceId': ${floats.size} floats, ${floats.size / 256} frames")
+                voiceCacheLogged = true
+            }
             floats
         }
         val frameCount = voice.size / 256
         val frame = tokenCount.coerceIn(0, frameCount - 1)
-        println("[Kokoro] Selected voice frame $frame of $frameCount for $tokenCount tokens")
         return voice.copyOfRange(frame * 256, frame * 256 + 256)
     }
 
@@ -917,6 +927,10 @@ private fun String.splitByWordAndCharLimits(maxWords: Int, maxChars: Int): List<
     }
     flushCurrent()
     return chunks
+}
+
+actual fun warmupKokoroEngine() {
+    AndroidKokoroEngine.prepareInBackground()
 }
 
 private fun combineKokoroWavSegments(results: List<KokoroSynthesisResult>): ByteArray? {

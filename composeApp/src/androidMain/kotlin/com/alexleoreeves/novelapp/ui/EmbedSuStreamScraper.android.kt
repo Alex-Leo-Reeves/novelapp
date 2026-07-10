@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -66,101 +67,99 @@ suspend fun extractStreamFromEmbed(
             if (settled) return
             settled = true
             mainHandler.post {
-                webView?.destroy()
+                try { webView?.destroy() } catch (_: Exception) {}
                 webView = null
             }
             if (cont.isActive) cont.resume(url)
         }
 
         mainHandler.post {
-            val wv = WebView(context).apply {
-                // Invisible — no parent view, never rendered on screen
-                @SuppressLint("VisibleForTests")
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    setSupportMultipleWindows(false)
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    userAgentString = SCRAPER_USER_AGENT
-                    blockNetworkLoads = false
-                    allowContentAccess = true
-                    allowFileAccess = false
-                    cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
-                }
-                setBackgroundColor(android.graphics.Color.BLACK)
-
-                webViewClient = object : WebViewClient() {
-                    // ── Block all ad/popup redirects ───────────────────────
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView?,
-                        request: WebResourceRequest?
-                    ): Boolean {
-                        val url = request?.url?.toString() ?: return true
-                        val host = request.url?.host ?: return true
-                        // Only allow the embed host and known CDN domains
-                        val allowed = ALLOWED_EMBED_DOMAINS.any { domain ->
-                            host == domain || host.endsWith(".$domain")
-                        }
-                        if (!allowed) {
-                            // Silently kill the redirect
-                            return true
-                        }
-                        // Check if this *IS* the stream we're looking for
-                        if (STREAM_PATTERNS.any { url.contains(it, ignoreCase = true) } &&
-                            isPlayableStreamUrl(url)) {
-                            deliver(url)
-                            return true
-                        }
-                        return false // allow embed page to continue loading
+            try {
+                val wv = WebView(context).apply {
+                    @SuppressLint("VisibleForTests")
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        setSupportMultipleWindows(false)
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        userAgentString = SCRAPER_USER_AGENT
+                        blockNetworkLoads = false
+                        allowContentAccess = true
+                        allowFileAccess = false
+                        cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                     }
+                    setBackgroundColor(android.graphics.Color.BLACK)
 
-                    // ── Intercept every sub-resource request ───────────────
-                    override fun shouldInterceptRequest(
-                        view: WebView?,
-                        request: WebResourceRequest?
-                    ): WebResourceResponse? {
-                        val url = request?.url?.toString() ?: return null
-                        val host = request.url?.host ?: ""
-
-                        // If this is a stream asset, capture it immediately
-                        if (isPlayableStreamUrl(url) &&
-                            STREAM_PATTERNS.any { url.contains(it, ignoreCase = true) }) {
-                            deliver(url)
-                            // Return empty response to the WebView — we don't need it to play
-                            return WebResourceResponse(
-                                "text/plain",
-                                "utf-8",
-                                ByteArrayInputStream(ByteArray(0))
-                            )
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): Boolean {
+                            val url = request?.url?.toString() ?: return true
+                            val host = request.url?.host ?: return true
+                            val allowed = ALLOWED_EMBED_DOMAINS.any { domain ->
+                                host == domain || host.endsWith(".$domain")
+                            }
+                            if (!allowed) return true
+                            if (STREAM_PATTERNS.any { url.contains(it, ignoreCase = true) } &&
+                                isPlayableStreamUrl(url)) {
+                                deliver(url)
+                                return true
+                            }
+                            return false
                         }
 
-                        // Block requests to non-allowed domains (ads, trackers)
-                        val allowed = ALLOWED_EMBED_DOMAINS.any { domain ->
-                            host == domain || host.endsWith(".$domain")
-                        }
-                        if (!allowed && url.startsWith("http")) {
-                            return WebResourceResponse(
-                                "text/plain",
-                                "utf-8",
-                                ByteArrayInputStream(ByteArray(0))
-                            )
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
+                            val url = request?.url?.toString() ?: return null
+                            val host = request.url?.host ?: ""
+                            if (isPlayableStreamUrl(url) &&
+                                STREAM_PATTERNS.any { url.contains(it, ignoreCase = true) }) {
+                                deliver(url)
+                                return WebResourceResponse(
+                                    "text/plain",
+                                    "utf-8",
+                                    ByteArrayInputStream(ByteArray(0))
+                                )
+                            }
+                            val allowed = ALLOWED_EMBED_DOMAINS.any { domain ->
+                                host == domain || host.endsWith(".$domain")
+                            }
+                            if (!allowed && url.startsWith("http")) {
+                                return WebResourceResponse(
+                                    "text/plain",
+                                    "utf-8",
+                                    ByteArrayInputStream(ByteArray(0))
+                                )
+                            }
+                            return null
                         }
 
-                        return null // pass through allowed requests
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: WebResourceError?
+                        ) {
+                            if (request?.isForMainFrame == true) deliver(null)
+                        }
                     }
                 }
-            }
-            webView = wv
+                webView = wv
 
-            cont.invokeOnCancellation {
-                mainHandler.post {
-                    wv.destroy()
-                    webView = null
+                cont.invokeOnCancellation {
+                    mainHandler.post {
+                        try { wv.destroy() } catch (_: Exception) {}
+                        webView = null
+                    }
                 }
-            }
 
-            wv.loadUrl(embedUrl, buildEmbedHeaders(embedUrl))
+                wv.loadUrl(embedUrl, buildEmbedHeaders(embedUrl))
+            } catch (e: Exception) {
+                deliver(null)
+            }
         }
     }
 }

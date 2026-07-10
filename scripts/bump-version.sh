@@ -5,12 +5,17 @@
 #    ./scripts/bump-version.sh 29 "1.29"
 #
 #  What it updates:
-#    composeApp/build.gradle.kts   (versionCode & versionName)
-#    AppReleaseConfig.kt           (CURRENT_VERSION_CODE & CURRENT_VERSION_NAME)
-#    site/app-version.json         (versionCode & versionName)
-#    iosApp/project.yml            (CURRENT_PROJECT_VERSION & MARKETING_VERSION)
-#    tvApp/build.gradle.kts        (versionCode & versionName)
-#    package.json                  (version)
+#    composeApp/build.gradle.kts           (versionCode & versionName)
+#    composeApp/build.gradle.kts           (packageVersion for Desktop)
+#    PlatformAppVersion.desktop.kt         (versionCode & versionName)
+#    site/app-version.json                 (versionCode & versionName)
+#    iosApp/project.yml                    (CURRENT_PROJECT_VERSION & MARKETING_VERSION)
+#    tvApp/build.gradle.kts                (versionCode & versionName)
+#    package.json                          (version)
+#
+#  NOTE: AppReleaseConfig.kt is NOT updated manually anymore — it now
+#  derives CURRENT_VERSION_CODE / CURRENT_VERSION_NAME from PlatformAppVersion
+#  at runtime, so those values are always the actual compiled version.
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -34,17 +39,21 @@ sed -i \
 sed -i \
   -E "s/^(\\s*versionName\\s*=\\s*)\"[^\"]+\"/\\1\"${VN}\"/" \
   "$ROOT/composeApp/build.gradle.kts"
+# Desktop packageVersion (last occurrence in the file)
+sed -i \
+  -E "s/^(\\s*packageVersion\\s*=\\s*)\"[^\"]+\"/\\1\"${VN}.0\"/" \
+  "$ROOT/composeApp/build.gradle.kts"
 echo "  ✔ composeApp/build.gradle.kts  →  $VC / $VN"
 
-# ── 2. AppReleaseConfig.kt ─────────────────────────────────────────────────
-CONFIG="$ROOT/composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/platform/AppReleaseConfig.kt"
+# ── 2. PlatformAppVersion.desktop.kt ──────────────────────────────────────
+DESKTOP="$ROOT/composeApp/src/desktopMain/kotlin/com/alexleoreeves/novelapp/platform/PlatformAppVersion.desktop.kt"
 sed -i \
-  -E "s/^(\\s*const val CURRENT_VERSION_CODE\\s*=\\s*)[0-9]+/\\1${VC}/" \
-  "$CONFIG"
+  -E "s/^(\\s*actual val versionCode: Int\\s*=\\s*)[0-9]+/\\1${VC}/" \
+  "$DESKTOP"
 sed -i \
-  -E "s/^(\\s*const val CURRENT_VERSION_NAME\\s*=\\s*)\"[^\"]+\"/\\1\"${VN}\"/" \
-  "$CONFIG"
-echo "  ✔ AppReleaseConfig.kt          →  $VC / $VN"
+  -E "s/^(\\s*actual val versionName: String\\s*=\\s*)\"[^\"]+\"/\\1\"${VN}\"/" \
+  "$DESKTOP"
+echo "  ✔ PlatformAppVersion.desktop.kt  →  $VC / $VN"
 
 # ── 3. site/app-version.json ───────────────────────────────────────────────
 sed -i \
@@ -56,8 +65,6 @@ sed -i \
 echo "  ✔ site/app-version.json        →  $VC / $VN"
 
 # ── 4. iosApp/project.yml ──────────────────────────────────────────────────
-#   CURRENT_PROJECT_VERSION: 12
-#   MARKETING_VERSION: "1.11"
 sed -i \
   -E "s/^(\\s*CURRENT_PROJECT_VERSION:\\s*)[0-9]+/\\1${VC}/" \
   "$ROOT/iosApp/project.yml"
@@ -79,7 +86,6 @@ echo "  ✔ tvApp/build.gradle.kts       →  $VC / $VN"
 #   "version": "1.0.0"  →  "version": "X.Y.Z"
 # We extract the major.minor.patch from versionName and write it
 # package.json uses semver; we map 1.29 → 1.29.0
-# If the versionName already includes a third segment, use as-is; else append ".0"
 if echo "$VN" | grep -q '\.'; then
   SEGMENTS=$(echo "$VN" | awk -F. '{print NF}')
   if [ "$SEGMENTS" -eq 2 ]; then
@@ -96,7 +102,7 @@ sed -i \
 echo "  ✔ package.json                 →  $SEMVER"
 
 echo ""
-echo "═══ Done — v$VN (code $VC) written to all 6 files ═══"
+echo "═══ Done — v$VN (code $VC) written to all files ═══"
 echo ""
 echo "Next steps:"
 echo "  1. Verify with:    git diff --stat"

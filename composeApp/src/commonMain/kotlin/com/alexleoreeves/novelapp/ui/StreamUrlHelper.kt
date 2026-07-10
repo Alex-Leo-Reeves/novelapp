@@ -106,6 +106,23 @@ fun buildVidSrcMeUrl(
 }
 
 /**
+ * Build an Embed.su (embed.su) embed URL.
+ *
+ * Movie: https://embed.su/embed/movie/{tmdbId}
+ * TV:    https://embed.su/embed/tv/{tmdbId}/{season}/{episode}
+ */
+fun buildEmbedSuUrl(
+    tmdbId: String,
+    type: String,
+    season: String = "1",
+    episode: String = "1"
+): String = if (type == "movie") {
+    "https://embed.su/embed/movie/$tmdbId"
+} else {
+    "https://embed.su/embed/tv/$tmdbId/$season/$episode"
+}
+
+/**
  * Check if a URL is a directly playable stream (HLS, MP4, DASH, etc.)
  */
 fun String.isDirectPlayableStreamUrl(): Boolean {

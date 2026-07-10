@@ -458,7 +458,7 @@ class ReadComicOnlineScraper(private val httpClient: HttpClient) : ComicSource {
                 val link = el.select("a[href*=/Comic/]").firstOrNull() ?: return@mapNotNull null
                 val href = link.attr("href")
                 val img = el.select("img").firstOrNull()
-                val cover = img?.attr("src").orEmpty()
+                val cover = img?.attr("data-src").orEmpty().ifBlank { img?.attr("src").orEmpty() }
                 val title = link.attr("title").ifBlank { link.text() }
                     .ifBlank { img?.attr("alt").orEmpty() }
                     .decodeHtmlEntitiesLite()
