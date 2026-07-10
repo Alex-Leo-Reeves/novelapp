@@ -82,6 +82,11 @@ class KokoroNarrationController(
 
     init {
         clearTemporaryNarrationAudioCache()
+        // Kick off engine warmup (model copy + session creation) in background
+        // so that when the user presses play, the model is already loaded.
+        controllerScope.launch {
+            warmupKokoroEngine()
+        }
     }
 
     fun updateSettings(transform: (KokoroNarrationSettings) -> KokoroNarrationSettings) {
@@ -789,6 +794,8 @@ expect fun playAmbientCue(cue: AmbientCue?, volume: Float)
 expect fun pauseAmbientCue()
 expect fun resumeAmbientCue()
 expect fun stopAmbientCue()
+expect fun warmupKokoroEngine()
+
 expect fun updateNarrationForegroundService(
     enabled: Boolean,
     title: String = "NovelApp narration",

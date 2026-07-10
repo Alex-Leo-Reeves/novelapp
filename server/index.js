@@ -683,6 +683,7 @@ function normalizeContentType(type) {
     if (["cartoon", "cartoons"].includes(raw)) return "cartoon";
     if (["classic", "classictv", "classic-tv"].includes(raw)) return "classic";
     if (["nigerian", "nollywood", "naija"].includes(raw)) return "nigerian";
+    if (["donghua", "chineseanime", "chineseanimation", "dongman", "donghua-anime", "chinesedrama"].includes(raw)) return "donghua";
     if (["anime", "manga"].includes(raw)) return raw;
     return "novels";
 }
@@ -855,6 +856,10 @@ async function tmdbItems(type, query, page = 1) {
     } else if (normalizedType === "cartoon") {
         // Cartoon: animation genre (16), exclude anime keyword (210024 = anime)
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&without_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "donghua") {
+        // Donghua: Chinese animation + Chinese-language movies/TV
+        endpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&with_genres=16&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        // Fall back to mixed discover if query (handle in general logic below)
     } else if (normalizedType === "anime") {
         // Anime: animation genre (16) + Japanese language + anime keyword
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
@@ -897,7 +902,7 @@ async function tmdbItems(type, query, page = 1) {
         return contentItem({
             id: `tmdb_${itemType}_${item.id}`,
             title: item.title || item.name || "Untitled",
-            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : "Movie",
+            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : "Movie",
             coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
             detailUrl: `tmdb://${itemType}/${item.id}`,
             sourceName: "TMDB",
@@ -1015,8 +1020,8 @@ async function contentHome(type, page = 1) {
         const live = await mangadexItems("", page).catch(() => []);
         return live.length ? live : fixtureItems("manga");
     }
-    // Anime, K-Drama, Cartoons, Classic TV, Nigerian, and Movies all go through TMDB (same pipeline)
-    if (["anime", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
+    // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, and Movies all go through TMDB (same pipeline)
+    if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
         const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
         return tmdb.length ? tmdb : fixtureItems(normalizedType);
     }
@@ -1026,8 +1031,8 @@ async function contentHome(type, page = 1) {
 
 async function contentSearch(type, query, page = 1) {
     const normalizedType = normalizeContentType(type);
-    // Anime, K-Drama, Cartoon, Classic, Movies, Nigerian: all go through TMDB multi-pipeline
-    if (["anime", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
+    // Donghua, Anime, K-Drama, Cartoon, Classic, Movies, Nigerian: all go through TMDB multi-pipeline
+    if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
         // Search multiple TMDB pages for better coverage (aggregate pages 1-3)
         const pagePromises = [];
         const maxPages = normalizedType === "movies" ? 3 : 2; // movies get deeper search

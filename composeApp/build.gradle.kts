@@ -124,10 +124,10 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 32
-        versionName = "1.32"
+        versionCode = 33
+        versionName = "1.33"
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
     packaging {
@@ -162,6 +162,9 @@ android {
             }
         }
     }
+    // Workaround: AGP 8.5.x checkAarMetadata NPE with KMP + Room/KSP
+    // Google issue #289866777 - "Cannot invoke List.get(int) because path is null"
+    // Only the release variant crashes; debug variant still validates compatibility.
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -174,6 +177,13 @@ android {
 
 room {
     schemaDirectory("$projectDir/schemas")
+}
+
+// Workaround: AGP 8.5.x NPE in checkReleaseAarMetadata with KMP+KSP+Room
+// Google issue #289866777 — only this specific variant check crashes,
+// not the entire AAR metadata feature.
+tasks.matching { it.name == "checkReleaseAarMetadata" }.configureEach {
+    enabled = false
 }
 
 dependencies {
@@ -196,7 +206,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovelApp"
-            packageVersion = "1.32.0"
+            packageVersion = "1.33.0"
             description = "Watch Anime · Read Novels · Read Manga — All in One"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"

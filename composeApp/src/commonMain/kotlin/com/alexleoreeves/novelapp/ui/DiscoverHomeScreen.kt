@@ -168,35 +168,69 @@ fun DiscoverHomeScreen(
     }
 
     // ── Lazy popular content load for the active tab only ──────────────────
+    // Uses try/catch + retry so a transient network failure on a cold device
+    // doesn't leave the loading spinner spinning forever.  maxRetries = 1 (2 attempts).
+    fun loadActiveTabPopular(retryCount: Int = 0) {
+        val maxRetries = 1
+        scope.launch {
+            isLoadingPopular = true
+            val loaded = try {
+                when (activeTab) {
+                    ContentTab.NOVELS -> repository.fetchPopularNovels(page = pageByTab[ContentTab.NOVELS] ?: 1)
+                    ContentTab.MANGA -> repository.fetchPopularManga(page = pageByTab[ContentTab.MANGA] ?: 1)
+                    ContentTab.COMIC -> repository.fetchPopularComics(page = pageByTab[ContentTab.COMIC] ?: 1)
+                    else -> emptyList()
+                }
+            } catch (e: Exception) {
+                println("[Discover] Failed to load ${activeTab.label}: ${e.message}")
+                if (retryCount < maxRetries) {
+                    kotlinx.coroutines.delay(2_000L)
+                    loadActiveTabPopular(retryCount + 1)
+                    return@launch
+                }
+                emptyList()
+            } finally {
+                isLoadingPopular = false
+            }
+            popularItemsByTab = popularItemsByTab + (activeTab to loaded)
+        }
+    }
+
     LaunchedEffect(activeTab) {
-        if (activeTab == ContentTab.NOVELS && popularItemsByTab[ContentTab.NOVELS].isNullOrEmpty()) {
-            isLoadingPopular = true
-            val loaded = repository.fetchPopularNovels(page = pageByTab[ContentTab.NOVELS] ?: 1)
-            popularItemsByTab = popularItemsByTab + (ContentTab.NOVELS to loaded)
-            isLoadingPopular = false
-        }
-        if (activeTab == ContentTab.MANGA && popularItemsByTab[ContentTab.MANGA].isNullOrEmpty()) {
-            isLoadingPopular = true
-            val loaded = repository.fetchPopularManga(page = pageByTab[ContentTab.MANGA] ?: 1)
-            popularItemsByTab = popularItemsByTab + (ContentTab.MANGA to loaded)
-            isLoadingPopular = false
-        }
-        if (activeTab == ContentTab.COMIC && popularItemsByTab[ContentTab.COMIC].isNullOrEmpty()) {
-            isLoadingPopular = true
-            val loaded = repository.fetchPopularComics(page = pageByTab[ContentTab.COMIC] ?: 1)
-            popularItemsByTab = popularItemsByTab + (ContentTab.COMIC to loaded)
-            isLoadingPopular = false
+        when (activeTab) {
+            ContentTab.NOVELS -> if (popularItemsByTab[ContentTab.NOVELS].isNullOrEmpty()) loadActiveTabPopular()
+            ContentTab.MANGA -> if (popularItemsByTab[ContentTab.MANGA].isNullOrEmpty()) loadActiveTabPopular()
+            ContentTab.COMIC -> if (popularItemsByTab[ContentTab.COMIC].isNullOrEmpty()) loadActiveTabPopular()
+            else -> {}
         }
     }
 
     // ── TMDB-backed video tabs ────────────────────────────────────────────
-    LaunchedEffect(activeTab) {
-        val category = activeTab.videoCategory() ?: return@LaunchedEffect
-        if (videoItemsByTab[activeTab].isNullOrEmpty()) {
+    fun loadActiveTabVideo(retryCount: Int = 0) {
+        val maxRetries = 1
+        scope.launch {
             isLoadingVideo = true
-            val loaded = repository.fetchVideo(category)
-            videoItemsByTab = videoItemsByTab + (activeTab to loaded)
-            isLoadingVideo = false
+            val loaded = try {
+                val category = activeTab.videoCategory() ?: return@launch
+                repository.fetchVideo(category)
+            } catch (e: Exception) {
+                println("[Discover] Failed to load ${activeTab.label}: ${e.message}")
+                if (retryCount < maxRetries) {
+                    kotlinx.coroutines.delay(2_000L)
+                    loadActiveTabVideo(retryCount + 1)
+                    return@launch
+                }
+                emptyList()
+            } finally {
+                isLoadingVideo = false
+            }
+            loaded?.let { videoItemsByTab = videoItemsByTab + (activeTab to it) }
+        }
+    }
+
+    LaunchedEffect(activeTab) {
+        if (activeTab.videoCategory() != null && videoItemsByTab[activeTab].isNullOrEmpty()) {
+            loadActiveTabVideo()
         }
     }
 
@@ -1027,12 +1061,39 @@ fun ContentCard(
                     .fillMaxWidth()
                     .aspectRatio(if (compact) 0.7f else 0.72f)
             ) {
-                AsyncImage(
-                    model = item.coverUrl,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (item.coverUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = item.coverUrl,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Placeholder when cover URL is empty
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                when {
+                                    item.isComic -> Color(0xFFFF6D00).copy(0.3f)
+                                    item.isManga -> Color(0xFFE91E8C).copy(0.3f)
+                                    else -> currentTheme.cardColor()
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.ImportContacts,
+                            contentDescription = null,
+                            tint = when {
+                                item.isComic -> Color.White.copy(0.6f)
+                                item.isManga -> Color.White.copy(0.6f)
+                                else -> currentTheme.subTextColor().copy(0.3f)
+                            },
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1049,6 +1110,7 @@ fun ContentCard(
                 color = when {
                     item.isAnime -> animeAccent
                     item.isManga -> Color(0xFFE91E8C)
+                    item.isComic -> comicAccent
                     item.isVideo -> when (item.mediaKind) {
                         VideoCategory.ANIME.name -> animeAccent
                         VideoCategory.K_DRAMA.name -> kDramaAccent
@@ -1065,6 +1127,7 @@ fun ContentCard(
                         when {
                             item.isAnime -> "A"
                             item.isManga -> "M"
+                            item.isComic -> "C"
                             item.isVideo -> when (item.mediaKind) {
                                 VideoCategory.K_DRAMA.name -> "K"
                                 VideoCategory.CARTOON.name -> "C"

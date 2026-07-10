@@ -73,8 +73,9 @@ class TmdbSource(
 
     /** Donghua / Chinese content: fetch all Chinese-language content including:
      *  1. Donghua (Chinese animation)
-     *  2. Chinese live-action movies (wuxia, xianxia, romance, etc.)
-     *  3. Chinese TV dramas (historical, modern, wuxia)
+     *  2. Chinese animated movies
+     *  3. Chinese live-action movies (wuxia, xianxia, romance, etc.)
+     *  4. Chinese TV dramas (historical, modern, wuxia)
      *  All results link to TMDB IDs → MediaDetailScreen → embed server playback.
      */
     private suspend fun fetchDonghua(page: Int): List<UnifiedSearchResult> = runCatching {
