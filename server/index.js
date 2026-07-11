@@ -1187,30 +1187,30 @@ function syntheticMangaPages(chapterUrl) {
 
 function embedProviders(mediaType, id, season = "1", episode = "1") {
   const movie = mediaType === "movie";
-  return [
-    {
-      provider: "VidLink Pro",
-      url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
-    },
-    {
-      provider: "VidSrc.me",
-      url: movie
-        ? `https://vidsrcme.ru/embed/movie?tmdb=${id}`
-        : `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
-    },
-    {
-      provider: "SuperEmbed",
-      url: movie ? `https://multiembed.mov/?video_id=${id}&tmdb=1` : `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`
-    },
-    {
-      provider: "AutoEmbed",
-      url: movie ? `https://player.autoembed.cc/movie/${id}` : `https://player.autoembed.cc/tv/${id}/${season}/${episode}`
-    },
-    {
-      provider: "2Embed",
-      url: movie ? `https://2embed.cc/embed/${id}` : `https://2embed.cc/embedtv/${id}&s=${season}&e=${episode}`
-    }
-  ];
+    return [
+      {
+        provider: "Embed.su",
+        url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "SuperEmbed",
+        url: movie ? `https://multiembed.mov/?video_id=${id}&tmdb=1` : `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`
+      },
+      {
+        provider: "2Embed",
+        url: movie ? `https://2embed.cc/embed/${id}` : `https://2embed.cc/embedtv/${id}&s=${season}&e=${episode}`
+      },
+      {
+        provider: "VidLink Pro",
+        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "VidSrc.me",
+        url: movie
+          ? `https://vidsrcme.ru/embed/movie?tmdb=${id}`
+          : `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+      }
+    ];
 }
 
 function isDirectStreamUrl(url) {
