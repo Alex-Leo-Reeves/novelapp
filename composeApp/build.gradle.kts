@@ -124,8 +124,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 33
-        versionName = "1.33"
+        versionCode = 34
+        versionName = "1.34"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -206,7 +206,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovelApp"
-            packageVersion = "1.33.0"
+            packageVersion = "1.34.0"
             description = "Watch Anime · Read Novels · Read Manga — All in One"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"

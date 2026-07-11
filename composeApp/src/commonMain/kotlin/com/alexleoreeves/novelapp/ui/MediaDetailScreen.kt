@@ -64,8 +64,8 @@ fun MediaDetailScreen(
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
     val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
-    val embedServerNames = listOf("VidLink", "VidSrc.me", "SuperEmbed", "AutoEmbed", "2Embed")
-    val serverNames = listOf("VidLink (Direct)") + embedServerNames.drop(1)
+    val embedServerNames = listOf("Embed.su", "SuperEmbed", "2Embed", "VidLink", "VidSrc.me")
+    val serverNames = embedServerNames
     val freeMoviePreviewMs = 20 * 60 * 1000L
     val freeEpisodeCount = remember(episodesList, isPremium) {
         if (isPremium || episodesList.isEmpty()) episodesList.size
@@ -85,12 +85,12 @@ fun MediaDetailScreen(
     ): String? {
         if (id.isBlank()) return null
         return when (selectedServer) {
-            0 -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
-            1 -> if (type == "movie") "https://vidsrcme.ru/embed/movie?tmdb=$id" else "https://vidsrcme.ru/embed/tv?tmdb=$id&season=$season&episode=$episode"
-            2 -> if (type == "movie") "https://multiembed.mov/?video_id=$id&tmdb=1" else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$season&e=$episode"
-            3 -> if (type == "movie") "https://player.autoembed.cc/movie/$id" else "https://player.autoembed.cc/tv/$id/$season/$episode"
-            4 -> if (type == "movie") "https://2embed.cc/embed/$id" else "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
-            else -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
+            0 -> if (type == "movie") "https://embed.su/embed/movie/$id" else "https://embed.su/embed/tv/$id/$season/$episode"
+            1 -> if (type == "movie") "https://multiembed.mov/?video_id=$id&tmdb=1" else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$season&e=$episode"
+            2 -> if (type == "movie") "https://2embed.cc/embed/$id" else "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
+            3 -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
+            4 -> if (type == "movie") "https://vidsrcme.ru/embed/movie?tmdb=$id" else "https://vidsrcme.ru/embed/tv?tmdb=$id&season=$season&episode=$episode"
+            else -> if (type == "movie") "https://embed.su/embed/movie/$id" else "https://embed.su/embed/tv/$id/$season/$episode"
         }
     }
 
@@ -212,7 +212,9 @@ fun MediaDetailScreen(
         providerTmdbId = ""
         providerTmdbType = "tv"
         isLoadingEpisodes = true
-        episodesList = when {
+
+        // Phase 1: Load episodes from the URL the item came from
+        val initialEpisodes = when {
             isTmdbDetail -> {
                 if (mediaType == "tv") {
                     tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
@@ -220,18 +222,19 @@ fun MediaDetailScreen(
                     emptyList()
                 }
             }
-            isDramaCoolDetail -> {
-                dramaScraper.fetchEpisodes(item.detailPageUrl)
-            }
-            isKimCartoonDetail -> {
-                cartoonScraper.fetchEpisodes(item.detailPageUrl)
-            }
-            isWcoStreamDetail -> {
-                wcoStreamScraper.fetchEpisodes(item.detailPageUrl)
-            }
+            isDramaCoolDetail -> dramaScraper.fetchEpisodes(item.detailPageUrl)
+            isKimCartoonDetail -> cartoonScraper.fetchEpisodes(item.detailPageUrl)
+            isWcoStreamDetail -> wcoStreamScraper.fetchEpisodes(item.detailPageUrl)
             else -> emptyList()
         }
-        if (!isTmdbDetail && !isWcoStreamDetail) {
+        episodesList = initialEpisodes
+
+        // Phase 2: If episodes are still empty AND this is NOT a movie,
+        // try to find a TMDB match by title and load episodes from it.
+        // This handles items from BACKEND, curated seeds, WCOStream, etc.
+        // that have no real TMDB ID but do have a title that matches TMDB.
+        val isMovie = mediaType == "movie"
+        if (episodesList.isEmpty() && !isMovie) {
             val tmdbMatch = runCatching {
                 tmdbScraper.search(item.title)
                     .sortedWith(
@@ -249,11 +252,41 @@ fun MediaDetailScreen(
             if (tmdbMatch != null) {
                 providerTmdbId = tmdbMatch.id
                 providerTmdbType = if (tmdbMatch.type == "MOVIE") "movie" else "tv"
-                if (episodesList.isEmpty() && providerTmdbType == "tv") {
-                    episodesList = tmdbScraper.fetchTVSeasonsAndEpisodes(providerTmdbId)
+                // Search returned a TV match — fetch real episodes
+                if (providerTmdbType == "tv") {
+                    val tmdbEpisodes = tmdbScraper.fetchTVSeasonsAndEpisodes(providerTmdbId)
+                    if (tmdbEpisodes.isNotEmpty()) {
+                        episodesList = tmdbEpisodes
+                    }
                 }
             }
         }
+
+        // Phase 3: If STILL no episodes found from any source,
+        // try a broader TMDB search using genre hints from the item
+        if (episodesList.isEmpty() && !isMovie) {
+            val genreHint = when {
+                item.mediaKind == VideoCategory.K_DRAMA.name -> "korean drama"
+                item.mediaKind == VideoCategory.CARTOON.name -> "cartoon"
+                item.mediaKind == VideoCategory.CLASSIC.name -> "tv series"
+                item.mediaKind == VideoCategory.DONGHUA.name -> "donghua chinese"
+                else -> "tv show"
+            }
+            val broaderSearch = runCatching {
+                tmdbScraper.search("$genreHint ${item.title}")
+                    .filter { it.type == "TVSHOW" }
+                    .firstOrNull()
+            }.getOrNull()
+            if (broaderSearch != null) {
+                providerTmdbId = broaderSearch.id
+                providerTmdbType = "tv"
+                val tmdbEpisodes = tmdbScraper.fetchTVSeasonsAndEpisodes(broaderSearch.id)
+                if (tmdbEpisodes.isNotEmpty()) {
+                    episodesList = tmdbEpisodes
+                }
+            }
+        }
+
         isLoadingEpisodes = false
     }
 
