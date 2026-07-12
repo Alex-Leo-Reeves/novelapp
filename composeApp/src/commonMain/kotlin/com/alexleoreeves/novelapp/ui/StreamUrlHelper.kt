@@ -90,6 +90,7 @@ fun buildVidLinkUrl(
 
 /**
  * Build a VidSrc.me (vidsrcme.ru) embed URL.
+ * Uses vidsrcme.ru directly to avoid the vidsrc.me redirect.
  *
  * Movie: https://vidsrcme.ru/embed/movie?tmdb={tmdbId}
  * TV:    https://vidsrcme.ru/embed/tv?tmdb={tmdbId}&season={s}&episode={e}
@@ -106,10 +107,10 @@ fun buildVidSrcMeUrl(
 }
 
 /**
- * Build an Embed.su (embed.su) embed URL.
+ * Build a VidSrc.to embed URL (replacement for the defunct embed.su).
  *
- * Movie: https://embed.su/embed/movie/{tmdbId}
- * TV:    https://embed.su/embed/tv/{tmdbId}/{season}/{episode}
+ * Movie: https://vidsrc.to/embed/movie/{tmdbId}
+ * TV:    https://vidsrc.to/embed/tv/{tmdbId}/{season}/{episode}
  */
 fun buildEmbedSuUrl(
     tmdbId: String,
@@ -117,9 +118,9 @@ fun buildEmbedSuUrl(
     season: String = "1",
     episode: String = "1"
 ): String = if (type == "movie") {
-    "https://embed.su/embed/movie/$tmdbId"
+    "https://vidsrc.to/embed/movie/$tmdbId"
 } else {
-    "https://embed.su/embed/tv/$tmdbId/$season/$episode"
+    "https://vidsrc.to/embed/tv/$tmdbId/$season/$episode"
 }
 
 /**

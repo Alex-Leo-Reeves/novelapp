@@ -25,5 +25,6 @@ expect fun AnimePlayerScreen(
     onProgress: (Long) -> Unit = {},
     previewLimitMs: Long? = null,
     onPreviewFinished: () -> Unit = {},
+    isAnime: Boolean = false,
     onBack: () -> Unit
 )

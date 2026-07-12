@@ -13,7 +13,7 @@ private let kokoroManifestURL = URL(string: "https://novelapp1.onrender.com/asse
 private let playerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 private func playerHeaders(for url: URL) -> [String: String] {
-    let origin = "\(url.scheme ?? "https")://\(url.host ?? "vidlink.pro")"
+    let origin = "\(url.scheme ?? "https")://\(url.host ?? "vidsrc.to")"
     return [
         "User-Agent": playerUserAgent,
         "Referer": "\(origin)/",

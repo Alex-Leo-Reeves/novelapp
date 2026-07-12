@@ -81,6 +81,7 @@ fun App(
     val animeEpisodeTitle = remember { mutableStateOf("") }
     val animeEpisodeNumber = remember { mutableStateOf(0) }
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
+    val animeStreamIsAnime = remember { mutableStateOf(false) }
 
     // Football & WWE navigation states
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
@@ -337,6 +338,7 @@ fun App(
             animeEpisodeTitle.value = item.episodeTitle
             animeEpisodeNumber.value = item.episodeNumber
             animePreviewLimitMs.value = null
+            animeStreamIsAnime.value = item.contentType == ContentType.ANIME
         }
 
         val canNavigateBack =
@@ -428,6 +430,7 @@ fun App(
                             animePreviewLimitMs.value = null
                             subscriptionMessage = "Free preview ended. Subscribe for full movies, cartoons, and K-drama."
                         },
+                        isAnime = animeStreamIsAnime.value,
                         onBack = {
                             animeStreamUrl.value = null
                             animePreviewLimitMs.value = null
@@ -447,6 +450,7 @@ fun App(
                             animeEpisodeTitle.value = epTitle
                             animeEpisodeNumber.value = epTitle.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
                             animePreviewLimitMs.value = null
+                            animeStreamIsAnime.value = true
                         },
                         onBack = { selectedAnime.value = null },
                         requireAuth = requireAuth
@@ -528,6 +532,7 @@ fun App(
                             animeStreamUrl.value = url
                             animeEpisodeTitle.value = title
                             animePreviewLimitMs.value = previewLimitMs
+                            animeStreamIsAnime.value = false
                         },
                         onBack = { selectedMedia.value = null }
                     )

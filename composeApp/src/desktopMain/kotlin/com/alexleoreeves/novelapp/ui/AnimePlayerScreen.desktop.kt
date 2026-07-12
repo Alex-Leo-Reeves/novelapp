@@ -39,6 +39,7 @@ actual fun AnimePlayerScreen(
     onProgress: (Long) -> Unit,
     previewLimitMs: Long?,
     onPreviewFinished: () -> Unit,
+    isAnime: Boolean,
     onBack: () -> Unit
 ) {
     Box(

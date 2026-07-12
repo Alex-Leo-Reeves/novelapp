@@ -330,7 +330,10 @@ fun MangaViewerScreen(
                             verticalArrangement = Arrangement.spacedBy(0.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
-                            itemsIndexed(pages) { index, pageUrl ->
+                            itemsIndexed(
+                                items = pages,
+                                key = { index, _ -> index }
+                            ) { index, pageUrl ->
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()

@@ -62,6 +62,7 @@ actual fun AnimePlayerScreen(
     onProgress: (Long) -> Unit,
     previewLimitMs: Long?,
     onPreviewFinished: () -> Unit,
+    isAnime: Boolean,
     onBack: () -> Unit
 ) {
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
@@ -242,10 +243,32 @@ private class PlayerNavigationDelegate(
     override fun webView(webView: WKWebView, didFailProvisionalNavigation: WKNavigation?, withError: platform.Foundation.NSError) {
         onFailed(withError.localizedDescription)
     }
+
+    @ObjCSignatureOverride
+    override fun webView(
+        webView: WKWebView,
+        decidePolicyForNavigationAction: platform.WebKit.WKNavigationAction,
+        decisionHandler: (platform.WebKit.WKNavigationActionPolicy) -> Unit
+    ) {
+        val url = decidePolicyForNavigationAction.request.URL?.absoluteString ?: ""
+        val host = decidePolicyForNavigationAction.request.URL?.host?.lowercase() ?: ""
+        
+        // Let it start with some initial host logic if needed, but for simplicity we just allow whitelist.
+        val allowedDomains = listOf(
+            "vidsrc", "nontongo", "multiembed", "streamingnow", "vidlink", 
+            "youtube.com", "vimeo.com", "dailymotion.com"
+        )
+        
+        if (allowedDomains.any { host.contains(it) }) {
+            decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
+        } else {
+            decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
+        }
+    }
 }
 
 private fun String.toPlayerRequest(): NSMutableURLRequest {
-    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidlink.pro")!!
+    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidsrc.to")!!
     return NSMutableURLRequest.requestWithURL(url).apply {
         allHTTPHeaderFields = playerHeaders()
     }
@@ -265,7 +288,7 @@ private fun String.playerReferer(): String = "${playerOrigin()}/"
 private fun String.playerOrigin(): String {
     val url = NSURL.URLWithString(this)
     val scheme = url?.scheme ?: "https"
-    val host = url?.host ?: "vidlink.pro"
+    val host = url?.host ?: "vidsrc.to"
     return "$scheme://$host"
 }
 
@@ -273,6 +296,11 @@ private fun String.providerName(): String {
     val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded provider"
     return when {
         "vidlink" in host -> "VidLink"
+        "nontongo" in host -> "Nontongo"
+        "multiembed" in host || "streamingnow" in host -> "MultiEmbed"
+        "vidsrcme" in host -> "VidSrc.me"
+        "vidsrc.in" == host || host.endsWith(".vidsrc.in") -> "VidSrc.in"
+        "vidsrc.to" == host || host.endsWith(".vidsrc.to") -> "VidSrc.to"
         "autoembed" in host -> "AutoEmbed"
         "vidsrc" in host -> "VidSrc"
         "embed" in host -> "Embed provider"

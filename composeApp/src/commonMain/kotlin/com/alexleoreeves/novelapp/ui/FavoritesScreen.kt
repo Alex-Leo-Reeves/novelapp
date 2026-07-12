@@ -161,18 +161,6 @@ fun FavoriteNovelRow(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Spacer(Modifier.height(5.dp))
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = currentTheme.accentColor().copy(alpha = 0.2f)
-                ) {
-                    Text(
-                        novel.sourceName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = currentTheme.accentColor(),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
             }
 
             IconButton(onClick = onRemove) {

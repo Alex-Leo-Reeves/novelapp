@@ -196,7 +196,7 @@ actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
 
 actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? {
     val ctx = com.alexleoreeves.novelapp.sensor.AppContextHolder.applicationContext ?: return null
-    return com.alexleoreeves.novelapp.ui.extractStreamFromEmbed(ctx, embedUrl, timeoutMs)
+    return com.alexleoreeves.novelapp.ui.extractStreamFromEmbed(ctx, embedUrl, timeoutMs)?.url
 }
 
 private fun getVideoDownloadsDir(parentId: String, episodeNumber: Int): File {

@@ -590,9 +590,63 @@ private object AndroidKokoroEngine {
         }
     }
 
+    /**
+     * Detects if the app is running inside a Waydroid (or similar LXC Android container)
+     * environment. Waydroid leaves distinct fingerprints in Build properties.
+     *
+     * Used to apply a safe thread configuration that avoids the division-by-zero FPE crash
+     * triggered when ONNX tries to dynamically scale thread pools using container CPU info
+     * that may report 0 online cores.
+     */
+    private fun isRunningInWaydroid(): Boolean {
+        val board = android.os.Build.BOARD?.lowercase() ?: ""
+        val brand = android.os.Build.BRAND?.lowercase() ?: ""
+        val device = android.os.Build.DEVICE?.lowercase() ?: ""
+        val fingerprint = android.os.Build.FINGERPRINT?.lowercase() ?: ""
+        val hardware = android.os.Build.HARDWARE?.lowercase() ?: ""
+        val manufacturer = android.os.Build.MANUFACTURER?.lowercase() ?: ""
+        val model = android.os.Build.MODEL?.lowercase() ?: ""
+        val product = android.os.Build.PRODUCT?.lowercase() ?: ""
+
+        val waydroidMarkers = listOf("waydroid", "lineage_waydroid", "x86_64")
+        return waydroidMarkers.any { marker ->
+            board.contains(marker) ||
+            brand.contains(marker) ||
+            device.contains(marker) ||
+            fingerprint.contains(marker) ||
+            hardware.contains(marker) ||
+            manufacturer.contains(marker) ||
+            model.contains(marker) ||
+            product.contains(marker)
+        } || (
+            // Secondary heuristic: Waydroid often runs x86_64 on an ARM host
+            // while reporting a suspicious hardware/board combination
+            android.os.Build.SUPPORTED_ABIS.any { it.contains("x86") } &&
+            manufacturer.isBlank()
+        )
+    }
+
     private fun sessionOptions(enableNnapi: Boolean): OrtSession.SessionOptions {
         val options = OrtSession.SessionOptions()
-        if (enableNnapi) {
+
+        if (isRunningInWaydroid()) {
+            // ── Waydroid / LXC container safe mode ────────────────────────
+            // ONNX reads 0 online cores from /sys inside the container and
+            // divides its thread pool by that number → FPE_INTDIV crash.
+            // Force exactly 1 thread and BASIC_OPT to bypass this entirely.
+            println("[Kokoro] Waydroid environment detected — applying safe 1-thread BASIC_OPT session config.")
+            options.setIntraOpNumThreads(1)
+            options.setInterOpNumThreads(1)
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
+        } else {
+            // ── Normal physical Android device ─────────────────────────────
+            // Let ONNX auto-scale threads to available CPU cores (0 = auto).
+            options.setIntraOpNumThreads(0)
+            options.setInterOpNumThreads(0)
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+        }
+
+        if (enableNnapi && !isRunningInWaydroid()) {
             runCatching {
                 options.javaClass.methods
                     .firstOrNull { it.name == "addNnapi" && it.parameterTypes.isEmpty() }
