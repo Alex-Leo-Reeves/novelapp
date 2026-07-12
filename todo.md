@@ -1,21 +1,32 @@
-# Issues fixed
+# Supabase Auth OTP Implementation
 
-## Donghua tab showing wrong content (Wuxiaworld/RoyalRoad novels)
+- [x] Install Supabase MCP server
+- [ x] Phase 1: SQL trigger for auto-creating novel_users from auth.users
+- [ ] Phase 2: Add Supabase Auth endpoints to server (OTP signup, OTP login, forgot/reset password)
+- [ ] Phase 3: Create migration script for existing users
+- [ ] Phase 4: Update Kotlin client AuthApi for OTP flow
+- [ ] Phase 5: Remove old custom auth code (after migration complete)
 
-### Root Cause — Server normalizeContentType
-The server function `normalizeContentType("donghua")` had no case for "donghua" — it fell through to the default `"novels"`, causing the server to return **novel titles** (Wuxiaworld, RoyalRoad, ReadNovelFull books) when the Donghua tab requested content.
+Good, Option B it is. Let me now implement the server-side proxy auth endpoints. This is a significant change — I'll add the new endpoints alongside the existing ones so both systems can coexist during migration.
 
-### Fixes applied to `server/index.js`:
-- [x] `normalizeContentType()`: Added `"donghua"` (and aliases `"chineseanime"`, `"chineseanimation"`, `"dongman"`, `"donghua-anime"`, `"chinesedrama"`) to return `"donghua"` instead of defaulting to `"novels"`
-- [x] `contentHome()`: Added `"donghua"` to the TMDB pipeline check
-- [x] `contentSearch()`: Added `"donghua"` to the TMDB pipeline check
-- [x] `tmdbItems()`: Added dedicated `normalizedType === "donghua"` endpoint for Chinese animation discovers
-- [x] `tmdbItems()`: Added `"Donghua"` subtitle in the subtitle mapping
+The file was truncated. Let me take a cleaner approach — create a separate module for Supabase Auth handlers (same pattern as wwe-handlers.js)
 
-## Other fixes
-- [x] DONGHUA tab: VideoCategory, fetchDonghua(), WweSource, DONGHUA in ContentTab enum, App.kt SPORTS tab
-- [x] DONGHUA fully wired in DiscoverHomeScreen, refreshActiveTab else branch, search/filter/labels
-- [x] Server multi-search year-aware fix for "forever 2024" queries
-- [x] Comic "could not fetch content": NovelDetailScreen now checks `isComic` alongside `isManga` for chapter loading
-- [x] Football live/upcoming: server now has FOOTBALL_FALLBACK_FIXTURES that return real league names
-- [x] Server syntax: fixed 5+ optional chaining issues
+for each user in novel_users, create a Supabase Auth account
+import { createClient } from '@supabase/supabase-js'
+const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false } })
+success
+
+Migration script for existing users
+
+for (const user of existingUsers) {
+  await admin.auth.admin.createUser({
+    email: user.email,
+    password: 'temporary-password', // they'll use forgot password
+    email_confirm: true,
+    user_metadata: { username: user.username }
+  })
+}
+
+Failed to run sql query: ERROR:  42601: syntax error at or near "for"
+LINE 1: for each user in novel_users, create a Supabase Auth account
+        ^

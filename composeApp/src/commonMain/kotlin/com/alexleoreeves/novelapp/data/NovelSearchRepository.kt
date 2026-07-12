@@ -259,6 +259,43 @@ class NovelSearchRepository(
             .filter { it.title.isNotEmpty() }
     }
 
+    /** Fetch user-created novels from the backend (community-written novels) */
+    suspend fun fetchUserCreatedNovels(page: Int = 1): List<UnifiedSearchResult> = runCatching {
+        val response = httpClient.get("${AppReleaseConfig.API_BASE_URL}/novels") {
+            parameter("page", page)
+            header("Accept", "application/json")
+        }
+        val text = response.bodyAsText()
+        val root = backendContentJson.parseToJsonElement(text).jsonObject
+        val novelsArray = root["novels"]?.jsonArray.orEmpty()
+        novelsArray.mapNotNull { element ->
+            val obj = element.jsonObject
+            val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val coverUrl = obj["cover_url"]?.jsonPrimitive?.contentOrNull ?: ""
+            val description = obj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+            val authorName = obj["author_name"]?.jsonPrimitive?.contentOrNull ?: "Anonymous"
+            val chaptersArray = obj["chapters"]?.jsonArray.orEmpty()
+            UnifiedSearchResult(
+                id = "user_novel_$id",
+                title = title,
+                coverUrl = coverUrl,
+                detailPageUrl = "user_novel://$id",
+                sourceName = "Community",
+                author = authorName,
+                genre = "Community",
+                synopsis = description.take(300),
+                isManga = false,
+                isComic = false,
+                isAnime = false,
+                isVideo = false
+            )
+        }
+    }.getOrElse { e ->
+        println("[UserNovels] Failed to fetch: ${e.message}")
+        emptyList()
+    }
+
     suspend fun fetchPopularNovels(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
         cachedFeed("novels:$page") {
             val novelTasks = sources.map { source ->
@@ -273,7 +310,10 @@ class NovelSearchRepository(
                     }
                 }
             }
-            (novelTasks.awaitAll().flatten() + curatedPopularNovelSeeds())
+            // Also fetch user-created novels from the backend
+            val userNovelsTask = async { fetchUserCreatedNovels(page) }
+
+            (novelTasks.awaitAll().flatten() + curatedPopularNovelSeeds() + userNovelsTask.await())
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
                 .rankedNovelResults("")
@@ -940,14 +980,68 @@ class NovelSearchRepository(
     //  Novel / Manga helpers (unchanged from before)
     // ─────────────────────────────────────────────────────────────────────────
     suspend fun fetchChapters(novelUrl: String, sourceName: String): List<Chapter> {
+        // Handle user-created novels from the backend
+        if (novelUrl.startsWith("user_novel://")) {
+            val novelId = novelUrl.removePrefix("user_novel://").trim()
+            return fetchUserNovelChapters(novelId)
+        }
         val source = sources.find { it.sourceName == sourceName } ?: sources.first()
         return try { source.fetchChapters(novelUrl).normalizedChapterOrder() } catch (e: Exception) { emptyList() }
     }
 
+    /** Fetch chapters for a user-created novel from the backend */
+    suspend fun fetchUserNovelChapters(novelId: String): List<Chapter> = runCatching {
+        val response = httpClient.get("${AppReleaseConfig.API_BASE_URL}/novels/$novelId") {
+            header("Accept", "application/json")
+        }
+        val text = response.bodyAsText()
+        val root = backendContentJson.parseToJsonElement(text).jsonObject
+        val chaptersArray = root["chapters"]?.jsonArray.orEmpty()
+        chaptersArray.mapIndexed { index, element ->
+            val obj = element.jsonObject
+            val chId = obj["id"]?.jsonPrimitive?.contentOrNull ?: "ch_$index"
+            val chNumber = obj["chapter_number"]?.jsonPrimitive?.intOrNull ?: (index + 1)
+            val chTitle = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Chapter $chNumber"
+            Chapter(
+                title = "$chNumber. $chTitle",
+                url = "user_novel_chapter://$novelId/$chId",
+                chapterNumber = chNumber
+            )
+        }
+    }.getOrElse { e ->
+        println("[UserNovels] Failed to fetch chapters: ${e.message}")
+        emptyList()
+    }
+
     suspend fun fetchChapterText(chapterUrl: String, sourceName: String): String {
+        // Handle user-created novel chapters from the backend
+        if (chapterUrl.startsWith("user_novel_chapter://")) {
+            return fetchUserNovelChapterText(chapterUrl)
+        }
         val source = sources.find { it.sourceName == sourceName } ?: sources.first()
         return try { source.fetchChapterText(chapterUrl) }
         catch (e: Exception) { "Failed to load chapter. Please try again." }
+    }
+
+    /** Fetch chapter content for a user-created novel chapter from the backend */
+    suspend fun fetchUserNovelChapterText(chapterUrl: String): String = runCatching {
+        val parts = chapterUrl.removePrefix("user_novel_chapter://").split("/")
+        val novelId = parts.getOrNull(0) ?: return "Chapter not found."
+        val chapterId = parts.getOrNull(1) ?: return "Chapter not found."
+        val response = httpClient.get("${AppReleaseConfig.API_BASE_URL}/novels/$novelId") {
+            header("Accept", "application/json")
+        }
+        val text = response.bodyAsText()
+        val root = backendContentJson.parseToJsonElement(text).jsonObject
+        val chaptersArray = root["chapters"]?.jsonArray.orEmpty()
+        val chapterObj = chaptersArray.firstOrNull { element ->
+            val obj = element.jsonObject
+            obj["id"]?.jsonPrimitive?.contentOrNull == chapterId
+        } ?: return "Chapter content not available."
+        chapterObj.jsonObject["content"]?.jsonPrimitive?.contentOrNull ?: "Chapter content not available."
+    }.getOrElse { e ->
+        println("[UserNovels] Failed to fetch chapter text: ${e.message}")
+        "Failed to load chapter: ${e.message}"
     }
 
     suspend fun fetchMangaChapters(mangaUrl: String, sourceName: String): List<MangaChapter> {

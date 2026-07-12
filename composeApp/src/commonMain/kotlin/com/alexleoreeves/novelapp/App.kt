@@ -81,7 +81,7 @@ fun App(
     val animeEpisodeTitle = remember { mutableStateOf("") }
     val animeEpisodeNumber = remember { mutableStateOf(0) }
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
-    val animeStreamIsAnime = remember { mutableStateOf(false) }
+    val animeContentKind = remember { mutableStateOf("") }
 
     // Football & WWE navigation states
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
@@ -338,7 +338,7 @@ fun App(
             animeEpisodeTitle.value = item.episodeTitle
             animeEpisodeNumber.value = item.episodeNumber
             animePreviewLimitMs.value = null
-            animeStreamIsAnime.value = item.contentType == ContentType.ANIME
+            animeContentKind.value = if (item.contentType == ContentType.ANIME) "anime" else if (item.mediaKind.uppercase() == "DONGHUA") "donghua" else ""
         }
 
         val canNavigateBack =
@@ -376,7 +376,7 @@ fun App(
                 .background(appTheme.value.backgroundColor())
         ) {
             when {
-                // ── 0. Football full-screen player ─────────────────────────
+                // ── 0a. Football full-screen player ────────────────────────
                 footballStreamUrl.value != null -> {
                     AnimePlayerScreen(
                         streamUrl = footballStreamUrl.value!!,
@@ -430,7 +430,7 @@ fun App(
                             animePreviewLimitMs.value = null
                             subscriptionMessage = "Free preview ended. Subscribe for full movies, cartoons, and K-drama."
                         },
-                        isAnime = animeStreamIsAnime.value,
+                        contentKind = animeContentKind.value,
                         onBack = {
                             animeStreamUrl.value = null
                             animePreviewLimitMs.value = null
@@ -450,7 +450,7 @@ fun App(
                             animeEpisodeTitle.value = epTitle
                             animeEpisodeNumber.value = epTitle.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
                             animePreviewLimitMs.value = null
-                            animeStreamIsAnime.value = true
+                            animeContentKind.value = "anime"
                         },
                         onBack = { selectedAnime.value = null },
                         requireAuth = requireAuth
@@ -532,8 +532,14 @@ fun App(
                             animeStreamUrl.value = url
                             animeEpisodeTitle.value = title
                             animePreviewLimitMs.value = previewLimitMs
-                            animeStreamIsAnime.value = false
+                            // Derive content kind from media kind for proper audio/sub labels
+                            animeContentKind.value = selectedMedia.value?.let { item ->
+                                if (item.mediaKind.equals(VideoCategory.ANIME.name, ignoreCase = true)) "anime"
+                                else if (item.mediaKind.equals(VideoCategory.DONGHUA.name, ignoreCase = true)) "donghua"
+                                else ""
+                            } ?: ""
                         },
+                        onPlayMaEmbed = { _, _ -> },
                         onBack = { selectedMedia.value = null }
                     )
                 }

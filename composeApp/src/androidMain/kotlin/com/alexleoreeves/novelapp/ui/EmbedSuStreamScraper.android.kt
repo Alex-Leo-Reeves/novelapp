@@ -96,11 +96,25 @@ suspend fun extractStreamFromEmbed(
                                     window.fetch = async function() {
                                         const response = await origFetch.apply(this, arguments);
                                         const reqUrl = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url ? arguments[0].url : '');
-                                        if (reqUrl && reqUrl.includes('api/b/')) {
+                                        if (reqUrl && (reqUrl.includes('api/b/') || reqUrl.includes('/api/tracks') || reqUrl.includes('/manifest') || reqUrl.includes('subtitles'))) {
                                             response.clone().json().then(data => {
-                                                const tracks = data?.stream?.tracks || data?.tracks;
+                                                const tracks = data?.stream?.tracks || data?.tracks || data?.subtitles;
                                                 if (tracks && Array.isArray(tracks)) {
                                                     console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
+                                                } else {
+                                                    // Try extracting vtt/srt subtitle URLs directly
+                                                    try {
+                                                        const jsonStr = JSON.stringify(data);
+                                                        const subtitleMatches = jsonStr.match(/https?:\\\/\\\/[^"']+?\\.(?:vtt|srt)[^"']*/g);
+                                                        if (subtitleMatches && subtitleMatches.length > 0) {
+                                                            const simplifiedTracks = subtitleMatches.map((url, i) => ({
+                                                                file: url.replace(/\\\\\\//g, '/'),
+                                                                label: ['English','Japanese','Chinese','Korean','Spanish'][i] || 'Track ' + (i+1),
+                                                                kind: 'captions'
+                                                            }));
+                                                            console.log('MAGIC_SUBTITLES=' + JSON.stringify(simplifiedTracks));
+                                                        }
+                                                    } catch(e) {}
                                                 }
                                             }).catch(e => {});
                                         }
@@ -109,10 +123,10 @@ suspend fun extractStreamFromEmbed(
                                     const origOpen = window.XMLHttpRequest.prototype.open;
                                     window.XMLHttpRequest.prototype.open = function() {
                                         this.addEventListener('load', function() {
-                                            if (this.responseURL && this.responseURL.includes('api/b/')) {
+                                            if (this.responseURL && (this.responseURL.includes('api/b/') || this.responseURL.includes('/api/tracks') || this.responseURL.includes('/manifest') || this.responseURL.includes('subtitles'))) {
                                                 try {
                                                     const data = JSON.parse(this.responseText);
-                                                    const tracks = data?.stream?.tracks || data?.tracks;
+                                                    const tracks = data?.stream?.tracks || data?.tracks || data?.subtitles;
                                                     if (tracks && Array.isArray(tracks)) {
                                                         console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
                                                     }
@@ -127,13 +141,38 @@ suspend fun extractStreamFromEmbed(
                                             if (typeof d === 'string') d = JSON.parse(d);
                                             const type = d?.type || d?.event;
                                             if (type && (type.includes('vidlink') || type.includes('stream') || type === 'ready')) {
-                                                const tracks = d.tracks || d.data?.tracks || d.stream?.tracks;
+                                                const tracks = d.tracks || d.data?.tracks || d.stream?.tracks || d.subtitles;
+                                                if (tracks && Array.isArray(tracks)) {
+                                                    console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
+                                                }
+                                            }
+                                            // Also catch subtitle-specific events
+                                            if (type === 'subtitles' || type === 'tracks' || type === 'captions') {
+                                                const tracks = d.tracks || d.data || d.payload;
                                                 if (tracks && Array.isArray(tracks)) {
                                                     console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
                                                 }
                                             }
                                         } catch(err) {}
                                     });
+                                    // Poll for subtitle elements in the DOM
+                                    function pollSubtitles() {
+                                        const trackEls = document.querySelectorAll('track');
+                                        if (trackEls.length > 0) {
+                                            const tracks = Array.from(trackEls).map(t => ({
+                                                file: t.src,
+                                                label: t.label || 'Unknown',
+                                                kind: t.kind || 'captions',
+                                                srclang: t.srclang || ''
+                                            })).filter(t => t.file && t.file.startsWith('http'));
+                                            if (tracks.length > 0) {
+                                                console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
+                                            }
+                                        }
+                                    }
+                                    setTimeout(pollSubtitles, 2000);
+                                    setTimeout(pollSubtitles, 5000);
+                                    setTimeout(pollSubtitles, 8000);
                                 })();
                             """.trimIndent(), null)
                         }

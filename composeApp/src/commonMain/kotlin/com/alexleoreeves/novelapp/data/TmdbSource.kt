@@ -145,16 +145,31 @@ class TmdbSource(
                             item.genre.contains("South Korea", ignoreCase = true)
                     }.ifEmpty { results }
                 }
-            VideoCategory.DONGHUA -> (searchMovie(query, page, category) + searchTv(query, page, category))
-                .filter { item ->
-                    item.genre.contains("Chinese", ignoreCase = true) ||
-                        item.genre.contains("zh", ignoreCase = true)
+            VideoCategory.DONGHUA -> {
+                // Search for ALL Chinese content: animation + live-action movies + TV dramas
+                // Uses searchMulti so both movies and TV shows appear for any query
+                val multiResults = searchMulti(query, page, category)
+                if (multiResults.isNotEmpty()) {
+                    multiResults
+                        .filter { item ->
+                            // Include anything with Chinese language or origin country CN
+                            item.genre.contains("Chinese", ignoreCase = true) ||
+                                item.genre.contains("zh", ignoreCase = true) ||
+                                item.genre.contains("CN", ignoreCase = true)
+                        }
+                        .ifEmpty { multiResults } // fallback: show all multi results
+                        .map { item ->
+                            item.copy(genre = "Donghua, Chinese, ${item.genre}")
+                        }
+                } else {
+                    // Fallback: movie + TV search
+                    (searchMovie(query, page, category) + searchTv(query, page, category))
+                        .distinctBy { it.id }
+                        .map { item ->
+                            item.copy(genre = "Donghua, Chinese, ${item.genre}")
+                        }
                 }
-                .ifEmpty { (searchMovie(query, page, category) + searchTv(query, page, category)) }
-                .distinctBy { it.id }
-                .map { item ->
-                    item.copy(genre = "Donghua, Chinese, ${item.genre}")
-                }
+            }
             VideoCategory.CARTOON -> (searchMovie(query, page, category) + searchTv(query, page, category))
                 .filter { item ->
                     item.genre.contains("Animation", ignoreCase = true) &&

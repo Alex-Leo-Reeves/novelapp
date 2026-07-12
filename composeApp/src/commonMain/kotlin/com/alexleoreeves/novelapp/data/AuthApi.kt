@@ -48,23 +48,122 @@ class AuthApi(
         return response.toSavedUserAccount()
     }
 
-    suspend fun recoverAccount(recoverySecret: String): SavedUserAccount {
-        val response = client.post("$baseUrl/auth/recover") {
+    // ── OTP Auth methods (Supabase Auth proxy) ──────────────────────────
+
+    /**
+     * Create Account Screen: fill username, email, password → otpSignup()
+     * Server creates user + sends OTP email → client navigates to OTP screen.
+     */
+    suspend fun otpSignup(username: String, email: String, password: String) {
+        val response = client.post("$baseUrl/auth/otp/signup") {
             accept(ContentType.parse("application/json"))
             contentType(ContentType.parse("application/json"))
-            setBody(RecoveryRequest(recoverySecret = recoverySecret))
+            setBody(OtpSignupRequest(username = username, email = email, password = password))
         }
-        return response.toSavedUserAccount()
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            val error = runCatching { authJson.decodeFromString<AuthErrorResponse>(rawBody).error }
+                .getOrNull() ?: "Signup failed."
+            throw AuthApiException(error, response.status.value)
+        }
     }
 
-    suspend fun resetPassword(token: String, password: String): SavedUserAccount {
-        val response = client.post("$baseUrl/auth/reset-password") {
+    /**
+     * OTP Screen (for signup or login): enter OTP code → verify.
+     * Returns SavedUserAccount with session token → go to home.
+     */
+    suspend fun otpVerify(email: String, token: String, type: String = "magiclink"): SavedUserAccount {
+        val response = client.post("$baseUrl/auth/otp/verify") {
             accept(ContentType.parse("application/json"))
             contentType(ContentType.parse("application/json"))
-            bearerAuth(token)
-            setBody(PasswordResetRequest(password = password))
+            setBody(OtpVerifyRequest(email = email, token = token, type = type))
         }
-        return response.toSavedUserAccount(existingToken = token)
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK && response.status != HttpStatusCode.Created) {
+            val error = runCatching { authJson.decodeFromString<AuthErrorResponse>(rawBody).error }
+                .getOrNull() ?: "OTP verification failed."
+            throw AuthApiException(error, response.status.value)
+        }
+
+        // For recovery (forgot password) flow, the response has accessToken instead of user session.
+        // The caller should detect this and use the accessToken in otpSetNewPassword().
+        val payload = authJson.decodeFromString<OtpVerifyResponse>(rawBody)
+        if (payload.needsNewPassword == true) {
+            throw OtpRecoveryRequiredException(payload.accessToken ?: "", email)
+        }
+
+        val sessionToken = payload.token ?: throw IllegalStateException("Session token was missing.")
+        return payload.user!!.toAccount(sessionToken)
+    }
+
+    /**
+     * Forgot Password Screen 1: enter email → sends OTP
+     */
+    suspend fun otpForgotPassword(email: String) {
+        val response = client.post("$baseUrl/auth/otp/forgot-password") {
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
+            setBody(OtpEmailRequest(email = email))
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            val error = runCatching { authJson.decodeFromString<AuthErrorResponse>(rawBody).error }
+                .getOrNull() ?: "Could not send recovery email."
+            throw AuthApiException(error, response.status.value)
+        }
+    }
+
+    /**
+     * Forgot Password Screen 2: enter OTP → verify.
+     * If valid, returns accessToken (throws OtpRecoveryRequiredException).
+     */
+    suspend fun otpVerifyRecovery(email: String, token: String): String {
+        try {
+            otpVerify(email, token, type = "recovery")
+            // If it didn't throw, something is wrong
+            throw AuthApiException("Unexpected response from recovery verification.", 500)
+        } catch (e: OtpRecoveryRequiredException) {
+            return e.accessToken
+        }
+    }
+
+    /**
+     * Forgot Password Screen 3: set new password + confirm.
+     * This signs the user in and returns the session.
+     */
+    suspend fun otpSetNewPassword(email: String, accessToken: String, newPassword: String): SavedUserAccount {
+        val response = client.post("$baseUrl/auth/otp/reset-password") {
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
+            setBody(OtpResetPasswordRequest(accessToken = accessToken, password = newPassword, email = email))
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            val error = runCatching { authJson.decodeFromString<AuthErrorResponse>(rawBody).error }
+                .getOrNull() ?: "Password reset failed."
+            throw AuthApiException(error, response.status.value)
+        }
+        val payload = authJson.decodeFromString<AuthResponse>(rawBody)
+        val sessionToken = payload.token ?: throw IllegalStateException("Session token was missing.")
+        return payload.user.toAccount(sessionToken)
+    }
+
+    /**
+     * Login Screen: enter email → sends OTP (if user exists).
+     * Then call otpVerify() with the code.
+     */
+    suspend fun otpLogin(email: String) {
+        val response = client.post("$baseUrl/auth/otp/login") {
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
+            setBody(OtpEmailRequest(email = email))
+        }
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            val error = runCatching { authJson.decodeFromString<AuthErrorResponse>(rawBody).error }
+                .getOrNull() ?: "Login failed."
+            throw AuthApiException(error, response.status.value)
+        }
     }
 
     suspend fun me(token: String): SavedUserAccount {
@@ -180,6 +279,12 @@ class AuthApi(
             ?.let { raw -> runCatching { authJson.decodeFromString<AuthErrorResponse>(raw).error }.getOrNull() }
 }
 
+/** Thrown when OTP verify is for recovery (forgot password) and needs a new password set. */
+class OtpRecoveryRequiredException(
+    val accessToken: String,
+    val email: String
+) : Exception("OTP verified. Please set a new password.")
+
 data class BillingStatus(
     val account: SavedUserAccount,
     val premium: Boolean,
@@ -216,10 +321,47 @@ private data class PasswordResetRequest(
     val password: String
 )
 
+// ── OTP request types ──────────────────────────────────────────────────
+
+@Serializable
+private data class OtpSignupRequest(
+    val username: String,
+    val email: String,
+    val password: String
+)
+
+@Serializable
+private data class OtpEmailRequest(
+    val email: String
+)
+
+@Serializable
+private data class OtpVerifyRequest(
+    val email: String,
+    val token: String,
+    val type: String = "magiclink"
+)
+
+@Serializable
+private data class OtpResetPasswordRequest(
+    val accessToken: String,
+    val password: String,
+    val email: String = ""
+)
+
 @Serializable
 private data class AuthResponse(
     val token: String? = null,
     val user: AuthUserResponse
+)
+
+@Serializable
+private data class OtpVerifyResponse(
+    val token: String? = null,
+    val user: AuthUserResponse? = null,
+    val accessToken: String? = null,
+    val needsNewPassword: Boolean? = null,
+    val email: String? = null
 )
 
 @Serializable

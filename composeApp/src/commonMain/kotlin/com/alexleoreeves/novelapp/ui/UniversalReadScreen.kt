@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
@@ -103,6 +104,12 @@ fun UniversalReadScreen(
                     Text("AI Novel", color = if (activeTab == 2) currentTheme.accentColor() else currentTheme.subTextColor())
                 }
             }
+            Tab(selected = activeTab == 3, onClick = { requireAuth { activeTab = 3 } }) {
+                Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.EditNote, null, tint = if (activeTab == 3) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
+                    Text("Write", color = if (activeTab == 3) currentTheme.accentColor() else currentTheme.subTextColor())
+                }
+            }
         }
 
         val setupStatus = voiceSetupStatus.value
@@ -140,6 +147,7 @@ fun UniversalReadScreen(
             0 -> PasteTextTab(pastedText, isPlaying.value, isBuffering.value, currentTheme, requireAuth, ttsController) { pastedText = it }
             1 -> UrlInputTab(urlInput, isPlaying.value, isBuffering.value, currentTheme, requireAuth, ttsController) { urlInput = it }
             2 -> AiNovelCreatorTab(currentTheme = currentTheme, account = account, downloadRepo = downloadRepo, favorites = favorites, requireAuth = requireAuth, ttsController = ttsController, onSubscribePlan = onSubscribePlan)
+            3 -> WriteNovelTab(currentTheme = currentTheme, account = account, ttsController = ttsController, requireAuth = requireAuth)
         }
     }
 }
@@ -485,5 +493,236 @@ private fun AiNovelCreatorTab(
                     Text("Payments via Flutterwave. One-time per month.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
                 }
             }, confirmButton = { TextButton(onClick = { showPaymentDropdown = false }) { Text("Close", color = currentTheme.accentColor()) } }, containerColor = currentTheme.surfaceColor())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Write Novel Tab — user can create their own novels with chapters
+// ─────────────────────────────────────────────────────────────────────────
+@Composable
+private fun WriteNovelTab(
+    currentTheme: AppTheme,
+    account: SavedUserAccount?,
+    ttsController: KokoroNarrationController,
+    requireAuth: (() -> Unit) -> Unit
+) {
+    val token = account?.authToken.orEmpty()
+    val api = remember { UserNovelApi() }
+    val scope = rememberCoroutineScope()
+
+    // State
+    var myNovels by remember { mutableStateOf<List<UserNovel>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showCreateForm by remember { mutableStateOf(false) }
+    var editingNovel by remember { mutableStateOf<UserNovel?>(null) }
+
+    // Create form fields
+    var newTitle by remember { mutableStateOf("") }
+    var newCoverUrl by remember { mutableStateOf("") }
+    var newDescription by remember { mutableStateOf("") }
+
+    // Chapter editor fields
+    var chapterTitle by remember { mutableStateOf("") }
+    var chapterContent by remember { mutableStateOf("") }
+    var editingChapterNumber by remember { mutableStateOf(0) }
+    var statusMsg by remember { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf("") }
+
+    // Load my novels
+    LaunchedEffect(token) {
+        if (token.isNotBlank()) {
+            isLoading = true
+            runCatching { api.getMyNovels(token) }.onSuccess { myNovels = it }
+            isLoading = false
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(currentTheme.backgroundColor())) {
+        if (editingNovel != null) {
+            // ── Chapter Editor View ──
+            val novel = editingNovel!!
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { editingNovel = null }) { Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor()) }
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(novel.title, style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${novel.chapters.size} chapter(s) · ${novel.status}", style = MaterialTheme.typography.labelSmall, color = currentTheme.subTextColor())
+                    }
+                    if (novel.status != "published") {
+                        Button(onClick = {
+                            scope.launch {
+                                runCatching { api.publishNovel(novel.id, token) }
+                                    .onSuccess {
+                                        statusMsg = "Published! Now visible to everyone."
+                                        editingNovel = novel.copy(status = "published")
+                                    }
+                                    .onFailure { errorMsg = it.message ?: "Publish failed" }
+                            }
+                        }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)), shape = RoundedCornerShape(8.dp)) {
+                            Text("Publish", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                Divider(color = currentTheme.textColor().copy(alpha = 0.1f))
+
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Chapter list
+                    if (novel.chapters.isNotEmpty()) {
+                        Text("Published Chapters", style = MaterialTheme.typography.titleSmall, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
+                        novel.chapters.sortedBy { it.chapter_number }.forEach { ch ->
+                            Surface(shape = RoundedCornerShape(8.dp), color = currentTheme.cardColor(), modifier = Modifier.fillMaxWidth()) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(ch.title.ifBlank { "Chapter ${ch.chapter_number}" }, color = currentTheme.textColor(), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                                        Text("${ch.content.split("\\s+".toRegex()).size} words", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    IconButton(onClick = { ttsController.playText(ch.content, "${novel.title} - ${ch.title}") }) {
+                                        Icon(Icons.Default.VolumeUp, null, tint = currentTheme.accentColor(), modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Divider(color = currentTheme.textColor().copy(alpha = 0.1f))
+
+                    // Add chapter form
+                    Text("Write New Chapter", style = MaterialTheme.typography.titleSmall, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
+
+                    OutlinedTextField(value = chapterTitle, onValueChange = { chapterTitle = it },
+                        label = { Text("Chapter Title (optional)", color = currentTheme.subTextColor()) },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = currentTheme.accentColor(), unfocusedBorderColor = currentTheme.subTextColor().copy(0.5f), focusedTextColor = currentTheme.textColor(), unfocusedTextColor = currentTheme.textColor(), cursorColor = currentTheme.accentColor()),
+                        shape = RoundedCornerShape(8.dp))
+
+                    OutlinedTextField(value = chapterContent, onValueChange = { chapterContent = it },
+                        label = { Text("Chapter content...", color = currentTheme.subTextColor()) },
+                        modifier = Modifier.fillMaxWidth().height(200.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = currentTheme.accentColor(), unfocusedBorderColor = currentTheme.subTextColor().copy(0.5f), focusedTextColor = currentTheme.textColor(), unfocusedTextColor = currentTheme.textColor(), cursorColor = currentTheme.accentColor(), unfocusedContainerColor = currentTheme.cardColor().copy(0.5f), focusedContainerColor = currentTheme.cardColor().copy(0.5f)),
+                        shape = RoundedCornerShape(8.dp))
+
+                    if (statusMsg.isNotBlank()) Text(statusMsg, color = Color(0xFF4CAF50), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    if (errorMsg.isNotBlank()) Text(errorMsg, color = Color.Red, style = MaterialTheme.typography.bodySmall)
+
+                    Button(onClick = {
+                        if (chapterContent.isBlank()) { errorMsg = "Content is required."; return@Button }
+                        val nextNum = (novel.chapters.maxOfOrNull { it.chapter_number } ?: 0) + 1
+                        scope.launch {
+                            runCatching { api.addChapter(novel.id, nextNum, chapterTitle.ifBlank { "Chapter $nextNum" }, chapterContent, token) }
+                                .onSuccess {
+                                    statusMsg = "Chapter $nextNum saved!"
+                                    chapterTitle = ""; chapterContent = ""; errorMsg = ""
+                                    // Reload novel
+                                    runCatching { api.getNovelById(novel.id, token) }.onSuccess { editingNovel = it }
+                                }
+                                .onFailure { errorMsg = it.message ?: "Failed to save chapter" }
+                        }
+                    }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()), shape = RoundedCornerShape(8.dp)) {
+                        Text("Save Chapter", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else if (showCreateForm) {
+            // ── Create Novel Form ──
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { showCreateForm = false }) { Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor()) }
+                    Spacer(Modifier.width(8.dp))
+                    Text("Create New Novel", style = MaterialTheme.typography.titleLarge, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedTextField(value = newTitle, onValueChange = { newTitle = it },
+                    label = { Text("Novel Title", color = currentTheme.subTextColor()) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = currentTheme.accentColor(), unfocusedBorderColor = currentTheme.subTextColor().copy(0.5f), focusedTextColor = currentTheme.textColor(), unfocusedTextColor = currentTheme.textColor(), cursorColor = currentTheme.accentColor()),
+                    shape = RoundedCornerShape(8.dp))
+
+                OutlinedTextField(value = newCoverUrl, onValueChange = { newCoverUrl = it },
+                    label = { Text("Cover Image URL (optional)", color = currentTheme.subTextColor()) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = currentTheme.accentColor(), unfocusedBorderColor = currentTheme.subTextColor().copy(0.5f), focusedTextColor = currentTheme.textColor(), unfocusedTextColor = currentTheme.textColor(), cursorColor = currentTheme.accentColor()),
+                    shape = RoundedCornerShape(8.dp))
+
+                OutlinedTextField(value = newDescription, onValueChange = { newDescription = it },
+                    label = { Text("Description (optional)", color = currentTheme.subTextColor()) },
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = currentTheme.accentColor(), unfocusedBorderColor = currentTheme.subTextColor().copy(0.5f), focusedTextColor = currentTheme.textColor(), unfocusedTextColor = currentTheme.textColor(), cursorColor = currentTheme.accentColor(), unfocusedContainerColor = currentTheme.cardColor().copy(0.5f), focusedContainerColor = currentTheme.cardColor().copy(0.5f)),
+                    shape = RoundedCornerShape(8.dp))
+
+                if (errorMsg.isNotBlank()) Text(errorMsg, color = Color.Red, style = MaterialTheme.typography.bodySmall)
+
+                Button(onClick = {
+                    if (newTitle.length < 2) { errorMsg = "Title must be at least 2 characters."; return@Button }
+                    scope.launch {
+                        runCatching { api.createNovel(newTitle, newCoverUrl, newDescription, token) }
+                            .onSuccess { novel ->
+                                statusMsg = "\"${novel.title}\" created!"
+                                newTitle = ""; newCoverUrl = ""; newDescription = ""; errorMsg = ""
+                                showCreateForm = false
+                                runCatching { api.getMyNovels(token) }.onSuccess { myNovels = it }
+                            }
+                            .onFailure { errorMsg = it.message ?: "Create failed" }
+                    }
+                }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()), shape = RoundedCornerShape(8.dp)) {
+                    Icon(Icons.Default.Create, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Create Novel", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            // ── My Novels List ──
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("My Novels", style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
+                        Text("Create and publish your own stories", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(onClick = { showCreateForm = true }, colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor()), shape = RoundedCornerShape(8.dp)) {
+                        Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("New", color = Color.White)
+                    }
+                }
+
+                if (isLoading) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = currentTheme.accentColor()) }
+                } else if (myNovels.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Outlined.EditNote, null, tint = currentTheme.subTextColor(), modifier = Modifier.size(64.dp))
+                            Spacer(Modifier.height(12.dp))
+                            Text("No novels yet", color = currentTheme.subTextColor(), style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text("Tap \"New\" to start writing!", color = currentTheme.subTextColor().copy(0.7f), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(myNovels) { novel ->
+                            Card(colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable { editingNovel = novel }) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(currentTheme.backgroundColor())) {
+                                        if (novel.cover_url.isNotBlank()) AsyncImage(model = novel.cover_url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        else Icon(Icons.Default.AutoStories, null, modifier = Modifier.align(Alignment.Center).size(28.dp), tint = currentTheme.subTextColor())
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(novel.title, color = currentTheme.textColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text("By ${novel.author_name}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
+                                            Surface(shape = RoundedCornerShape(4.dp), color = if (novel.status == "published") Color(0xFF4CAF50).copy(0.2f) else currentTheme.accentColor().copy(0.2f)) {
+                                                Text(novel.status.take(1).uppercase() + novel.status.drop(1), color = if (novel.status == "published") Color(0xFF4CAF50) else currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                            }
+                                        }
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null, tint = currentTheme.subTextColor())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
