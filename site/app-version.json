@@ -1,16 +1,16 @@
 {
-    "versionCode": 34,
-    "versionName": "1.34",
-    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-    "releaseNotes": [
-        "Fixed VidLink source error — Embed.su is now the default streaming server",
-        "Fixed VidSrc.me black screen issue — demoted to last server choice",
-        "Removed broken AutoEmbed server",
-        "Fixed episodes not showing in Home tab items — added 3-phase TMDB fallback",
-        "Movies, Classic, K-Drama, Cartoon items now always get episodes via title match"
-    ],
-    "forceUpdate": false,
-    "apkBytes": 209087447,
-    "apkSha256": "784b0a9abdf930632a3cf22c129b037f89bc748eb9db22eb75ac3479b0874a26"
+  "versionCode": 34,
+  "versionName": "1.34",
+  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+  "releaseNotes": [
+    "Fixed VidLink source error — Embed.su is now the default streaming server",
+    "Fixed VidSrc.me black screen issue — demoted to last server choice",
+    "Removed broken AutoEmbed server",
+    "Fixed episodes not showing in Home tab items — added 3-phase TMDB fallback",
+    "Movies, Classic, K-Drama, Cartoon items now always get episodes via title match"
+  ],
+  "forceUpdate": false,
+  "apkBytes": 209087447,
+  "apkSha256": "d0dc436a1e99b2c9b182ba16811e2d4a349db4e9050415accb82f415427fac13"
 }
