@@ -71,6 +71,24 @@ fun MediaDetailScreen(
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
+
+    // Route Server 1 (VidLink) → ExoPlayer via onPlayStream
+    // Route Server 2/3/4 (Videasy, VidFast, 111Movies) → WebView via onPlayMaEmbed
+    fun playWithServer(embedUrl: String, title: String, previewLimitMs: Long?) {
+        if (selectedServer == StreamServer.VIDLINK) {
+            onPlayStream(embedUrl, title, previewLimitMs)
+        } else {
+            onPlayMaEmbed(embedUrl, title)
+        }
+    }
+
+    fun playEpisodeWithServer(embedUrl: String, title: String) {
+        if (selectedServer == StreamServer.VIDLINK) {
+            onPlayStream(embedUrl, title, null)
+        } else {
+            onPlayMaEmbed(embedUrl, title)
+        }
+    }
     val freeEpisodeCount = remember(episodesList, isPremium) {
         if (isPremium || episodesList.isEmpty()) episodesList.size
         else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
@@ -322,10 +340,14 @@ fun MediaDetailScreen(
                 else -> ep.url
             }
 
-            // Pass the embed URL to onPlayStream. The AnimePlayerScreen (ExoPlayer)
-            // will scrape the embed URL via extractStreamFromEmbed() to get the HLS stream.
-            // All 4 servers work this way — the same pipeline as the original Server 1.
-            onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
+            // Route based on selected server:
+            // Server 1 (VidLink) → ExoPlayer (scrapes HLS via extractStreamFromEmbed)
+            // Server 2/3/4 (Videasy, VidFast, 111Movies) → WebView embed player
+            if (selectedServer == StreamServer.VIDLINK) {
+                onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
+            } else {
+                onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
+            }
         }
     }
 
@@ -508,7 +530,7 @@ fun MediaDetailScreen(
                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
                             statusText = "Opening stream via ${selectedServer.displayName}..."
                             val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                            onPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
+                            playWithServer(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
                         }
                     },
                         modifier = Modifier.weight(1f).height(50.dp),
