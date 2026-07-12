@@ -26,3 +26,8 @@ iosApp/*.xcworkspace/
 !debug.keystore
 novelapp.backup.src/
 tmp/
+
+# Binary builds
+*.apk
+*.ipa
+*.msi

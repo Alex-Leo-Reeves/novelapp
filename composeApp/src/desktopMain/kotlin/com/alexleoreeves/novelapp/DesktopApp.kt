@@ -135,7 +135,10 @@ fun DesktopApp() {
                         repository = repository,
                         currentTheme = appTheme.value,
                         downloadRepo = downloadRepo,
-                        onPlayEpisode = { url, title -> animeStreamUrl.value = url; animeEpisodeTitle.value = title },
+                        onPlayEpisode = { url, title ->
+                            animeStreamUrl.value = url
+                            animeEpisodeTitle.value = title
+                        },
                         onBack = { selectedAnime.value = null },
                         requireAuth = desktopRequireAuth
                     )
@@ -143,6 +146,8 @@ fun DesktopApp() {
                         item = selectedMedia.value!!,
                         currentTheme = appTheme.value,
                         isPremium = true,
+                        downloadRepo = downloadRepo,
+                        requireAuth = desktopRequireAuth,
                         onSubscribe = {},
                         onPlayStream = { url, title, _ ->
                             animeStreamUrl.value = url

@@ -5,6 +5,29 @@ const path = require("path");
 const { URL } = require("url");
 const swiftNovelScrapers = require("./swift-novel-scrapers");
 const wweHandlers = require("./wwe-handlers");
+const supabaseAuthHandlers = require("./supabase-auth-handlers");
+let _supabaseOtpHandlers = null;
+
+function getSupabaseOtpHandlers() {
+    if (!_supabaseOtpHandlers) {
+        _supabaseOtpHandlers = supabaseAuthHandlers.createSupabaseAuthHandlers({
+            sendJson,
+            sendError,
+            readBody,
+            SUPABASE_URL,
+            SUPABASE_SECRET_KEY,
+            supabaseEnabled,
+            findSupabaseUserById,
+            findSupabaseUserByEmail,
+            insertSupabaseUser,
+            updateSupabaseUser,
+            createSupabaseSession,
+            publicUser,
+            assertCanCreateSession
+        });
+    }
+    return _supabaseOtpHandlers;
+}
 let consumetExtensions = null;
 try {
     consumetExtensions = require("@consumet/extensions");
@@ -22,6 +45,8 @@ const CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.en
 const CONSUMET_BASE_URL = cleanBaseUrl(process.env.CONSUMET_BASE_URL || process.env.CONSUMET_API_BASE_URL || "");
 const SUPABASE_URL = cleanBaseUrl(process.env.SUPABASE_URL || process.env.supabase_url || process.env.project_url || "");
 const SUPABASE_SECRET_KEY = String(process.env.SUPABASE_SECRET_KEY || process.env.supabase_secret_key || process.env.service_role_key || "").trim();
+// ── Supabase Auth helpers (used when Supabase Auth is enabled for OTP flow) ──
+const SUPABASE_AUTH_URL = `${SUPABASE_URL}/auth/v1`;
 const FLUTTERWAVE_SECRET_KEY = String(process.env.FLUTTERWAVE_SECRET_KEY || process.env.flutterwave_secret_key || "").trim();
 const FLUTTERWAVE_SECRET_HASH = String(process.env.FLUTTERWAVE_SECRET_HASH || process.env.flutterwave_secret_hash || "").trim();
 const GOOGLE_API_KEY = String(process.env.GOOGLE_API_KEY || "AQ.Ab8RN6ITDbEYY9LCLlTqnTeqywJnvxeduXj2tPvs7OIA6HqyCg").trim();
@@ -2726,6 +2751,201 @@ async function handlePublishAiNovel(request, response) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  User-Created Novels Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleCreateNovel(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const { title, cover_url, description } = body;
+  if (!title || title.trim().length < 2) {
+    return sendError(response, 400, "Title must be at least 2 characters.");
+  }
+  const novel = {
+    id: crypto.randomUUID(),
+    author_id: user.id,
+    author_name: user.username || "Anonymous",
+    title: title.trim(),
+    cover_url: cover_url || "",
+    description: description || "",
+    status: "draft",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  if (supabaseEnabled()) {
+    try {
+      const rows = await supabaseRequest("user_created_novels", {
+        method: "POST",
+        prefer: "return=representation",
+        body: {
+          id: novel.id,
+          author_id: novel.author_id,
+          author_name: novel.author_name,
+          title: novel.title,
+          cover_url: novel.cover_url,
+          description: novel.description,
+          status: novel.status,
+          created_at: novel.created_at,
+          updated_at: novel.updated_at
+        }
+      });
+      return sendJson(response, 200, { ok: true, novel: rows?.[0] || novel });
+    } catch (error) {
+      return sendError(response, 500, `Supabase error: ${error.message}`);
+    }
+  } else {
+    const data = readData();
+    if (!data.userNovels) data.userNovels = [];
+    data.userNovels.push(novel);
+    writeData(data);
+    return sendJson(response, 200, { ok: true, novel });
+  }
+}
+
+async function handleGetNovels(request, response, requestUrl) {
+  const page = Math.max(1, parseInt(requestUrl.searchParams.get("page") || "1", 10));
+  const limit = 20;
+  const offset = (page - 1) * limit;
+
+  if (supabaseEnabled()) {
+    try {
+      const rows = await supabaseRequest(`user_created_novels?select=*,user_novel_chapters(*)&status=eq.published&order=updated_at.desc&limit=${limit}&offset=${offset}`);
+      return sendJson(response, 200, { novels: Array.isArray(rows) ? rows : [] });
+    } catch (error) {
+      return sendError(response, 500, `Supabase error: ${error.message}`);
+    }
+  } else {
+    const data = readData();
+    if (!data.userNovels) data.userNovels = [];
+    const novels = data.userNovels
+      .filter(n => n.status === "published")
+      .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+      .slice(offset, offset + limit);
+    // Attach chapters
+    const enriched = novels.map(n => ({
+      ...n,
+      chapters: (data.userNovelChapters || []).filter(c => c.novel_id === n.id)
+    }));
+    return sendJson(response, 200, { novels: enriched });
+  }
+}
+
+async function handleGetMyNovels(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+
+  if (supabaseEnabled()) {
+    try {
+      const rows = await supabaseRequest(`user_created_novels?author_id=eq.${encodeURIComponent(user.id)}&order=updated_at.desc&select=*`);
+      return sendJson(response, 200, { novels: Array.isArray(rows) ? rows : [] });
+    } catch (error) {
+      return sendError(response, 500, `Supabase error: ${error.message}`);
+    }
+  } else {
+    const data = readData();
+    if (!data.userNovels) data.userNovels = [];
+    const novels = data.userNovels
+      .filter(n => n.author_id === user.id)
+      .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    return sendJson(response, 200, { novels });
+  }
+}
+
+async function handleGetNovelById(request, response, pathname) {
+  const id = pathname.replace("/api/novels/", "").split("/")[0];
+  if (!id) return sendError(response, 400, "Novel ID required.");
+
+  if (supabaseEnabled()) {
+    try {
+      const rows = await supabaseRequest(`user_created_novels?id=eq.${encodeURIComponent(id)}&select=*`);
+      const novel = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+      if (!novel) return sendError(response, 404, "Novel not found.");
+      const chapterRows = await supabaseRequest(`user_novel_chapters?novel_id=eq.${encodeURIComponent(id)}&order=chapter_number.asc&select=*`);
+      novel.chapters = Array.isArray(chapterRows) ? chapterRows : [];
+      return sendJson(response, 200, novel);
+    } catch (error) {
+      return sendError(response, 500, `Supabase error: ${error.message}`);
+    }
+  } else {
+    const data = readData();
+    if (!data.userNovels) data.userNovels = [];
+    const novel = data.userNovels.find(n => n.id === id);
+    if (!novel) return sendError(response, 404, "Novel not found.");
+    novel.chapters = (data.userNovelChapters || []).filter(c => c.novel_id === id);
+    return sendJson(response, 200, novel);
+  }
+}
+
+async function handlePublishNovel(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const novelId = body.novel_id || body.id;
+  if (!novelId) return sendError(response, 400, "Novel ID required.");
+
+  if (supabaseEnabled()) {
+    try {
+      await supabaseRequest(`user_created_novels?id=eq.${encodeURIComponent(novelId)}&author_id=eq.${encodeURIComponent(user.id)}`, {
+        method: "PATCH",
+        body: { status: "published", updated_at: new Date().toISOString() }
+      });
+      return sendJson(response, 200, { ok: true });
+    } catch (error) {
+      return sendError(response, 500, `Supabase error: ${error.message}`);
+    }
+  } else {
+    const data = readData();
+    if (!data.userNovels) data.userNovels = [];
+    const idx = data.userNovels.findIndex(n => n.id === novelId && n.author_id === user.id);
+    if (idx === -1) return sendError(response, 404, "Novel not found.");
+    data.userNovels[idx].status = "published";
+    data.userNovels[idx].updated_at = new Date().toISOString();
+    writeData(data);
+    return sendJson(response, 200, { ok: true });
+  }
+}
+
+async function handleAddChapter(request, response) {
+  const user = await requireApiUser(request, response);
+  if (!user) return;
+  const body = await readBody(request);
+  const { novel_id, chapter_number, title, content } = body;
+  if (!novel_id || !chapter_number || !content) {
+    return sendError(response, 400, "novel_id, chapter_number, and content are required.");
+  }
+
+  const chapter = {
+    id: crypto.randomUUID(),
+    novel_id,
+    chapter_number: parseInt(chapter_number, 10),
+    title: title || `Chapter ${chapter_number}`,
+    content: content || "",
+    created_at: new Date().toISOString()
+  };
+
+  if (supabaseEnabled()) {
+    try {
+      const rows = await supabaseRequest("user_novel_chapters", {
+        method: "POST",
+        prefer: "return=representation",
+        body: chapter
+      });
+      return sendJson(response, 200, { ok: true, chapter: rows?.[0] || chapter });
+    } catch (error) {
+      return sendError(response, 500, `Supabase error: ${error.message}`);
+    }
+  } else {
+    const data = readData();
+    if (!data.userNovelChapters) data.userNovelChapters = [];
+    data.userNovelChapters.push(chapter);
+    writeData(data);
+    return sendJson(response, 200, { ok: true, chapter });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Football / API-Football Proxy Endpoints
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2997,6 +3217,28 @@ async function handleApi(request, response, pathname) {
     if (request.method === "POST" && pathname === "/api/auth/reset-password") {
       return await handleResetPassword(request, response);
     }
+
+    // ── OTP Auth routes (Supabase Auth proxy) ─────────────────────────────
+    // Step 1: Create account + send OTP
+    if (request.method === "POST" && pathname === "/api/auth/otp/signup") {
+      return await getSupabaseOtpHandlers().handleOtpSignup(request, response);
+    }
+    // Step 2: Verify OTP and sign in
+    if (request.method === "POST" && pathname === "/api/auth/otp/verify") {
+      return await getSupabaseOtpHandlers().handleOtpVerify(request, response);
+    }
+    // Login with OTP (existing users)
+    if (request.method === "POST" && pathname === "/api/auth/otp/login") {
+      return await getSupabaseOtpHandlers().handleOtpLogin(request, response);
+    }
+    // Forgot password
+    if (request.method === "POST" && pathname === "/api/auth/otp/forgot-password") {
+      return await getSupabaseOtpHandlers().handleOtpForgotPassword(request, response);
+    }
+    // Reset password with access token
+    if (request.method === "POST" && pathname === "/api/auth/otp/reset-password") {
+      return await getSupabaseOtpHandlers().handleOtpResetPassword(request, response);
+    }
     if (request.method === "GET" && pathname === "/api/billing/status") {
       return await handleBillingStatus(request, response);
     }
@@ -3037,8 +3279,29 @@ async function handleApi(request, response, pathname) {
       return await handleGetAiNovelById(request, response, pathname);
     }
 
+    // ── User-Created Novel Routes ────────────────────────────────────────
+    if (request.method === "POST" && pathname === "/api/novels/create") {
+      return await handleCreateNovel(request, response);
+    }
+    if (request.method === "GET" && pathname === "/api/novels") {
+      return await handleGetNovels(request, response, requestUrl);
+    }
+    if (request.method === "GET" && pathname === "/api/novels/mine") {
+      return await handleGetMyNovels(request, response);
+    }
+    if (request.method === "GET" && pathname.startsWith("/api/novels/")) {
+      return await handleGetNovelById(request, response, pathname);
+    }
+    if (request.method === "POST" && pathname === "/api/novels/publish") {
+      return await handlePublishNovel(request, response);
+    }
+    if (request.method === "POST" && pathname === "/api/novels/chapter") {
+      return await handleAddChapter(request, response);
+    }
+
     return sendError(response, 404, "API route not found.");
   } catch (error) {
+    console.error("[API] Error:", error.stack || error.message || error);
     return sendError(response, 400, error.message || "Request failed.");
   }
 }
