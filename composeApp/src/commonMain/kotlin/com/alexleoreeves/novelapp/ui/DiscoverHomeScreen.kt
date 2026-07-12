@@ -1143,18 +1143,8 @@ fun ContentCard(
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = Color.Black.copy(0.6f),
-                    modifier = Modifier.align(Alignment.BottomStart).padding(6.dp)
-                ) {
-                    Text(
-                        item.sourceName.take(8),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(0.9f),
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
-                }
+                // Source name badge removed for abstraction
+
                 if (!compact) {
                     Text(
                         item.title,

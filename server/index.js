@@ -1189,26 +1189,30 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
   const movie = mediaType === "movie";
     return [
       {
-        provider: "Embed.su",
-        url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
+        provider: "VidSrc.to",
+        url: movie ? `https://vidsrc.to/embed/movie/${id}` : `https://vidsrc.to/embed/tv/${id}/${season}/${episode}`
       },
       {
-        provider: "SuperEmbed",
+        provider: "Nontongo",
+        url: movie ? `https://nontongo.win/embed/movie/${id}` : `https://nontongo.win/embed/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "MultiEmbed",
         url: movie ? `https://multiembed.mov/?video_id=${id}&tmdb=1` : `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`
-      },
-      {
-        provider: "2Embed",
-        url: movie ? `https://2embed.cc/embed/${id}` : `https://2embed.cc/embedtv/${id}&s=${season}&e=${episode}`
-      },
-      {
-        provider: "VidLink Pro",
-        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
       },
       {
         provider: "VidSrc.me",
         url: movie
           ? `https://vidsrcme.ru/embed/movie?tmdb=${id}`
           : `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+      },
+      {
+        provider: "VidSrc.in",
+        url: movie ? `https://vidsrc.in/embed/movie/${id}` : `https://vidsrc.in/embed/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "VidLink",
+        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
       }
     ];
 }
@@ -2538,11 +2542,19 @@ function calculateQuota(plan, credits) {
   };
 }
 
+function getCurrentPeriodString() {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${weekNo.toString().padStart(2, '0')}`;
+}
+
 async function handleGetAiQuota(request, response) {
   const user = await requireApiUser(request, response);
   if (!user) return;
-  const month = new Date().toISOString().substring(0, 7);
-  const credits = await getUserAiCredits(user.id, month);
+  const period = getCurrentPeriodString();
+  const credits = await getUserAiCredits(user.id, period);
   const quota = calculateQuota(user.plan, credits);
   return sendJson(response, 200, quota);
 }
@@ -2553,18 +2565,18 @@ async function handleGenerateAiStart(request, response) {
   const body = await readBody(request);
   const type = body.type === "long" ? "long" : "short";
 
-  const month = new Date().toISOString().substring(0, 7);
-  const credits = await getUserAiCredits(user.id, month);
+  const period = getCurrentPeriodString();
+  const credits = await getUserAiCredits(user.id, period);
   const quota = calculateQuota(user.plan, credits);
 
   if (type === "short" && quota.limitShort !== -1 && quota.limitShort <= 0) {
-    return sendError(response, 402, "You have exceeded your short novel creations for this month. Upgrade to get more quota.");
+    return sendError(response, 402, "You have exceeded your short novel creations for this week. Upgrade to get more quota.");
   }
   if (type === "long" && quota.limitLong !== -1 && quota.limitLong <= 0) {
-    return sendError(response, 402, "You have exceeded your long novel creations for this month. Upgrade to get more quota.");
+    return sendError(response, 402, "You have exceeded your long novel creations for this week. Upgrade to get more quota.");
   }
 
-  await incrementUserAiCredits(user.id, month, type);
+  await incrementUserAiCredits(user.id, period, type);
   return sendJson(response, 200, { ok: true, message: "Quota verified and deducted successfully." });
 }
 

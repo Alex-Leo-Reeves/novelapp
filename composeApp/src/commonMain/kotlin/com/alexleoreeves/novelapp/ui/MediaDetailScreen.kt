@@ -6,6 +6,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Download
@@ -59,24 +61,19 @@ fun MediaDetailScreen(
     var providerTmdbId by remember(item.detailPageUrl) { mutableStateOf("") }
     var providerTmdbType by remember(item.detailPageUrl) { mutableStateOf("tv") }
 
-    var selectedServer by remember { mutableStateOf(0) }
+    var isMovieContent by remember(mediaType) { mutableStateOf(mediaType == "movie") }
+    val isYouTubeNollywood = item.id.startsWith("youtube_nollywood_")
+
+    var selectedServer by remember { mutableStateOf(if (item.mediaKind.equals("DONGHUA", ignoreCase = true)) 1 else 0) }
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
     val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
-    val embedServerNames = listOf("Embed.su", "SuperEmbed", "2Embed", "VidLink", "VidSrc.me")
-    val serverNames = embedServerNames
-    val freeMoviePreviewMs = 20 * 60 * 1000L
-    val freeEpisodeCount = remember(episodesList, isPremium) {
-        if (isPremium || episodesList.isEmpty()) episodesList.size
-        else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
-    }
+    
+    // Made VidLink the first and only visible source per user request, but kept others for fallback
+    val embedServerNames = listOf("VidLink", "VidSrc.to", "Nontongo", "MultiEmbed", "VidSrc.me", "VidSrc.in")
+    val serverNames = listOf("VidLink") // Hide the other sources in UI
 
-    /**
-     * Build an embed URL for the selected server.
-     * The AnimePlayerScreen will take this URL, scrape the .m3u8 from it via
-     * a hidden WebView, and play the direct stream in ExoPlayer.
-     */
     fun buildEmbedUrl(
         type: String,
         id: String,
@@ -85,13 +82,20 @@ fun MediaDetailScreen(
     ): String? {
         if (id.isBlank()) return null
         return when (selectedServer) {
-            0 -> if (type == "movie") "https://embed.su/embed/movie/$id" else "https://embed.su/embed/tv/$id/$season/$episode"
-            1 -> if (type == "movie") "https://multiembed.mov/?video_id=$id&tmdb=1" else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$season&e=$episode"
-            2 -> if (type == "movie") "https://2embed.cc/embed/$id" else "https://2embed.cc/embedtv/$id&s=$season&e=$episode"
-            3 -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
+            0 -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
+            1 -> if (type == "movie") "https://vidsrc.to/embed/movie/$id" else "https://vidsrc.to/embed/tv/$id/$season/$episode"
+            2 -> if (type == "movie") "https://nontongo.win/embed/movie/$id" else "https://nontongo.win/embed/tv/$id/$season/$episode"
+            3 -> if (type == "movie") "https://multiembed.mov/?video_id=$id&tmdb=1" else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$season&e=$episode"
             4 -> if (type == "movie") "https://vidsrcme.ru/embed/movie?tmdb=$id" else "https://vidsrcme.ru/embed/tv?tmdb=$id&season=$season&episode=$episode"
-            else -> if (type == "movie") "https://embed.su/embed/movie/$id" else "https://embed.su/embed/tv/$id/$season/$episode"
+            5 -> if (type == "movie") "https://vidsrc.in/embed/movie/$id" else "https://vidsrc.in/embed/tv/$id/$season/$episode"
+            else -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
         }
+    }
+
+    val freeMoviePreviewMs = 20 * 60 * 1000L
+    val freeEpisodeCount = remember(episodesList, isPremium) {
+        if (isPremium || episodesList.isEmpty()) episodesList.size
+        else ceil(episodesList.size * 0.2).toInt().coerceAtLeast(1)
     }
 
     var downloadingEpisodes by remember { mutableStateOf<Set<Int>>(emptySet()) }
@@ -204,11 +208,8 @@ fun MediaDetailScreen(
         }
     }
 
-    val isMovieContent = mediaType == "movie"
-    val isYouTubeNollywood = item.id.startsWith("youtube_nollywood_")
-
     LaunchedEffect(item.detailPageUrl) {
-        selectedServer = 0
+        selectedServer = if (item.mediaKind.equals("DONGHUA", ignoreCase = true)) 1 else 0
         providerTmdbId = ""
         providerTmdbType = "tv"
         isLoadingEpisodes = true
@@ -229,12 +230,13 @@ fun MediaDetailScreen(
         }
         episodesList = initialEpisodes
 
-        // Phase 2: If episodes are still empty AND this is NOT a movie,
+        // Phase 2: If episodes are still empty (or it's a movie without a TMDB ID),
         // try to find a TMDB match by title and load episodes from it.
         // This handles items from BACKEND, curated seeds, WCOStream, etc.
         // that have no real TMDB ID but do have a title that matches TMDB.
         val isMovie = mediaType == "movie"
-        if (episodesList.isEmpty() && !isMovie) {
+        val needsTmdbMatch = (episodesList.isEmpty() && !isMovie) || (isMovie && !isTmdbDetail)
+        if (needsTmdbMatch) {
             val tmdbMatch = runCatching {
                 tmdbScraper.search(item.title)
                     .sortedWith(
@@ -252,11 +254,15 @@ fun MediaDetailScreen(
             if (tmdbMatch != null) {
                 providerTmdbId = tmdbMatch.id
                 providerTmdbType = if (tmdbMatch.type == "MOVIE") "movie" else "tv"
+                if (providerTmdbType == "movie") {
+                    isMovieContent = true
+                }
                 // Search returned a TV match — fetch real episodes
                 if (providerTmdbType == "tv") {
                     val tmdbEpisodes = tmdbScraper.fetchTVSeasonsAndEpisodes(providerTmdbId)
                     if (tmdbEpisodes.isNotEmpty()) {
                         episodesList = tmdbEpisodes
+                        isMovieContent = false
                     }
                 }
             }
@@ -264,7 +270,7 @@ fun MediaDetailScreen(
 
         // Phase 3: If STILL no episodes found from any source,
         // try a broader TMDB search using genre hints from the item
-        if (episodesList.isEmpty() && !isMovie) {
+        if (episodesList.isEmpty() && !isMovieContent) {
             val genreHint = when {
                 item.mediaKind == VideoCategory.K_DRAMA.name -> "korean drama"
                 item.mediaKind == VideoCategory.CARTOON.name -> "cartoon"
@@ -400,17 +406,7 @@ fun MediaDetailScreen(
                     .align(Alignment.BottomStart)
                     .padding(18.dp)
             ) {
-                Surface(
-                    color = currentTheme.surfaceColor().copy(alpha = 0.86f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        item.sourceName,
-                        color = currentTheme.subTextColor(),
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
+                // sourceName badge removed for abstraction
                 Spacer(Modifier.height(8.dp))
                 Text(
                     item.title,
@@ -447,28 +443,7 @@ fun MediaDetailScreen(
                 )
             }
 
-            // Server Selector
-            Column {
-                Text("Streaming Server", color = currentTheme.textColor(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    serverNames.forEachIndexed { idx, name ->
-                        FilterChip(
-                            selected = selectedServer == idx,
-                            onClick = { selectedServer = idx },
-                            label = { Text(name, style = MaterialTheme.typography.labelSmall) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = currentTheme.accentColor(),
-                                selectedLabelColor = Color.White
-                            )
-                        )
-                    }
-                }
-            }
+            // Server Selector removed for abstraction
 
             if (statusText.isNotEmpty()) {
                 Text(
@@ -505,7 +480,8 @@ fun MediaDetailScreen(
             }
 
             // Movie: Single Play button
-            if (item.detailPageUrl.startsWith("tmdb://") && mediaType == "movie") {
+            val hasMovieId = (isTmdbDetail && mediaType == "movie") || (providerTmdbType == "movie" && providerTmdbId.isNotBlank())
+            if (hasMovieId) {
                 if (!isPremium) {
                     Surface(
                         color = currentTheme.accentColor().copy(alpha = 0.12f),
@@ -532,9 +508,10 @@ fun MediaDetailScreen(
                     Button(
                         onClick = {
                             scope.launch {
+                                val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
                                 statusText = "Opening ${serverNames.getOrNull(selectedServer) ?: "server"}..."
                                 statusText = "Opening stream..."
-                                val embedUrl = buildEmbedUrl("movie", tmdbId) ?: return@launch
+                                val embedUrl = buildEmbedUrl("movie", resolvedTmdbId) ?: return@launch
                                 onPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
                             }
                         },
@@ -560,7 +537,8 @@ fun MediaDetailScreen(
                                     scope.launch {
                                         try {
                                             downloadRepo.addItem(DownloadedItem(item.id, item.title, item.coverUrl, contentTypeForItem(), item.sourceName))
-                                            val embedUrl = buildEmbedUrl("movie", tmdbId)
+                                            val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
+                                            val embedUrl = buildEmbedUrl("movie", resolvedTmdbId)
                                             if (embedUrl != null) {
                                                 statusText = "Downloading movie..."
                                                 val saved = saveDownloadedVideo(item.id, 1, embedUrl)
@@ -609,8 +587,46 @@ fun MediaDetailScreen(
                     if (!isPremium) {
                         Text("Free account access: $freeEpisodeCount of ${episodesList.size} episodes unlocked.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodySmall)
                     }
-                    episodesList.forEachIndexed { index, ep ->
-                        val locked = !isPremium && index >= freeEpisodeCount
+                    
+                    val chunkSize = 50
+                    var currentChunkIndex by remember(episodesList) { mutableStateOf(0) }
+                    
+                    if (episodesList.size > chunkSize) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                        ) {
+                            items(episodesList.chunked(chunkSize).size) { chunkIndex ->
+                                val startEp = chunkIndex * chunkSize + 1
+                                val endEp = minOf((chunkIndex + 1) * chunkSize, episodesList.size)
+                                val isSelected = currentChunkIndex == chunkIndex
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { currentChunkIndex = chunkIndex },
+                                    label = { Text("$startEp - $endEp", color = if (isSelected) currentTheme.backgroundColor() else currentTheme.textColor()) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = currentTheme.accentColor(),
+                                        containerColor = currentTheme.cardColor()
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        borderColor = if (isSelected) currentTheme.accentColor() else currentTheme.subTextColor().copy(alpha = 0.3f),
+                                        enabled = true,
+                                        selected = isSelected
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    val displayedEpisodes = if (episodesList.size > chunkSize) {
+                        episodesList.chunked(chunkSize).getOrNull(currentChunkIndex) ?: emptyList()
+                    } else {
+                        episodesList
+                    }
+
+                    displayedEpisodes.forEachIndexed { i, ep ->
+                        val actualIndex = currentChunkIndex * chunkSize + i
+                        val locked = !isPremium && actualIndex >= freeEpisodeCount
                         val isDownloaded = remember(refreshTrigger, ep.episodeNumber) { downloadRepo.isEpisodeDownloaded(item.id, ep.episodeNumber) }
                         val isDownloading = ep.episodeNumber in downloadingEpisodes
 

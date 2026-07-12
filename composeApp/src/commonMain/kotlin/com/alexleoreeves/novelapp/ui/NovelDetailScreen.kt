@@ -372,7 +372,10 @@ fun NovelDetailScreen(
                     }
                 }
             } else if (visibleChapters.isNotEmpty()) {
-                items(visibleChapters) { chapter ->
+                items(
+                    items = visibleChapters,
+                    key = { it.chapterNumber }
+                ) { chapter ->
                     // Read actual downloaded state
                     val isDownloaded = remember(refreshTrigger, chapter.chapterNumber) {
                         downloadRepo.isChapterDownloaded(novel.id, chapter.chapterNumber)

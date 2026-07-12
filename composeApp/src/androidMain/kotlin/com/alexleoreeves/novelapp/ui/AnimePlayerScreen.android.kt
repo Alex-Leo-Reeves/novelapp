@@ -19,6 +19,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -45,9 +47,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.alexleoreeves.novelapp.data.AppTheme
+import com.alexleoreeves.novelapp.ui.theme.accentColor
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 /**
  * Android actual: Full-screen immersive ExoPlayer.
@@ -68,6 +72,7 @@ actual fun AnimePlayerScreen(
     onProgress: (Long) -> Unit,
     previewLimitMs: Long?,
     onPreviewFinished: () -> Unit,
+    isAnime: Boolean,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -106,6 +111,7 @@ actual fun AnimePlayerScreen(
     // we try to scrape a direct .m3u8; if we fail, we null it out and show
     // a WebView fallback instead.
     var resolvedUrl by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    var subtitlesJson by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var isResolving by remember(streamUrl, retryKey) { mutableStateOf(true) }
     var resolveError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var needsWebViewFallback by remember(streamUrl, retryKey) { mutableStateOf(false) }
@@ -123,13 +129,27 @@ actual fun AnimePlayerScreen(
         isResolving = true
         resolveError = null
         needsWebViewFallback = false
-        val scraped = extractStreamFromEmbed(context, streamUrl)
-        if (scraped != null && scraped.isDirectPlayableMediaUrl()) {
-            resolvedUrl = scraped
+        
+        var scraped: com.alexleoreeves.novelapp.ui.ScrapedStream? = null
+        for (i in 0 until 2) { // Try up to 2 times
+            scraped = extractStreamFromEmbed(context, streamUrl, timeoutMs = 25_000L)
+            if (scraped != null) {
+                break
+            }
+            if (i == 0) {
+                // Wait briefly before retrying
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+
+        if (scraped != null) {
+            resolvedUrl = scraped.url
+            subtitlesJson = scraped.subtitlesJson
             isResolving = false
         } else {
             // Scraping failed — will fall back to showing the embed in a visible WebView
             resolvedUrl = null
+            subtitlesJson = null
             isResolving = false
             needsWebViewFallback = true
             resolveError = "Could not extract stream from embed."
@@ -141,7 +161,8 @@ actual fun AnimePlayerScreen(
         if (resolvedUrl != null) {
             val url = resolvedUrl!!
             val cache = NovelAppVideoCache.get(context)
-            val requestHeaders = url.playerHeaders()
+            // Use the ORIGINAL embed URL (streamUrl) to generate headers so the CDNs get the correct Referer and Origin!
+            val requestHeaders = streamUrl.playerHeaders()
             val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent(PLAYER_USER_AGENT)
                 .setDefaultRequestProperties(requestHeaders)
@@ -150,15 +171,24 @@ actual fun AnimePlayerScreen(
                 .setCache(cache)
                 .setUpstreamDataSourceFactory(dataSourceFactory)
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            // Netflix-style buffering: large background buffer, but resume quickly after rebuffer
             val loadControl = DefaultLoadControl.Builder()
-                .setBufferDurationsMs(30_000, 90_000, 1_500, 4_000)
+                .setBufferDurationsMs(
+                    60_000,  // minBufferMs (60s) — always try to stay 1 minute ahead
+                    300_000, // maxBufferMs (5 mins) — buffer up to 5 mins ahead
+                    1_500,   // bufferForPlaybackMs (1.5s) — start playing quickly
+                    3_000    // bufferForPlaybackAfterRebufferMs (3s) — resume fast after rebuffer
+                )
+                .setTargetBufferBytes(150 * 1024 * 1024) // Allow up to 150MB of RAM for the buffer
+                .setPrioritizeTimeOverSizeThresholds(true) // Never stop buffering just because of file size limit
                 .build()
             ExoPlayer.Builder(context)
                 .setLoadControl(loadControl)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
                 .build()
                 .apply {
-                    setMediaItem(MediaItem.fromUri(url))
+                    val mediaItem = buildMediaItemWithSubtitles(url, subtitlesJson)
+                    setMediaItem(mediaItem)
                     prepare()
                     if (initialPositionMs > 0L) seekTo(initialPositionMs)
                     playWhenReady = true
@@ -192,7 +222,7 @@ actual fun AnimePlayerScreen(
     }
 
     // Manual player restart — triggered by Retry button, reuses the same resolvedUrl
-    // WITHOUT going back to embed scraping.
+    // WITHOUT going back to embed scraping. Preserves subtitle config.
     LaunchedEffect(playerRestartTrigger) {
         if (playerRestartTrigger > 0 && exoPlayer != null && resolvedUrl != null) {
             audioCodecRetries = 0
@@ -201,7 +231,7 @@ actual fun AnimePlayerScreen(
             delay(300L)
             exoPlayer?.stop()
             exoPlayer?.clearMediaItems()
-            exoPlayer?.setMediaItem(MediaItem.fromUri(resolvedUrl!!))
+            exoPlayer?.setMediaItem(buildMediaItemWithSubtitles(resolvedUrl!!, subtitlesJson))
             exoPlayer?.prepare()
             exoPlayer?.playWhenReady = true
         }
@@ -255,7 +285,7 @@ actual fun AnimePlayerScreen(
         }
         bufferingTooLong = true
         if (playerError == null) {
-            playerError = "Video is taking too long to load. Try a different server or episode."
+            playerError = "Video is taking too long to load. Please click on retry."
         }
     }
 
@@ -284,20 +314,124 @@ actual fun AnimePlayerScreen(
         }
     }
 
-    LaunchedEffect(audioLanguage) {
-        exoPlayer?.let { p ->
-            p.trackSelectionParameters = p.trackSelectionParameters
-                .buildUpon().setPreferredAudioLanguage(audioLanguage).build()
+    // Audio language override — only for anime content (multi-track streams)
+    if (isAnime) {
+        LaunchedEffect(audioLanguage) {
+            exoPlayer?.let { p ->
+                p.trackSelectionParameters = p.trackSelectionParameters
+                    .buildUpon().setPreferredAudioLanguage(audioLanguage).build()
+                
+                // Count total audio tracks across all groups
+                var totalAudioTracks = 0
+                for (groupIndex in 0 until p.currentTracks.groups.size) {
+                    if (p.currentTracks.groups[groupIndex].type == C.TRACK_TYPE_AUDIO) {
+                        totalAudioTracks += p.currentTracks.groups[groupIndex].length
+                    }
+                }
+                
+                // Only override if there are multiple audio tracks available
+                if (totalAudioTracks > 1) {
+                    val targetLabel = when (audioLanguage) {
+                        "en" -> "english"
+                        "ja" -> "japanese"
+                        else -> audioLanguage.lowercase()
+                    }
+                    for (groupIndex in 0 until p.currentTracks.groups.size) {
+                        val group = p.currentTracks.groups[groupIndex]
+                        if (group.type == C.TRACK_TYPE_AUDIO) {
+                            for (trackIndex in 0 until group.length) {
+                                val format = group.getTrackFormat(trackIndex)
+                                val label = format.label?.lowercase() ?: ""
+                                val lang = format.language?.lowercase() ?: ""
+                                if (label.contains(targetLabel) || lang.contains(targetLabel) || lang == audioLanguage) {
+                                    p.trackSelectionParameters = p.trackSelectionParameters
+                                        .buildUpon()
+                                        .setOverrideForType(
+                                            TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
+                                        )
+                                        .build()
+                                    return@let
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
-    LaunchedEffect(subtitleMode) {
+    // When subtitle mode changes, enable/disable text tracks and select by label or language
+    LaunchedEffect(subtitleMode, exoPlayer) {
         exoPlayer?.let { p ->
+            if (subtitleMode == "off") {
+                p.trackSelectionParameters = p.trackSelectionParameters
+                    .buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+            } else {
+                // Enable text tracks
+                p.trackSelectionParameters = p.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setPreferredTextLanguage(subtitleMode)
+                    .build()
+                // Also try to find and select the track by label (VidLink uses labels like "English")
+                val targetLabel = when (subtitleMode) {
+                    "en" -> "english"
+                    "ja" -> "japanese"
+                    else -> subtitleMode.lowercase()
+                }
+                for (groupIndex in 0 until p.currentTracks.groups.size) {
+                    val group = p.currentTracks.groups[groupIndex]
+                    if (group.type == C.TRACK_TYPE_TEXT) {
+                        for (trackIndex in 0 until group.length) {
+                            val format = group.getTrackFormat(trackIndex)
+                            val label = format.label?.lowercase() ?: ""
+                            val lang = format.language?.lowercase() ?: ""
+                            if (label.contains(targetLabel) || lang.contains(targetLabel) || lang == subtitleMode) {
+                                p.trackSelectionParameters = p.trackSelectionParameters
+                                    .buildUpon()
+                                    .setOverrideForType(
+                                        TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
+                                    )
+                                    .build()
+                                return@let
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Auto-enable English subtitles when player first reaches READY state
+    LaunchedEffect(exoPlayer, playerReady) {
+        if (exoPlayer != null && playerReady && subtitleMode != "off") {
+            // Small delay to let tracks populate
+            delay(500)
+            val p = exoPlayer
             p.trackSelectionParameters = p.trackSelectionParameters
-                .buildUpon().apply {
-                    if (subtitleMode == "off") setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    else { setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false); setPreferredTextLanguage(subtitleMode) }
-                }.build()
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .build()
+            // Try to select English track by label
+            for (groupIndex in 0 until p.currentTracks.groups.size) {
+                val group = p.currentTracks.groups[groupIndex]
+                if (group.type == C.TRACK_TYPE_TEXT) {
+                    for (trackIndex in 0 until group.length) {
+                        val format = group.getTrackFormat(trackIndex)
+                        val label = format.label?.lowercase() ?: ""
+                        val lang = format.language?.lowercase() ?: ""
+                        if (label.contains("english") || lang == "en" || lang.contains("english")) {
+                            p.trackSelectionParameters = p.trackSelectionParameters
+                                .buildUpon()
+                                .setOverrideForType(
+                                    TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
+                                )
+                                .build()
+                            return@LaunchedEffect
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -311,8 +445,8 @@ actual fun AnimePlayerScreen(
             PlayerLoadingOverlay(
                 visible = true,
                 title = episodeTitle,
-                providerName = providerName,
-                message = "Resolving stream via $providerName ...",
+                providerName = "Server",
+                message = "Resolving high quality stream...",
                 isError = false,
                 onRetry = { retryKey++ },
                 onBack = onBack
@@ -325,9 +459,9 @@ actual fun AnimePlayerScreen(
 
             LaunchedEffect(streamUrl, retryKey, webLoading) {
                 if (webLoading) {
-                    delay(18_000)
+                    delay(25_000)
                     if (webLoading) {
-                        webError = "$providerName is taking too long. Try another server."
+                        webError = "Server is taking too long. Please click on retry."
                         webLoading = false
                     }
                 }
@@ -382,11 +516,23 @@ actual fun AnimePlayerScreen(
                                     val url = request?.url?.toString() ?: ""
                                     return !url.isAllowedPlayerNavigation(streamUrl)
                                 }
+                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                    val url = request?.url?.toString() ?: return null
+                                    if (url.isBlockedSubResource()) {
+                                        return WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                                    }
+                                    return super.shouldInterceptRequest(view, request)
+                                }
                                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                                     if (request?.isForMainFrame == true) { webLoading = false; webError = error?.description?.toString() ?: "Provider failed to load." }
                                 }
                                 override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
                                     if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) { webLoading = false; webError = "$providerName returned ${errorResponse?.statusCode}." }
+                                }
+                            }
+                            webChromeClient = object : android.webkit.WebChromeClient() {
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    if (newProgress > 80) webLoading = false
                                 }
                             }
                             loadUrl(streamUrl, streamUrl.playerHeaders())
@@ -399,8 +545,8 @@ actual fun AnimePlayerScreen(
             PlayerLoadingOverlay(
                 visible = webLoading || webError != null,
                 title = episodeTitle,
-                providerName = providerName,
-                message = webError ?: "Loading $providerName ...",
+                providerName = "Server",
+                message = webError ?: "Resolving source...",
                 isError = webError != null,
                 onRetry = { webError = null; webLoading = true; retryKey++ },
                 onBack = onBack
@@ -410,14 +556,59 @@ actual fun AnimePlayerScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
         }
-        // Phase 3: ExoPlayer with direct stream (either native direct or scraped)
         else {
             val player = exoPlayer ?: return@Box
+            var playbackSpeed by remember { mutableStateOf(1f) }
+            var isSpeedLocked by remember { mutableStateOf(false) }
+            var showSpeedPicker by remember { mutableStateOf(false) }
+
+            LaunchedEffect(playbackSpeed) {
+                player.playbackParameters = PlaybackParameters(playbackSpeed)
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
                     .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { showControls = !showControls }
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                if (down.position.x > size.width * 0.6f && !isSpeedLocked) {
+                                    var isLongPress = false
+                                    try {
+                                        withTimeout(500L) {
+                                            var event = awaitPointerEvent()
+                                            while (event.changes.any { it.pressed }) {
+                                                event = awaitPointerEvent()
+                                            }
+                                        }
+                                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                                        isLongPress = true
+                                    }
+
+                                    if (isLongPress) {
+                                        playbackSpeed = 2f
+                                        var isLocked = false
+                                        do {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull() ?: break
+                                            if (change.position.y < down.position.y - 100) {
+                                                isLocked = true
+                                                isSpeedLocked = true
+                                                break
+                                            }
+                                        } while (event.changes.any { it.pressed })
+
+                                        if (!isLocked) {
+                                            playbackSpeed = 1f
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -429,6 +620,27 @@ actual fun AnimePlayerScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+
+                if (playbackSpeed > 1f) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 32.dp)
+                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                            .clickable { 
+                                isSpeedLocked = false
+                                playbackSpeed = 1f
+                            }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = if (isSpeedLocked) "2X SPEED (LOCKED)" else "2X SPEED",
+                            color = currentTheme.accentColor(),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
 
                 PlayerLoadingOverlay(
                     visible = isPlayerBuffering || playerError != null,
@@ -477,17 +689,25 @@ actual fun AnimePlayerScreen(
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text("${formatMs(position)} / ${formatMs(duration)}", color = Color.White.copy(0.8f), style = MaterialTheme.typography.labelSmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(onClick = { showAudioPicker = !showAudioPicker },
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                        border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
-                                        Icon(Icons.Default.VolumeUp, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
-                                        Text(if (audioLanguage == "ja") "JP Audio" else "EN Audio", style = MaterialTheme.typography.labelSmall)
+                                    if (isAnime) {
+                                        OutlinedButton(onClick = { showAudioPicker = !showAudioPicker },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                            border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                                            Icon(Icons.Default.VolumeUp, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+                                            Text(if (audioLanguage == "ja") "JP Audio" else "EN Audio", style = MaterialTheme.typography.labelSmall)
+                                        }
                                     }
                                     OutlinedButton(onClick = { showSubtitlePicker = !showSubtitlePicker },
                                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                                         border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
                                         Icon(Icons.Default.ClosedCaption, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
                                         Text(when (subtitleMode) { "ja" -> "JP Subs"; "en" -> "EN Subs"; else -> "Subs Off" }, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    OutlinedButton(onClick = { showSpeedPicker = !showSpeedPicker },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                        border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                                        Icon(Icons.Default.Speed, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+                                        Text(if (playbackSpeed == 2f) "2x" else "1x", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
@@ -517,6 +737,17 @@ actual fun AnimePlayerScreen(
                         }
                     }
                 }
+
+                AnimatedVisibility(visible = showSpeedPicker, enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }, modifier = Modifier.align(Alignment.BottomEnd)) {
+                    Card(shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)), modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 96.dp)) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Speed", style = MaterialTheme.typography.titleSmall, color = Color.White, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(10.dp))
+                            LanguageOption1("1x (Normal)", playbackSpeed == 1f) { playbackSpeed = 1f; isSpeedLocked = false; showSpeedPicker = false }
+                            LanguageOption1("2x (Fast)", playbackSpeed == 2f) { playbackSpeed = 2f; isSpeedLocked = true; showSpeedPicker = false }
+                        }
+                    }
+                }
             }
         }
     }
@@ -540,7 +771,10 @@ private fun formatMs(ms: Long): String {
 
 private fun String.isDirectPlayableMediaUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
-    return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") || clean.endsWith(".webm") || clean.endsWith(".mkv") || clean.endsWith(".mov") || !startsWith("http", ignoreCase = true)
+    return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") || 
+           clean.endsWith(".webm") || clean.endsWith(".mkv") || clean.endsWith(".mov") || clean.endsWith(".ts") ||
+           contains("/hls/", ignoreCase = true) || contains("/dash/", ignoreCase = true) || contains("/manifest/", ignoreCase = true) ||
+           !startsWith("http", ignoreCase = true)
 }
 
 private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
@@ -550,14 +784,31 @@ private fun String.isAllowedPlayerNavigation(initialUrl: String): Boolean {
     val initialHost = runCatching { Uri.parse(initialUrl).host.orEmpty().lowercase() }.getOrDefault("")
     if (requestedHost.isBlank()) return false
     if (requestedHost == initialHost || requestedHost.endsWith(".$initialHost")) return true
-    val blockedDomains = listOf("doubleclick.net", "googleadservices.com", "pagead2", "popads", "popcash")
-    if (blockedDomains.any { requestedHost.contains(it) }) return false
-    return listOf("anineko", "anizara", "vivibebe", "bibiemb", "otakuhg", "otakuvid", "playmogo",
-        "kwik", "dood", "vidsrc", "vidlink", "autoembed", "stream", "embed", "tmdb", "themoviedb",
-        "kisskh", "dramacool", "kimcartoon", "fastani", "vidplay", "filemoon",
-        "rapidvideo", "voe", "cloudflare", "jwpcdn", "jwplatform", "cdnjs",
-        "bootstrapcdn", "googleapis", "gstatic", "font", "ajax.googleapis", "static", "cdn",
-        "player", "media", "video", "m3u8", "hls", "mp4", "aniwatch", "zoro", "anime").any { requestedHost.contains(it) }
+    
+    // Explicitly allow known video/embed providers just in case of cross-navigation
+    val allowedDomains = listOf(
+        "vidsrc", "nontongo", "multiembed", "streamingnow", "vidlink", 
+        "youtube.com", "vimeo.com", "dailymotion.com",
+        "gogoplay", "goload", "vidstreaming", "animepahe", "noobees",
+        "dood", "streamwish", "filemoon", "mp4upload", "ninjastream"
+    )
+    if (allowedDomains.any { requestedHost.contains(it) }) return true
+
+    // Block EVERYTHING ELSE to completely eliminate ad redirects and popups
+    return false
+}
+
+private fun String.isBlockedSubResource(): Boolean {
+    if (isBlank()) return false
+    val requestedHost = runCatching { android.net.Uri.parse(this).host.orEmpty().lowercase() }.getOrDefault("")
+    if (requestedHost.isBlank()) return false
+    
+    val adDomains = listOf(
+        "adsco.re", "popads", "popcash", "propellerads", "exoclick", 
+        "bebi.com", "doubleclick", "google-analytics", "disable-devtool",
+        "googlesyndication.com", "adserver", "tracking"
+    )
+    return adDomains.any { requestedHost.contains(it) }
 }
 
 @Composable
@@ -606,6 +857,11 @@ private fun String.providerName(): String {
         "anineko" in host -> "Anineko"
         "animepahe" in host -> "AnimePahe"
         "vidlink" in host -> "VidLink"
+        "nontongo" in host -> "Nontongo"
+        "multiembed" in host || "streamingnow" in host -> "MultiEmbed"
+        "vidsrcme" in host -> "VidSrc.me"
+        "vidsrc.in" == host || host.endsWith(".vidsrc.in") -> "VidSrc.in"
+        "vidsrc.to" == host || host.endsWith(".vidsrc.to") -> "VidSrc.to"
         "autoembed" in host -> "AutoEmbed"
         "vidsrc" in host -> "VidSrc"
         "embed" in host -> "Embed provider"
@@ -618,14 +874,12 @@ private fun String.providerName(): String {
 
 private fun String.playerReferer(): String {
     val uri = runCatching { Uri.parse(this) }.getOrNull()
-    val scheme = uri?.scheme ?: "https"; val host = uri?.host ?: return "https://vidlink.pro/"
-    return "$scheme://$host/"
+    return if (uri != null) "${uri.scheme}://${uri.host}/" else "https://google.com/"
 }
 
 private fun String.playerOrigin(): String {
     val uri = runCatching { Uri.parse(this) }.getOrNull()
-    val scheme = uri?.scheme ?: "https"; val host = uri?.host ?: return "https://vidlink.pro"
-    return "$scheme://$host"
+    return if (uri != null) "${uri.scheme}://${uri.host}" else "https://google.com"
 }
 
 private fun String.playerHeaders(): Map<String, String> = mapOf(
@@ -637,3 +891,53 @@ private fun String.playerHeaders(): Map<String, String> = mapOf(
 )
 
 private const val PLAYER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun buildMediaItemWithSubtitles(url: String, subtitlesJson: String?): MediaItem {
+    val mediaItemBuilder = MediaItem.Builder().setUri(url)
+    if (subtitlesJson != null) {
+        try {
+            val jsonArray = org.json.JSONArray(subtitlesJson)
+            val subtitleConfigs = mutableListOf<MediaItem.SubtitleConfiguration>()
+            for (i in 0 until jsonArray.length()) {
+                val track = jsonArray.getJSONObject(i)
+                val file = track.optString("file", "")
+                val label = track.optString("label", "Unknown")
+                val kind = track.optString("kind", "")
+                if (file.isNotBlank() && file.startsWith("http")) {
+                    val mimeType = if (file.endsWith(".vtt")) MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP
+                    // Map VidLink labels like "English", "Japanese" to ISO 639-1 codes
+                    val langCode = when (label.trim().lowercase()) {
+                        "english" -> "en"
+                        "japanese" -> "ja"
+                        "spanish" -> "es"
+                        "french" -> "fr"
+                        "german" -> "de"
+                        "portuguese" -> "pt"
+                        "italian" -> "it"
+                        "korean" -> "ko"
+                        "chinese" -> "zh"
+                        "arabic" -> "ar"
+                        "hindi" -> "hi"
+                        "russian" -> "ru"
+                        else -> label.take(2).lowercase()
+                    }
+                    val config = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(file))
+                        .setMimeType(mimeType)
+                        .setLanguage(langCode)
+                        .setLabel(label)
+                        .setSelectionFlags(if (kind.contains("caption") || label.trim().lowercase() == "english") C.SELECTION_FLAG_DEFAULT else 0)
+                        .build()
+                    subtitleConfigs.add(config)
+                }
+            }
+            if (subtitleConfigs.isNotEmpty()) {
+                mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    return mediaItemBuilder.build()
+}
+

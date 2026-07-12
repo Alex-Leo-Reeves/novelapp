@@ -460,7 +460,10 @@ fun AnimeDetailScreen(
                     }
                 }
             } else {
-                items(episodes) { episode ->
+                items(
+                    items = episodes,
+                    key = { it.title }
+                ) { episode ->
                     val isDownloaded = remember(refreshTrigger, episode.episodeNumber) {
                         downloadRepo.isEpisodeDownloaded(anime.id, episode.episodeNumber)
                     }

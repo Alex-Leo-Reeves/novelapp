@@ -277,7 +277,7 @@ private fun AiNovelCreatorTab(
                 if (upgradeOptions.isNotEmpty()) TextButton(onClick = { showPaymentDropdown = true }) { Icon(Icons.Default.Upgrade, null, modifier = Modifier.size(14.dp), tint = currentTheme.accentColor()); Spacer(Modifier.width(4.dp)); Text("Unlock more", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall) }
             }
 
-            quota?.let { q -> Text(if (q.limitShort == -1) "Unlimited creations" else "Short: ${q.limitShort} · Long: ${q.limitLong} left", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) }
+            quota?.let { q -> Text(if (q.limitShort == -1) "Unlimited creations" else "Short: ${q.limitShort} · Long: ${q.limitLong} left this week", color = currentTheme.accentColor(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)) }
 
             if (innerTab == 0) {
                 // ── Community Tab ──
@@ -354,7 +354,7 @@ private fun AiNovelCreatorTab(
                                 Row(modifier = Modifier.fillMaxWidth().background(currentTheme.backgroundColor().copy(alpha = 0.5f), RoundedCornerShape(8.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     AsyncImage(model = src.coverUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
                                     Spacer(Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) { Text(src.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(src.sourceName, color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }
+                                    Column(modifier = Modifier.weight(1f)) { Text(src.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); /* source name hidden */ }
                                     IconButton(onClick = { selectedSources = selectedSources - src }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
                                 }
                             }
@@ -454,7 +454,7 @@ private fun AiNovelCreatorTab(
                     }
                     if (pickerTab == 0) {
                         if (allFavoriteItems.isEmpty()) Text("No saved or downloaded novels found. Add favorites or download novels first.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
-                        else { LazyColumn(modifier = Modifier.height(260.dp)) { items(allFavoriteItems) { item -> Row(modifier = Modifier.fillMaxWidth().clickable { if (selectedSources.none { it.id == item.id } && selectedSources.size < sourceLimit) selectedSources = selectedSources + item; showSourcePicker = false }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = item.coverUrl, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop); Spacer(Modifier.width(10.dp)); Column { Text(item.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold); Text(item.sourceName, color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) } } } } }
+                        else { LazyColumn(modifier = Modifier.height(260.dp)) { items(allFavoriteItems) { item -> Row(modifier = Modifier.fillMaxWidth().clickable { if (selectedSources.none { it.id == item.id } && selectedSources.size < sourceLimit) selectedSources = selectedSources + item; showSourcePicker = false }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = item.coverUrl, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop); Spacer(Modifier.width(10.dp)); Column { Text(item.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold); /* source name hidden */ } } } } }
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -464,7 +464,7 @@ private fun AiNovelCreatorTab(
                                     if (isSearchingPicker) CircularProgressIndicator(color = currentTheme.accentColor(), modifier = Modifier.size(24.dp)) else Icon(Icons.Default.Search, null, tint = currentTheme.accentColor())
                                 }
                             }
-                            LazyColumn(modifier = Modifier.height(200.dp)) { items(searchPickerResults) { item -> Row(modifier = Modifier.fillMaxWidth().clickable { if (selectedSources.none { it.id == item.id } && selectedSources.size < sourceLimit) selectedSources = selectedSources + item; showSourcePicker = false }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = item.coverUrl, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop); Spacer(Modifier.width(10.dp)); Column(modifier = Modifier.weight(1f)) { Text(item.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(item.sourceName, color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) } } } }
+                            LazyColumn(modifier = Modifier.height(200.dp)) { items(searchPickerResults) { item -> Row(modifier = Modifier.fillMaxWidth().clickable { if (selectedSources.none { it.id == item.id } && selectedSources.size < sourceLimit) selectedSources = selectedSources + item; showSourcePicker = false }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = item.coverUrl, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop); Spacer(Modifier.width(10.dp)); Column(modifier = Modifier.weight(1f)) { Text(item.title, color = currentTheme.textColor(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); /* source name hidden */ } } } }
                         }
                     }
                 }

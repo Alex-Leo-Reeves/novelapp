@@ -499,9 +499,9 @@ private fun resolveIosWatchUrl(kind: String, title: String, detailUrl: String): 
         val mediaType = tmdbMatch.groupValues[1]
         val id = tmdbMatch.groupValues[2]
         return if (mediaType == "movie" || normalizedKind == "movie") {
-            "https://vidlink.pro/movie/$id"
+            "https://vidsrc.to/embed/movie/$id"
         } else {
-            "https://vidlink.pro/tv/$id/1/1"
+            "https://vidsrc.to/embed/tv/$id/1/1"
         }
     }
 
