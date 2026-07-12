@@ -83,6 +83,10 @@ fun App(
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
     val animeContentKind = remember { mutableStateOf("") }
 
+    // MA Server WebView embed player state (for Server 2/3/4)
+    val maServerEmbedUrl = remember { mutableStateOf<String?>(null) }
+    val maServerEmbedTitle = remember { mutableStateOf("") }
+
     // Football & WWE navigation states
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
     val footballStreamUrl = remember { mutableStateOf<String?>(null) }
@@ -343,6 +347,7 @@ fun App(
 
         val canNavigateBack =
             animeStreamUrl.value != null ||
+                maServerEmbedUrl.value != null ||
                 footballStreamUrl.value != null ||
                 selectedFootballMatch.value != null ||
                 selectedChapterUrl.value != null ||
@@ -353,6 +358,10 @@ fun App(
 
         PlatformBackHandler(enabled = canNavigateBack) {
             when {
+                maServerEmbedUrl.value != null -> {
+                    maServerEmbedUrl.value = null
+                    maServerEmbedTitle.value = ""
+                }
                 animeStreamUrl.value != null -> {
                     animeStreamUrl.value = null
                     animePreviewLimitMs.value = null
@@ -539,8 +548,24 @@ fun App(
                                 else ""
                             } ?: ""
                         },
-                        onPlayMaEmbed = { _, _ -> },
+                        onPlayMaEmbed = { embedUrl, title ->
+                            maServerEmbedUrl.value = embedUrl
+                            maServerEmbedTitle.value = title
+                        },
                         onBack = { selectedMedia.value = null }
+                    )
+                }
+
+                // ── 4b. MA Server WebView embed player (Server 2/3/4) ──
+                maServerEmbedUrl.value != null -> {
+                    MaServerPlayerScreen(
+                        embedUrl = maServerEmbedUrl.value!!,
+                        episodeTitle = maServerEmbedTitle.value,
+                        currentTheme = appTheme.value,
+                        onBack = {
+                            maServerEmbedUrl.value = null
+                            maServerEmbedTitle.value = ""
+                        }
                     )
                 }
 
