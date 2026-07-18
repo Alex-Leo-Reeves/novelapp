@@ -1,16 +1,14 @@
 {
-  "versionCode": 34,
-  "versionName": "1.34",
+  "versionCode": 35,
+  "versionName": "1.35",
   "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
   "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
   "releaseNotes": [
-    "Fixed VidLink source error — Embed.su is now the default streaming server",
-    "Fixed VidSrc.me black screen issue — demoted to last server choice",
-    "Removed broken AutoEmbed server",
-    "Fixed episodes not showing in Home tab items — added 3-phase TMDB fallback",
-    "Movies, Classic, K-Drama, Cartoon items now always get episodes via title match"
+    "Migrated offline TTS to stutter-free Sherpa-ONNX Engine",
+    "Removed buggy Kokoro implementation",
+    "Upgraded background audio queue architecture for continuous playback"
   ],
   "forceUpdate": false,
-  "apkBytes": 209087447,
-  "apkSha256": "d51582472471e1bc215deed18be877aaba4b880344e89665223b145f258598cb"
+  "apkBytes": 216715463,
+  "apkSha256": "80d45640bafa33c7029eaf31958868917e4f00ab9e73faac62eab041ee0f20f7"
 }
