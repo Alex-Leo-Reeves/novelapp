@@ -12,7 +12,7 @@ import android.os.IBinder
 import com.alexleoreeves.novelapp.MainActivity
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
 
-actual fun updateNarrationForegroundService(
+fun updateNarrationForegroundService(
     enabled: Boolean,
     title: String,
     subtitle: String

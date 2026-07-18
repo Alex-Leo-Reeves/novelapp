@@ -16,10 +16,10 @@ import kotlin.coroutines.resumeWithException
 import kotlin.math.max
 
 /**
- * Android implementation: streams generated Kokoro WAV bytes through AudioTrack.
+ * Android implementation: streams generated WAV bytes through AudioTrack.
  * This avoids temp-file I/O between narration chunks.
  */
-actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
+suspend fun platformPlayAudio(audioBytes: ByteArray) {
     try {
         AndroidGeneratedAudioPlayer.playWavBytes(audioBytes)
     } catch (e: Exception) {
@@ -27,7 +27,7 @@ actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     }
 }
 
-actual suspend fun playKokoroAudioFile(filePath: String) {
+suspend fun playAudioFile(filePath: String) {
     AndroidGeneratedAudioPlayer.playFile(File(filePath), deleteOnFinish = false)
 }
 
@@ -35,18 +35,18 @@ internal fun stopPlatformNarrationAudio() = AndroidGeneratedAudioPlayer.stop()
 internal fun pausePlatformNarrationAudio() = AndroidGeneratedAudioPlayer.pause()
 internal fun resumePlatformNarrationAudio() = AndroidGeneratedAudioPlayer.resume()
 
-actual fun clearTemporaryNarrationAudioCache() {
+fun clearTemporaryNarrationAudioCache() {
     AppContextHolder.applicationContext?.cacheDir
         ?.resolve("narration-audio-temp")
         ?.deleteRecursively()
 }
 
-actual fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String? {
+fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String? {
     val file = narrationAudioFile(cacheKey, persistent)
     return file.takeIf { it.exists() && it.length() > 44L }?.absolutePath
 }
 
-actual fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String? {
+fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String? {
     if (audioBytes.size <= 44) return null
     return runCatching {
         val file = narrationAudioFile(cacheKey, persistent)

@@ -30,11 +30,11 @@ class AuthApi(
         }
     }
 
-    suspend fun register(username: String, email: String, password: String, recoverySecret: String): SavedUserAccount {
+    suspend fun register(username: String, email: String, password: String, recoverySecret: String = ""): SavedUserAccount {
         val response = client.post("$baseUrl/auth/register") {
             accept(ContentType.parse("application/json"))
             contentType(ContentType.parse("application/json"))
-            setBody(AuthRequest(username = username, email = email, password = password, recoverySecret = recoverySecret))
+            setBody(AuthRequest(username = username, email = email, password = password, recoverySecret = recoverySecret.ifBlank { null }))
         }
         return response.toSavedUserAccount()
     }
@@ -46,6 +46,33 @@ class AuthApi(
             setBody(AuthRequest(email = email, password = password))
         }
         return response.toSavedUserAccount()
+    }
+
+    suspend fun recoverAccount(recoverySecret: String): SavedUserAccount {
+        val response = client.post("$baseUrl/auth/recover") {
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
+            setBody(RecoveryBody(recoverySecret = recoverySecret))
+        }
+        return response.toSavedUserAccount()
+    }
+
+    suspend fun resetPassword(token: String, newPassword: String): SavedUserAccount {
+        val response = client.post("$baseUrl/auth/reset-password") {
+            accept(ContentType.parse("application/json"))
+            contentType(ContentType.parse("application/json"))
+            bearerAuth(token)
+            setBody(NewPasswordBody(password = newPassword))
+        }
+        // The server returns { user } without a new token for reset-password.
+        // We create a SavedUserAccount using the existing token.
+        val rawBody = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            val error = rawBody.decodeAuthError()
+            throw AuthApiException(error ?: "Password reset failed.", response.status.value)
+        }
+        val payload = authJson.decodeFromString<ResetPasswordResponse>(rawBody)
+        return payload.user.toAccount(token)
     }
 
     // ── OTP Auth methods (Supabase Auth proxy) ──────────────────────────
@@ -309,6 +336,21 @@ private data class AuthRequest(
     val email: String? = null,
     val password: String,
     val recoverySecret: String? = null
+)
+
+@Serializable
+private data class RecoveryBody(
+    val recoverySecret: String
+)
+
+@Serializable
+private data class NewPasswordBody(
+    val password: String
+)
+
+@Serializable
+private data class ResetPasswordResponse(
+    val user: AuthUserResponse
 )
 
 @Serializable

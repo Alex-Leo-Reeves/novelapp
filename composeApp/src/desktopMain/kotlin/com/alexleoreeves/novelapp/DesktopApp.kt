@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
-import com.alexleoreeves.novelapp.audio.KokoroNarrationController
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.theme.*
@@ -48,7 +48,7 @@ fun DesktopApp() {
             rapidApiHost = BuildKonfig.RAPID_API_HOST
         )
     }
-    val ttsController = remember { KokoroNarrationController() }
+    val ttsController = remember { SherpaNarrationController() }
 
     DisposableEffect(Unit) {
         onDispose { ttsController.close() }
@@ -224,7 +224,7 @@ fun DesktopApp() {
 private fun DesktopSidebar(
     currentSection: DesktopSection,
     currentTheme: AppTheme,
-    ttsController: KokoroNarrationController,
+    ttsController: SherpaNarrationController,
     onSectionChange: (DesktopSection) -> Unit,
     onThemeChange: (AppTheme) -> Unit
 ) {

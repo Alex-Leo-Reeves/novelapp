@@ -1,3 +1,0 @@
-headers = onnxruntime_c_api.h novel_ort_bridge.h
-compilerOpts = -Isrc/nativeInterop/cinterop -Isrc/nativeInterop/cinterop/onnxruntime_headers
-package = onnxruntime

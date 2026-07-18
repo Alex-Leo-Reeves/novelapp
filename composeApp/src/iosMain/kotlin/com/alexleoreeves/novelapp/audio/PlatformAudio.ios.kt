@@ -17,7 +17,7 @@ import platform.Foundation.writeToFile
 
 private var activeNarrationPlayer: AVAudioPlayer? = null
 
-actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
+suspend fun platformPlayAudio(audioBytes: ByteArray) {
     val data = audioBytes.toNSData() ?: return
     val player = AVAudioPlayer(data = data, error = null)
     activeNarrationPlayer?.stop()
@@ -30,7 +30,7 @@ actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     }
 }
 
-actual suspend fun playKokoroAudioFile(filePath: String) {
+suspend fun playAudioFile(filePath: String) {
     val player = AVAudioPlayer(
         contentsOfURL = NSURL.fileURLWithPath(filePath),
         error = null
@@ -58,16 +58,16 @@ internal fun resumePlatformNarrationAudio() {
     activeNarrationPlayer?.play()
 }
 
-actual fun clearTemporaryNarrationAudioCache() {
+fun clearTemporaryNarrationAudioCache() {
     NSFileManager.defaultManager.removeItemAtPath(narrationRoot(persistent = false), error = null)
 }
 
-actual fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String? {
+fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String? {
     val path = narrationAudioPath(cacheKey, persistent)
     return path.takeIf { NSFileManager.defaultManager.fileExistsAtPath(it) }
 }
 
-actual fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String? {
+fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String? {
     if (audioBytes.size <= 44) return null
     val path = narrationAudioPath(cacheKey, persistent)
     ensureDirectory(path.substringBeforeLast("/"))

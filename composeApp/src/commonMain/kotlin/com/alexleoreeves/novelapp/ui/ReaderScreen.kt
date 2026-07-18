@@ -23,8 +23,8 @@ import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.BuildKonfig
-import com.alexleoreeves.novelapp.audio.KokoroNarrationController
-import com.alexleoreeves.novelapp.audio.KokoroVoiceSetupPhase
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
+import com.alexleoreeves.novelapp.audio.VoiceSetupPhase
 import com.alexleoreeves.novelapp.audio.VoiceMode
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.currentTimeMillis
@@ -41,7 +41,7 @@ fun ReaderScreen(
     chapterTitle: String,
     sourceName: String,
     currentTheme: AppTheme,
-    ttsController: KokoroNarrationController,
+    ttsController: SherpaNarrationController,
     onThemeChange: (AppTheme) -> Unit,
     initialParagraphIndex: Int = 0,
     onProgress: (Int) -> Unit = {},
@@ -540,8 +540,8 @@ fun ReaderScreen(
                                         trackColor = currentTheme.cardColor().copy(alpha = 0.5f)
                                     )
                                     if (
-                                        setupStatus.phase == KokoroVoiceSetupPhase.Error ||
-                                        setupStatus.phase == KokoroVoiceSetupPhase.Fallback
+                                        setupStatus.phase == VoiceSetupPhase.Error ||
+                                        setupStatus.phase == VoiceSetupPhase.Fallback
                                     ) {
                                         TextButton(
                                             onClick = {
