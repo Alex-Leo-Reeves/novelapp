@@ -4,7 +4,7 @@ import com.alexleoreeves.novelapp.data.AnimeResult
 import com.alexleoreeves.novelapp.data.NovelSearchRepository
 import com.alexleoreeves.novelapp.data.UnifiedSearchResult
 import com.alexleoreeves.novelapp.data.VideoCategory
-import com.alexleoreeves.novelapp.audio.KokoroNarrationController
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.data.AuthApi
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.platform.DeveloperContact
@@ -26,7 +26,7 @@ class NovelAppIosBridge {
         rapidApiKey = BuildKonfig.RAPID_API_KEY,
         rapidApiHost = BuildKonfig.RAPID_API_HOST
     )
-    private val narrationController = KokoroNarrationController()
+    private val narrationController = SherpaNarrationController()
     private val authApi = AuthApi()
     private val sessionStore = IosUserSessionStore()
 

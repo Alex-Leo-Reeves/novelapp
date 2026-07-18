@@ -9,7 +9,7 @@ import javax.sound.sampled.Clip
 import javax.sound.sampled.LineEvent
 import kotlin.coroutines.resume
 
-actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
+suspend fun platformPlayAudio(audioBytes: ByteArray) {
     runCatching {
         DesktopGeneratedAudioPlayer.playBytes(audioBytes)
     }.onFailure {
@@ -17,7 +17,7 @@ actual suspend fun platformPlayAudio(audioBytes: ByteArray) {
     }
 }
 
-actual suspend fun playKokoroAudioFile(filePath: String) {
+suspend fun playAudioFile(filePath: String) {
     DesktopGeneratedAudioPlayer.playFile(File(filePath))
 }
 
@@ -25,16 +25,16 @@ internal fun stopPlatformNarrationAudio() = DesktopGeneratedAudioPlayer.stop()
 internal fun pausePlatformNarrationAudio() = DesktopGeneratedAudioPlayer.pause()
 internal fun resumePlatformNarrationAudio() = DesktopGeneratedAudioPlayer.resume()
 
-actual fun clearTemporaryNarrationAudioCache() {
+fun clearTemporaryNarrationAudioCache() {
     narrationRoot(persistent = false).deleteRecursively()
 }
 
-actual fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String? {
+fun existingNarrationAudioCachePath(cacheKey: String, persistent: Boolean): String? {
     val file = narrationAudioFile(cacheKey, persistent)
     return file.takeIf { it.exists() && it.length() > 44L }?.absolutePath
 }
 
-actual fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String? {
+fun writeNarrationAudioCache(cacheKey: String, persistent: Boolean, audioBytes: ByteArray): String? {
     if (audioBytes.size <= 44) return null
     return runCatching {
         val file = narrationAudioFile(cacheKey, persistent)

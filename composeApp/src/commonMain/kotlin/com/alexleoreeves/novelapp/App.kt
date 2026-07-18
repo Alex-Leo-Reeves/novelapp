@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.alexleoreeves.novelapp.audio.KokoroNarrationController
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.EmptyUserSessionStore
 import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
@@ -64,6 +64,10 @@ fun App(
     var hasHydratedCloudState by remember { mutableStateOf(false) }
     var searchHistoryPulse by remember { mutableStateOf(0) }
     var subscriptionMessage by remember { mutableStateOf<String?>(null) }
+    var pendingOtpEmail by remember { mutableStateOf("") }
+    var pendingUsername by remember { mutableStateOf("") }
+    var showOtpScreen by remember { mutableStateOf(false) }
+    var otpIsLogin by remember { mutableStateOf(false) }
     val authApi = remember { AuthApi() }
 
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
@@ -103,7 +107,7 @@ fun App(
     }
 
     val ttsController = remember {
-        KokoroNarrationController()
+        SherpaNarrationController()
     }
     val narrationSettings = ttsController.settings.collectAsState()
     val isNarrationPlaying = ttsController.isPlaying.collectAsState()
@@ -263,58 +267,33 @@ fun App(
                     isGuestSession = true
                     currentTab.value = BottomTab.DISCOVER
                 },
-                onSignIn = { email, password ->
+                onOtpLogin = { email ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.login(email, password) }
-                            .onSuccess { signedIn ->
-                                userSessionStore.saveAccount(signedIn)
-                                account = signedIn
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(signedIn.authToken)
-                                queueCloudSync()
+                        runCatching { authApi.otpLogin(email) }
+                            .onSuccess {
+                                pendingOtpEmail = email
+                                otpIsLogin = true
+                                showOtpScreen = true
+                                isAuthSubmitting = false
                             }
-                            .onFailure { authError = it.message ?: "Sign in failed." }
-                        isAuthSubmitting = false
+                            .onFailure { authError = it.message ?: "Could not send OTP."; isAuthSubmitting = false }
                     }
                 },
-                onCreateAccount = { username, email, password, recoverySecret ->
+                onOtpSignup = { username, email, password ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.register(username, email, password, recoverySecret) }
-                            .onSuccess { created ->
-                                userSessionStore.saveAccount(created)
-                                account = created
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(created.authToken)
-                                queueCloudSync()
+                        runCatching { authApi.otpSignup(username, email, password) }
+                            .onSuccess {
+                                pendingOtpEmail = email
+                                pendingUsername = username
+                                otpIsLogin = false
+                                showOtpScreen = true
+                                isAuthSubmitting = false
                             }
-                            .onFailure { authError = it.message ?: "Account creation failed." }
-                        isAuthSubmitting = false
-                    }
-                },
-                onRecoverAccount = { recoverySecret, newPassword ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching {
-                            val recovered = authApi.recoverAccount(recoverySecret)
-                            authApi.resetPassword(recovered.authToken, newPassword)
-                        }
-                            .onSuccess { recovered ->
-                                userSessionStore.saveAccount(recovered)
-                                account = recovered
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(recovered.authToken)
-                                queueCloudSync()
-                            }
-                            .onFailure { authError = it.message ?: "Account recovery failed." }
-                        isAuthSubmitting = false
+                            .onFailure { authError = it.message ?: "Account creation failed."; isAuthSubmitting = false }
                     }
                 }
             )
@@ -784,6 +763,52 @@ fun App(
             }
         }
 
+        // ── OTP verification screen (overlays everything) ─────────────
+        if (showOtpScreen) {
+            OtpScreen(
+                email = pendingOtpEmail,
+                isSubmitting = isAuthSubmitting,
+                errorMessage = authError,
+                onClearError = { authError = null },
+                onVerify = { otp ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching { authApi.otpVerify(pendingOtpEmail, otp) }
+                            .onSuccess { verified ->
+                                userSessionStore.saveAccount(verified)
+                                account = verified
+                                isGuestSession = false
+                                showOtpScreen = false
+                                showAuthSheet = false
+                                hydrateCloudState(verified.authToken)
+                                queueCloudSync()
+                            }
+                            .onFailure { authError = it.message ?: "OTP verification failed." }
+                        isAuthSubmitting = false
+                    }
+                },
+                onResend = {
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching {
+                            if (otpIsLogin) authApi.otpLogin(pendingOtpEmail)
+                            else authApi.otpSignup(pendingUsername, pendingOtpEmail, "")
+                        }
+                            .onSuccess { isAuthSubmitting = false }
+                            .onFailure { authError = it.message ?: "Could not resend OTP."; isAuthSubmitting = false }
+                    }
+                },
+                onBack = {
+                    showOtpScreen = false
+                    pendingOtpEmail = ""
+                    authError = null
+                },
+                currentTheme = appTheme.value
+            )
+        }
+
         if (showAuthSheet) {
             AuthScreen(
                 currentTheme = appTheme.value,
@@ -795,58 +820,33 @@ fun App(
                     isGuestSession = true
                     showAuthSheet = false
                 },
-                onSignIn = { email, password ->
+                onOtpLogin = { email ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.login(email, password) }
-                            .onSuccess { signedIn ->
-                                userSessionStore.saveAccount(signedIn)
-                                account = signedIn
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(signedIn.authToken)
-                                queueCloudSync()
+                        runCatching { authApi.otpLogin(email) }
+                            .onSuccess {
+                                pendingOtpEmail = email
+                                otpIsLogin = true
+                                showOtpScreen = true
+                                isAuthSubmitting = false
                             }
-                            .onFailure { authError = it.message ?: "Sign in failed." }
-                        isAuthSubmitting = false
+                            .onFailure { authError = it.message ?: "Could not send OTP."; isAuthSubmitting = false }
                     }
                 },
-                onCreateAccount = { username, email, password, recoverySecret ->
+                onOtpSignup = { username, email, password ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.register(username, email, password, recoverySecret) }
-                            .onSuccess { created ->
-                                userSessionStore.saveAccount(created)
-                                account = created
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(created.authToken)
-                                queueCloudSync()
+                        runCatching { authApi.otpSignup(username, email, password) }
+                            .onSuccess {
+                                pendingOtpEmail = email
+                                pendingUsername = username
+                                otpIsLogin = false
+                                showOtpScreen = true
+                                isAuthSubmitting = false
                             }
-                            .onFailure { authError = it.message ?: "Account creation failed." }
-                        isAuthSubmitting = false
-                    }
-                },
-                onRecoverAccount = { recoverySecret, newPassword ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching {
-                            val recovered = authApi.recoverAccount(recoverySecret)
-                            authApi.resetPassword(recovered.authToken, newPassword)
-                        }
-                            .onSuccess { recovered ->
-                                userSessionStore.saveAccount(recovered)
-                                account = recovered
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(recovered.authToken)
-                                queueCloudSync()
-                            }
-                            .onFailure { authError = it.message ?: "Account recovery failed." }
-                        isAuthSubmitting = false
+                            .onFailure { authError = it.message ?: "Account creation failed."; isAuthSubmitting = false }
                     }
                 }
             )

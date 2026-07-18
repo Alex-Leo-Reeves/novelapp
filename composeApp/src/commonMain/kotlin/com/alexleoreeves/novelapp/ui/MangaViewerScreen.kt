@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.BuildKonfig
-import com.alexleoreeves.novelapp.audio.KokoroNarrationController
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.audio.MangaOcrReader
 import com.alexleoreeves.novelapp.audio.OcrTextPanel
 import com.alexleoreeves.novelapp.data.*
@@ -47,7 +47,7 @@ fun MangaViewerScreen(
     chapterTitle: String,
     sourceName: String,
     currentTheme: AppTheme,
-    ttsController: KokoroNarrationController,
+    ttsController: SherpaNarrationController,
     initialPageIndex: Int = 0,
     onProgress: (Int) -> Unit = {},
     onBack: () -> Unit
@@ -265,7 +265,7 @@ fun MangaViewerScreen(
                         lazyListState.animateScrollToItem(pageIndex, (targetY - 120).coerceAtLeast(0))
                     }
 
-                    ttsController.readText(panel.text)
+                    ttsController.playText(panel.text)
                 }
 
                 if (autoScrollEnabled && pageIndex < pages.lastIndex) {

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.AppTheme
@@ -55,8 +56,8 @@ import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import com.alexleoreeves.novelapp.ui.theme.cardColor
 import com.alexleoreeves.novelapp.ui.theme.subTextColor
-import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 import com.alexleoreeves.novelapp.ui.theme.textColor
+import com.alexleoreeves.novelapp.ui.theme.surfaceColor
 
 enum class AuthMode(val label: String) {
     SIGN_IN("Sign in"),
@@ -70,9 +71,9 @@ fun AuthScreen(
     isSubmitting: Boolean = false,
     errorMessage: String?,
     onClearError: () -> Unit,
-    onSignIn: (email: String, password: String) -> Unit,
-    onCreateAccount: (username: String, email: String, password: String) -> Unit,
-    onForgotPasswordClick: () -> Unit,
+    onOtpLogin: (email: String) -> Unit,
+    onOtpSignup: (username: String, email: String, password: String) -> Unit,
+    onForgotPasswordClick: () -> Unit = {},
     onDismiss: (() -> Unit)? = null
 ) {
     var mode by remember { mutableStateOf(AuthMode.CREATE_ACCOUNT) }
@@ -93,15 +94,15 @@ fun AuthScreen(
             localError = "Enter a valid email address."
             return
         }
-        if (password.length < 6) {
+        if (mode == AuthMode.CREATE_ACCOUNT && password.length < 6) {
             localError = "Password must be at least 6 characters."
             return
         }
 
         if (mode == AuthMode.CREATE_ACCOUNT) {
-            onCreateAccount(username.trim(), email.trim(), password)
+            onOtpSignup(username.trim(), email.trim(), password)
         } else {
-            onSignIn(email.trim(), password)
+            onOtpLogin(email.trim())
         }
     }
 
@@ -147,7 +148,7 @@ fun AuthScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    "Sign in or create a new account.",
+                    "Sign in or create a new account. A one-time code will be sent to your email.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = currentTheme.subTextColor(),
                     textAlign = TextAlign.Center
@@ -157,7 +158,7 @@ fun AuthScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    AuthMode.values().forEach { item ->
+                    AuthMode.entries.forEach { item ->
                         FilterChip(
                             selected = mode == item,
                             onClick = {
@@ -194,14 +195,16 @@ fun AuthScreen(
                     keyboardType = KeyboardType.Email
                 )
 
-                AuthTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = "Password",
-                    currentTheme = currentTheme,
-                    keyboardType = KeyboardType.Password,
-                    isPassword = true
-                )
+                if (mode == AuthMode.CREATE_ACCOUNT) {
+                    AuthTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = "Password",
+                        currentTheme = currentTheme,
+                        keyboardType = KeyboardType.Password,
+                        isPassword = true
+                    )
+                }
 
                 val shownError = localError ?: errorMessage
                 if (!shownError.isNullOrBlank()) {
@@ -227,12 +230,16 @@ fun AuthScreen(
                             modifier = Modifier.size(20.dp)
                         )
                     } else {
-                        Text(mode.label, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (mode == AuthMode.SIGN_IN) "Send OTP" else "Create Account",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
                 if (onDismiss != null) {
-                    androidx.compose.material3.TextButton(
+                    TextButton(
                         onClick = onDismiss,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -311,7 +318,7 @@ private fun AuthTextField(
         onValueChange = onValueChange,
         label = { Text(label) },
         singleLine = true,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
             imeAction = ImeAction.Next

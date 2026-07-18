@@ -23,8 +23,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
-import com.alexleoreeves.novelapp.audio.KokoroNarrationController
-import com.alexleoreeves.novelapp.audio.KokoroVoiceSetupPhase
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
+import com.alexleoreeves.novelapp.audio.VoiceSetupPhase
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.platform.currentTimeMillis
@@ -55,7 +55,7 @@ private fun availableSourceUpgrades(currentPlan: String): List<Pair<String, Stri
 @Composable
 fun UniversalReadScreen(
     currentTheme: AppTheme,
-    ttsController: KokoroNarrationController,
+    ttsController: SherpaNarrationController,
     requireAuth: (() -> Unit) -> Unit,
     account: SavedUserAccount? = null,
     downloadRepo: LocalDownloadRepository? = null,
@@ -122,7 +122,7 @@ fun UniversalReadScreen(
                     style = MaterialTheme.typography.bodySmall, color = currentTheme.subTextColor())
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.72f).height(3.dp).padding(top = 6.dp),
                     color = currentTheme.accentColor(), trackColor = currentTheme.cardColor().copy(alpha = 0.5f))
-                if (setupStatus.phase == KokoroVoiceSetupPhase.Error || setupStatus.phase == KokoroVoiceSetupPhase.Fallback) {
+                if (setupStatus.phase == VoiceSetupPhase.Error || setupStatus.phase == VoiceSetupPhase.Fallback) {
                     TextButton(onClick = {
                         val text = when { activeTab == 0 && pastedText.isNotBlank() -> pastedText
                             activeTab == 1 && urlInput.isNotBlank() -> "Reading content from: $urlInput"
@@ -153,7 +153,7 @@ fun UniversalReadScreen(
 }
 
 @Composable
-private fun PasteTextTab(text: String, isPlaying: Boolean, isBuffering: Boolean, currentTheme: AppTheme, requireAuth: (() -> Unit) -> Unit, ttsController: KokoroNarrationController, onTextChanged: (String) -> Unit) {
+private fun PasteTextTab(text: String, isPlaying: Boolean, isBuffering: Boolean, currentTheme: AppTheme, requireAuth: (() -> Unit) -> Unit, ttsController: SherpaNarrationController, onTextChanged: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(value = text, onValueChange = onTextChanged, modifier = Modifier.fillMaxWidth().weight(1f),
@@ -171,7 +171,7 @@ private fun PasteTextTab(text: String, isPlaying: Boolean, isBuffering: Boolean,
 }
 
 @Composable
-private fun UrlInputTab(url: String, isPlaying: Boolean, isBuffering: Boolean, currentTheme: AppTheme, requireAuth: (() -> Unit) -> Unit, ttsController: KokoroNarrationController, onUrlChanged: (String) -> Unit) {
+private fun UrlInputTab(url: String, isPlaying: Boolean, isBuffering: Boolean, currentTheme: AppTheme, requireAuth: (() -> Unit) -> Unit, ttsController: SherpaNarrationController, onUrlChanged: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(value = url, onValueChange = onUrlChanged, modifier = Modifier.fillMaxWidth(), label = { Text("Article / Blog URL", color = currentTheme.subTextColor()) }, placeholder = { Text("https://...", color = currentTheme.subTextColor()) }, singleLine = true,
@@ -198,7 +198,7 @@ private fun UrlInputTab(url: String, isPlaying: Boolean, isBuffering: Boolean, c
 private fun AiNovelCreatorTab(
     currentTheme: AppTheme, account: SavedUserAccount?, downloadRepo: LocalDownloadRepository?,
     favorites: List<FavoriteNovel>?, requireAuth: (() -> Unit) -> Unit,
-    ttsController: KokoroNarrationController, onSubscribePlan: ((String) -> Unit)? = null
+    ttsController: SherpaNarrationController, onSubscribePlan: ((String) -> Unit)? = null
 ) {
     val token = account?.authToken.orEmpty()
     val api = remember { AiNovelApi() }
@@ -503,7 +503,7 @@ private fun AiNovelCreatorTab(
 private fun WriteNovelTab(
     currentTheme: AppTheme,
     account: SavedUserAccount?,
-    ttsController: KokoroNarrationController,
+    ttsController: SherpaNarrationController,
     requireAuth: (() -> Unit) -> Unit
 ) {
     val token = account?.authToken.orEmpty()
