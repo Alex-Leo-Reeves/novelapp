@@ -48,12 +48,6 @@ kotlin {
             baseName = "ComposeApp"
             isStatic = true
         }
-        iosTarget.compilations.getByName("main") {
-            cinterops.create("onnxruntime") {
-                defFile(project.file("src/nativeInterop/cinterop/onnxruntime.def"))
-                includeDirs(project.file("src/nativeInterop/cinterop/onnxruntime_headers"))
-            }
-        }
     }
 
     sourceSets {
@@ -71,7 +65,8 @@ kotlin {
             implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
             implementation("androidx.media3:media3-ui:1.3.1")
             implementation("androidx.media3:media3-datasource:1.3.1")
-            implementation(libs.onnxruntime.android)
+            implementation(files("libs/sherpa-onnx-1.13.4.aar"))
+            implementation("org.apache.commons:commons-compress:1.26.1")
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -103,7 +98,6 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.ktor.client.cio)
                 implementation(libs.jspecify)
-                implementation(libs.onnxruntime)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
             }
             resources.srcDir(rootProject.file("kokoro-assets"))
@@ -124,8 +118,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 34
-        versionName = "1.34"
+        versionCode = 35
+        versionName = "1.35"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -206,7 +200,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovelApp"
-            packageVersion = "1.34.0"
+            packageVersion = "1.35.0"
             description = "Watch Anime · Read Novels · Read Manga — All in One"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"
