@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-actual class SherpaNarrationController {
+actual class SherpaNarrationController actual constructor() {
     
     private val context = AppContextHolder.applicationContext ?: error("App context not initialized")
     private val modelManager = SherpaModelManager(context)
@@ -64,8 +64,8 @@ actual class SherpaNarrationController {
         sleepTimerMinutes.value = 0
     }
 
-    actual fun playText(text: String, cacheKey: String?, persistAudioCache: Boolean) {
-        val paragraphs = text.split(Regex("(?<=[.!?])\\s+")).filter { it.isNotBlank() }
+    actual fun playText(text: String, cacheKey: String?, persistAudioCache: Boolean, isDialogueOnly: Boolean) {
+        val paragraphs = text.toNarrationBlocks()
         if (paragraphs.isEmpty()) return
         
         scope.launch {
@@ -74,14 +74,14 @@ actual class SherpaNarrationController {
             if (!modelManager.isModelReady()) {
                 _voiceSetupStatus.value = VoiceSetupStatus(
                     phase = VoiceSetupPhase.Downloading,
-                    message = "Downloading Sherpa-ONNX model..."
+                    message = "Extracting bundled Sherpa-ONNX model..."
                 )
                 val success = modelManager.prepareModel { progress ->
                     _voiceSetupStatus.value = VoiceSetupStatus(
                         phase = VoiceSetupPhase.Downloading,
                         downloadedBytes = progress.toLong(),
                         totalBytes = 100,
-                        message = "Downloading Sherpa-ONNX model... $progress%"
+                        message = "Extracting bundled Sherpa-ONNX model... $progress%"
                     )
                 }
                 if (!success) {
@@ -95,20 +95,18 @@ actual class SherpaNarrationController {
             }
             
             _voiceSetupStatus.value = VoiceSetupStatus(
-                phase = VoiceSetupPhase.Synthesizing,
-                message = "Synthesizing audio offline..."
+                phase = VoiceSetupPhase.Ready
             )
             
-            // voiceId mapping:
-            // 12: Deep Fantasy, 4: Classic, 22: Ancient, 0: Youth Male, 1: Youth Female, 51: Wise Elder
-            val voiceId = when (_settings.value.voiceMode) {
-                VoiceMode.NarratorOnly -> 12
-                VoiceMode.Dynamic -> 4 
-            }
-            
-            chapterNarrator.downloadChapterAudio(paragraphs, voiceId, cacheKey ?: "temp_chapter") { result ->
-                _voiceSetupStatus.value = VoiceSetupStatus(phase = VoiceSetupPhase.Ready)
-                stutterFreeNarrator.playAudioFileWithTimings(result.first, result.second)
+            stutterFreeNarrator.streamText(paragraphs, _settings.value, isDialogueOnly)
+        }
+    }
+
+    actual fun testVoice(voiceId: Int) {
+        scope.launch(Dispatchers.IO) {
+            val audioResult = chapterNarrator.generateAudioWavBytes("This is a test of the selected voice.", voiceId)
+            if (audioResult != null) {
+                platformPlayAudio(audioResult.first)
             }
         }
     }
@@ -138,7 +136,73 @@ actual class SherpaNarrationController {
         stutterFreeNarrator.seekToProgress(progress)
     }
 
+    actual suspend fun downloadChapterAudio(text: String, chapterName: String): String? {
+        val paragraphs = text.toNarrationBlocks()
+        if (paragraphs.isEmpty()) return null
+        
+        if (!modelManager.isModelReady()) {
+            val success = modelManager.prepareModel { }
+            if (!success) return null
+        }
+        
+        return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                chapterNarrator.downloadChapterAudio(
+                    paragraphs = paragraphs,
+                    voiceId = settings.value.narratorVoiceId,
+                    chapterName = chapterName,
+                    onComplete = { (file, _) ->
+                        continuation.resume(file.absolutePath) {}
+                    }
+                )
+            }
+        }
+    }
+
     actual fun close() {
         stop()
     }
+}
+
+/**
+ * Must mirror [ReaderScreen.toReaderBlocks] exactly so that paragraphIndex
+ * values emitted by the narrator correspond 1:1 with the LazyColumn items.
+ */
+private fun String.toNarrationBlocks(): List<String> =
+    split(Regex("""\n\s*\n"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .flatMap { paragraph ->
+            if (paragraph.length <= 520) {
+                listOf(paragraph)
+            } else {
+                paragraph.splitNarrationSentenceBlocks(maxChars = 420)
+            }
+        }
+
+private fun String.splitNarrationSentenceBlocks(maxChars: Int): List<String> {
+    val sentences = split(Regex("""(?<=[.!?。！？…])\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+    if (sentences.isEmpty()) return chunked(maxChars)
+
+    val blocks = mutableListOf<String>()
+    val current = StringBuilder()
+    for (sentence in sentences) {
+        if (current.isNotEmpty() && current.length + sentence.length + 1 > maxChars) {
+            blocks.add(current.toString().trim())
+            current.clear()
+        }
+        if (sentence.length > maxChars) {
+            if (current.isNotEmpty()) {
+                blocks.add(current.toString().trim())
+                current.clear()
+            }
+            blocks.addAll(sentence.chunked(maxChars))
+        } else {
+            current.append(sentence).append(' ')
+        }
+    }
+    if (current.isNotEmpty()) blocks.add(current.toString().trim())
+    return blocks
 }

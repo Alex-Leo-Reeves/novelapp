@@ -25,16 +25,16 @@ class SherpaChapterNarrator(private val context: Context, private val modelManag
             tokens = modelManager.getTokensPath(),
             dataDir = modelManager.getDataDir(),
             dictDir = "",
-            noiseScale = 0.667f,
-            noiseScaleW = 0.8f,
-            lengthScale = 1.0f
+            noiseScale = 0.33f,     // Lower = cleaner, less garbled phonemes
+            noiseScaleW = 0.45f,    // Lower = more stable word pronunciation
+            lengthScale = 1.15f     // Slightly slower = clearer articulation
         )
         val modelConfig = OfflineTtsModelConfig(
             vits = vitsConfig,
             numThreads = 2
         )
         val config = OfflineTtsConfig(model = modelConfig)
-        tts = OfflineTts(context.assets, config)
+        tts = OfflineTts(assetManager = null, config = config)
     }
 
     suspend fun downloadChapterAudio(
@@ -85,49 +85,133 @@ class SherpaChapterNarrator(private val context: Context, private val modelManag
             currentPosition += segment.size
         }
 
-        savePcmToWavFile(targetOutputFile, finalBuffer, sampleRate)
+        val wavBytes = floatArrayToWavBytes(finalBuffer, sampleRate)
+        FileOutputStream(targetOutputFile).use { it.write(wavBytes) }
         withContext(Dispatchers.Main) {
             onComplete(Pair(targetOutputFile, timings))
         }
     }
 
-    private fun savePcmToWavFile(file: File, samples: FloatArray, sampleRate: Int) {
-        FileOutputStream(file).use { out ->
-            val pcmData = ShortArray(samples.size)
-            for (i in samples.indices) {
-                pcmData[i] = (samples[i] * 32767).toInt().coerceIn(-32768, 32767).toShort()
+    fun generateAudioWavBytes(paragraph: String, settings: NarrationSettings, isDialogueOnly: Boolean): Pair<ByteArray, Long>? {
+        initializeTts()
+        val engine = tts ?: return null
+        if (paragraph.isBlank()) return null
+        
+        val segments = if (isDialogueOnly) {
+            listOf(Pair(paragraph, true))
+        } else {
+            parseSegments(paragraph)
+        }
+
+        val allAudioSamples = mutableListOf<FloatArray>()
+        var sampleRate = 22050
+        
+        for ((text, isDialogue) in segments) {
+            if (text.isBlank()) continue
+            
+            val voiceId = if (isDialogue && settings.voiceMode == VoiceMode.Dynamic) {
+                settings.characterVoiceId
+            } else {
+                settings.narratorVoiceId
             }
             
-            val header = ByteArray(44)
-            val totalDataLen = pcmData.size * 2 + 36
-            val byteRate = sampleRate * 2
+            val audioResult = engine.generate(text, sid = voiceId, speed = 1.0f) ?: continue
+            allAudioSamples.add(audioResult.samples)
+            sampleRate = audioResult.sampleRate
+        }
+        
+        if (allAudioSamples.isEmpty()) return null
+        
+        val totalLength = allAudioSamples.sumOf { it.size }
+        val finalBuffer = FloatArray(totalLength)
+        var currentPosition = 0
+        for (segment in allAudioSamples) {
+            System.arraycopy(segment, 0, finalBuffer, currentPosition, segment.size)
+            currentPosition += segment.size
+        }
 
-            header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte(); header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
-            header[4] = (totalDataLen and 0xff).toByte(); header[5] = ((totalDataLen shr 8) and 0xff).toByte()
-            header[6] = ((totalDataLen shr 16) and 0xff).toByte(); header[7] = ((totalDataLen shr 24) and 0xff).toByte()
-            header[8] = 'W'.code.toByte(); header[9] = 'A'.code.toByte(); header[10] = 'V'.code.toByte(); header[11] = 'E'.code.toByte()
-            header[12] = 'f'.code.toByte(); header[13] = 'm'.code.toByte(); header[14] = 't'.code.toByte(); header[15] = ' '.code.toByte()
-            header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0 
-            header[20] = 1; header[21] = 0 
-            header[22] = 1; header[23] = 0 
-            header[24] = (sampleRate and 0xff).toByte(); header[25] = ((sampleRate shr 8) and 0xff).toByte()
-            header[26] = ((sampleRate shr 16) and 0xff).toByte(); header[27] = ((sampleRate shr 24) and 0xff).toByte()
-            header[28] = (byteRate and 0xff).toByte(); header[29] = ((byteRate shr 8) and 0xff).toByte()
-            header[30] = ((byteRate shr 16) and 0xff).toByte(); header[31] = ((byteRate shr 24) and 0xff).toByte()
-            header[32] = 2; header[33] = 0 
-            header[34] = 16; header[35] = 0 
-            header[36] = 'd'.code.toByte(); header[37] = 'a'.code.toByte(); header[38] = 't'.code.toByte(); header[39] = 'a'.code.toByte()
-            val audioDataLen = pcmData.size * 2
-            header[40] = (audioDataLen and 0xff).toByte(); header[41] = ((audioDataLen shr 8) and 0xff).toByte()
-            header[42] = ((audioDataLen shr 16) and 0xff).toByte(); header[43] = ((audioDataLen shr 24) and 0xff).toByte()
+        val durationMs = max(1L, (finalBuffer.size * 1000L) / sampleRate)
+        val wavBytes = floatArrayToWavBytes(finalBuffer, sampleRate)
+        return Pair(wavBytes, durationMs)
+    }
 
-            out.write(header)
-            val buffer = ByteArray(2)
-            for (sample in pcmData) {
-                buffer[0] = (sample.toInt() and 0xff).toByte()
-                buffer[1] = ((sample.toInt() shr 8) and 0xff).toByte()
-                out.write(buffer)
+    private fun parseSegments(paragraph: String): List<Pair<String, Boolean>> {
+        val segments = mutableListOf<Pair<String, Boolean>>()
+        val quoteRegex = Regex("[\"“](.*?)[\"”]")
+        var lastIndex = 0
+        
+        for (match in quoteRegex.findAll(paragraph)) {
+            val narration = paragraph.substring(lastIndex, match.range.first)
+            if (narration.isNotBlank()) {
+                segments.add(Pair(narration, false))
+            }
+            // The match includes the quotes, we synthesize them too (they are ignored by TTS usually, but good for context)
+            segments.add(Pair(match.value, true))
+            lastIndex = match.range.last + 1
+        }
+        
+        if (lastIndex < paragraph.length) {
+            val remaining = paragraph.substring(lastIndex)
+            if (remaining.isNotBlank()) {
+                segments.add(Pair(remaining, false))
             }
         }
+        
+        if (segments.isEmpty()) {
+            segments.add(Pair(paragraph, false))
+        }
+        
+        return segments
+    }
+
+    fun generateAudioWavBytes(text: String, voiceId: Int): Pair<ByteArray, Long>? {
+        initializeTts()
+        val engine = tts ?: return null
+        if (text.isBlank()) return null
+        
+        val audioResult = engine.generate(text, sid = voiceId, speed = 1.0f) ?: return null
+        val durationMs = max(1L, (audioResult.samples.size * 1000L) / audioResult.sampleRate)
+        val wavBytes = floatArrayToWavBytes(audioResult.samples, audioResult.sampleRate)
+        return Pair(wavBytes, durationMs)
+    }
+
+    private fun floatArrayToWavBytes(samples: FloatArray, sampleRate: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val pcmData = ShortArray(samples.size)
+        for (i in samples.indices) {
+            pcmData[i] = (samples[i] * 32767).toInt().coerceIn(-32768, 32767).toShort()
+        }
+        
+        val header = ByteArray(44)
+        val totalDataLen = pcmData.size * 2 + 36
+        val byteRate = sampleRate * 2
+
+        header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte(); header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
+        header[4] = (totalDataLen and 0xff).toByte(); header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+        header[6] = ((totalDataLen shr 16) and 0xff).toByte(); header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+        header[8] = 'W'.code.toByte(); header[9] = 'A'.code.toByte(); header[10] = 'V'.code.toByte(); header[11] = 'E'.code.toByte()
+        header[12] = 'f'.code.toByte(); header[13] = 'm'.code.toByte(); header[14] = 't'.code.toByte(); header[15] = ' '.code.toByte()
+        header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0 
+        header[20] = 1; header[21] = 0 
+        header[22] = 1; header[23] = 0 
+        header[24] = (sampleRate and 0xff).toByte(); header[25] = ((sampleRate shr 8) and 0xff).toByte()
+        header[26] = ((sampleRate shr 16) and 0xff).toByte(); header[27] = ((sampleRate shr 24) and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte(); header[29] = ((byteRate shr 8) and 0xff).toByte()
+        header[30] = ((byteRate shr 16) and 0xff).toByte(); header[31] = ((byteRate shr 24) and 0xff).toByte()
+        header[32] = 2; header[33] = 0 
+        header[34] = 16; header[35] = 0 
+        header[36] = 'd'.code.toByte(); header[37] = 'a'.code.toByte(); header[38] = 't'.code.toByte(); header[39] = 'a'.code.toByte()
+        val audioDataLen = pcmData.size * 2
+        header[40] = (audioDataLen and 0xff).toByte(); header[41] = ((audioDataLen shr 8) and 0xff).toByte()
+        header[42] = ((audioDataLen shr 16) and 0xff).toByte(); header[43] = ((audioDataLen shr 24) and 0xff).toByte()
+
+        out.write(header)
+        val buffer = ByteArray(2)
+        for (sample in pcmData) {
+            buffer[0] = (sample.toInt() and 0xff).toByte()
+            buffer[1] = ((sample.toInt() shr 8) and 0xff).toByte()
+            out.write(buffer)
+        }
+        return out.toByteArray()
     }
 }

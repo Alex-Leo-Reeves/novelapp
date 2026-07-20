@@ -151,24 +151,33 @@ fun ReaderScreen(
         }
     }
 
-    // Track and debounce user scroll — 3 second grace period before auto-scroll resumes
-    val userScrollGraceMs = 3_000L
+    // Track and debounce user scroll — 5 second grace period before auto-scroll resumes
+    val userScrollGraceMs = 5_000L
     LaunchedEffect(isUserScrolling) {
         if (isUserScrolling) {
+            lastUserScrollAt = currentTimeMillis()
+        } else {
+            // User just finished a scroll gesture — record the end time
             lastUserScrollAt = currentTimeMillis()
         }
     }
 
-    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, paragraphs.size, isUserScrolling) {
+    LaunchedEffect(isPlaying.value, autoScrollEnabled, ttsParagraphIndex.value, paragraphs.size) {
         if (!isPlaying.value || !autoScrollEnabled || paragraphs.isEmpty()) return@LaunchedEffect
-        if (isUserScrolling || currentTimeMillis() - lastUserScrollAt < userScrollGraceMs) return@LaunchedEffect
+        // Never fight the user while they are actively scrolling
+        if (isUserScrolling) return@LaunchedEffect
+        // Wait for the grace period after the user stopped scrolling
+        if (currentTimeMillis() - lastUserScrollAt < userScrollGraceMs) return@LaunchedEffect
 
         val paragraphIndex = ttsParagraphIndex.value.takeIf { it >= 0 } ?: return@LaunchedEffect
         val listIndex = (paragraphIndex + 2).coerceIn(0, paragraphs.size + 1)
 
-        // Only auto-scroll when the target is at least 3 paragraphs below visible area
-        val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (listIndex <= lastVisible + 2) return@LaunchedEffect
+        // Scroll when the highlighted paragraph is outside the visible window
+        val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
+        val firstVisible = visibleItems.firstOrNull()?.index ?: 0
+        val lastVisible = visibleItems.lastOrNull()?.index ?: 0
+        val isVisible = listIndex in firstVisible..lastVisible
+        if (isVisible) return@LaunchedEffect
         if (listIndex == lastAutoScrollTarget) return@LaunchedEffect
 
         lastAutoScrollTarget = listIndex
@@ -266,7 +275,7 @@ fun ReaderScreen(
                         ) {
                             if (isHighlighted && highlightedWordIndex >= 0) {
                                 // Word-by-word highlight using AnnotatedString
-                                val words = paragraph.split(Regex("(?<=\\s)|(?=\\s)"))
+                                val words = paragraph.split(Regex("\\s+")).filter { it.isNotBlank() }
                                 val annotated = buildAnnotatedString(words, highlightedWordIndex, selectedTextColor, currentTheme.accentColor())
                                 Text(
                                     text = annotated,
@@ -900,29 +909,23 @@ private fun buildAnnotatedString(
     accentColor: Color
 ): AnnotatedString {
     return buildAnnotatedString {
-        var wordCount = 0
-        for (token in words) {
-            val isWord = token.trim().isNotEmpty()
-            if (isWord) {
-                if (wordCount == highlightedIndex) {
-                    withStyle(
-                        SpanStyle(
-                            color = accentColor,
-                            fontWeight = FontWeight.Bold,
-                            background = accentColor.copy(alpha = 0.25f)
-                        )
-                    ) {
-                        append(token)
-                    }
-                } else {
-                    withStyle(SpanStyle(color = defaultColor)) {
-                        append(token)
-                    }
+        for ((i, word) in words.withIndex()) {
+            if (i == highlightedIndex) {
+                withStyle(
+                    SpanStyle(
+                        color = accentColor,
+                        fontWeight = FontWeight.Bold,
+                        background = accentColor.copy(alpha = 0.25f)
+                    )
+                ) {
+                    append(word)
                 }
-                wordCount++
             } else {
-                append(token)
+                withStyle(SpanStyle(color = defaultColor)) {
+                    append(word)
+                }
             }
+            if (i < words.lastIndex) append(" ")
         }
     }
 }

@@ -2,9 +2,11 @@ const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const zlib = require("zlib");
 const { URL } = require("url");
 const swiftNovelScrapers = require("./swift-novel-scrapers");
 const wweHandlers = require("./wwe-handlers");
+const youtubeHandlers = require("./youtube-handlers");
 const supabaseAuthHandlers = require("./supabase-auth-handlers");
 let _supabaseOtpHandlers = null;
 
@@ -50,6 +52,10 @@ const SUPABASE_AUTH_URL = `${SUPABASE_URL}/auth/v1`;
 const FLUTTERWAVE_SECRET_KEY = String(process.env.FLUTTERWAVE_SECRET_KEY || process.env.flutterwave_secret_key || "").trim();
 const FLUTTERWAVE_SECRET_HASH = String(process.env.FLUTTERWAVE_SECRET_HASH || process.env.flutterwave_secret_hash || "").trim();
 const GOOGLE_API_KEY = String(process.env.GOOGLE_API_KEY || "AQ.Ab8RN6ITDbEYY9LCLlTqnTeqywJnvxeduXj2tPvs7OIA6HqyCg").trim();
+const OPENSUBTITLES_API_KEY = String(process.env.OPENSUBTITLES_API_KEY || process.env.opensubtitles_api_key || "").trim();
+const OPENSUBTITLES_USERNAME = String(process.env.OPENSUBTITLES_USERNAME || process.env.opensubtitles_username || "").trim();
+const OPENSUBTITLES_PASSWORD = String(process.env.OPENSUBTITLES_PASSWORD || process.env.opensubtitles_password || "").trim();
+const SUBDL_API_KEY = String(process.env.SUBDL_API_KEY || process.env.subdl_api_key || "").trim();
 const PUBLIC_APP_URL = cleanBaseUrl(process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || "https://novelapp1.onrender.com");
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
@@ -696,6 +702,361 @@ function readBody(request) {
 
         request.on("error", reject);
     });
+}
+
+function normalizeSubtitleSource(source) {
+    const raw = String(source || "").trim().toLowerCase();
+    if (["opensubtitles", "open-subtitles", "sub2", "sub_2"].includes(raw)) return "opensubtitles";
+    if (["subdl", "sub-dl", "sub3", "sub_3"].includes(raw)) return "subdl";
+    return "";
+}
+
+function subtitleLanguageLabel(language) {
+    const code = String(language || "en").trim().toLowerCase();
+    const map = {
+        en: "EN",
+        zh: "CN",
+        id: "ID",
+        ja: "JP",
+        ko: "KR",
+        es: "ES",
+        fr: "FR",
+        pt: "PT",
+        ar: "AR"
+    };
+    return map[code] || code.toUpperCase();
+}
+
+function subdlLanguageCode(language) {
+    const code = String(language || "en").trim().toLowerCase();
+    return code === "zh" ? "ZH" : code.toUpperCase();
+}
+
+function subtitleSearchContext(body) {
+    const rawTitle = String(body.title || body.query || "").trim();
+    const year = Number(body.year || 0) || null;
+    const season = Number(body.season || 0) || null;
+    const episode = Number(body.episode || 0) || null;
+    const kind = String(body.contentKind || body.kind || "").trim().toLowerCase();
+    const type = kind === "movie" ? "movie" : (season || episode || ["anime", "donghua", "tv", "kdrama", "cartoon", "classic"].includes(kind) ? "tv" : null);
+    return {
+        title: rawTitle,
+        year,
+        season,
+        episode,
+        type
+    };
+}
+
+async function handleSubtitleResolve(request, response) {
+    if (request.method !== "POST") return sendApiError(response, 405, "Subtitle route requires POST.");
+    try {
+        const body = await readBody(request);
+        const source = normalizeSubtitleSource(body.source);
+        const language = String(body.language || "en").trim().toLowerCase() || "en";
+        const context = subtitleSearchContext(body);
+
+        if (!source) return sendApiError(response, 400, "Unsupported subtitle source.");
+        if (!context.title) return sendApiError(response, 400, "Subtitle title is required.");
+
+        const result = source === "opensubtitles" ?
+            await fetchOpenSubtitlesTrack(context, language) :
+            await fetchSubdlTrack(context, language);
+        return sendApiData(response, 200, result);
+    } catch (error) {
+        return sendApiError(response, 400, error.message || "Subtitle lookup failed.");
+    }
+}
+
+async function fetchOpenSubtitlesTrack(context, language) {
+    if (!OPENSUBTITLES_API_KEY) {
+        return { tracksJson: null, message: "OpenSubtitles key is not configured on Render." };
+    }
+
+    const headers = await openSubtitlesHeaders();
+    const url = new URL("https://api.opensubtitles.com/api/v1/subtitles");
+    url.searchParams.set("query", context.title);
+    url.searchParams.set("languages", language);
+    url.searchParams.set("order_by", "download_count");
+    url.searchParams.set("order_direction", "desc");
+    if (context.year) url.searchParams.set("year", String(context.year));
+    if (context.season) url.searchParams.set("season_number", String(context.season));
+    if (context.episode) url.searchParams.set("episode_number", String(context.episode));
+
+    const payload = await fetchJson(url.toString(), { headers });
+    const results = Array.isArray(payload ?.data) ? payload.data : [];
+    for (const item of results) {
+        const attributes = item ?.attributes || item || {};
+        const files = Array.isArray(attributes.files) ? attributes.files : [];
+        for (const file of files) {
+            const fileId = Number(file ?.file_id || 0);
+            if (!fileId) continue;
+            const fileName = String(file.file_name || attributes.release || "OpenSubtitles");
+            const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
+            if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
+        }
+        const fileId = Number(attributes.file_id || item ?.file_id || 0);
+        if (fileId) {
+            const fileName = String(attributes.file_name || attributes.release || "OpenSubtitles");
+            const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
+            if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
+        }
+    }
+
+    return { tracksJson: null, message: `No OpenSubtitles ${subtitleLanguageLabel(language)} subtitles found.` };
+}
+
+async function openSubtitlesHeaders() {
+    const headers = {
+        "Api-Key": OPENSUBTITLES_API_KEY,
+        "Accept": "application/json",
+        "User-Agent": "NovelApp Render"
+    };
+    if (OPENSUBTITLES_USERNAME && OPENSUBTITLES_PASSWORD) {
+        const login = await fetchJson("https://api.opensubtitles.com/api/v1/login", {
+            method: "POST",
+            headers: {
+                ...headers,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                username: OPENSUBTITLES_USERNAME,
+                password: OPENSUBTITLES_PASSWORD
+            })
+        }).catch(() => null);
+        if (login ?.token) headers.Authorization = `Bearer ${login.token}`;
+    }
+    return headers;
+}
+
+async function downloadOpenSubtitlesTrack(fileId, fileName, language, headers) {
+    const payload = await fetchJson("https://api.opensubtitles.com/api/v1/download", {
+        method: "POST",
+        headers: {
+            ...headers,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ file_id: fileId })
+    });
+    const link = payload ?.link || payload ?.download_link || payload ?.url;
+    if (!link) return null;
+    const bytes = await fetchBuffer(link, {
+        "Accept": "*/*",
+        "User-Agent": "NovelApp Render"
+    });
+    return subtitleBytesToTrackJson(bytes, fileName, link, language, "OpenSubtitles");
+}
+
+async function fetchSubdlTrack(context, language) {
+    if (!SUBDL_API_KEY) {
+        return { tracksJson: null, message: "SubDL key is not configured on Render." };
+    }
+
+    const url = new URL("https://api.subdl.com/api/v1/subtitles");
+    url.searchParams.set("api_key", SUBDL_API_KEY);
+    url.searchParams.set("film_name", context.title);
+    url.searchParams.set("languages", subdlLanguageCode(language));
+    url.searchParams.set("subs_per_page", "10");
+    url.searchParams.set("unpack", "1");
+    url.searchParams.set("client", "novelapp_render");
+    if (context.type) url.searchParams.set("type", context.type);
+    if (context.year) url.searchParams.set("year", String(context.year));
+    if (context.season) url.searchParams.set("season_number", String(context.season));
+    if (context.episode) url.searchParams.set("episode_number", String(context.episode));
+
+    const payload = await fetchJson(url.toString(), {
+        headers: {
+            "Accept": "application/json",
+            "User-Agent": "NovelApp Render"
+        }
+    });
+    if (payload ?.status === false) {
+        return { tracksJson: null, message: String(payload.error || payload.message || "SubDL subtitle search failed.") };
+    }
+
+    const candidates = collectSubdlCandidates(payload, context);
+    for (const candidate of candidates) {
+        const downloadUrl = toSubdlDownloadUrl(candidate.url);
+        const bytes = await fetchBuffer(downloadUrl, {
+            "Accept": "*/*",
+            "User-Agent": "NovelApp Render",
+            "x-api-key": SUBDL_API_KEY
+        }).catch(() => null);
+        if (!bytes) continue;
+        const tracksJson = subtitleBytesToTrackJson(bytes, candidate.name, downloadUrl, language, "SubDL");
+        if (tracksJson) return { tracksJson, message: "SubDL subtitles loaded." };
+    }
+
+    return { tracksJson: null, message: `No SubDL ${subtitleLanguageLabel(language)} subtitles found.` };
+}
+
+function collectSubdlCandidates(payload, context) {
+    const subtitles = Array.isArray(payload ?.subtitles) ? payload.subtitles : [];
+    const exact = [];
+    const fallback = [];
+
+    for (const subtitle of subtitles) {
+        const target = subdlMatchesEpisode(subtitle, context) ? exact : fallback;
+        for (const key of["unpack_files", "unpacked_files", "files"]) {
+            const files = Array.isArray(subtitle ?.[key]) ? subtitle[key] : [];
+            for (const file of files) {
+                if (!subdlMatchesEpisode(file, context)) continue;
+                const url = firstString(file, ["url", "download_url", "download", "subtitle_url", "path"]);
+                if (url) target.push({ url, name: firstString(file, ["name", "file_name", "release_name"]) || "SubDL" });
+            }
+        }
+        const url = firstString(subtitle, ["url", "download_url", "download", "subtitle_url", "path"]);
+        if (url) target.push({ url, name: firstString(subtitle, ["name", "file_name", "release_name"]) || "SubDL" });
+    }
+
+    return exact.length ? exact : fallback;
+}
+
+function firstString(source, keys) {
+    for (const key of keys) {
+        const value = source ?.[key];
+        if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+}
+
+function subdlMatchesEpisode(value, context) {
+    const wanted = Number(context.episode || 0);
+    if (!wanted) return true;
+    const episode = Number(value ?.episode || 0);
+    const from = Number(value ?.episode_from || 0);
+    const end = Number(value ?.episode_end || 0);
+    if (episode) return episode === wanted;
+    if (from && end) return wanted >= from && wanted <= end;
+    return true;
+}
+
+function toSubdlDownloadUrl(value) {
+    const url = String(value || "").trim();
+    if (/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith("/")) return `https://dl.subdl.com${url}`;
+    return `https://dl.subdl.com/${url}`;
+}
+
+function subtitleBytesToTrackJson(bytes, fileName, sourceUrl, language, provider) {
+    const payload = extractSubtitlePayload(bytes, fileName, sourceUrl);
+    if (!payload) return null;
+    const text = payload.bytes.toString("utf8");
+    const webVtt = payload.name.toLowerCase().endsWith(".vtt") || text.trimStart().toUpperCase().startsWith("WEBVTT") ?
+        normalizeWebVtt(text) :
+        srtToWebVtt(text);
+    const dataUri = `data:text/vtt;base64,${Buffer.from(webVtt, "utf8").toString("base64")}`;
+    return JSON.stringify([{
+        file: dataUri,
+        label: `${provider} ${subtitleLanguageLabel(language)}`,
+        srclang: language,
+        kind: "captions"
+    }]);
+}
+
+function extractSubtitlePayload(bytes, fileName, sourceUrl) {
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0) return null;
+    if (isZipPayload(bytes) || String(sourceUrl || "").split("?")[0].toLowerCase().endsWith(".zip")) {
+        const fromZip = extractSubtitleFromZip(bytes);
+        if (fromZip) return fromZip;
+    }
+    const name = String(fileName || sourceUrl || "subtitle.srt").split("?")[0].split("/").pop() || "subtitle.srt";
+    const lower = name.toLowerCase();
+    if (lower.endsWith(".vtt") || lower.endsWith(".srt") || lower.endsWith(".txt") || isLikelyTextSubtitle(bytes)) {
+        return { name, bytes };
+    }
+    return null;
+}
+
+function isZipPayload(bytes) {
+    return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+}
+
+function extractSubtitleFromZip(bytes) {
+    let offset = 0;
+    let fallback = null;
+    while (offset + 30 < bytes.length) {
+        if (bytes.readUInt32LE(offset) !== 0x04034b50) {
+            offset += 1;
+            continue;
+        }
+        const compression = bytes.readUInt16LE(offset + 8);
+        const compressedSize = bytes.readUInt32LE(offset + 18);
+        const nameLength = bytes.readUInt16LE(offset + 26);
+        const extraLength = bytes.readUInt16LE(offset + 28);
+        const nameStart = offset + 30;
+        const dataStart = nameStart + nameLength + extraLength;
+        const dataEnd = dataStart + compressedSize;
+        if (dataStart > bytes.length || dataEnd > bytes.length || compressedSize <= 0) break;
+        const name = bytes.slice(nameStart, nameStart + nameLength).toString("utf8");
+        const lower = name.toLowerCase();
+        if (lower.endsWith(".srt") || lower.endsWith(".vtt")) {
+            const compressed = bytes.slice(dataStart, dataEnd);
+            let fileBytes = null;
+            if (compression === 0) fileBytes = compressed;
+            if (compression === 8) fileBytes = zlib.inflateRawSync(compressed);
+            if (fileBytes) {
+                const candidate = { name, bytes: fileBytes };
+                if (lower.endsWith(".srt")) return candidate;
+                if (!fallback) fallback = candidate;
+            }
+        }
+        offset = dataEnd;
+    }
+    return fallback;
+}
+
+function isLikelyTextSubtitle(bytes) {
+    const head = bytes.slice(0, 256).toString("utf8").trimStart();
+    return /^WEBVTT/i.test(head) || head.includes("-->");
+}
+
+function srtToWebVtt(text) {
+    const normalized = stripBom(String(text || "")).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (/^\s*WEBVTT/i.test(normalized)) return normalizeWebVtt(normalized);
+    const cues = normalized
+        .replace(/^\s*\d+\s*\n(?=\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->)/gm, "")
+        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2")
+        .trim();
+    return `WEBVTT\n\n${cues}\n`;
+}
+
+function normalizeWebVtt(text) {
+    const normalized = stripBom(String(text || "")).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    return /^WEBVTT/i.test(normalized) ? `${normalized}\n` : `WEBVTT\n\n${normalized}\n`;
+}
+
+function stripBom(value) {
+    return String(value || "").replace(/^\uFEFF/, "");
+}
+
+async function fetchJson(url, options = {}, timeoutMillis = 20000) {
+    const text = await fetchText(url, options, timeoutMillis);
+    return JSON.parse(text);
+}
+
+async function fetchText(url, options = {}, timeoutMillis = 20000) {
+    const response = await fetchWithAbort(url, options, timeoutMillis);
+    const text = await response.text();
+    if (!response.ok) throw new Error(text.slice(0, 180) || `HTTP ${response.status}`);
+    return text;
+}
+
+async function fetchBuffer(url, headers = {}, timeoutMillis = 25000) {
+    const response = await fetchWithAbort(url, { headers }, timeoutMillis);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) throw new Error(bytes.toString("utf8").slice(0, 180) || `HTTP ${response.status}`);
+    return bytes;
+}
+
+async function fetchWithAbort(url, options = {}, timeoutMillis = 20000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMillis);
+    try {
+        return await fetch(url, {...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 function normalizeContentType(type) {
@@ -3194,6 +3555,21 @@ async function handleApi(request, response, pathname) {
     }
     if (pathname === "/api/wwe/stream") {
       return await wweHandlers.handleWweStream(request, response, requestUrl);
+    }
+
+    // ── YouTube API routes (Nollywood + general) ──────────────────────────
+    if (pathname === "/api/youtube/search") {
+      return await youtubeHandlers.handleYouTubeSearch(request, response);
+    }
+    if (pathname === "/api/youtube/stream") {
+      return await youtubeHandlers.handleYouTubeStream(request, response);
+    }
+    if (pathname === "/api/youtube/nollywood-feed") {
+      return await youtubeHandlers.handleYouTubeNollywoodFeed(request, response);
+    }
+
+    if (pathname === "/api/subtitles/resolve") {
+      return await handleSubtitleResolve(request, response);
     }
 
     if (pathname.startsWith("/api/content/")) {

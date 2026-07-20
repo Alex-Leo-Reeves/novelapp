@@ -10,6 +10,10 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayInputStream
@@ -18,7 +22,18 @@ import kotlin.coroutines.resume
 // Removed ALLOWED_EMBED_DOMAINS list as it was blocking necessary CDNs for VidLink WASM crypto
 
 // File extensions and URL patterns that are definitively playable by ExoPlayer.
-private val STREAM_PATTERNS = listOf(".m3u8", ".mp4", ".mpd", ".ts", "/hls/", "/dash/", "/manifest/")
+private val STREAM_PATTERNS = listOf(
+    ".m3u8",
+    ".mp4",
+    ".mpd",
+    ".ts",
+    "/hls/",
+    "/dash/",
+    "/manifest/",
+    "/playlist/",
+    "/m3u8/",
+    "/master/"
+)
 
 /**
  * Tries to scrape a direct stream URL (.m3u8 / .mp4) from [embedUrl] using a
@@ -44,20 +59,40 @@ suspend fun extractStreamFromEmbed(
         var settled = false
         var capturedSubtitles: String? = null
 
+        fun captureSubtitleUrl(url: String) {
+            if (capturedSubtitles != null || !isSubtitleTrackUrl(url)) return
+            val label = when {
+                url.contains("zh", ignoreCase = true) || url.contains("chinese", ignoreCase = true) -> "Chinese"
+                url.contains("id", ignoreCase = true) || url.contains("indo", ignoreCase = true) -> "Indonesian"
+                else -> "English"
+            }
+            val safeUrl = url.replace("\\", "\\\\").replace("\"", "\\\"")
+            capturedSubtitles = """[{"file":"$safeUrl","label":"$label","kind":"captions"}]"""
+        }
+
         fun deliver(url: String?) {
             if (settled) return
             settled = true
             
-            // If we found a URL but subtitles haven't been captured yet, wait a tiny bit to avoid the race condition
-            val delayMs = if (url != null && capturedSubtitles == null) 850L else 0L
-            mainHandler.postDelayed({
+            if (url != null && capturedSubtitles == null) {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                    var waited = 0L
+                    while (capturedSubtitles == null && waited < 1500L) {
+                        kotlinx.coroutines.delay(50L)
+                        waited += 50L
+                    }
+                    if (cont.isActive) cont.resume(ScrapedStream(url, capturedSubtitles))
+                    try { webView?.destroy() } catch (_: Exception) {}
+                    webView = null
+                }
+            } else {
                 if (cont.isActive) {
                     if (url != null) cont.resume(ScrapedStream(url, capturedSubtitles))
                     else cont.resume(null)
                 }
                 try { webView?.destroy() } catch (_: Exception) {}
                 webView = null
-            }, delayMs)
+            }
         }
 
         mainHandler.post {
@@ -167,8 +202,19 @@ suspend fun extractStreamFromEmbed(
                                             })).filter(t => t.file && t.file.startsWith('http'));
                                             if (tracks.length > 0) {
                                                 console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
+                                                return true;
                                             }
                                         }
+                                        return false;
+                                    }
+                                    if (!pollSubtitles()) {
+                                        const observer = new MutationObserver((mutations) => {
+                                            if (document.querySelector('track')) {
+                                                pollSubtitles();
+                                                observer.disconnect();
+                                            }
+                                        });
+                                        observer.observe(document.documentElement, { childList: true, subtree: true });
                                     }
                                     setTimeout(pollSubtitles, 2000);
                                     setTimeout(pollSubtitles, 5000);
@@ -245,6 +291,7 @@ suspend fun extractStreamFromEmbed(
                             request: WebResourceRequest?
                         ): WebResourceResponse? {
                             val url = request?.url?.toString() ?: return null
+                            captureSubtitleUrl(url)
                             if (isPlayableStreamUrl(url) &&
                                 STREAM_PATTERNS.any { url.contains(it, ignoreCase = true) }) {
                                 deliver(url)
@@ -255,6 +302,17 @@ suspend fun extractStreamFromEmbed(
                                 )
                             }
                             return null
+                        }
+
+                        override fun onLoadResource(view: WebView?, url: String?) {
+                            super.onLoadResource(view, url)
+                            val resourceUrl = url ?: return
+                            captureSubtitleUrl(resourceUrl)
+                            if (!settled &&
+                                isPlayableStreamUrl(resourceUrl) &&
+                                STREAM_PATTERNS.any { resourceUrl.contains(it, ignoreCase = true) }) {
+                                deliver(resourceUrl)
+                            }
                         }
 
                         override fun onReceivedError(
@@ -313,9 +371,23 @@ fun isPlayableStreamUrl(url: String): Boolean {
         pathLower.contains("/hls/") ||
         pathLower.contains("/dash/") ||
         pathLower.contains("/manifest/") ||
+        pathLower.contains("/playlist/") ||
+        pathLower.contains("/m3u8/") ||
+        pathLower.contains("/master/") ||
         pathLower.contains("/playlist.m3u8") ||
         pathLower.contains("/index.m3u8") ||
         pathLower.contains("/master.m3u8")
+}
+
+private fun isSubtitleTrackUrl(url: String): Boolean {
+    val clean = url.substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".vtt") ||
+        clean.endsWith(".srt") ||
+        clean.endsWith(".ass") ||
+        clean.contains("/subtitle") ||
+        clean.contains("/subtitles") ||
+        clean.contains("/captions") ||
+        clean.contains("/tracks")
 }
 
 private fun buildEmbedHeaders(embedUrl: String): Map<String, String> {

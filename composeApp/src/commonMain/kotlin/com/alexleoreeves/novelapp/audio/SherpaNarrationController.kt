@@ -8,6 +8,8 @@ data class NarrationSettings(
     val ambienceVolume: Float = 0.18f,
     val ambienceEnabled: Boolean = false,
     val voiceMode: VoiceMode = VoiceMode.NarratorOnly,
+    val narratorVoiceId: Int = 0,
+    val characterVoiceId: Int = 17,
     val backgroundPlaybackEnabled: Boolean = false,
     val backgroundTitle: String = "NovelApp narration",
     val backgroundSubtitle: String = "Reading in background"
@@ -78,12 +80,14 @@ expect class SherpaNarrationController() {
     fun updateSettings(transform: (NarrationSettings) -> NarrationSettings)
     fun startSleepTimer(minutes: Int, onTimerFinished: () -> Unit)
     fun cancelSleepTimer()
-    fun playText(text: String, cacheKey: String? = null, persistAudioCache: Boolean = false)
+    fun playText(text: String, cacheKey: String? = null, persistAudioCache: Boolean = false, isDialogueOnly: Boolean = false)
+    fun testVoice(voiceId: Int)
     fun pause()
     fun resume()
     fun stop()
     fun skipForward()
     fun skipBack()
     fun seekToProgress(progress: Float)
+    suspend fun downloadChapterAudio(text: String, chapterName: String): String?
     fun close()
 }

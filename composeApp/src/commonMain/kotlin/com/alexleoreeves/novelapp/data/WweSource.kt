@@ -3,8 +3,8 @@ package com.alexleoreeves.novelapp.data
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import com.fleeksoft.ksoup.Ksoup
 import kotlinx.serialization.json.*
-import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 
 private val wweJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -54,171 +54,133 @@ data class WweBrand(
 
 class WweSource(private val httpClient: HttpClient) {
 
-    /**
-     * Fetch upcoming/live/completed WWE events.
-     * Delegates to our server proxy which scrapes WWE data from various sources
-     * (same architecture as FootballApiSource).
-     */
+    private val baseUrl = "https://watchwrestling.ae"
+
     suspend fun fetchEvents(brand: String = "", status: String = ""): List<WweEvent> = runCatching {
-        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/wwe/events") {
-            if (brand.isNotBlank()) parameter("brand", brand)
-            if (status.isNotBlank()) parameter("status", status)
+        val url = if (brand.isNotBlank()) {
+            when (brand.lowercase()) {
+                "raw" -> "$baseUrl/category/wwe/raw/"
+                "smackdown" -> "$baseUrl/category/wwe/smackdown/"
+                "nxt" -> "$baseUrl/category/wwe/nxt/"
+                "aew" -> "$baseUrl/category/aew/"
+                else -> baseUrl
+            }
+        } else baseUrl
+
+        val html = httpClient.get(url) {
+            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         }.bodyAsText()
-        val root = wweJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toWweEvent() }
-            .orEmpty()
+
+        val doc = Ksoup.parse(html)
+        doc.select("div.post, article.post, div.item").mapNotNull { el ->
+            val link = el.select("a.clip-link, h2.entry-title a, a[rel=bookmark]").firstOrNull() ?: return@mapNotNull null
+            val href = link.attr("href")
+            val img = el.select("img").firstOrNull()
+            var cover = img?.attr("src") ?: ""
+            if (cover.contains("dummy") || cover.contains("blank") || cover.contains("spacer")) {
+                cover = img?.attr("data-src") ?: ""
+            }
+            val title = link.attr("title").ifBlank { link.text() }.ifBlank { img?.attr("alt").orEmpty() }.trim()
+
+            if (href.isBlank() || title.isBlank()) return@mapNotNull null
+
+            var eventBrand = "WWE"
+            if (title.contains("Raw", ignoreCase = true)) eventBrand = "RAW"
+            if (title.contains("SmackDown", ignoreCase = true)) eventBrand = "SmackDown"
+            if (title.contains("NXT", ignoreCase = true)) eventBrand = "NXT"
+            if (title.contains("AEW", ignoreCase = true)) eventBrand = "AEW"
+
+            WweEvent(
+                eventId = href.substringAfter("://").replace("/", "_"),
+                title = title,
+                brand = eventBrand,
+                eventType = "TV Show",
+                date = "Recent",
+                status = "COMPLETED",
+                posterUrl = cover,
+                detailPageUrl = href
+            )
+        }.distinctBy { it.eventId }
     }.getOrElse { error ->
         println("[WWE] Events fetch failed: ${error.message}")
         emptyList()
     }
 
-    /**
-     * Fetch matches for a specific event.
-     */
     suspend fun fetchMatches(eventId: String): List<WweMatch> = runCatching {
-        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/wwe/matches") {
-            parameter("eventId", eventId)
-        }.bodyAsText()
-        val root = wweJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toWweMatch() }
-            .orEmpty()
-    }.getOrElse { error ->
-        println("[WWE] Matches fetch failed: ${error.message}")
-        emptyList()
-    }
+        // Since we scrape posts, we don't have individual matches upfront.
+        // We return a single dummy match that represents the full show replay.
+        val href = eventId.replace("_", "/").let { "https://$it" }
+        listOf(
+            WweMatch(
+                matchId = "${eventId}_full",
+                eventId = eventId,
+                title = "Full Show Replay / Live Stream",
+                status = "COMPLETED",
+                detailUrl = href
+            )
+        )
+    }.getOrElse { emptyList() }
 
-    /**
-     * Fetch available brands (RAW, SmackDown, NXT, PPV).
-     */
     suspend fun fetchBrands(): List<WweBrand> = runCatching {
-        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/wwe/brands").bodyAsText()
-        val root = wweJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toWweBrand() }
-            .orEmpty()
-    }.getOrElse { error ->
-        println("[WWE] Brands fetch failed: ${error.message}")
-        emptyList()
-    }
+        listOf(
+            WweBrand("raw", "RAW", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/WWE_Raw_logo_%282019%29.svg/1200px-WWE_Raw_logo_%282019%29.svg.png"),
+            WweBrand("smackdown", "SmackDown", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/WWE_SmackDown_2019_logo.svg/1200px-WWE_SmackDown_2019_logo.svg.png"),
+            WweBrand("nxt", "NXT", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/WWE_NXT_logo_%282019-2021%29.svg/1200px-WWE_NXT_logo_%282019-2021%29.svg.png"),
+            WweBrand("aew", "AEW", "https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/All_Elite_Wrestling_Logo.svg/1200px-All_Elite_Wrestling_Logo.svg.png")
+        )
+    }.getOrElse { emptyList() }
 
-    /**
-     * Search events by title, brand, or match participant.
-     */
     suspend fun searchEvents(query: String): List<WweEvent> = runCatching {
-        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/wwe/search") {
-            parameter("q", query)
+        val url = "$baseUrl/?s=${query.replace(" ", "+")}"
+        val html = httpClient.get(url) {
+            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         }.bodyAsText()
-        val root = wweJson.parseToJsonElement(raw).jsonObject
-        root["data"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonObject.toWweEvent() }
-            .orEmpty()
-    }.getOrElse { error ->
-        println("[WWE] Search failed: ${error.message}")
-        emptyList()
-    }
 
-    /**
-     * Returns a playable stream URL for a given event/match.
-     * Our server returns URLs to live streams or replay sources.
-     */
-    suspend fun resolveStreamUrl(eventId: String): String? = runCatching {
-        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/wwe/stream") {
-            parameter("event", eventId)
-        }.bodyAsText()
-        val root = wweJson.parseToJsonElement(raw).jsonObject
-        val data = root["data"]
-        when {
-            data?.jsonPrimitive?.contentOrNull != null -> data.jsonPrimitive.content
-            data?.jsonArray != null -> {
-                data.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
-                    .firstOrNull { it.isNotBlank() }
+        val doc = Ksoup.parse(html)
+        doc.select("div.post, article.post, div.item").mapNotNull { el ->
+            val link = el.select("a.clip-link, h2.entry-title a, a[rel=bookmark]").firstOrNull() ?: return@mapNotNull null
+            val href = link.attr("href")
+            val img = el.select("img").firstOrNull()
+            var cover = img?.attr("src") ?: ""
+            if (cover.contains("dummy") || cover.contains("blank") || cover.contains("spacer")) {
+                cover = img?.attr("data-src") ?: ""
             }
-            else -> null
-        }
-    }.getOrElse { error ->
-        println("[WWE] Stream resolve failed for $eventId: ${error.message}")
-        null
+            val title = link.attr("title").ifBlank { link.text() }.trim()
+
+            if (href.isBlank() || title.isBlank()) return@mapNotNull null
+
+            WweEvent(
+                eventId = href.substringAfter("://").replace("/", "_"),
+                title = title,
+                brand = "WWE",
+                status = "COMPLETED",
+                posterUrl = cover,
+                detailPageUrl = href
+            )
+        }.distinctBy { it.eventId }
+    }.getOrElse { emptyList() }
+
+    suspend fun resolveStreamUrl(eventId: String): String? {
+        val urls = resolveStreamUrls(eventId)
+        return urls.firstOrNull()
     }
 
-    /**
-     * Returns all available stream URLs for this event.
-     */
     suspend fun resolveStreamUrls(eventId: String): List<String> = runCatching {
-        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/wwe/stream") {
-            parameter("event", eventId)
+        val href = eventId.replace("_", "/").let { "https://$it" }
+        val html = httpClient.get(href) {
+            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         }.bodyAsText()
-        val root = wweJson.parseToJsonElement(raw).jsonObject
-        val data = root["data"]
-        when {
-            data?.jsonPrimitive?.contentOrNull != null -> {
-                data.jsonPrimitive.content.split("|").map { it.trim() }.filter { it.isNotBlank() }
-            }
-            data?.jsonArray != null -> {
-                data.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it.isNotBlank() }
-            }
-            else -> emptyList()
-        }
-    }.getOrElse { error ->
-        println("[WWE] Stream URLs resolve failed: ${error.message}")
-        emptyList()
-    }
 
-    private fun JsonObject.toWweEvent(): WweEvent? {
-        val id = this["id"]?.jsonPrimitive?.contentOrNull ?: return null
-        val title = this["title"]?.jsonPrimitive?.contentOrNull ?: return null
-        return WweEvent(
-            eventId = id,
-            title = title,
-            brand = this["brand"]?.jsonPrimitive?.contentOrNull ?: "",
-            eventType = this["eventType"]?.jsonPrimitive?.contentOrNull ?: "",
-            date = this["date"]?.jsonPrimitive?.contentOrNull ?: "",
-            time = this["time"]?.jsonPrimitive?.contentOrNull ?: "",
-            status = this["status"]?.jsonPrimitive?.contentOrNull ?: "UPCOMING",
-            venue = this["venue"]?.jsonPrimitive?.contentOrNull ?: "",
-            description = this["description"]?.jsonPrimitive?.contentOrNull ?: "",
-            matches = this["matches"]?.jsonArray?.mapNotNull { it.jsonObject.toWweMatch() } ?: emptyList(),
-            posterUrl = this["posterUrl"]?.jsonPrimitive?.contentOrNull ?: "",
-            detailPageUrl = this["detailPageUrl"]?.jsonPrimitive?.contentOrNull ?: ""
-        )
-    }
+        val doc = Ksoup.parse(html)
+        
+        // Extract iframe src links which host the video player
+        val links = doc.select("iframe").mapNotNull { it.attr("src") }
+            .filter { it.isNotBlank() && (it.contains("dailymotion") || it.contains("vidmoly") || it.contains("embed") || it.contains("dood")) }
+            
+        // Some sites use buttons that link to different hosters
+        val buttonLinks = doc.select("a.button, a.btn, a[href*='embed']").mapNotNull { it.attr("href") }
+            .filter { it.contains("embed") || it.contains("video") || it.contains("watch") }
 
-    private fun JsonObject.toWweMatch(): WweMatch? {
-        val id = this["id"]?.jsonPrimitive?.contentOrNull ?: return null
-        val title = this["title"]?.jsonPrimitive?.contentOrNull
-            ?: this["name"]?.jsonPrimitive?.contentOrNull ?: return null
-        val participants = this["participants"]?.jsonArray
-            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
-            ?: emptyList()
-        return WweMatch(
-            matchId = id,
-            eventId = this["eventId"]?.jsonPrimitive?.contentOrNull ?: "",
-            title = title,
-            participants = participants,
-            matchType = this["matchType"]?.jsonPrimitive?.contentOrNull ?: "",
-            stipulation = this["stipulation"]?.jsonPrimitive?.contentOrNull ?: "",
-            isTitleMatch = this["isTitleMatch"]?.jsonPrimitive?.booleanOrNull ?: false,
-            titleName = this["titleName"]?.jsonPrimitive?.contentOrNull ?: "",
-            status = this["status"]?.jsonPrimitive?.contentOrNull ?: "UPCOMING",
-            winner = this["winner"]?.jsonPrimitive?.contentOrNull ?: "",
-            result = this["result"]?.jsonPrimitive?.contentOrNull ?: "",
-            detailUrl = this["detailUrl"]?.jsonPrimitive?.contentOrNull ?: "",
-            posterUrl = this["posterUrl"]?.jsonPrimitive?.contentOrNull ?: ""
-        )
-    }
-
-    private fun JsonObject.toWweBrand(): WweBrand? {
-        val id = this["id"]?.jsonPrimitive?.contentOrNull ?: return null
-        val name = this["name"]?.jsonPrimitive?.contentOrNull ?: return null
-        return WweBrand(
-            id = id,
-            name = name,
-            logo = this["logo"]?.jsonPrimitive?.contentOrNull ?: ""
-        )
-    }
+        (links + buttonLinks).distinct().ifEmpty { listOf(href) }
+    }.getOrElse { emptyList() }
 }

@@ -191,6 +191,18 @@ fun TvApp() {
                         activeViewerTitle = title
                     }
                 )
+                currentSection == TvSection.NOLLYWOOD -> TvNollywoodScreen(
+                    onPlayStream = { url, title -> animeStreamUrl = url; animeTitle = title },
+                    onPlayYouTube = { videoId, title -> animeStreamUrl = "https://www.youtube.com/embed/$videoId?autoplay=1"; animeTitle = title },
+                    onBack = { currentSection = TvSection.ANIME }
+                )
+                currentSection == TvSection.DONGHUA -> TvDonghuaScreen(
+                    onPlayStream = { url, title -> animeStreamUrl = url; animeTitle = title },
+                    onBack = { currentSection = TvSection.ANIME }
+                )
+                currentSection == TvSection.SPORTS -> TvSportsScreen(
+                    onBack = { currentSection = TvSection.ANIME }
+                )
             }
         }
     }
@@ -297,9 +309,12 @@ fun TvSplashScreen(onFinished: () -> Unit) {
 // ─────────────────────────────────────────────────────────────────────────────
 enum class TvSection(val label: String, val icon: ImageVector, val group: String) {
     ANIME("Anime", Icons.Default.PlayCircle, "Watch"),
+    DONGHUA("Donghua", Icons.Default.Videocam, "Watch"),
     K_DRAMA("K-Drama", Icons.Default.LiveTv, "Watch"),
     CARTOON("Cartoon", Icons.Default.Animation, "Watch"),
     MOVIES("Movies", Icons.Default.Movie, "Watch"),
+    NOLLYWOOD("Nollywood", Icons.Default.Flag, "Watch"),
+    SPORTS("Sports", Icons.Default.SportsEsports, "Watch"),
     MANGA("Manga", Icons.Default.Collections, "Read"),
     NOVELS("Novels", Icons.Default.AutoStories, "Read"),
     DOWNLOADS("Downloads", Icons.Default.Download, "Library")

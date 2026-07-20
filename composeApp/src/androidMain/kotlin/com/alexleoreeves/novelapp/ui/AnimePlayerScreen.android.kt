@@ -37,10 +37,16 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.alexleoreeves.novelapp.data.AppTheme
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.ui.theme.accentColor
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -65,9 +71,9 @@ actual fun AnimePlayerScreen(
 ) {
     val isDonghua = contentKind.equals("donghua", ignoreCase = true)
     val isAnime = contentKind.equals("anime", ignoreCase = true)
-    // Show audio/subtitle controls only for anime and donghua content.
-    // For Server 1-4 movie/TV content (contentKind is ""), hide controls and force English.
+    // Normal movie/TV playback only exposes subtitle controls; anime/donghua also expose audio language controls.
     val showAudioSubControls = isAnime || isDonghua
+    val showSubtitleControls = true
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
@@ -115,6 +121,44 @@ actual fun AnimePlayerScreen(
     var subtitleMode by remember { mutableStateOf("en") }
     var showAudioPicker by remember { mutableStateOf(false) }
     var showSubtitlePicker by remember { mutableStateOf(false) }
+    var selectedSubtitleSource by remember(streamUrl, retryKey) { mutableStateOf(SubtitleSource.NORMAL) }
+    var pendingSubtitleSource by remember(streamUrl, retryKey) { mutableStateOf(SubtitleSource.NORMAL) }
+    var subtitlePickerStep by remember(streamUrl, retryKey) { mutableStateOf(SubtitlePickerStep.SOURCE) }
+    var externalSubtitlesJson by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    var isSubtitleLoading by remember(streamUrl, retryKey) { mutableStateOf(false) }
+    var subtitleStatus by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    var subtitleRequestToken by remember(streamUrl, retryKey) { mutableStateOf(0) }
+    val activeSubtitlesJson = if (selectedSubtitleSource == SubtitleSource.NORMAL) subtitlesJson else externalSubtitlesJson
+
+    fun closeSubtitlePicker() {
+        showSubtitlePicker = false
+        subtitlePickerStep = SubtitlePickerStep.SOURCE
+    }
+
+    fun applySubtitleChoice(source: SubtitleSource, languageCode: String) {
+        subtitleRequestToken++
+        val requestToken = subtitleRequestToken
+        selectedSubtitleSource = source
+        subtitleMode = languageCode
+        subtitleStatus = null
+        closeSubtitlePicker()
+
+        if (languageCode == "off" || source == SubtitleSource.NORMAL) {
+            isSubtitleLoading = false
+            externalSubtitlesJson = null
+            return
+        }
+
+        isSubtitleLoading = true
+        externalSubtitlesJson = null
+        scope.launch {
+            val result = resolveExternalSubtitleTrack(source, episodeTitle, contentKind, languageCode)
+            if (requestToken != subtitleRequestToken) return@launch
+            externalSubtitlesJson = result.tracksJson
+            subtitleStatus = result.message
+            isSubtitleLoading = false
+        }
+    }
 
     // Resolve stream URL via embed scraping
     LaunchedEffect(streamUrl, retryKey) {
@@ -168,7 +212,7 @@ actual fun AnimePlayerScreen(
     // ── ExoPlayer setup ──────────────────────────────────────────────────
     // KEY FIX: Set subtitle/audio track preferences BEFORE prepare() so
     // ExoPlayer picks the correct tracks from the manifest
-    val exoPlayer = remember(resolvedUrl, resolvedSourceUrl, subtitlesJson, subtitleMode, audioLanguage) {
+    val exoPlayer = remember(resolvedUrl, resolvedSourceUrl, activeSubtitlesJson, subtitleMode, audioLanguage) {
         if (resolvedUrl != null) {
             val url = resolvedUrl!!
             val cache = NovelAppVideoCache.get(context)
@@ -177,23 +221,24 @@ actual fun AnimePlayerScreen(
                 .setUserAgent(PLAYER_USER_AGENT)
                 .setDefaultRequestProperties(requestHeaders)
             val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-            val cacheDataSourceFactory = CacheDataSource.Factory()
-                .setCache(cache)
-                .setUpstreamDataSourceFactory(dataSourceFactory)
-                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             val loadControl = DefaultLoadControl.Builder()
-                .setBufferDurationsMs(60_000, 300_000, 1_500, 3_000)
-                .setTargetBufferBytes(150 * 1024 * 1024)
+                .setBufferDurationsMs(32_000, 64_000, 1_000, 1_500)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
-            val mediaItem = buildMediaItemWithSubtitles(url, subtitlesJson)
+            val mediaItem = buildMediaItemWithSubtitles(url, activeSubtitlesJson)
 
             ExoPlayer.Builder(context)
                 .setLoadControl(loadControl)
-                .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+                .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
                 .build()
                 .apply {
+                    val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build()
+                    setAudioAttributes(audioAttributes, true)
+
                     // ── CRITICAL: Set subtitle preferences BEFORE prepare() ──
                     val subEnabled = subtitleMode != "off"
                     val params = trackSelectionParameters
@@ -243,7 +288,7 @@ actual fun AnimePlayerScreen(
             delay(300L)
             exoPlayer?.stop()
             exoPlayer?.clearMediaItems()
-            val mediaItem = buildMediaItemWithSubtitles(resolvedUrl!!, subtitlesJson)
+            val mediaItem = buildMediaItemWithSubtitles(resolvedUrl!!, activeSubtitlesJson)
             exoPlayer?.setMediaItem(mediaItem)
             exoPlayer?.prepare()
             exoPlayer?.playWhenReady = true
@@ -360,6 +405,7 @@ actual fun AnimePlayerScreen(
             var playbackSpeed by remember { mutableStateOf(1f) }
             var isSpeedLocked by remember { mutableStateOf(false) }
             var showSpeedPicker by remember { mutableStateOf(false) }
+            var playerResizeMode by remember { mutableStateOf(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT) }
 
             LaunchedEffect(playbackSpeed) {
                 player.playbackParameters = PlaybackParameters(playbackSpeed)
@@ -376,7 +422,12 @@ actual fun AnimePlayerScreen(
                             this.player = player
                             useController = false
                             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                            this.resizeMode = playerResizeMode
                         }
+                    },
+                    update = { view ->
+                        if (view.player != player) view.player = player
+                        if (view.resizeMode != playerResizeMode) view.resizeMode = playerResizeMode
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -449,16 +500,16 @@ actual fun AnimePlayerScreen(
                                             Text(audioLabel, style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
-                                    if (showAudioSubControls) {
+                                    if (showSubtitleControls) {
                                         val subLabel = when {
-                                            isDonghua && subtitleMode == "zh" -> "CN Subs"
-                                            isDonghua && subtitleMode == "en" -> "EN Subs"
-                                            isDonghua && subtitleMode == "off" -> "Subs Off"
-                                            subtitleMode == "ja" -> "JP Subs"
-                                            subtitleMode == "en" -> "EN Subs"
-                                            else -> "Subs Off"
+                                            subtitleMode == "off" -> "Subs Off"
+                                            isSubtitleLoading -> "${pendingSubtitleSource.shortLabel}..."
+                                            else -> "${selectedSubtitleSource.shortLabel} ${subtitleMode.subtitleButtonLanguage()}"
                                         }
-                                        OutlinedButton(onClick = { showSubtitlePicker = !showSubtitlePicker },
+                                        OutlinedButton(onClick = {
+                                            showSubtitlePicker = !showSubtitlePicker
+                                            if (showSubtitlePicker) subtitlePickerStep = SubtitlePickerStep.SOURCE
+                                        },
                                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                                             border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
                                             Icon(Icons.Default.ClosedCaption, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
@@ -471,7 +522,33 @@ actual fun AnimePlayerScreen(
                                         Icon(Icons.Default.Speed, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
                                         Text(if (playbackSpeed == 2f) "2x" else "1x", style = MaterialTheme.typography.labelSmall)
                                     }
+                                    OutlinedButton(onClick = {
+                                        playerResizeMode = when(playerResizeMode) {
+                                            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+                                            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                            else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                        }
+                                        showControls = true
+                                    },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                        border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                                        Icon(Icons.Default.AspectRatio, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+                                        Text(when(playerResizeMode) {
+                                            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT -> "Fit"
+                                            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch"
+                                            else -> "Zoom"
+                                        }, style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
+                            }
+                            if (isSubtitleLoading || subtitleStatus != null) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    if (isSubtitleLoading) "Loading ${pendingSubtitleSource.title}..." else subtitleStatus.orEmpty(),
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.align(Alignment.End)
+                                )
                             }
                         }
                     }
@@ -494,18 +571,39 @@ actual fun AnimePlayerScreen(
                 }
 
                 // Subtitle picker
-                AnimatedVisibility(visible = showSubtitlePicker, enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }, modifier = Modifier.align(Alignment.BottomEnd)) {
+                AnimatedVisibility(visible = showSubtitleControls && showSubtitlePicker, enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }, modifier = Modifier.align(Alignment.BottomEnd)) {
                     Card(shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)), modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 96.dp)) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Subtitles", style = MaterialTheme.typography.titleSmall, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (subtitlePickerStep == SubtitlePickerStep.SOURCE) "Subtitles" else "${pendingSubtitleSource.title} Language",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
                             Spacer(Modifier.height(10.dp))
-                            LanguageOption1("🇺🇸  English", subtitleMode == "en") { subtitleMode = "en"; showSubtitlePicker = false }
-                            if (isDonghua) {
-                                LanguageOption1("🇨🇳  Chinese", subtitleMode == "zh") { subtitleMode = "zh"; showSubtitlePicker = false }
+                            if (subtitlePickerStep == SubtitlePickerStep.SOURCE) {
+                                SubtitleSource.values().forEach { source ->
+                                    LanguageOption1(source.menuLabel, selectedSubtitleSource == source && subtitleMode != "off") {
+                                        pendingSubtitleSource = source
+                                        subtitlePickerStep = SubtitlePickerStep.LANGUAGE
+                                    }
+                                }
+                                LanguageOption1("Off", subtitleMode == "off") {
+                                    applySubtitleChoice(selectedSubtitleSource, "off")
+                                }
                             } else {
-                                LanguageOption1("🇯🇵  Japanese", subtitleMode == "ja") { subtitleMode = "ja"; showSubtitlePicker = false }
+                                subtitleLanguages.forEach { language ->
+                                    LanguageOption1(
+                                        "${language.flag}  ${language.name}",
+                                        selectedSubtitleSource == pendingSubtitleSource && subtitleMode == language.code
+                                    ) {
+                                        applySubtitleChoice(pendingSubtitleSource, language.code)
+                                    }
+                                }
+                                LanguageOption1("Back", false) {
+                                    subtitlePickerStep = SubtitlePickerStep.SOURCE
+                                }
                             }
-                            LanguageOption1("⛔  Off", subtitleMode == "off") { subtitleMode = "off"; showSubtitlePicker = false }
                         }
                     }
                 }
@@ -531,6 +629,186 @@ private fun LanguageOption1(label: String, selected: Boolean, onClick: () -> Uni
     Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Color.White, style = MaterialTheme.typography.bodyMedium)
         if (selected) Icon(Icons.Default.Check, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(18.dp))
+    }
+}
+
+private enum class SubtitleSource(
+    val title: String,
+    val shortLabel: String,
+    val menuLabel: String,
+    val backendId: String
+) {
+    NORMAL("Sub 1", "Sub 1", "Sub 1  Normal", "normal"),
+    OPENSUBTITLES("Sub 2", "Sub 2", "Sub 2  OpenSubtitles", "opensubtitles"),
+    SUBDL("Sub 3", "Sub 3", "Sub 3  SubDL", "subdl")
+}
+
+private enum class SubtitlePickerStep {
+    SOURCE,
+    LANGUAGE
+}
+
+private data class SubtitleLanguage(
+    val code: String,
+    val name: String,
+    val flag: String
+)
+
+private val subtitleLanguages = listOf(
+    SubtitleLanguage("en", "English", "🇺🇸"),
+    SubtitleLanguage("zh", "Chinese", "🇨🇳"),
+    SubtitleLanguage("id", "Indonesian", "🇮🇩"),
+    SubtitleLanguage("ja", "Japanese", "🇯🇵"),
+    SubtitleLanguage("ko", "Korean", "🇰🇷"),
+    SubtitleLanguage("es", "Spanish", "🇪🇸"),
+    SubtitleLanguage("fr", "French", "🇫🇷"),
+    SubtitleLanguage("pt", "Portuguese", "🇵🇹"),
+    SubtitleLanguage("ar", "Arabic", "🇸🇦")
+)
+
+private data class SubtitleSearchContext(
+    val title: String,
+    val year: Int?,
+    val season: Int?,
+    val episode: Int?,
+    val type: String?
+)
+
+private data class ExternalSubtitleResult(
+    val tracksJson: String?,
+    val message: String
+)
+
+private suspend fun resolveExternalSubtitleTrack(
+    source: SubtitleSource,
+    episodeTitle: String,
+    contentKind: String,
+    languageCode: String
+): ExternalSubtitleResult = withContext(Dispatchers.IO) {
+    runCatching {
+        val searchContext = episodeTitle.toSubtitleSearchContext(contentKind)
+        if (searchContext.title.isBlank()) {
+            return@runCatching ExternalSubtitleResult(null, "Could not read the title for subtitle search.")
+        }
+
+        when (source) {
+            SubtitleSource.NORMAL -> ExternalSubtitleResult(null, "")
+            SubtitleSource.OPENSUBTITLES,
+            SubtitleSource.SUBDL -> fetchBackendSubtitleTrack(source, searchContext, languageCode)
+        }
+    }.getOrElse { error ->
+        ExternalSubtitleResult(null, "${source.title} failed: ${error.message ?: "subtitle lookup failed."}")
+    }
+}
+
+private fun fetchBackendSubtitleTrack(
+    source: SubtitleSource,
+    searchContext: SubtitleSearchContext,
+    languageCode: String
+): ExternalSubtitleResult {
+    val body = org.json.JSONObject()
+        .put("source", source.backendId)
+        .put("title", searchContext.title)
+        .put("language", languageCode)
+        .put("contentKind", searchContext.type ?: "")
+        .apply {
+            searchContext.year?.let { put("year", it) }
+            searchContext.season?.let { put("season", it) }
+            searchContext.episode?.let { put("episode", it) }
+        }
+        .toString()
+
+    val raw = httpPostJsonText(
+        "${AppReleaseConfig.API_BASE_URL}/subtitles/resolve",
+        body,
+        mapOf(
+            "Accept" to "application/json",
+            "Content-Type" to "application/json",
+            "User-Agent" to PLAYER_USER_AGENT
+        )
+    )
+    val root = org.json.JSONObject(raw)
+    if (!root.optBoolean("ok", false)) {
+        return ExternalSubtitleResult(null, root.optString("error").ifBlank { "${source.title} subtitle lookup failed." })
+    }
+    val data = root.optJSONObject("data")
+        ?: return ExternalSubtitleResult(null, "${source.title} did not return subtitle data.")
+    val tracksJson = data.optString("tracksJson").takeIf { it.isNotBlank() && it != "null" }
+    val message = data.optString("message").ifBlank {
+        if (tracksJson != null) "${source.title} subtitles loaded." else "No ${source.title} ${languageCode.subtitleButtonLanguage()} subtitles found."
+    }
+    return ExternalSubtitleResult(tracksJson, message)
+}
+
+private fun String.toSubtitleSearchContext(contentKind: String): SubtitleSearchContext {
+    val rawTitle = trim()
+    val year = Regex("""\b(?:19|20)\d{2}\b""").find(rawTitle)?.value?.toIntOrNull()
+    val seasonEpisode = Regex("""(?i)\bseason\s+(\d{1,2})\D+episode\s+(\d{1,4})\b""").find(rawTitle)
+    val compactSeasonEpisode = Regex("""(?i)\bs(\d{1,2})\s*e(\d{1,4})\b""").find(rawTitle)
+    val season = seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?: compactSeasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull()
+    val episode = seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
+        ?: compactSeasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
+        ?: Regex("""(?i)\bepisode\s+(\d{1,4})\b""").find(rawTitle)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+    val title = rawTitle
+        .replace(Regex("""\((?:19|20)\d{2}\)"""), " ")
+        .replace(Regex("""(?i)\s*[-:|]\s*season\s+\d{1,2}\D+episode\s+\d{1,4}.*$"""), " ")
+        .replace(Regex("""(?i)\s*[-:|]\s*s\d{1,2}\s*e\d{1,4}.*$"""), " ")
+        .replace(Regex("""(?i)\s*[-:|]\s*episode\s+\d{1,4}.*$"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+        .ifBlank { rawTitle }
+
+    val type = when {
+        contentKind.equals("movie", ignoreCase = true) -> "movie"
+        season != null || episode != null -> "tv"
+        contentKind.equals("anime", ignoreCase = true) || contentKind.equals("donghua", ignoreCase = true) -> "tv"
+        else -> null
+    }
+    return SubtitleSearchContext(title = title, year = year, season = season, episode = episode, type = type)
+}
+
+private fun String.subtitleButtonLanguage(): String = when (lowercase(Locale.US)) {
+    "en" -> "EN"
+    "zh" -> "CN"
+    "id" -> "ID"
+    "ja" -> "JP"
+    "ko" -> "KR"
+    "es" -> "ES"
+    "fr" -> "FR"
+    "pt" -> "PT"
+    "ar" -> "AR"
+    else -> uppercase(Locale.US)
+}
+
+private fun httpPostJsonText(url: String, body: String, headers: Map<String, String> = emptyMap()): String {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15_000
+        readTimeout = 20_000
+        requestMethod = "POST"
+        doOutput = true
+        instanceFollowRedirects = true
+        headers.forEach { (key, value) -> setRequestProperty(key, value) }
+    }
+    connection.outputStream.use { output ->
+        output.write(body.toByteArray(Charsets.UTF_8))
+    }
+    return connection.readResponseBytes().toString(Charsets.UTF_8)
+}
+
+private fun HttpURLConnection.readResponseBytes(): ByteArray {
+    try {
+        val status = responseCode
+        val stream = if (status in 200..299) inputStream else errorStream
+        val bytes = stream?.use { it.readBytes() } ?: ByteArray(0)
+        if (status !in 200..299) {
+            val message = bytes.toString(Charsets.UTF_8).take(140).ifBlank { "HTTP $status" }
+            throw IllegalStateException(message)
+        }
+        return bytes
+    } finally {
+        disconnect()
     }
 }
 
@@ -618,19 +896,36 @@ private fun buildMediaItemWithSubtitles(url: String, subtitlesJson: String?): Me
                 val track = jsonArray.getJSONObject(i)
                 val file = track.optString("file", "")
                 val label = track.optString("label", "Unknown")
+                val srclang = track.optString("srclang", "")
+                    .ifBlank { track.optString("language", "") }
                 val kind = track.optString("kind", "")
-                if (file.isNotBlank() && file.startsWith("http")) {
-                    val mimeType = if (file.endsWith(".vtt")) MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP
-                    val langCode = when (label.trim().lowercase()) {
-                        "english" -> "en"; "japanese" -> "ja"; "spanish" -> "es"
-                        "french" -> "fr"; "german" -> "de"; "portuguese" -> "pt"
-                        "italian" -> "it"; "korean" -> "ko"; "chinese" -> "zh"
-                        "arabic" -> "ar"; "hindi" -> "hi"; "russian" -> "ru"
-                        else -> label.take(2).lowercase()
+                if (file.isNotBlank() && (file.startsWith("http", ignoreCase = true) || file.startsWith("data:", ignoreCase = true))) {
+                    val filePath = file.substringBefore("?").lowercase(Locale.US)
+                    val mimeType = when {
+                        filePath.startsWith("data:text/vtt") || filePath.endsWith(".vtt") -> MimeTypes.TEXT_VTT
+                        filePath.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
+                        else -> MimeTypes.TEXT_VTT
+                    }
+                    val languageHint = srclang.ifBlank { label }.trim().lowercase()
+                    val langCode = when {
+                        languageHint in setOf("en", "eng") || "english" in languageHint -> "en"
+                        languageHint in setOf("zh", "zho", "chi", "cn") || "chinese" in languageHint -> "zh"
+                        languageHint in setOf("id", "ind", "ina") || "indo" in languageHint || "indonesian" in languageHint -> "id"
+                        languageHint in setOf("ja", "jpn") || "japanese" in languageHint -> "ja"
+                        languageHint in setOf("ko", "kor") || "korean" in languageHint -> "ko"
+                        languageHint in setOf("es", "spa") || "spanish" in languageHint -> "es"
+                        languageHint in setOf("fr", "fra", "fre") || "french" in languageHint -> "fr"
+                        languageHint in setOf("de", "ger", "deu") || "german" in languageHint -> "de"
+                        languageHint in setOf("pt", "por") || "portuguese" in languageHint -> "pt"
+                        languageHint in setOf("it", "ita") || "italian" in languageHint -> "it"
+                        languageHint in setOf("ar", "ara") || "arabic" in languageHint -> "ar"
+                        languageHint in setOf("hi", "hin") || "hindi" in languageHint -> "hi"
+                        languageHint in setOf("ru", "rus") || "russian" in languageHint -> "ru"
+                        else -> languageHint.take(2).ifBlank { "en" }
                     }
                     val config = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(file))
                         .setMimeType(mimeType).setLanguage(langCode).setLabel(label)
-                        .setSelectionFlags(if (label.lowercase().trim() == "english") C.SELECTION_FLAG_DEFAULT else 0)
+                        .setSelectionFlags(if (langCode == "en") C.SELECTION_FLAG_DEFAULT else 0)
                         .build()
                     subtitleConfigs.add(config)
                 }
