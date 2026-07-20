@@ -67,6 +67,8 @@ kotlin {
             implementation("androidx.media3:media3-datasource:1.3.1")
             implementation(files("libs/sherpa-onnx-1.13.4.aar"))
             implementation("org.apache.commons:commons-compress:1.26.1")
+            // YouTube Player library for Nollywood in-app YouTube playback
+            implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.1")
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -118,8 +120,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 35
-        versionName = "1.35"
+        versionCode = 37
+        versionName = "1.37"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -200,7 +202,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovelApp"
-            packageVersion = "1.35.0"
+            packageVersion = "1.37.0"
             description = "Watch Anime · Read Novels · Read Manga — All in One"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"

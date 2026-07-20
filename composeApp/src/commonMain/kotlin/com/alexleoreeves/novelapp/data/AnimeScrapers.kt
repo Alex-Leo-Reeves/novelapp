@@ -688,6 +688,318 @@ class AnimePaheScraper(private val client: HttpClient) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Donghua scrapers — DonghuaStream and Lucifer Donghua
+// ─────────────────────────────────────────────────────────────────────────────
+class DonghuaSiteScraper private constructor(
+    private val client: HttpClient,
+    private val config: Config
+) {
+    data class Config(
+        val baseUrl: String,
+        val label: String,
+        val directSlugSuffixes: List<String> = listOf("", "1")
+    )
+
+    companion object {
+        private val BROWSER_HEADERS = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language" to "en-US,en;q=0.9"
+        )
+
+        fun donghuaStream(client: HttpClient): DonghuaSiteScraper =
+            DonghuaSiteScraper(
+                client,
+                Config(
+                    baseUrl = "https://donghuastream.org",
+                    label = "DonghuaStream",
+                    directSlugSuffixes = listOf("", "1")
+                )
+            )
+
+        fun luciferDonghua(client: HttpClient): DonghuaSiteScraper =
+            DonghuaSiteScraper(
+                client,
+                Config(
+                    baseUrl = "https://luciferdonghua.in",
+                    label = "Lucifer Donghua",
+                    directSlugSuffixes = listOf("", "-xian-ni", "-2023", "-season-1")
+                )
+            )
+    }
+
+    suspend fun fetchEpisodes(
+        titleQuery: String,
+        alternateQueries: List<String> = emptyList(),
+        maxEpisodes: Int = 300
+    ): List<MediaEpisode> {
+        val queries = donghuaTitleQueries(titleQuery, alternateQueries)
+        for (query in queries) {
+            val seriesUrls = findSeriesCandidates(query)
+            for (seriesUrl in seriesUrls) {
+                val episodes = runCatching {
+                    fetchEpisodesFromSeries(seriesUrl, maxEpisodes)
+                }.getOrElse { error ->
+                    println("[${config.label}] Episode list failed for '$seriesUrl': ${error.message}")
+                    emptyList()
+                }
+                if (episodes.isNotEmpty()) return episodes
+            }
+        }
+        return emptyList()
+    }
+
+    suspend fun resolveEpisodePlayerUrl(episodeUrl: String): String? = runCatching {
+        val html = fetchHtml(episodeUrl, config.baseUrl)
+        if (html.isBlockedOrErrorPage()) return@runCatching null
+        extractDirectDonghuaMediaUrl(html)
+            ?: extractPreferredDonghuaEmbedUrl(html, episodeUrl)
+    }.getOrElse { error ->
+        println("[${config.label}] Player resolve failed: ${error.message}")
+        null
+    }
+
+    private suspend fun findSeriesCandidates(query: String): List<String> {
+        val slug = query.slugifyAnimeTitle()
+        val directCandidates = config.directSlugSuffixes
+            .map { suffix -> "${config.baseUrl}/anime/$slug$suffix/" }
+
+        val searchHtml = runCatching {
+            fetchHtml("${config.baseUrl}/?s=${query.encodeURLQueryComponent()}", config.baseUrl)
+        }.getOrNull()
+
+        val searchCandidates = searchHtml
+            ?.takeUnless { it.isBlockedOrErrorPage() }
+            ?.let { html ->
+                val doc = Ksoup.parse(html)
+                doc.select("a[href*=/anime/]")
+                    .mapNotNull { link ->
+                        val href = link.attr("href").ifBlank { return@mapNotNull null }
+                        val title = link.attr("title")
+                            .ifBlank { link.select("h2, h3").firstOrNull()?.text().orEmpty() }
+                            .ifBlank { link.text() }
+                            .decodeHtmlEntitiesLite()
+                        val url = normalizeDonghuaUrl(href, config.baseUrl) ?: return@mapNotNull null
+                        title to url
+                    }
+                    .filter { (title, _) -> title.isNotBlank() }
+                    .distinctBy { it.second }
+                    .sortedWith(
+                        compareByDescending<Pair<String, String>> { animeTitleMatchScore(query, it.first) }
+                            .thenBy { it.first.length }
+                    )
+                    .map { it.second }
+            }
+            .orEmpty()
+
+        return (directCandidates + searchCandidates).distinct()
+    }
+
+    private suspend fun fetchEpisodesFromSeries(seriesUrl: String, maxEpisodes: Int): List<MediaEpisode> {
+        val html = fetchHtml(seriesUrl, config.baseUrl)
+        if (html.isBlockedOrErrorPage()) return emptyList()
+
+        val doc = Ksoup.parse(html)
+        val episodes = doc.select("a[href]")
+            .mapNotNull { link ->
+                val href = link.attr("href")
+                val absoluteUrl = normalizeDonghuaUrl(href, config.baseUrl) ?: return@mapNotNull null
+                val rawTitle = link.attr("title")
+                    .ifBlank { link.select("h4, h3, h2").firstOrNull()?.text().orEmpty() }
+                    .ifBlank { link.text() }
+                    .decodeHtmlEntitiesLite()
+                val combined = "$rawTitle $absoluteUrl"
+                if (!combined.contains("episode", ignoreCase = true) && !combined.contains("/v/", ignoreCase = true)) {
+                    return@mapNotNull null
+                }
+                val episodeNumber = Regex("""(?:episode|eps?|/v/)[^0-9]{0,12}(\d+)""", RegexOption.IGNORE_CASE)
+                    .find(combined)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toIntOrNull()
+                    ?: return@mapNotNull null
+
+                MediaEpisode(
+                    title = rawTitle.cleanDonghuaEpisodeTitle(episodeNumber),
+                    url = absoluteUrl,
+                    episodeNumber = episodeNumber
+                )
+            }
+            .filterNot { it.url.contains("/anime/", ignoreCase = true) }
+            .distinctBy { it.url }
+            .sortedBy { it.episodeNumber }
+
+        if (episodes.isNotEmpty()) {
+            return episodes.take(maxEpisodes.coerceAtLeast(1))
+        }
+
+        val singlePlayer = extractPreferredDonghuaEmbedUrl(html, seriesUrl)
+            ?: extractDirectDonghuaMediaUrl(html)
+        return if (singlePlayer != null) {
+            listOf(MediaEpisode(title = "Movie", url = seriesUrl, episodeNumber = 1))
+        } else {
+            emptyList()
+        }
+    }
+
+    private suspend fun fetchHtml(url: String, referer: String): String =
+        client.get(url) {
+            BROWSER_HEADERS.forEach { (key, value) -> header(key, value) }
+            header("Referer", referer)
+        }.body()
+}
+
+private fun donghuaTitleQueries(titleQuery: String, alternateQueries: List<String>): List<String> =
+    (listOf(titleQuery) + alternateQueries)
+        .flatMap { raw ->
+            val base = raw.trim()
+            listOf(
+                base,
+                base.replace(Regex("""\([^)]*\)"""), " "),
+                base.replace(Regex("""\[[^]]*]"""), " "),
+                base.substringBefore(":"),
+                base.substringBefore("-")
+            )
+        }
+        .map { it.decodeHtmlEntitiesLite().trim() }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.normalizedAnimeTitle() }
+
+private fun String.cleanDonghuaEpisodeTitle(episodeNumber: Int): String {
+    val cleaned = replace(Regex("""\s+"""), " ")
+        .substringBefore(" - ")
+        .trim()
+    return cleaned.takeIf { it.length in 3..90 } ?: "Episode $episodeNumber"
+}
+
+private fun extractPreferredDonghuaEmbedUrl(html: String, pageUrl: String): String? {
+    val doc = Ksoup.parse(html)
+    val baseUrl = pageUrl.originOrNull() ?: pageUrl
+    val optionCandidates = doc.select("select.mirror option[value], .video-nav option[value], option[value]")
+        .mapNotNull { option ->
+            val label = option.text().decodeHtmlEntitiesLite()
+            val value = option.attr("value").decodeHtmlEntitiesLite()
+            val urls = extractDonghuaUrlsFromMirrorValue(value, baseUrl)
+            if (urls.isEmpty()) null else label to urls
+        }
+        .sortedBy { (label, _) -> donghuaMirrorPriority(label) }
+        .flatMap { it.second }
+
+    val metaCandidates = doc.select("meta[itemprop=embedUrl], meta[property=og:video], meta[property=og:video:url]")
+        .mapNotNull { it.attr("content").toDonghuaAbsoluteUrl(baseUrl) }
+
+    val iframeCandidates = doc.select("iframe[src], iframe[data-src], iframe[data-litespeed-src]")
+        .flatMap { iframe ->
+            listOf(
+                iframe.attr("src"),
+                iframe.attr("data-src"),
+                iframe.attr("data-litespeed-src")
+            )
+        }
+        .mapNotNull { it.toDonghuaAbsoluteUrl(baseUrl) }
+
+    val jsCandidates = Regex("""(?:src|file|url|embedUrl)["']?\s*[:=]\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        .findAll(html.replace("\\/", "/").decodeHtmlEntitiesLite())
+        .mapNotNull { it.groupValues.getOrNull(1)?.toDonghuaAbsoluteUrl(baseUrl) }
+        .toList()
+
+    return (optionCandidates + metaCandidates + iframeCandidates + jsCandidates)
+        .filter { it.startsWith("http", ignoreCase = true) }
+        .filterNot { it.isNonPlayableAnimeProviderUrl() }
+        .distinct()
+        .firstOrNull()
+}
+
+private fun extractDonghuaUrlsFromMirrorValue(value: String, baseUrl: String): List<String> {
+    if (value.isBlank()) return emptyList()
+    val directUrl = value.toDonghuaAbsoluteUrl(baseUrl)
+    if (directUrl != null) return listOf(directUrl)
+
+    val decoded = decodeBase64Ascii(value)?.decodeHtmlEntitiesLite().orEmpty()
+    if (decoded.isBlank()) return emptyList()
+    val doc = Ksoup.parse(decoded)
+    val iframeUrls = doc.select("iframe[src], iframe[data-src], iframe[data-litespeed-src]")
+        .flatMap { iframe ->
+            listOf(
+                iframe.attr("src"),
+                iframe.attr("data-src"),
+                iframe.attr("data-litespeed-src")
+            )
+        }
+        .mapNotNull { it.toDonghuaAbsoluteUrl(baseUrl) }
+    val regexUrls = Regex("""https?://[^\s"'<>]+""")
+        .findAll(decoded)
+        .map { it.value.decodeHtmlEntitiesLite() }
+        .toList()
+    return (iframeUrls + regexUrls).distinct()
+}
+
+private fun donghuaMirrorPriority(label: String): Int {
+    val lower = label.lowercase()
+    return when {
+        "all sub" in lower -> 0
+        "vid hide" in lower || "vidhide" in lower || "streamplay" in lower -> 1
+        "rumble" in lower -> 2
+        "dailymotion" in lower -> 3
+        "multiple sub" in lower || "eng+indo" in lower || "indo + eng" in lower -> 4
+        "ok.ru" in lower || "ok ru" in lower -> 5
+        else -> 9
+    }
+}
+
+private fun extractDirectDonghuaMediaUrl(html: String): String? {
+    val cleaned = html
+        .replace("\\/", "/")
+        .replace("\\u0026", "&")
+        .decodeHtmlEntitiesLite()
+    val patterns = listOf(
+        Regex("""https?://[^\s"'<>]+\.m3u8[^\s"'<>]*""", RegexOption.IGNORE_CASE),
+        Regex("""https?://[^\s"'<>]+\.mp4[^\s"'<>]*""", RegexOption.IGNORE_CASE),
+        Regex("""["'](?:file|src|url)["']\s*:\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']""", RegexOption.IGNORE_CASE),
+        Regex("""(?:file|src|url)\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']""", RegexOption.IGNORE_CASE)
+    )
+    return patterns.firstNotNullOfOrNull { pattern ->
+        pattern.find(cleaned)?.let { match ->
+            match.groupValues.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: match.value.trim('"', '\'')
+        }
+    }?.decodeHtmlEntitiesLite()
+}
+
+private fun normalizeDonghuaUrl(rawUrl: String, baseUrl: String): String? =
+    rawUrl.toDonghuaAbsoluteUrl(baseUrl)?.substringBefore("#")?.trim()
+
+private fun String.toDonghuaAbsoluteUrl(baseUrl: String): String? {
+    val cleaned = trim().decodeHtmlEntitiesLite()
+    if (cleaned.isBlank() || cleaned.startsWith("javascript:", ignoreCase = true) || cleaned == "about:blank") return null
+    return when {
+        cleaned.startsWith("//") -> "https:$cleaned"
+        cleaned.startsWith("http://") || cleaned.startsWith("https://") -> cleaned
+        cleaned.startsWith("/") -> baseUrl.trimEnd('/') + cleaned
+        else -> null
+    }
+}
+
+private fun decodeBase64Ascii(value: String): String? = runCatching {
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    val cleaned = value.filterNot { it.isWhitespace() }
+    val bytes = mutableListOf<Byte>()
+    var buffer = 0
+    var bits = 0
+    for (char in cleaned) {
+        if (char == '=') break
+        val index = alphabet.indexOf(char)
+        if (index < 0) return@runCatching null
+        buffer = (buffer shl 6) or index
+        bits += 6
+        if (bits >= 8) {
+            bits -= 8
+            bytes += ((buffer shr bits) and 0xff).toByte()
+        }
+    }
+    bytes.toByteArray().decodeToString()
+}.getOrNull()
+
 class ConsumetAnimeScraper(private val client: HttpClient) {
     companion object {
         private const val MARKER_PREFIX = "consumet://"

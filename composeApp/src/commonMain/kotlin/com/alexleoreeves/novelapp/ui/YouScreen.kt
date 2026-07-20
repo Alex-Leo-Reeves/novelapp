@@ -37,9 +37,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.data.AppTheme
 import com.alexleoreeves.novelapp.data.AppUpdateManifest
 import com.alexleoreeves.novelapp.data.AuthApi
@@ -97,7 +100,8 @@ fun YouScreen(
     onResumeRead: (ReadHistoryItem) -> Unit,
     onResumeWatch: (WatchHistoryItem) -> Unit,
     onSubscribePlan: (String) -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    ttsController: SherpaNarrationController
 ) {
     val scope = rememberCoroutineScope()
     val client = remember {
@@ -252,6 +256,9 @@ fun YouScreen(
                 currentTheme = currentTheme,
                 onClick = { linkOpener.open(DeveloperContact.WHATSAPP_CHANNEL_URL) }
             )
+
+            SectionTitle("Voice Settings", currentTheme)
+            VoiceSettingsCard(ttsController, currentTheme)
 
             SectionTitle("App update", currentTheme)
             UpdateCard(
@@ -799,9 +806,123 @@ private fun UpdateCard(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Install update", color = Color.White)
+                        Text("Download", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+        }
+    }
+}
+
+private val VCTK_VOICES = listOf(
+    Pair(0, "Female 1 (Clear)"),
+    Pair(5, "Female 2"),
+    Pair(6, "Female 3"),
+    Pair(17, "Male 1 (Clear)"),
+    Pair(18, "Male 2"),
+    Pair(14, "Male 3")
+)
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun VoiceSettingsCard(
+    ttsController: SherpaNarrationController,
+    currentTheme: AppTheme
+) {
+    val narrationSettings by ttsController.settings.collectAsState()
+    
+    Card(
+        colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            VoiceSelectorRow(
+                label = "Narrator Voice",
+                selectedVoiceId = narrationSettings.narratorVoiceId,
+                currentTheme = currentTheme,
+                onVoiceSelected = { newId ->
+                    ttsController.updateSettings { it.copy(narratorVoiceId = newId) }
+                },
+                onTestPlay = { ttsController.testVoice(narrationSettings.narratorVoiceId) }
+            )
+            
+            androidx.compose.material3.HorizontalDivider(color = currentTheme.subTextColor().copy(alpha = 0.2f))
+            
+            VoiceSelectorRow(
+                label = "Character Voice",
+                selectedVoiceId = narrationSettings.characterVoiceId,
+                currentTheme = currentTheme,
+                onVoiceSelected = { newId ->
+                    ttsController.updateSettings { it.copy(characterVoiceId = newId) }
+                },
+                onTestPlay = { ttsController.testVoice(narrationSettings.characterVoiceId) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceSelectorRow(
+    label: String,
+    selectedVoiceId: Int,
+    currentTheme: AppTheme,
+    onVoiceSelected: (Int) -> Unit,
+    onTestPlay: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedVoiceName = VCTK_VOICES.find { it.first == selectedVoiceId }?.second ?: "Voice $selectedVoiceId"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color = currentTheme.textColor(),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                Text(
+                    text = selectedVoiceName,
+                    color = currentTheme.accentColor(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .clickable { expanded = true }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+                androidx.compose.material3.DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(currentTheme.surfaceColor())
+                ) {
+                    VCTK_VOICES.forEach { (id, name) ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(name, color = currentTheme.textColor()) },
+                            onClick = {
+                                onVoiceSelected(id)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            
+            androidx.compose.material3.IconButton(onClick = onTestPlay, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    Icons.Default.PlayCircle,
+                    contentDescription = "Test Play",
+                    tint = currentTheme.accentColor(),
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }

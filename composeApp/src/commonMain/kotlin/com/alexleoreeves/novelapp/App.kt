@@ -64,10 +64,6 @@ fun App(
     var hasHydratedCloudState by remember { mutableStateOf(false) }
     var searchHistoryPulse by remember { mutableStateOf(0) }
     var subscriptionMessage by remember { mutableStateOf<String?>(null) }
-    var pendingOtpEmail by remember { mutableStateOf("") }
-    var pendingUsername by remember { mutableStateOf("") }
-    var showOtpScreen by remember { mutableStateOf(false) }
-    var otpIsLogin by remember { mutableStateOf(false) }
     val authApi = remember { AuthApi() }
 
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
@@ -98,6 +94,10 @@ fun App(
     val selectedWweEvent = remember { mutableStateOf<WweEvent?>(null) }
     val wweStreamUrl = remember { mutableStateOf<String?>(null) }
     val wweStreamTitle = remember { mutableStateOf("") }
+
+    // YouTube / Nollywood navigation states
+    val youtubeVideoId = remember { mutableStateOf<String?>(null) }
+    val youtubeVideoTitle = remember { mutableStateOf("") }
 
     val repository = remember {
         NovelSearchRepository(
@@ -267,33 +267,55 @@ fun App(
                     isGuestSession = true
                     currentTab.value = BottomTab.DISCOVER
                 },
-                onOtpLogin = { email ->
+                onSignIn = { email, password ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.otpLogin(email) }
-                            .onSuccess {
-                                pendingOtpEmail = email
-                                otpIsLogin = true
-                                showOtpScreen = true
+                        runCatching { authApi.login(email, password) }
+                            .onSuccess { signedIn ->
+                                userSessionStore.saveAccount(signedIn)
+                                account = signedIn
+                                isGuestSession = false
+                                hydrateCloudState(signedIn.authToken)
+                                queueCloudSync()
                                 isAuthSubmitting = false
                             }
-                            .onFailure { authError = it.message ?: "Could not send OTP."; isAuthSubmitting = false }
+                            .onFailure { authError = it.message ?: "Sign in failed."; isAuthSubmitting = false }
                     }
                 },
-                onOtpSignup = { username, email, password ->
+                onCreateAccount = { username, email, password, recoverySecret ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.otpSignup(username, email, password) }
-                            .onSuccess {
-                                pendingOtpEmail = email
-                                pendingUsername = username
-                                otpIsLogin = false
-                                showOtpScreen = true
+                        runCatching { authApi.register(username, email, password, recoverySecret) }
+                            .onSuccess { created ->
+                                userSessionStore.saveAccount(created)
+                                account = created
+                                isGuestSession = false
+                                hydrateCloudState(created.authToken)
+                                queueCloudSync()
                                 isAuthSubmitting = false
                             }
                             .onFailure { authError = it.message ?: "Account creation failed."; isAuthSubmitting = false }
+                    }
+                },
+                onRecoverAccount = { recoverySecret, newPassword ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching {
+                            val recovered = authApi.recoverAccount(recoverySecret)
+                            authApi.resetPassword(recovered.authToken, newPassword)
+                        }
+                            .onSuccess { recovered ->
+                                userSessionStore.saveAccount(recovered)
+                                account = recovered
+                                isGuestSession = false
+                                hydrateCloudState(recovered.authToken)
+                                queueCloudSync()
+                                isAuthSubmitting = false
+                            }
+                            .onFailure { authError = it.message ?: "Account recovery failed."; isAuthSubmitting = false }
                     }
                 }
             )
@@ -325,10 +347,13 @@ fun App(
         }
 
         val canNavigateBack =
-            animeStreamUrl.value != null ||
+            youtubeVideoId.value != null ||
+                animeStreamUrl.value != null ||
                 maServerEmbedUrl.value != null ||
                 footballStreamUrl.value != null ||
                 selectedFootballMatch.value != null ||
+                wweStreamUrl.value != null ||
+                selectedWweEvent.value != null ||
                 selectedChapterUrl.value != null ||
                 selectedAnime.value != null ||
                 selectedMedia.value != null ||
@@ -337,6 +362,10 @@ fun App(
 
         PlatformBackHandler(enabled = canNavigateBack) {
             when {
+                youtubeVideoId.value != null -> {
+                    youtubeVideoId.value = null
+                    youtubeVideoTitle.value = ""
+                }
                 maServerEmbedUrl.value != null -> {
                     maServerEmbedUrl.value = null
                     maServerEmbedTitle.value = ""
@@ -350,6 +379,11 @@ fun App(
                     footballStreamTitle.value = ""
                 }
                 selectedFootballMatch.value != null -> selectedFootballMatch.value = null
+                wweStreamUrl.value != null -> {
+                    wweStreamUrl.value = null
+                    wweStreamTitle.value = ""
+                }
+                selectedWweEvent.value != null -> selectedWweEvent.value = null
                 selectedChapterUrl.value != null -> selectedChapterUrl.value = null
                 selectedAnime.value != null -> selectedAnime.value = null
                 selectedMedia.value != null -> selectedMedia.value = null
@@ -366,8 +400,8 @@ fun App(
             when {
                 // ── 0a. Football full-screen player ────────────────────────
                 footballStreamUrl.value != null -> {
-                    AnimePlayerScreen(
-                        streamUrl = footballStreamUrl.value!!,
+                    MaServerPlayerScreen(
+                        embedUrl = footballStreamUrl.value!!,
                         episodeTitle = footballStreamTitle.value,
                         currentTheme = appTheme.value,
                         onBack = {
@@ -387,6 +421,32 @@ fun App(
                             footballStreamTitle.value = title
                         },
                         onBack = { selectedFootballMatch.value = null }
+                    )
+                }
+
+                // ── 0c. WWE full-screen player ─────────────────────────────
+                wweStreamUrl.value != null -> {
+                    MaServerPlayerScreen(
+                        embedUrl = wweStreamUrl.value!!,
+                        episodeTitle = wweStreamTitle.value,
+                        currentTheme = appTheme.value,
+                        onBack = {
+                            wweStreamUrl.value = null
+                            wweStreamTitle.value = ""
+                        }
+                    )
+                }
+
+                // ── 0d. WWE event detail screen ────────────────────────────
+                selectedWweEvent.value != null -> {
+                    WweMatchScreen(
+                        event = selectedWweEvent.value!!,
+                        currentTheme = appTheme.value,
+                        onPlayStream = { url, title ->
+                            wweStreamUrl.value = url
+                            wweStreamTitle.value = title
+                        },
+                        onBack = { selectedWweEvent.value = null }
                     )
                 }
 
@@ -579,7 +639,21 @@ fun App(
                             selectedSourceName.value = selectedNovel.value!!.sourceName
                         },
                         onBack = { selectedNovel.value = null },
-                        requireAuth = requireAuth
+                        requireAuth = requireAuth,
+                        ttsController = ttsController
+                    )
+                }
+
+                // ── 5b. YouTube Player (Nollywood) ─────────────────────────
+                youtubeVideoId.value != null -> {
+                    YouTubePlayerScreen(
+                        videoId = youtubeVideoId.value!!,
+                        title = youtubeVideoTitle.value,
+                        currentTheme = appTheme.value,
+                        onBack = {
+                            youtubeVideoId.value = null
+                            youtubeVideoTitle.value = ""
+                        }
                     )
                 }
 
@@ -651,7 +725,28 @@ fun App(
                                         selectedWweEvent.value = event
                                     }
                                 )
-                                BottomTab.YOU -> {
+                                BottomTab.NOLLYWOOD -> NollywoodHomeScreen(
+                    currentTheme = appTheme.value,
+                    onPlayStream = { url, title, previewLimitMs ->
+                        animeStreamUrl.value = url
+                        animeEpisodeTitle.value = title
+                        animePreviewLimitMs.value = previewLimitMs
+                        animeContentKind.value = ""
+                    },
+                    onPlayYtVideo = { videoId, title ->
+                        youtubeVideoId.value = videoId
+                        youtubeVideoTitle.value = title
+                    },
+                    onPlayMaEmbed = { embedUrl, title ->
+                        maServerEmbedUrl.value = embedUrl
+                        maServerEmbedTitle.value = title
+                    },
+                    onBack = { currentTab.value = BottomTab.DISCOVER },
+                    requireAuth = requireAuth,
+                    onSubscribe = { beginPremiumCheckout("premium_3_devices") },
+                    downloadRepo = downloadRepo
+                )
+                BottomTab.YOU -> {
                                     if (account == null) {
                                         showAuthSheet = true
                                         currentTab.value = BottomTab.DISCOVER
@@ -661,6 +756,7 @@ fun App(
                                             currentTheme = appTheme.value,
                                             downloadRepo = downloadRepo,
                                             linkOpener = linkOpener,
+                                            ttsController = ttsController,
                                             onPlayEpisode = { path, title ->
                                                 selectedAnime.value = null
                                                 animeStreamUrl.value = path
@@ -763,52 +859,6 @@ fun App(
             }
         }
 
-        // ── OTP verification screen (overlays everything) ─────────────
-        if (showOtpScreen) {
-            OtpScreen(
-                email = pendingOtpEmail,
-                isSubmitting = isAuthSubmitting,
-                errorMessage = authError,
-                onClearError = { authError = null },
-                onVerify = { otp ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching { authApi.otpVerify(pendingOtpEmail, otp) }
-                            .onSuccess { verified ->
-                                userSessionStore.saveAccount(verified)
-                                account = verified
-                                isGuestSession = false
-                                showOtpScreen = false
-                                showAuthSheet = false
-                                hydrateCloudState(verified.authToken)
-                                queueCloudSync()
-                            }
-                            .onFailure { authError = it.message ?: "OTP verification failed." }
-                        isAuthSubmitting = false
-                    }
-                },
-                onResend = {
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching {
-                            if (otpIsLogin) authApi.otpLogin(pendingOtpEmail)
-                            else authApi.otpSignup(pendingUsername, pendingOtpEmail, "")
-                        }
-                            .onSuccess { isAuthSubmitting = false }
-                            .onFailure { authError = it.message ?: "Could not resend OTP."; isAuthSubmitting = false }
-                    }
-                },
-                onBack = {
-                    showOtpScreen = false
-                    pendingOtpEmail = ""
-                    authError = null
-                },
-                currentTheme = appTheme.value
-            )
-        }
-
         if (showAuthSheet) {
             AuthScreen(
                 currentTheme = appTheme.value,
@@ -820,33 +870,58 @@ fun App(
                     isGuestSession = true
                     showAuthSheet = false
                 },
-                onOtpLogin = { email ->
+                onSignIn = { email, password ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.otpLogin(email) }
-                            .onSuccess {
-                                pendingOtpEmail = email
-                                otpIsLogin = true
-                                showOtpScreen = true
+                        runCatching { authApi.login(email, password) }
+                            .onSuccess { signedIn ->
+                                userSessionStore.saveAccount(signedIn)
+                                account = signedIn
+                                isGuestSession = false
+                                showAuthSheet = false
+                                hydrateCloudState(signedIn.authToken)
+                                queueCloudSync()
                                 isAuthSubmitting = false
                             }
-                            .onFailure { authError = it.message ?: "Could not send OTP."; isAuthSubmitting = false }
+                            .onFailure { authError = it.message ?: "Sign in failed."; isAuthSubmitting = false }
                     }
                 },
-                onOtpSignup = { username, email, password ->
+                onCreateAccount = { username, email, password, recoverySecret ->
                     scope.launch {
                         isAuthSubmitting = true
                         authError = null
-                        runCatching { authApi.otpSignup(username, email, password) }
-                            .onSuccess {
-                                pendingOtpEmail = email
-                                pendingUsername = username
-                                otpIsLogin = false
-                                showOtpScreen = true
+                        runCatching { authApi.register(username, email, password, recoverySecret) }
+                            .onSuccess { created ->
+                                userSessionStore.saveAccount(created)
+                                account = created
+                                isGuestSession = false
+                                showAuthSheet = false
+                                hydrateCloudState(created.authToken)
+                                queueCloudSync()
                                 isAuthSubmitting = false
                             }
                             .onFailure { authError = it.message ?: "Account creation failed."; isAuthSubmitting = false }
+                    }
+                },
+                onRecoverAccount = { recoverySecret, newPassword ->
+                    scope.launch {
+                        isAuthSubmitting = true
+                        authError = null
+                        runCatching {
+                            val recovered = authApi.recoverAccount(recoverySecret)
+                            authApi.resetPassword(recovered.authToken, newPassword)
+                        }
+                            .onSuccess { recovered ->
+                                userSessionStore.saveAccount(recovered)
+                                account = recovered
+                                isGuestSession = false
+                                showAuthSheet = false
+                                hydrateCloudState(recovered.authToken)
+                                queueCloudSync()
+                                isAuthSubmitting = false
+                            }
+                            .onFailure { authError = it.message ?: "Account recovery failed."; isAuthSubmitting = false }
                     }
                 }
             )
@@ -984,6 +1059,7 @@ fun App(
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.Home),
     FAVORITES("Favorites", Icons.Default.Favorite),
+    NOLLYWOOD("Nollywood", Icons.Default.Flag),
     SPORTS("Sports", Icons.Default.SportsEsports),
     READ("Read", Icons.Default.MenuBook),
     YOU("You", Icons.Default.Person)

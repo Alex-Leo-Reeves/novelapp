@@ -33,7 +33,8 @@ fun NovelDetailScreen(
     onToggleFavorite: (UnifiedSearchResult) -> Unit,
     onChapterSelected: (Chapter) -> Unit,
     onBack: () -> Unit,
-    requireAuth: (() -> Unit) -> Unit
+    requireAuth: (() -> Unit) -> Unit,
+    ttsController: com.alexleoreeves.novelapp.audio.SherpaNarrationController? = null
 ) {
     val scope = rememberCoroutineScope()
     var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
@@ -448,13 +449,20 @@ fun NovelDetailScreen(
                                                 val text = repository.fetchChapterText(chapter.url, novel.sourceName)
                                                 if (text.isNotEmpty() && !text.startsWith("Failed")) {
                                                     val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
+                                                    var audioPath = ""
+                                                    if (ttsController != null) {
+                                                        audioPath = ttsController.downloadChapterAudio(text, "${novel.id}_${chapter.chapterNumber}") ?: ""
+                                                    }
+                                                    
+                                                    val combinedPath = if (audioPath.isNotBlank()) "$path|$audioPath" else path
+                                                    
                                                     if (path.isNotBlank() && isDownloadedLocalFileAvailable(path)) {
                                                         downloadRepo.addChapter(
                                                             DownloadedChapter(
                                                                 parentId = novel.id,
                                                                 chapterNumber = chapter.chapterNumber,
                                                                 chapterTitle = chapter.title,
-                                                                localFilePath = path
+                                                                localFilePath = combinedPath
                                                             )
                                                         )
                                                     } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {

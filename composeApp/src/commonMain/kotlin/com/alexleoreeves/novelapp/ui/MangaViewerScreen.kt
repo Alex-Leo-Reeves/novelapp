@@ -265,7 +265,7 @@ fun MangaViewerScreen(
                         lazyListState.animateScrollToItem(pageIndex, (targetY - 120).coerceAtLeast(0))
                     }
 
-                    ttsController.playText(panel.text)
+                    ttsController.playText(panel.text, isDialogueOnly = true)
                 }
 
                 if (autoScrollEnabled && pageIndex < pages.lastIndex) {

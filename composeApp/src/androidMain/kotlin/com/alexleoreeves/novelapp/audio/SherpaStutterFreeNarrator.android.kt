@@ -14,7 +14,7 @@ data class ParagraphTiming(
     val startTimeMs: Long,
     val durationMs: Long
 ) {
-    val words: List<String> = text.split(Regex("(?<=\\s)|(?=\\s)"))
+    val words: List<String> = text.split(Regex("\\s+")).filter { it.isNotBlank() }
 }
 
 class SherpaStutterFreeNarrator(
@@ -42,6 +42,68 @@ class SherpaStutterFreeNarrator(
     
     private var currentTimings = listOf<ParagraphTiming>()
     private var currentChapterAudio: File? = null
+
+    private var streamingJob: Job? = null
+    
+    data class ParagraphAudioData(
+        val index: Int,
+        val paragraph: String,
+        val wavBytes: ByteArray,
+        val durationMs: Long
+    )
+
+    suspend fun streamText(paragraphs: List<String>, settings: NarrationSettings, isDialogueOnly: Boolean) {
+        stop()
+        _isBuffering.value = true
+        
+        val channel = kotlinx.coroutines.channels.Channel<ParagraphAudioData>(capacity = 5)
+        
+        // Producer: Synthesize audio chunks in the background
+        val producerJob = scope.launch(Dispatchers.IO) {
+            for ((index, paragraph) in paragraphs.withIndex()) {
+                if (paragraph.isBlank()) continue
+                val result = chapterNarrator.generateAudioWavBytes(paragraph, settings, isDialogueOnly)
+                if (result != null) {
+                    channel.send(ParagraphAudioData(index, paragraph, result.first, result.second))
+                }
+            }
+            channel.close()
+        }
+        
+        // Consumer: Play chunks gaplessly using AudioTrack
+        streamingJob = scope.launch {
+            var first = true
+            for (data in channel) {
+                if (first) {
+                    _isBuffering.value = false
+                    _isPlaying.value = true
+                    first = false
+                }
+                
+                _currentParagraphIndex.value = data.index
+                
+                // Timeline tracker for words
+                val wordTrackerJob = launch {
+                    val words = data.paragraph.split(Regex("\\s+")).filter { it.isNotBlank() }
+                    if (words.isNotEmpty()) {
+                        val stepMs = data.durationMs / words.size
+                        for (i in words.indices) {
+                            _currentWordIndex.value = i
+                            delay(stepMs)
+                        }
+                    }
+                }
+                
+                // This blocks until 60ms before the segment finishes playing, ensuring smooth handoff!
+                platformPlayAudio(data.wavBytes)
+                wordTrackerJob.cancel()
+            }
+            _isPlaying.value = false
+        }
+        
+        // Tie producer to streaming job so stopping cancels both
+        streamingJob?.invokeOnCompletion { producerJob.cancel() }
+    }
 
     suspend fun loadAndPlayChapter(
         paragraphs: List<String>, 
@@ -149,21 +211,25 @@ class SherpaStutterFreeNarrator(
     }
     
     fun pause() {
-        mediaPlayer?.pause()
+        mediaPlayer?.takeIf { it.isPlaying }?.pause()
+        pausePlatformNarrationAudio()
         _isPlaying.value = false
         timelineJob?.cancel()
     }
     
     fun resume() {
         mediaPlayer?.start()
+        resumePlatformNarrationAudio()
         _isPlaying.value = true
-        startNarrationLoop()
+        if (mediaPlayer != null) startNarrationLoop()
     }
     
     fun stop() {
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
+        stopPlatformNarrationAudio()
+        streamingJob?.cancel()
         _isPlaying.value = false
         _isBuffering.value = false
         _currentParagraphIndex.value = -1

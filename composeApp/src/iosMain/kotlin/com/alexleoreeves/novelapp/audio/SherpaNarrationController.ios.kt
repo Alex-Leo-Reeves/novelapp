@@ -3,7 +3,7 @@ package com.alexleoreeves.novelapp.audio
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-actual class SherpaNarrationController {
+actual class SherpaNarrationController() {
     actual val isPlaying: StateFlow<Boolean> = MutableStateFlow(false)
     actual val currentChunkIndex: StateFlow<Int> = MutableStateFlow(0)
     actual val chunkBoundaries: StateFlow<List<Int>> = MutableStateFlow(emptyList())
@@ -22,7 +22,8 @@ actual class SherpaNarrationController {
     actual fun updateSettings(transform: (NarrationSettings) -> NarrationSettings) {}
     actual fun startSleepTimer(minutes: Int, onTimerFinished: () -> Unit) {}
     actual fun cancelSleepTimer() {}
-    actual fun playText(text: String, cacheKey: String?, persistAudioCache: Boolean) {}
+    actual fun playText(text: String, cacheKey: String?, persistAudioCache: Boolean, isDialogueOnly: Boolean) {}
+    actual fun testVoice(voiceId: Int) {}
     actual fun pause() {}
     actual fun resume() {}
     actual fun stop() {}

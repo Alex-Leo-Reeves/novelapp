@@ -65,7 +65,8 @@ class ZipComicScraper(private val httpClient: HttpClient) : ComicSource {
                 val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
                 val href = link.attr("href")
                 val img = el.select("img").firstOrNull()
-                val cover = img?.attr("data-src")?.orEmpty().orEmpty().ifBlank { img?.attr("src").orEmpty() }
+                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
+                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
                 val title = link.attr("title").ifBlank { link.text() }
                     .ifBlank { img?.attr("alt").orEmpty() }
                     .decodeHtmlEntitiesLite()
@@ -132,8 +133,11 @@ class ZipComicScraper(private val httpClient: HttpClient) : ComicSource {
             val doc = Ksoup.parse(html)
             // ZipComic loads entire issue on a single page — all <img> tags
             doc.select("div.reader-area img, div.reader img, div.comic-pages img, img[src*=/uploads/], img[src*=/comics/], img[src*=/images/]")
-                .map { it.attr("data-src").ifBlank { it.attr("src") } }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) }
+                .map { el ->
+                    listOf("data-original", "data-lazy-src", "data-src", "src")
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                }
+                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
                 .map { absoluteComicUrl(base, it) }
                 .distinct()
                 .ifEmpty {
@@ -197,7 +201,8 @@ class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
                 val href = link.attr("href")
                 if (href.isBlank() || href.contains("/page/") || href.contains("/tag/")) return@mapNotNull null
                 val img = el.select("img").firstOrNull()
-                val cover = img?.attr("data-src").orEmpty().ifBlank { img?.attr("src").orEmpty() }
+                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
+                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
                 val title = link.attr("title").ifBlank { link.text() }
                     .ifBlank { img?.attr("alt").orEmpty() }
                     .decodeHtmlEntitiesLite()
@@ -259,15 +264,21 @@ class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
             // ReadAllComics.com loads all sequential comic panels inside:
             //   <div class="scrolling-box"><img src="..." /><img src="..." />...</div>
             doc.select("div.scrolling-box img")
-                .map { it.attr("src") }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) }
+                .map { el ->
+                    listOf("data-original", "data-lazy-src", "data-src", "src")
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                }
+                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
                 .map { absoluteComicUrl(base, it) }
                 .distinct()
                 .ifEmpty {
                     // Fallback: broad <img> extraction if scrolling-box isn't found
                     doc.select("div.entry-content img, div.reader img, div.comic img, div.thecontent img, img[src*=/comic/]")
-                        .map { it.attr("data-src").ifBlank { it.attr("src") } }
-                        .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) }
+                        .map { el ->
+                            listOf("data-original", "data-lazy-src", "data-src", "src")
+                                .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                        }
+                        .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
                         .map { absoluteComicUrl(base, it) }
                         .distinct()
                 }
@@ -331,7 +342,8 @@ class BatCaveScraper(private val httpClient: HttpClient) : ComicSource {
                 val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
                 val href = link.attr("href")
                 val img = el.select("img").firstOrNull()
-                val cover = img?.attr("data-src").orEmpty().ifBlank { img?.attr("src").orEmpty() }
+                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
+                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
                 val title = link.attr("title").ifBlank { link.text() }
                     .ifBlank { img?.attr("alt").orEmpty() }
                     .decodeHtmlEntitiesLite()
@@ -391,8 +403,11 @@ class BatCaveScraper(private val httpClient: HttpClient) : ComicSource {
 
             val doc = Ksoup.parse(html)
             doc.select("div.reader-area img, div.reader img, div.comic img, img[src*=/uploads/], img[src*=/comics/]")
-                .map { it.attr("data-src").ifBlank { it.attr("src") } }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) }
+                .map { el ->
+                    listOf("data-original", "data-lazy-src", "data-src", "src")
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                }
+                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
                 .map { absoluteComicUrl(base, it) }
                 .distinct()
                 .ifEmpty {
@@ -458,7 +473,8 @@ class ReadComicOnlineScraper(private val httpClient: HttpClient) : ComicSource {
                 val link = el.select("a[href*=/Comic/]").firstOrNull() ?: return@mapNotNull null
                 val href = link.attr("href")
                 val img = el.select("img").firstOrNull()
-                val cover = img?.attr("data-src").orEmpty().ifBlank { img?.attr("src").orEmpty() }
+                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
+                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
                 val title = link.attr("title").ifBlank { link.text() }
                     .ifBlank { img?.attr("alt").orEmpty() }
                     .decodeHtmlEntitiesLite()
@@ -524,8 +540,11 @@ class ReadComicOnlineScraper(private val httpClient: HttpClient) : ComicSource {
             val doc = Ksoup.parse(html)
             // ReadComicOnline loads all pages as <img> tags inside the reader
             val images = doc.select("div.reader-area img, div.reader img, div#divImage img, p img, img[src*=/uploads/], img[src*=/manga/]")
-                .map { it.attr("src") }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("discord", ignoreCase = true) }
+                .map { el ->
+                    listOf("data-original", "data-lazy-src", "data-src", "src")
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                }
+                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("discord", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
                 .map { absoluteComicUrl(base, it) }
                 .distinct()
 
@@ -592,7 +611,8 @@ class ViewComicScraper(private val httpClient: HttpClient) : ComicSource {
                 val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
                 val href = link.attr("href")
                 val img = el.select("img").firstOrNull()
-                val cover = img?.attr("data-src").orEmpty().ifBlank { img?.attr("src").orEmpty() }
+                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
+                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
                 val title = link.attr("title").ifBlank { link.text() }
                     .ifBlank { img?.attr("alt").orEmpty() }
                     .decodeHtmlEntitiesLite()
@@ -654,9 +674,12 @@ class ViewComicScraper(private val httpClient: HttpClient) : ComicSource {
 
             val doc = Ksoup.parse(html)
             val images = doc.select("div.reader-area img, div.reader img, div.comic img, div.chapter-content img, img[src*=/uploads/], img[src*=/comics/]")
-                .map { it.attr("data-src").ifBlank { it.attr("src") } }
+                .map { el ->
+                    listOf("data-original", "data-lazy-src", "data-src", "src")
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                }
                 .filter { it.isNotBlank() }
-                .filterNot { it.contains("logo", ignoreCase = true) || it.contains("avatar", ignoreCase = true) || it.contains("discord", ignoreCase = true) }
+                .filterNot { it.contains("logo", ignoreCase = true) || it.contains("avatar", ignoreCase = true) || it.contains("discord", ignoreCase = true) || it.contains("dummy", ignoreCase = true) || it.contains("blank", ignoreCase = true) || it.contains("spacer", ignoreCase = true) }
                 .map { absoluteComicUrl(base, it) }
                 .distinct()
 

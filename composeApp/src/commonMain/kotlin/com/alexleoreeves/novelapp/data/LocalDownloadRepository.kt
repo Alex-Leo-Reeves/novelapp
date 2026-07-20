@@ -183,7 +183,8 @@ class LocalDownloadRepository {
         }
 
     private fun isChapterLocalAvailable(chapter: DownloadedChapter): Boolean {
-        val paths = chapter.localFilePath.split(",")
+        // Split by either comma (for manga pages) or pipe (for novel text|audio)
+        val paths = chapter.localFilePath.split(Regex("[,|]"))
             .map { it.trim() }
             .filter { it.isNotBlank() }
         return paths.isNotEmpty() && paths.all { isDownloadedLocalFileAvailable(it) }

@@ -1,14 +1,16 @@
 {
-  "versionCode": 35,
-  "versionName": "1.35",
-  "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
-  "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-  "releaseNotes": [
-    "Migrated offline TTS to stutter-free Sherpa-ONNX Engine",
-    "Removed buggy Kokoro implementation",
-    "Upgraded background audio queue architecture for continuous playback"
-  ],
-  "forceUpdate": false,
-  "apkBytes": 216715463,
-  "apkSha256": "80d45640bafa33c7029eaf31958868917e4f00ab9e73faac62eab041ee0f20f7"
+    "versionCode": 37,
+    "versionName": "1.37",
+    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+    "releaseNotes": [
+        "Rebuilt Sherpa-ONNX offline TTS engine for stutter-free narration",
+        "Improved anime, comic, football and WWE stream scrapers",
+        "Refreshed auth flow — removed legacy OTP screen",
+        "Polished media detail, reader and library screens",
+        "TV app: revamped sports screen and navigation fixes"
+    ],
+    "forceUpdate": false,
+    "apkBytes": 297106340,
+    "apkSha256": "1ba8a10843aa2b7506dd88d53ba9f242a11c80662eca256a23fe466ade57c1e2"
 }

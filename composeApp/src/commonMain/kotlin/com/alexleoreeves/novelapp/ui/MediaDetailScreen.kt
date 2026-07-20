@@ -46,6 +46,8 @@ fun MediaDetailScreen(
     val cartoonScraper = remember { KimCartoonScraper(httpClient) }
     val wcoStreamScraper = remember { WcoStreamScraper(httpClient) }
     val youtubeNollywoodScraper = remember { YouTubeNollywoodScraper(httpClient) }
+    val donghuaStreamScraper = remember { DonghuaSiteScraper.donghuaStream(httpClient) }
+    val luciferDonghuaScraper = remember { DonghuaSiteScraper.luciferDonghua(httpClient) }
 
     val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
@@ -67,27 +69,58 @@ fun MediaDetailScreen(
     val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
 
     // ── Server selector ──────────────────────────────────────────────
-    // All 4 servers displayed inline. Default to Server 1 (VidLink).
+    // All 2 servers displayed inline. Default to Server 1 (VidLink).
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
 
-    // Route Server 1 (VidLink) → ExoPlayer via onPlayStream
-    // Route Server 2/3/4 (Videasy, VidFast, 111Movies) → WebView via onPlayMaEmbed
     fun playWithServer(embedUrl: String, title: String, previewLimitMs: Long?) {
-        if (selectedServer == StreamServer.VIDLINK) {
-            onPlayStream(embedUrl, title, previewLimitMs)
-        } else {
-            onPlayMaEmbed(embedUrl, title)
-        }
+        onPlayStream(embedUrl, title, previewLimitMs)
     }
 
     fun playEpisodeWithServer(embedUrl: String, title: String) {
-        if (selectedServer == StreamServer.VIDLINK) {
-            onPlayStream(embedUrl, title, null)
-        } else {
-            onPlayMaEmbed(embedUrl, title)
+        onPlayStream(embedUrl, title, null)
+    }
+
+    fun selectedDonghuaScraper(): DonghuaSiteScraper =
+        when (selectedDonghuaServer) {
+            DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
+            DonghuaServer.LUCIFER_DONGHUA -> luciferDonghuaScraper
+            DonghuaServer.TWOEMBED -> donghuaStreamScraper
         }
+
+    fun resolveDonghuaTwoEmbedUrl(ep: MediaEpisode): String? {
+        val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+        val detailType = detailParts.getOrNull(0).orEmpty()
+        val detailTmdbId = detailParts.getOrNull(1).orEmpty()
+        if (!item.detailPageUrl.startsWith("tmdb://") || detailTmdbId.isBlank()) return null
+
+        return if (detailType == "movie") {
+            StreamServer.TWOEMBED.buildEmbedUrl(detailTmdbId, "movie", "1", "1")
+        } else {
+            val urlParts = ep.url.split(":")
+            val season = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+            val episode = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() }
+                ?: ep.episodeNumber.coerceAtLeast(1).toString()
+            StreamServer.TWOEMBED.buildEmbedUrl(detailTmdbId, "tv", season, episode)
+        }
+    }
+
+    suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? =
+        if (selectedDonghuaServer == DonghuaServer.TWOEMBED) {
+            resolveDonghuaTwoEmbedUrl(ep)
+        } else {
+            selectedDonghuaScraper().resolveEpisodePlayerUrl(ep.url)
+                ?: ep.url.takeIf { it.isNotBlank() }
+        }
+
+    suspend fun resolveDownloadableStreamUrl(sourceUrl: String): String? {
+        val trimmed = sourceUrl.trim()
+        if (trimmed.isBlank()) return null
+        if (trimmed.isDirectPlayableStreamUrl()) return trimmed
+        return extractStreamFromEmbed(trimmed, timeoutMs = 30_000L)
+            ?.takeIf { it.isDirectPlayableStreamUrl() }
     }
     val freeEpisodeCount = remember(episodesList, isPremium) {
         if (isPremium || episodesList.isEmpty()) episodesList.size
@@ -130,7 +163,8 @@ fun MediaDetailScreen(
                             )
                         )
 
-                        val embedUrl = when {
+                        val sourceUrl = when {
+                            isDonghuaItem -> resolveDonghuaEpisodeUrl(ep)
                             isTmdbDetail -> {
                                 val urlParts = ep.url.split(":")
                                 val tvId = urlParts.getOrNull(1) ?: tmdbId
@@ -163,12 +197,13 @@ fun MediaDetailScreen(
                             else -> ep.url
                         }
 
-                        if (embedUrl != null) {
+                        val downloadUrl = sourceUrl?.let { resolveDownloadableStreamUrl(it) }
+                        if (downloadUrl != null) {
                             statusText = "Downloading Episode ${ep.episodeNumber}..."
                             val saved = saveDownloadedVideo(
                                 parentId = item.id,
                                 episodeNumber = ep.episodeNumber,
-                                sourceUrl = embedUrl
+                                sourceUrl = downloadUrl
                             )
                             if (saved.success) {
                                 downloadRepo.addEpisode(
@@ -204,13 +239,18 @@ fun MediaDetailScreen(
         }
     }
 
-    LaunchedEffect(item.detailPageUrl) {
+    LaunchedEffect(item.detailPageUrl, selectedDonghuaServer) {
         providerTmdbId = ""
         providerTmdbType = "tv"
         isLoadingEpisodes = true
 
         // Phase 1: Load episodes from the URL the item came from
         val initialEpisodes = when {
+            isDonghuaItem -> selectedDonghuaScraper().fetchEpisodes(
+                titleQuery = item.title,
+                alternateQueries = listOf(item.title.substringBefore(":")),
+                maxEpisodes = 300
+            )
             isTmdbDetail -> {
                 if (mediaType == "tv") {
                     tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
@@ -224,11 +264,14 @@ fun MediaDetailScreen(
             else -> emptyList()
         }
         episodesList = initialEpisodes
+        if (isDonghuaItem && initialEpisodes.isNotEmpty()) {
+            isMovieContent = false
+        }
 
         // Phase 2: If episodes are still empty (or it's a movie without a TMDB ID),
         // try to find a TMDB match by title and load episodes from it.
         val isMovie = mediaType == "movie"
-        val needsTmdbMatch = (episodesList.isEmpty() && !isMovie) || (isMovie && !isTmdbDetail)
+        val needsTmdbMatch = !isDonghuaItem && ((episodesList.isEmpty() && !isMovie) || (isMovie && !isTmdbDetail))
         if (needsTmdbMatch) {
             val tmdbMatch = runCatching {
                 tmdbScraper.search(item.title)
@@ -261,7 +304,7 @@ fun MediaDetailScreen(
         }
 
         // Phase 3: Broader search fallback
-        if (episodesList.isEmpty() && !isMovieContent) {
+        if (!isDonghuaItem && episodesList.isEmpty() && !isMovieContent) {
             val genreHint = when {
                 item.mediaKind == VideoCategory.K_DRAMA.name -> "korean drama"
                 item.mediaKind == VideoCategory.CARTOON.name -> "cartoon"
@@ -289,10 +332,23 @@ fun MediaDetailScreen(
 
     val playEpisode: (MediaEpisode) -> Unit = { ep ->
         scope.launch {
-            statusText = "Resolving stream via ${selectedServer.displayName}..."
+            val serverLabel = if (isDonghuaItem) {
+                "${selectedDonghuaServer.displayName} (${selectedDonghuaServer.providerName})"
+            } else {
+                selectedServer.displayName
+            }
+            statusText = "Resolving stream via $serverLabel..."
 
             // Build the embed URL using the selected server's URL builder
             val embedUrl = when {
+                isDonghuaItem -> {
+                    val resolved = resolveDonghuaEpisodeUrl(ep)
+                    if (resolved == null) {
+                        statusText = "Donghua stream unavailable. Try a different server."
+                        return@launch
+                    }
+                    resolved
+                }
                 isTmdbDetail -> {
                     val urlParts = ep.url.split(":")
                     val tvId = urlParts.getOrNull(1) ?: tmdbId
@@ -340,14 +396,8 @@ fun MediaDetailScreen(
                 else -> ep.url
             }
 
-            // Route based on selected server:
-            // Server 1 (VidLink) → ExoPlayer (scrapes HLS via extractStreamFromEmbed)
-            // Server 2/3/4 (Videasy, VidFast, 111Movies) → WebView embed player
-            if (selectedServer == StreamServer.VIDLINK) {
-                onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
-            } else {
-                onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
-            }
+            // Route to ExoPlayer. Embed pages are resolved by AnimePlayerScreen's hidden WebView.
+            onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
         }
     }
 
@@ -430,14 +480,41 @@ fun MediaDetailScreen(
                 )
             }
 
-            // ── Server Selector — 4 servers inline ─────────────────────────
+            // ── Server Selector — 2 servers inline ─────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StreamServer.ALL_IN_ORDER.forEach { server ->
-                    val isSelected = selectedServer == server
+                if (isDonghuaItem) {
+                    DonghuaServer.ALL_IN_ORDER.forEach { server ->
+                        val isSelected = selectedDonghuaServer == server
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedDonghuaServer = server },
+                            label = {
+                                Text(
+                                    server.displayName,
+                                    color = if (isSelected) Color.White else currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = currentTheme.accentColor(),
+                                containerColor = currentTheme.cardColor(),
+                                labelColor = currentTheme.subTextColor()
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true, selected = isSelected,
+                                selectedBorderColor = currentTheme.accentColor(),
+                                borderColor = currentTheme.subTextColor().copy(0.3f)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
+                } else {
+                    StreamServer.ALL_IN_ORDER.forEach { server ->
+                        val isSelected = selectedServer == server
                     FilterChip(
                         selected = isSelected,
                         onClick = { selectedServer = server },
@@ -460,6 +537,7 @@ fun MediaDetailScreen(
                         ),
                         shape = RoundedCornerShape(20.dp)
                     )
+                    }
                 }
             }
 
@@ -498,7 +576,8 @@ fun MediaDetailScreen(
             }
 
             // Movie: Single Play button
-            val hasMovieId = (isTmdbDetail && mediaType == "movie") || (providerTmdbType == "movie" && providerTmdbId.isNotBlank())
+            val hasMovieId = !isDonghuaItem &&
+                ((isTmdbDetail && mediaType == "movie") || (providerTmdbType == "movie" && providerTmdbId.isNotBlank()))
             if (hasMovieId) {
                 if (!isPremium) {
                     Surface(
@@ -556,10 +635,11 @@ fun MediaDetailScreen(
                                         try {
                                             downloadRepo.addItem(DownloadedItem(item.id, item.title, item.coverUrl, contentTypeForItem(), item.sourceName))
                                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
-                                            val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                                            if (embedUrl != null) {
+                                            val sourceUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
+                                            val downloadUrl = resolveDownloadableStreamUrl(sourceUrl)
+                                            if (downloadUrl != null) {
                                                 statusText = "Downloading movie..."
-                                                val saved = saveDownloadedVideo(item.id, 1, embedUrl)
+                                                val saved = saveDownloadedVideo(item.id, 1, downloadUrl)
                                                 if (saved.success) {
                                                     downloadRepo.addEpisode(DownloadedEpisode(item.id, 1, item.title, saved.localPath, saved.fileSizeBytes))
                                                     statusText = "Movie saved offline."
