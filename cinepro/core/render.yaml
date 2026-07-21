@@ -23,6 +23,8 @@ services:
             value: '*'
           - key: MCP_ENABLED
             value: 'true'
+          - key: HOST
+            value: '0.0.0.0'
           - key: TMDB_API_KEY
             sync: false
             value: f728f7197fc9c3a7dfb35d78478d7e8e
