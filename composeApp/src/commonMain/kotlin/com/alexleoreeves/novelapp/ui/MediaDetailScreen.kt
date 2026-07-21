@@ -345,7 +345,7 @@ fun MediaDetailScreen(
                 val tvId = urlParts.getOrNull(1) ?: tmdbId
                 val s = urlParts.getOrNull(2) ?: "1"
                 val e = urlParts.getOrNull(3) ?: "1"
-                val serverBase = "https://novelapp1.onrender.com"
+                val serverBase = AppReleaseConfig.SERVER_BASE_URL
                 val sources = resolveAllCineProSources(httpClient, serverBase, "tv", tvId, s, e)
                 if (sources.isEmpty()) {
                     statusText = "CinePro returned no streams. Try another server."
@@ -644,7 +644,7 @@ fun MediaDetailScreen(
                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
                             // ── CinePro: Fetch ALL direct stream sources from the server ─
                             if (selectedServer == StreamServer.CINEPRO) {
-                                val serverBase = "https://novelapp1.onrender.com"
+                                val serverBase = AppReleaseConfig.SERVER_BASE_URL
                                 val sources = resolveAllCineProSources(httpClient, serverBase, "movie", resolvedTmdbId)
                                 if (sources.isEmpty()) {
                                     statusText = "CinePro returned no streams. Try another server."
