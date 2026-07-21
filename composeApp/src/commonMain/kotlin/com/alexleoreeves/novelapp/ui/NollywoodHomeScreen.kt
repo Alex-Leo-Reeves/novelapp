@@ -52,7 +52,7 @@ private val nigerianGreen = Color(0xFF008751)
 @Composable
 fun NollywoodHomeScreen(
     currentTheme: AppTheme,
-    onPlayStream: (String, String, Long?) -> Unit,
+    onPlayStream: (String, String, Long?, String?) -> Unit,
     onPlayYtVideo: (String, String) -> Unit,
     onPlayMaEmbed: (String, String) -> Unit,
     onBack: () -> Unit,
@@ -142,7 +142,7 @@ fun NollywoodHomeScreen(
                 scope.launch {
                     val streamUrl = resolveYouTubePipedStream(httpClient, videoId)
                     if (streamUrl != null) {
-                        onPlayStream(streamUrl, title, null)
+                        onPlayStream(streamUrl, title, null, null)
                     }
                 }
             },

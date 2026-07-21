@@ -1,13 +1,14 @@
 {
-    "versionCode": 37,
-    "versionName": "1.37",
+    "versionCode": 38,
+    "versionName": "1.38",
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Rebuilt Sherpa-ONNX offline TTS engine for stutter-free narration",
+        "Fixed subtitle toggle causing black screen in ExoPlayer",
+        "CinePro Sub 1 subtitles now reach ExoPlayer properly",
+        "Fixed 30 syntax errors in server/index.js (optional chaining)",
+        "Removed unused Kokoro TTS binary assets to free space",
         "Improved anime, comic, football and WWE stream scrapers",
-        "Refreshed auth flow — removed legacy OTP screen",
-        "Polished media detail, reader and library screens",
         "TV app: revamped sports screen and navigation fixes"
     ],
     "forceUpdate": false,

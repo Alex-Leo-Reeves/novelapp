@@ -32,8 +32,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp.tv"
         minSdk = 21    // Android TV minimum
         targetSdk = 35
-        versionCode = 37
-        versionName = "1.37"
+        versionCode = 38
+        versionName = "1.38"
     }
 
     buildTypes {

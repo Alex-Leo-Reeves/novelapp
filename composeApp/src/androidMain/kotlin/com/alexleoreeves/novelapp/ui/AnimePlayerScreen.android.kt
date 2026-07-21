@@ -67,6 +67,7 @@ actual fun AnimePlayerScreen(
     previewLimitMs: Long?,
     onPreviewFinished: () -> Unit,
     contentKind: String,
+    subtitlesJson: String?,
     onBack: () -> Unit
 ) {
     val isDonghua = contentKind.equals("donghua", ignoreCase = true)
@@ -102,7 +103,8 @@ actual fun AnimePlayerScreen(
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
     var resolvedUrl by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var resolvedSourceUrl by remember(streamUrl, retryKey) { mutableStateOf(streamUrl) }
-    var subtitlesJson by remember(streamUrl, retryKey) { mutableStateOf(subtitlesJson) }
+    val _paramSubtitles = subtitlesJson
+    var subtitlesJson by remember(streamUrl, retryKey) { mutableStateOf(_paramSubtitles) }
     var isResolving by remember(streamUrl, retryKey) { mutableStateOf(true) }
     var resolveError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var resolveFailed by remember(streamUrl, retryKey) { mutableStateOf(false) }
