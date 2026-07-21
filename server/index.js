@@ -1985,7 +1985,7 @@ async function cineProviderRoute(mediaType, id, season = "1", episode = "1") {
  * Returns every source as a flat array for the client to try one by one.
  */
 async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
-  if (!CINEPRO_BASE_URL || typeof fetch !== "function") return [];
+  if (!CINEPRO_BASE_URL || typeof fetch !== "function") return { sources: [], subtitles: [] };
   const endpoint = mediaType === "movie"
     ? `${CINEPRO_BASE_URL}/movie/${encodeURIComponent(id)}`
     : `${CINEPRO_BASE_URL}/tv/${encodeURIComponent(id)}?s=${encodeURIComponent(season || "1")}&e=${encodeURIComponent(episode || "1")}`;
@@ -1994,6 +1994,7 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
       headers: { accept: "application/json" }
     }, 20000);
     const sources = Array.isArray(payload?.sources) ? payload.sources : [];
+    const subtitles = Array.isArray(payload?.subtitles) ? payload.subtitles : [];
     // Flatten: collect ALL source URLs (not just the first direct one)
     const results = [];
     const collectSources = (obj, depth = 0) => {
@@ -2045,10 +2046,10 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
       seen.add(key);
       return true;
     });
-    return deduped;
+    return { sources: deduped, subtitles };
   } catch (error) {
     console.warn("[cinepro] Source fetch failed:", error.message || error);
-    return [];
+    return { sources: [], subtitles: [] };
   }
 }
 
@@ -2068,9 +2069,11 @@ async function handleCineproSources(request, response) {
     if (!CINEPRO_BASE_URL) {
       return sendApiData(response, 200, { sources: [], message: "CinePro is not configured on this server." });
     }
-    const sources = await cineproAllSources(mediaType, id, season, episode);
+    const { sources, subtitles } = await cineproAllSources(mediaType, id, season, episode);
+    const subtitleTracks = Array.isArray(subtitles) ? subtitles.filter(s => s?.url && (s.url.startsWith("http") || s.url.startsWith("/"))) : [];
     return sendApiData(response, 200, {
       sources,
+      subtitles: subtitleTracks,
       cineproEnabled: true,
       message: sources.length > 0 ? `Found ${sources.length} stream(s)` : "No streams returned by CinePro"
     });

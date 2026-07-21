@@ -82,6 +82,7 @@ fun App(
     val animeEpisodeNumber = remember { mutableStateOf(0) }
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
     val animeContentKind = remember { mutableStateOf("") }
+    val animeSubtitlesJson = remember { mutableStateOf<String?>(null) }
 
     // MA Server WebView embed player state (for Server 2/3/4)
     val maServerEmbedUrl = remember { mutableStateOf<String?>(null) }
@@ -479,6 +480,7 @@ fun App(
                             subscriptionMessage = "Free preview ended. Subscribe for full movies, cartoons, and K-drama."
                         },
                         contentKind = animeContentKind.value,
+                        subtitlesJson = animeSubtitlesJson.value,
                         onBack = {
                             animeStreamUrl.value = null
                             animePreviewLimitMs.value = null
@@ -590,10 +592,11 @@ fun App(
                         downloadRepo = downloadRepo,
                         requireAuth = requireAuth,
                         onSubscribe = { beginPremiumCheckout("premium_3_devices") },
-                        onPlayStream = { url, title, previewLimitMs ->
+                        onPlayStream = { url, title, previewLimitMs, subtitlesJson ->
                             animeStreamUrl.value = url
                             animeEpisodeTitle.value = title
                             animePreviewLimitMs.value = previewLimitMs
+                            animeSubtitlesJson.value = subtitlesJson
                             // Derive content kind from media kind for proper audio/sub labels
                             animeContentKind.value = selectedMedia.value?.let { item ->
                                 if (item.mediaKind.equals(VideoCategory.ANIME.name, ignoreCase = true)) "anime"

@@ -35,7 +35,7 @@ fun MediaDetailScreen(
     downloadRepo: LocalDownloadRepository,
     requireAuth: (() -> Unit) -> Unit,
     onSubscribe: () -> Unit,
-    onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?) -> Unit,
+    onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?, subtitlesJson: String?) -> Unit,
     onPlayMaEmbed: (embedUrl: String, title: String) -> Unit = { _, _ -> },
     onBack: () -> Unit
 ) {
@@ -346,7 +346,9 @@ fun MediaDetailScreen(
                 val s = urlParts.getOrNull(2) ?: "1"
                 val e = urlParts.getOrNull(3) ?: "1"
                 val serverBase = AppReleaseConfig.SERVER_BASE_URL
-                val sources = resolveAllCineProSources(httpClient, serverBase, "tv", tvId, s, e)
+                val result = resolveAllCineProSources(httpClient, serverBase, "tv", tvId, s, e)
+                val sources = result.sources
+                val subtitlesJson = result.subtitlesJson
                 if (sources.isEmpty()) {
                     statusText = "CinePro returned no streams. Try another server."
                     return@launch
@@ -356,7 +358,7 @@ fun MediaDetailScreen(
                     statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
                     if (source.url.isDirectPlayableStreamUrl()) {
                         statusText = ""
-                        onPlayStream(source.url, "${item.title} - ${ep.title}", null)
+                        onPlayStream(source.url, "${item.title} - ${ep.title}", null, subtitlesJson)
                         return@launch
                     }
                 }
@@ -427,7 +429,7 @@ fun MediaDetailScreen(
             // Non-donghua: visible WebView for both S1/S2 (WebGL/anti-bot handling).
             if (isDonghuaItem) {
                 when (selectedDonghuaServer) {
-                    DonghuaServer.DONGHUA_STREAM -> onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
+                    DonghuaServer.DONGHUA_STREAM -> onPlayStream(embedUrl, "${item.title} - ${ep.title}", null, null)
                     DonghuaServer.LUCIFER_DONGHUA, DonghuaServer.TWOEMBED -> onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
                 }
             } else {
@@ -645,7 +647,9 @@ fun MediaDetailScreen(
                             // ── CinePro: Fetch ALL direct stream sources from the server ─
                             if (selectedServer == StreamServer.CINEPRO) {
                                 val serverBase = AppReleaseConfig.SERVER_BASE_URL
-                                val sources = resolveAllCineProSources(httpClient, serverBase, "movie", resolvedTmdbId)
+                                val result = resolveAllCineProSources(httpClient, serverBase, "movie", resolvedTmdbId)
+                                val sources = result.sources
+                                val subtitlesJson = result.subtitlesJson
                                 if (sources.isEmpty()) {
                                     statusText = "CinePro returned no streams. Try another server."
                                     return@launch
@@ -654,7 +658,7 @@ fun MediaDetailScreen(
                                     statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
                                     if (source.url.isDirectPlayableStreamUrl()) {
                                         statusText = ""
-                                        onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs)
+                                        onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson)
                                         return@launch
                                     }
                                 }
