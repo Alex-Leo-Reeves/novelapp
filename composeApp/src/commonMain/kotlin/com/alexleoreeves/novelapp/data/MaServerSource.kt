@@ -41,8 +41,8 @@ enum class StreamServer(
         }
     ),
     CINEPRO(
-        "CinePro (10+ links)",
-        0,
+        "Server 4 (Auto-Link)",
+        4,
         { _, _, _, _ -> "" }
     );
 
