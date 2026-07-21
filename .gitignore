@@ -41,3 +41,7 @@ onnxruntime-ios.zip
 # CinePro Core build artifacts
 cinepro/core/node_modules/
 cinepro/core/dist/
+
+# Large binary downloads (host separately)
+site/downloads/*.apk
+site/downloads/*.ipa
