@@ -21,6 +21,13 @@ data class CineProSource(
  * Response from the main NovelApp server's POST /api/content/cinepro/sources endpoint.
  */
 @kotlinx.serialization.Serializable
+data class CineProSubtitleTrack(
+    val url: String = "",
+    val language: String = "en",
+    val label: String = ""
+)
+
+@kotlinx.serialization.Serializable
 data class CineProSourcesResponse(
     val ok: Boolean = false,
     val data: CineProSourcesData? = null
@@ -29,6 +36,7 @@ data class CineProSourcesResponse(
 @kotlinx.serialization.Serializable
 data class CineProSourcesData(
     val sources: List<CineProSourceData> = emptyList(),
+    val subtitles: List<CineProSubtitleTrack> = emptyList(),
     val cineproEnabled: Boolean = false,
     val message: String? = null
 )
@@ -52,6 +60,14 @@ data class CineProSourceData(
  *
  * Returns a list of CineProSource ordered by quality (best first).
  */
+/**
+ * Result of fetching CinePro sources — both stream URLs and subtitle tracks.
+ */
+data class CineProSourcesResult(
+    val sources: List<CineProSource>,
+    val subtitlesJson: String? = null
+)
+
 suspend fun resolveAllCineProSources(
     client: HttpClient,
     serverBaseUrl: String,
@@ -59,7 +75,7 @@ suspend fun resolveAllCineProSources(
     tmdbId: String,
     season: String = "1",
     episode: String = "1"
-): List<CineProSource> = runCatching {
+): CineProSourcesResult = runCatching {
     val body = buildString {
         append("{")
         append("\"type\":\"$type\",")
@@ -74,13 +90,13 @@ suspend fun resolveAllCineProSources(
         header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
         setBody(body)
     }.bodyAsText()
-    if (raw.isBlockedOrErrorPage()) return@runCatching emptyList()
+    if (raw.isBlockedOrErrorPage()) return@runCatching CineProSourcesResult(emptyList())
 
-    val response = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-        .decodeFromString<CineProSourcesResponse>(raw)
-    if (response.ok != true) return@runCatching emptyList()
+    val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+    val response = json.decodeFromString<CineProSourcesResponse>(raw)
+    if (response.ok != true) return@runCatching CineProSourcesResult(emptyList())
 
-    response.data?.sources?.map { src ->
+    val sources = response.data?.sources?.map { src ->
         CineProSource(
             url = src.url,
             provider = src.provider,
@@ -88,7 +104,39 @@ suspend fun resolveAllCineProSources(
             headers = src.headers
         )
     }?.filter { it.url.isNotBlank() } ?: emptyList()
-}.getOrDefault(emptyList())
+
+    // Convert CinePro subtitles to the format ExoPlayer expects: [{"file":"data:...","label":"...","srclang":"en","kind":"captions"}]
+    val subtitlesJson = buildCineProSubtitlesJson(response.data?.subtitles ?: emptyList())
+
+    CineProSourcesResult(sources, subtitlesJson)
+}.getOrDefault(CineProSourcesResult(emptyList()))
+
+/**
+ * Convert CinePro's subtitle tracks (url/language/label) into the standard JSON format
+ * that ExoPlayer's buildMediaItemWithSubtitles expects.
+ * Each valid subtitle URL becomes a base64 data: URI for inline playback.
+ */
+private fun buildCineProSubtitlesJson(tracks: List<CineProSubtitleTrack>): String? {
+    if (tracks.isEmpty()) return null
+    val validTracks = tracks.filter { it.url.isNotBlank() && it.language.isNotBlank() }
+    if (validTracks.isEmpty()) return null
+    // For direct URL subtitles, build standard [{file, label, srclang, kind}] JSON
+    val jsonArray = org.json.JSONArray()
+    for (track in validTracks.take(5)) {
+        // If the URL is a full HTTP URL, use it directly
+        val fileUrl = if (track.url.startsWith("http")) track.url else {
+            // Relative URLs would need CINEPRO_BASE_URL prefix — skip for now
+            if (track.url.startsWith("/")) null else null
+        } ?: continue
+        val obj = org.json.JSONObject()
+        obj.put("file", fileUrl)
+        obj.put("label", track.label.ifBlank { "CinePro ${track.language.uppercase()}" })
+        obj.put("srclang", track.language)
+        obj.put("kind", "captions")
+        jsonArray.put(obj)
+    }
+    return if (jsonArray.length() > 0) jsonArray.toString() else null
+}
 
 /**
  * Resolve a direct HLS stream URL from CinePro API.

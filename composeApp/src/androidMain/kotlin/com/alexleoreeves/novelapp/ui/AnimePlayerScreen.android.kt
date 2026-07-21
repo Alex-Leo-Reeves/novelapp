@@ -102,7 +102,7 @@ actual fun AnimePlayerScreen(
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
     var resolvedUrl by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var resolvedSourceUrl by remember(streamUrl, retryKey) { mutableStateOf(streamUrl) }
-    var subtitlesJson by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    var subtitlesJson by remember(streamUrl, retryKey) { mutableStateOf(subtitlesJson) }
     var isResolving by remember(streamUrl, retryKey) { mutableStateOf(true) }
     var resolveError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var resolveFailed by remember(streamUrl, retryKey) { mutableStateOf(false) }
@@ -181,7 +181,8 @@ actual fun AnimePlayerScreen(
         if (candidate.isDirectPlayableMediaUrl()) {
             resolvedUrl = candidate
             resolvedSourceUrl = candidate
-            subtitlesJson = null
+            // Don't hardcode null — CinePro may have passed subtitles via the streamUrl param
+            // subtitlesJson is already set from scraped results; keep whatever we have.
             isResolving = false
             return@LaunchedEffect
         }
@@ -212,7 +213,7 @@ actual fun AnimePlayerScreen(
     // ── ExoPlayer setup ──────────────────────────────────────────────────
     // KEY FIX: Set subtitle/audio track preferences BEFORE prepare() so
     // ExoPlayer picks the correct tracks from the manifest
-    val exoPlayer = remember(resolvedUrl, resolvedSourceUrl, activeSubtitlesJson, subtitleMode, audioLanguage) {
+    val exoPlayer = remember(resolvedUrl) {
         if (resolvedUrl != null) {
             val url = resolvedUrl!!
             val cache = NovelAppVideoCache.get(context)

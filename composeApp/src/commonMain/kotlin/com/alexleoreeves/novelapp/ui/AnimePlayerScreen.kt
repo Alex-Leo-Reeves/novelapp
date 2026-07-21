@@ -28,5 +28,6 @@ expect fun AnimePlayerScreen(
     previewLimitMs: Long? = null,
     onPreviewFinished: () -> Unit = {},
     contentKind: String = "",
+    subtitlesJson: String? = null,
     onBack: () -> Unit
 )
