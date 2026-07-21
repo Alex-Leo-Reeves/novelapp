@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.ui.theme.*
 import com.alexleoreeves.novelapp.platform.platformHttpClient
 import kotlinx.coroutines.launch
@@ -76,11 +77,11 @@ fun MediaDetailScreen(
     val freeMoviePreviewMs = 20 * 60 * 1000L
 
     fun playWithServer(embedUrl: String, title: String, previewLimitMs: Long?) {
-        onPlayStream(embedUrl, title, previewLimitMs)
+        onPlayStream(embedUrl, title, previewLimitMs, null)
     }
 
     fun playEpisodeWithServer(embedUrl: String, title: String) {
-        onPlayStream(embedUrl, title, null)
+        onPlayStream(embedUrl, title, null, null)
     }
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
@@ -596,7 +597,7 @@ fun MediaDetailScreen(
                             val videoId = item.id.removePrefix(prefix)
                             val streamUrl = youtubeNollywoodScraper.extractStreamUrl(videoId)
                             if (streamUrl != null) {
-                                onPlayStream(streamUrl, item.title, null)
+                                onPlayStream(streamUrl, item.title, null, null)
                             } else {
                                 statusText = "Could not resolve stream."
                             }

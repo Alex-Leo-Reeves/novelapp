@@ -301,7 +301,7 @@ class ViewComicNoscriptScraper(private val httpClient: HttpClient) : ComicSource
 
             // Try <noscript> meta refresh first (works without JS), then click-here link
             val bypassUrl = FINGERPRINT_PATTERN.find(fpPage)?.groupValues?.getOrNull(1)
-                ?.replace("'", "'").replace("&", "&")
+                ?.replace("'", "'")?.replace("&", "&")
                 ?: CLICK_LINK_PATTERN.find(fpPage)?.groupValues?.getOrNull(1)
                 ?: return@bypassFingerprint null
 
