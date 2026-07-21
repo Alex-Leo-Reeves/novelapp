@@ -784,18 +784,18 @@ async function fetchOpenSubtitlesTrack(context, language) {
     if (context.episode) url.searchParams.set("episode_number", String(context.episode));
 
     const payload = await fetchJson(url.toString(), { headers });
-    const results = Array.isArray(payload ?.data) ? payload.data : [];
+    const results = Array.isArray(payload ? .data) ? payload.data : [];
     for (const item of results) {
-        const attributes = item ?.attributes || item || {};
+        const attributes = item ? .attributes || item || {};
         const files = Array.isArray(attributes.files) ? attributes.files : [];
         for (const file of files) {
-            const fileId = Number(file ?.file_id || 0);
+            const fileId = Number(file ? .file_id || 0);
             if (!fileId) continue;
             const fileName = String(file.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
             if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
         }
-        const fileId = Number(attributes.file_id || item ?.file_id || 0);
+        const fileId = Number(attributes.file_id || item ? .file_id || 0);
         if (fileId) {
             const fileName = String(attributes.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
@@ -824,7 +824,7 @@ async function openSubtitlesHeaders() {
                 password: OPENSUBTITLES_PASSWORD
             })
         }).catch(() => null);
-        if (login ?.token) headers.Authorization = `Bearer ${login.token}`;
+        if (login ? .token) headers.Authorization = `Bearer ${login.token}`;
     }
     return headers;
 }
@@ -838,7 +838,7 @@ async function downloadOpenSubtitlesTrack(fileId, fileName, language, headers) {
         },
         body: JSON.stringify({ file_id: fileId })
     });
-    const link = payload ?.link || payload ?.download_link || payload ?.url;
+    const link = payload ? .link || payload ? .download_link || payload ? .url;
     if (!link) return null;
     const bytes = await fetchBuffer(link, {
         "Accept": "*/*",
@@ -870,7 +870,7 @@ async function fetchSubdlTrack(context, language) {
             "User-Agent": "NovelApp Render"
         }
     });
-    if (payload ?.status === false) {
+    if (payload ? .status === false) {
         return { tracksJson: null, message: String(payload.error || payload.message || "SubDL subtitle search failed.") };
     }
 
@@ -891,14 +891,14 @@ async function fetchSubdlTrack(context, language) {
 }
 
 function collectSubdlCandidates(payload, context) {
-    const subtitles = Array.isArray(payload ?.subtitles) ? payload.subtitles : [];
+    const subtitles = Array.isArray(payload ? .subtitles) ? payload.subtitles : [];
     const exact = [];
     const fallback = [];
 
     for (const subtitle of subtitles) {
         const target = subdlMatchesEpisode(subtitle, context) ? exact : fallback;
         for (const key of["unpack_files", "unpacked_files", "files"]) {
-            const files = Array.isArray(subtitle ?.[key]) ? subtitle[key] : [];
+            const files = Array.isArray(subtitle ? .[key]) ? subtitle[key] : [];
             for (const file of files) {
                 if (!subdlMatchesEpisode(file, context)) continue;
                 const url = firstString(file, ["url", "download_url", "download", "subtitle_url", "path"]);
@@ -914,7 +914,7 @@ function collectSubdlCandidates(payload, context) {
 
 function firstString(source, keys) {
     for (const key of keys) {
-        const value = source ?.[key];
+        const value = source ? .[key];
         if (typeof value === "string" && value.trim()) return value.trim();
     }
     return "";
@@ -923,9 +923,9 @@ function firstString(source, keys) {
 function subdlMatchesEpisode(value, context) {
     const wanted = Number(context.episode || 0);
     if (!wanted) return true;
-    const episode = Number(value ?.episode || 0);
-    const from = Number(value ?.episode_from || 0);
-    const end = Number(value ?.episode_end || 0);
+    const episode = Number(value ? .episode || 0);
+    const from = Number(value ? .episode_from || 0);
+    const end = Number(value ? .episode_end || 0);
     if (episode) return episode === wanted;
     if (from && end) return wanted >= from && wanted <= end;
     return true;
@@ -1973,6 +1973,112 @@ async function cineProviderRoute(mediaType, id, season = "1", episode = "1") {
   };
 }
 
+/**
+ * Fetch ALL streaming sources from CinePro Core.
+ * CinePro Core is an OMSS-compliant aggregator that discovers 10+ providers
+ * (vidsrc, vidlink, vidapi, vidrock, vidnest, vidzee, vixsrc, fshare, cinesu, popr, etc.)
+ * and returns all available streams for a given TMDB movie or TV episode.
+ *
+ * Response shape from CinePro:
+ *   { sources: [{ url, provider, quality, headers, ... }], subtitles: [...], diagnostics: [...] }
+ *
+ * Returns every source as a flat array for the client to try one by one.
+ */
+async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
+  if (!CINEPRO_BASE_URL || typeof fetch !== "function") return [];
+  const endpoint = mediaType === "movie"
+    ? `${CINEPRO_BASE_URL}/movie/${encodeURIComponent(id)}`
+    : `${CINEPRO_BASE_URL}/tv/${encodeURIComponent(id)}?s=${encodeURIComponent(season || "1")}&e=${encodeURIComponent(episode || "1")}`;
+  try {
+    const payload = await fetchWithTimeout(endpoint, {
+      headers: { accept: "application/json" }
+    }, 20000);
+    const sources = Array.isArray(payload?.sources) ? payload.sources : [];
+    // Flatten: collect ALL source URLs (not just the first direct one)
+    const results = [];
+    const collectSources = (obj, depth = 0) => {
+      if (!obj || depth > 3) return;
+      if (typeof obj === "string" && isDirectStreamUrl(obj)) {
+        results.push({ url: obj, provider: "", quality: "" });
+        return;
+      }
+      if (Array.isArray(obj)) {
+        obj.forEach(item => collectSources(item, depth + 1));
+        return;
+      }
+      if (typeof obj !== "object") return;
+      // Direct stream URL fields
+      const url = obj.url || obj.file || obj.src || obj.playlist || obj.streamUrl || "";
+      if (url && isDirectStreamUrl(url)) {
+        results.push({
+          url,
+          provider: obj.provider?.name || obj.provider?.id || obj.provider || obj.label || "",
+          quality: obj.quality || obj.resolution || obj.label || "",
+          headers: obj.headers || obj.proxyHeaders || null
+        });
+      }
+      // Recurse into nested arrays/objects
+      ["files", "data", "stream", "streams", "qualities"].forEach(key => {
+        if (obj[key]) collectSources(obj[key], depth + 1);
+      });
+    };
+    // Process each source object from the sources array
+    for (const source of sources) {
+      const url = source?.url || "";
+      const provider = source?.provider?.name || source?.provider?.id || source?.provider || "";
+      if (url && isDirectStreamUrl(url)) {
+        results.push({
+          url,
+          provider: String(provider),
+          quality: source?.quality || source?.resolution || "",
+          headers: source?.headers || null
+        });
+      }
+      // Also check nested fields
+      collectSources(source, 1);
+    }
+    // Deduplicate by URL
+    const seen = new Set();
+    const deduped = results.filter(s => {
+      const key = s.url.split("?")[0];
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return deduped;
+  } catch (error) {
+    console.warn("[cinepro] Source fetch failed:", error.message || error);
+    return [];
+  }
+}
+
+/**
+ * Handle CinePro sources endpoint — returns ALL available stream URLs
+ * from the CinePro Core instance so the client can auto-try each one.
+ */
+async function handleCineproSources(request, response) {
+  if (request.method !== "POST") return sendApiError(response, 405, "CinePro sources route requires POST.");
+  try {
+    const body = await readBody(request);
+    const mediaType = body.type === "movie" || body.mediaType === "movie" ? "movie" : "tv";
+    const id = String(body.id || body.tmdbId || "").trim();
+    if (!id) return sendApiError(response, 400, "TMDB id is required.");
+    const season = String(body.season || "1");
+    const episode = String(body.episode || "1");
+    if (!CINEPRO_BASE_URL) {
+      return sendApiData(response, 200, { sources: [], message: "CinePro is not configured on this server." });
+    }
+    const sources = await cineproAllSources(mediaType, id, season, episode);
+    return sendApiData(response, 200, {
+      sources,
+      cineproEnabled: true,
+      message: sources.length > 0 ? `Found ${sources.length} stream(s)` : "No streams returned by CinePro"
+    });
+  } catch (error) {
+    return sendApiError(response, 500, error.message || "CinePro sources lookup failed.");
+  }
+}
+
 async function providerStreamRoute(mediaType, id, season, episode, provider) {
   const normalizedProvider = String(provider || "vidlink").toLowerCase();
   const normalizedType = mediaType === "movie" ? "movie" : "tv";
@@ -2147,6 +2253,9 @@ async function handleContentApi(request, response, pathname, url) {
       const episode = String(url.searchParams.get("episode") || "1");
       const provider = String(url.searchParams.get("provider") || "vidlink");
       return sendApiData(response, 200, await providerStreamRoute(mediaType, id, season, episode, provider));
+    }
+    if (request.method === "POST" && pathname === "/api/content/cinepro/sources") {
+      return await handleCineproSources(request, response);
     }
     if (request.method === "POST" && pathname === "/api/content/chapters") {
       const body = await readBody(request);

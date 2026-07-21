@@ -27,7 +27,17 @@ iosApp/*.xcworkspace/
 novelapp.backup.src/
 tmp/
 
+# Kokoro TTS (removed — using Sherpa instead)
+kokoro-assets/
+kokoro-assets-lite/
+kokoro-assets-runtime/
+onnxruntime-ios.zip
+
 # Binary builds
 *.apk
 *.ipa
 *.msi
+
+# CinePro Core build artifacts
+cinepro/core/node_modules/
+cinepro/core/dist/
