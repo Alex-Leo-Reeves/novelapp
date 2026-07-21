@@ -5,6 +5,7 @@ object AppReleaseConfig {
     val CURRENT_VERSION_CODE: Int get() = PlatformAppVersion.versionCode
     val CURRENT_VERSION_NAME: String get() = PlatformAppVersion.versionName
 
+    const val SERVER_BASE_URL = "https://novelapp1.onrender.com"
     const val API_BASE_URL = "https://novelapp1.onrender.com/api"
     const val UPDATE_MANIFEST_URL = "https://novelapp1.onrender.com/app-version.json"
     const val DOWNLOAD_URL = "https://novelapp1.onrender.com/downloads/novelapp-android.apk"
