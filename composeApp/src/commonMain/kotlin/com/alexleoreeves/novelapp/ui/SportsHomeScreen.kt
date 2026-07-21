@@ -146,7 +146,7 @@ fun SportsHomeScreen(
         Spacer(Modifier.height(4.dp))
 
         // ── Content ───────────────────────────────────────────────────────
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (activeSport) {
                 SportTab.FOOTBALL -> FootballHomeScreen(
                     currentTheme = currentTheme,

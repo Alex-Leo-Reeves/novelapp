@@ -822,10 +822,11 @@ private fun formatMs(ms: Long): String {
 
 private fun String.isDirectPlayableMediaUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
+    // Extension-only for the same reason as the WebView scraper —
+    // path patterns like /hls/ or /manifest/ match VidLink's own API
+    // endpoints, causing crashes.
     return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") ||
-           clean.endsWith(".webm") || clean.endsWith(".mkv") || clean.endsWith(".mov") || clean.endsWith(".ts") ||
-           contains("/hls/", ignoreCase = true) || contains("/dash/", ignoreCase = true) || contains("/manifest/", ignoreCase = true) ||
-           !startsWith("http", ignoreCase = true)
+           clean.endsWith(".webm") || clean.endsWith(".mkv") || clean.endsWith(".mov") || clean.endsWith(".ts")
 }
 
 @Composable

@@ -6,39 +6,29 @@ import android.os.Handler
 import android.os.Looper
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.ByteArrayInputStream
 import kotlin.coroutines.resume
 
-// Removed ALLOWED_EMBED_DOMAINS list as it was blocking necessary CDNs for VidLink WASM crypto
-
-// File extensions and URL patterns that are definitively playable by ExoPlayer.
+// Only match concrete video file extensions — path-pattern matching like
+// "/hls/" or "/manifest/" causes false positives with VidLink's own API
+// calls, delivering non-playable URLs and crashing ExoPlayer.
 private val STREAM_PATTERNS = listOf(
     ".m3u8",
     ".mp4",
     ".mpd",
-    ".ts",
-    "/hls/",
-    "/dash/",
-    "/manifest/",
-    "/playlist/",
-    "/m3u8/",
-    "/master/"
+    ".webm",
+    ".mkv",
+    ".mov",
+    ".ts"
 )
 
 /**
  * Tries to scrape a direct stream URL (.m3u8 / .mp4) from [embedUrl] using a
- * hidden in-memory WebView.  Ad redirects are blocked; only allowed embed domains
- * may load.  Returns `null` if no stream is found within [timeoutMs].
+ * hidden in-memory WebView. Returns `null` if no stream is found within [timeoutMs].
  *
  * **Must be called on the main thread** (WebView requires it).
  */
@@ -57,42 +47,16 @@ suspend fun extractStreamFromEmbed(
         val mainHandler = Handler(Looper.getMainLooper())
         var webView: WebView? = null
         var settled = false
-        var capturedSubtitles: String? = null
-
-        fun captureSubtitleUrl(url: String) {
-            if (capturedSubtitles != null || !isSubtitleTrackUrl(url)) return
-            val label = when {
-                url.contains("zh", ignoreCase = true) || url.contains("chinese", ignoreCase = true) -> "Chinese"
-                url.contains("id", ignoreCase = true) || url.contains("indo", ignoreCase = true) -> "Indonesian"
-                else -> "English"
-            }
-            val safeUrl = url.replace("\\", "\\\\").replace("\"", "\\\"")
-            capturedSubtitles = """[{"file":"$safeUrl","label":"$label","kind":"captions"}]"""
-        }
 
         fun deliver(url: String?) {
             if (settled) return
             settled = true
-            
-            if (url != null && capturedSubtitles == null) {
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                    var waited = 0L
-                    while (capturedSubtitles == null && waited < 1500L) {
-                        kotlinx.coroutines.delay(50L)
-                        waited += 50L
-                    }
-                    if (cont.isActive) cont.resume(ScrapedStream(url, capturedSubtitles))
-                    try { webView?.destroy() } catch (_: Exception) {}
-                    webView = null
-                }
-            } else {
-                if (cont.isActive) {
-                    if (url != null) cont.resume(ScrapedStream(url, capturedSubtitles))
-                    else cont.resume(null)
-                }
-                try { webView?.destroy() } catch (_: Exception) {}
-                webView = null
+            if (cont.isActive) {
+                if (url != null) cont.resume(ScrapedStream(url))
+                else cont.resume(null)
             }
+            try { webView?.destroy() } catch (_: Exception) {}
+            webView = null
         }
 
         mainHandler.post {
@@ -117,111 +81,7 @@ suspend fun extractStreamFromEmbed(
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?
-                        ): Boolean {
-                            return false
-                        }
-
-                        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                            super.onPageStarted(view, url, favicon)
-                            view?.evaluateJavascript("""
-                                (function() {
-                                    if (window.hasInjectedScraper) return;
-                                    window.hasInjectedScraper = true;
-                                    const origFetch = window.fetch;
-                                    window.fetch = async function() {
-                                        const response = await origFetch.apply(this, arguments);
-                                        const reqUrl = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url ? arguments[0].url : '');
-                                        if (reqUrl && (reqUrl.includes('api/b/') || reqUrl.includes('/api/tracks') || reqUrl.includes('/manifest') || reqUrl.includes('subtitles'))) {
-                                            response.clone().json().then(data => {
-                                                const tracks = data?.stream?.tracks || data?.tracks || data?.subtitles;
-                                                if (tracks && Array.isArray(tracks)) {
-                                                    console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
-                                                } else {
-                                                    // Try extracting vtt/srt subtitle URLs directly
-                                                    try {
-                                                        const jsonStr = JSON.stringify(data);
-                                                        const subtitleMatches = jsonStr.match(/https?:\\\/\\\/[^"']+?\\.(?:vtt|srt)[^"']*/g);
-                                                        if (subtitleMatches && subtitleMatches.length > 0) {
-                                                            const simplifiedTracks = subtitleMatches.map((url, i) => ({
-                                                                file: url.replace(/\\\\\\//g, '/'),
-                                                                label: ['English','Japanese','Chinese','Korean','Spanish'][i] || 'Track ' + (i+1),
-                                                                kind: 'captions'
-                                                            }));
-                                                            console.log('MAGIC_SUBTITLES=' + JSON.stringify(simplifiedTracks));
-                                                        }
-                                                    } catch(e) {}
-                                                }
-                                            }).catch(e => {});
-                                        }
-                                        return response;
-                                    };
-                                    const origOpen = window.XMLHttpRequest.prototype.open;
-                                    window.XMLHttpRequest.prototype.open = function() {
-                                        this.addEventListener('load', function() {
-                                            if (this.responseURL && (this.responseURL.includes('api/b/') || this.responseURL.includes('/api/tracks') || this.responseURL.includes('/manifest') || this.responseURL.includes('subtitles'))) {
-                                                try {
-                                                    const data = JSON.parse(this.responseText);
-                                                    const tracks = data?.stream?.tracks || data?.tracks || data?.subtitles;
-                                                    if (tracks && Array.isArray(tracks)) {
-                                                        console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
-                                                    }
-                                                } catch(e) {}
-                                            }
-                                        });
-                                        origOpen.apply(this, arguments);
-                                    };
-                                    window.addEventListener('message', function(e) {
-                                        try {
-                                            let d = e.data;
-                                            if (typeof d === 'string') d = JSON.parse(d);
-                                            const type = d?.type || d?.event;
-                                            if (type && (type.includes('vidlink') || type.includes('stream') || type === 'ready')) {
-                                                const tracks = d.tracks || d.data?.tracks || d.stream?.tracks || d.subtitles;
-                                                if (tracks && Array.isArray(tracks)) {
-                                                    console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
-                                                }
-                                            }
-                                            // Also catch subtitle-specific events
-                                            if (type === 'subtitles' || type === 'tracks' || type === 'captions') {
-                                                const tracks = d.tracks || d.data || d.payload;
-                                                if (tracks && Array.isArray(tracks)) {
-                                                    console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
-                                                }
-                                            }
-                                        } catch(err) {}
-                                    });
-                                    // Poll for subtitle elements in the DOM
-                                    function pollSubtitles() {
-                                        const trackEls = document.querySelectorAll('track');
-                                        if (trackEls.length > 0) {
-                                            const tracks = Array.from(trackEls).map(t => ({
-                                                file: t.src,
-                                                label: t.label || 'Unknown',
-                                                kind: t.kind || 'captions',
-                                                srclang: t.srclang || ''
-                                            })).filter(t => t.file && t.file.startsWith('http'));
-                                            if (tracks.length > 0) {
-                                                console.log('MAGIC_SUBTITLES=' + JSON.stringify(tracks));
-                                                return true;
-                                            }
-                                        }
-                                        return false;
-                                    }
-                                    if (!pollSubtitles()) {
-                                        const observer = new MutationObserver((mutations) => {
-                                            if (document.querySelector('track')) {
-                                                pollSubtitles();
-                                                observer.disconnect();
-                                            }
-                                        });
-                                        observer.observe(document.documentElement, { childList: true, subtree: true });
-                                    }
-                                    setTimeout(pollSubtitles, 2000);
-                                    setTimeout(pollSubtitles, 5000);
-                                    setTimeout(pollSubtitles, 8000);
-                                })();
-                            """.trimIndent(), null)
-                        }
+                        ): Boolean = false
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
@@ -286,28 +146,9 @@ suspend fun extractStreamFromEmbed(
                             """.trimIndent(), null)
                         }
 
-                        override fun shouldInterceptRequest(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): WebResourceResponse? {
-                            val url = request?.url?.toString() ?: return null
-                            captureSubtitleUrl(url)
-                            if (isPlayableStreamUrl(url) &&
-                                STREAM_PATTERNS.any { url.contains(it, ignoreCase = true) }) {
-                                deliver(url)
-                                return WebResourceResponse(
-                                    "text/plain",
-                                    "utf-8",
-                                    ByteArrayInputStream(ByteArray(0))
-                                )
-                            }
-                            return null
-                        }
-
                         override fun onLoadResource(view: WebView?, url: String?) {
                             super.onLoadResource(view, url)
                             val resourceUrl = url ?: return
-                            captureSubtitleUrl(resourceUrl)
                             if (!settled &&
                                 isPlayableStreamUrl(resourceUrl) &&
                                 STREAM_PATTERNS.any { resourceUrl.contains(it, ignoreCase = true) }) {
@@ -327,14 +168,9 @@ suspend fun extractStreamFromEmbed(
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
                             val msg = consoleMessage?.message() ?: return false
-                            if (msg.startsWith("MAGIC_SUBTITLES=")) {
-                                val json = msg.removePrefix("MAGIC_SUBTITLES=").trim()
-                                if (json.isNotBlank()) capturedSubtitles = json
-                                return true
-                            }
                             if (msg.startsWith("MAGIC_VIDEO_SRC=")) {
                                 val videoSrc = msg.removePrefix("MAGIC_VIDEO_SRC=").trim()
-                                if (videoSrc.isNotBlank() && videoSrc.startsWith("http")) {
+                                if (videoSrc.isNotBlank() && videoSrc.startsWith("http") && isPlayableStreamUrl(videoSrc)) {
                                     deliver(videoSrc)
                                 }
                                 return true
@@ -367,27 +203,9 @@ fun isPlayableStreamUrl(url: String): Boolean {
         pathLower.endsWith(".mp4") ||
         pathLower.endsWith(".mpd") ||
         pathLower.endsWith(".webm") ||
-        pathLower.endsWith(".ts") ||
-        pathLower.contains("/hls/") ||
-        pathLower.contains("/dash/") ||
-        pathLower.contains("/manifest/") ||
-        pathLower.contains("/playlist/") ||
-        pathLower.contains("/m3u8/") ||
-        pathLower.contains("/master/") ||
-        pathLower.contains("/playlist.m3u8") ||
-        pathLower.contains("/index.m3u8") ||
-        pathLower.contains("/master.m3u8")
-}
-
-private fun isSubtitleTrackUrl(url: String): Boolean {
-    val clean = url.substringBefore("?").substringBefore("#").lowercase()
-    return clean.endsWith(".vtt") ||
-        clean.endsWith(".srt") ||
-        clean.endsWith(".ass") ||
-        clean.contains("/subtitle") ||
-        clean.contains("/subtitles") ||
-        clean.contains("/captions") ||
-        clean.contains("/tracks")
+        pathLower.endsWith(".mkv") ||
+        pathLower.endsWith(".mov") ||
+        pathLower.endsWith(".ts")
 }
 
 private fun buildEmbedHeaders(embedUrl: String): Map<String, String> {

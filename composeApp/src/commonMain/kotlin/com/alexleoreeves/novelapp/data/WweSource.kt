@@ -166,21 +166,58 @@ class WweSource(private val httpClient: HttpClient) {
     }
 
     suspend fun resolveStreamUrls(eventId: String): List<String> = runCatching {
-        val href = eventId.replace("_", "/").let { "https://$it" }
-        val html = httpClient.get(href) {
-            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        val pageUrl = eventId.replace("_", "/").let { "https://$it" }
+        val html = httpClient.get(pageUrl) {
+            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            header("Referer", "https://watchwrestling.ae/")
         }.bodyAsText()
 
         val doc = Ksoup.parse(html)
+        val embedUrls = mutableListOf<String>()
         
-        // Extract iframe src links which host the video player
-        val links = doc.select("iframe").mapNotNull { it.attr("src") }
-            .filter { it.isNotBlank() && (it.contains("dailymotion") || it.contains("vidmoly") || it.contains("embed") || it.contains("dood")) }
-            
-        // Some sites use buttons that link to different hosters
-        val buttonLinks = doc.select("a.button, a.btn, a[href*='embed']").mapNotNull { it.attr("href") }
-            .filter { it.contains("embed") || it.contains("video") || it.contains("watch") }
+        // 1. Extract iframe src with video host patterns
+        doc.select("iframe").mapNotNull { it.attr("src") }
+            .filter { src ->
+                src.isNotBlank() && (
+                    src.contains("dailymotion") || src.contains("vidmoly") ||
+                    src.contains("dood") || src.contains("embed") ||
+                    src.contains("voe") || src.contains("stream") ||
+                    src.contains("player") || src.contains("watch") ||
+                    src.contains("video")
+                )
+            }
+            .forEach { embedUrls.add(it) }
+        
+        // 2. Links pointing to video hosters or embed pages
+        doc.select("a[href]").mapNotNull { el ->
+            val link = el.attr("href")
+            val text = el.text().lowercase()
+            link.takeIf {
+                it.isNotBlank() && (
+                    it.contains("embed") || it.contains("dailymotion") ||
+                    it.contains("vidmoly") || it.contains("dood") ||
+                    it.contains("voe.sx") || it.contains("streamtape") ||
+                    it.contains("watchwrestling") || it.contains("play") ||
+                    text.contains("server") || text.contains("watch") ||
+                    text.contains("stream")
+                )
+            }
+        }.forEach { embedUrls.add(it) }
 
-        (links + buttonLinks).distinct().ifEmpty { listOf(href) }
-    }.getOrElse { emptyList() }
+        // 3. Any link with known video host domains
+        doc.select("a[href*='dailymotion'], a[href*='vidmoly'], a[href*='dood'], a[href*='voe'], a[href*='streamtape'], a[href*='watchwrestling']")
+            .mapNotNull { it.attr("href").takeIf { h -> h.isNotBlank() } }
+            .forEach { embedUrls.add(it) }
+
+        val distinct = embedUrls.distinct()
+        
+        // If we found real video embeds, return them.
+        // Otherwise fall back to the post page URL — watchwrestling uses AJAX
+        // to load video players dynamically, so the WebView loading the page
+        // will execute JS and show the video player.
+        distinct.ifEmpty { listOf(pageUrl) }
+    }.getOrElse { e ->
+        println("[WWE] Stream resolve failed: ${e.message}")
+        emptyList()
+    }
 }

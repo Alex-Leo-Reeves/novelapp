@@ -32,6 +32,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.alexleoreeves.novelapp.data.AppTheme
 import com.alexleoreeves.novelapp.ui.theme.accentColor
 import com.alexleoreeves.novelapp.ui.theme.backgroundColor
+import androidx.activity.compose.BackHandler
 import java.io.ByteArrayInputStream
 
 /**
@@ -382,6 +383,10 @@ actual fun MaServerPlayerScreen(
             }
         }
     }
+
+    // Consume system back presses locally so the App-level handler
+    // doesn't clear selectedMedia (which would skip the detail screen).
+    BackHandler { onBack() }
 
     // Immersive mode
     DisposableEffect(Unit) {

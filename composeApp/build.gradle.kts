@@ -66,7 +66,6 @@ kotlin {
             implementation("androidx.media3:media3-ui:1.3.1")
             implementation("androidx.media3:media3-datasource:1.3.1")
             implementation(files("libs/sherpa-onnx-1.13.4.aar"))
-            implementation("org.apache.commons:commons-compress:1.26.1")
             // YouTube Player library for Nollywood in-app YouTube playback
             implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.1")
         }
@@ -102,7 +101,7 @@ kotlin {
                 implementation(libs.jspecify)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
             }
-            resources.srcDir(rootProject.file("kokoro-assets"))
+
         }
     }
 }
@@ -168,7 +167,6 @@ android {
     buildFeatures {
         buildConfig = true
     }
-    sourceSets["main"].assets.srcDir(rootProject.file("kokoro-assets"))
 }
 
 room {

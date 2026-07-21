@@ -81,13 +81,11 @@ class NovelSearchRepository(
         WeebCentralScraper(httpClient)
     )
 
-    /** Comic sources — Western comics from ReadAllComics, ZipComic, BatCave, ReadComicOnline, ViewComic */
+    /** Comic sources — Western comics from NewComic.info, ComicBookPlus, ViewComic */
     private val comicSources: List<ComicSource> = listOf(
-        ReadComicOnlineScraper(httpClient),
-        ViewComicScraper(httpClient),
-        ZipComicScraper(httpClient),
-        ReadAllComicsScraper(httpClient),
-        BatCaveScraper(httpClient)
+        NewComicScraper(httpClient),
+        ComicBookPlusScraper(httpClient),
+        ViewComicNoscriptScraper(httpClient)
     )
 
     /** Anime sources */
@@ -379,6 +377,20 @@ class NovelSearchRepository(
         cachedFeed("video:${category.name}:$page") {
             val results = mutableListOf<UnifiedSearchResult>()
 
+            // ── NIGERIAN is YouTube-only — no TMDB, no embed servers ──
+            if (category == VideoCategory.NIGERIAN) {
+                val youtubeNollywood = youtubeNollywoodScraper.fetchYouTubeNollywoodFeed(page)
+                println("[Video Feed] NIGERIAN: YouTube Nollywood returned ${youtubeNollywood.size} items")
+                results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
+
+                if (results.isEmpty()) {
+                    val seeds = curatedVideoSeeds(category)
+                    println("[Video Feed] NIGERIAN: Using curated seeds (${seeds.size})")
+                    results.addAll(seeds)
+                }
+                return@cachedFeed results.distinctBy { it.id }.take(48)
+            }
+
             // Source 1: Client-side TMDB (always has fallback API key)
             val client = tmdbSource.fetchVideo(category, page)
             println("[Video Feed] ${category.name}: TMDB returned ${client.size} items")
@@ -433,16 +445,7 @@ class NovelSearchRepository(
                 results.addAll(wcoStream)
             }
 
-            // Source 6: YouTube Nollywood via Piped API (for NIGERIAN category)
-            // This brings in fresh YouTube-based Nigerian movie content alongside TMDB.
-            // Piped returns ad-free direct .mp4 streams that play in ExoPlayer.
-            if (category == VideoCategory.NIGERIAN && results.size < 24) {
-                val youtubeNollywood = youtubeNollywoodScraper.fetchYouTubeNollywoodFeed(page)
-                println("[Video Feed] ${category.name}: YouTube Nollywood returned ${youtubeNollywood.size} items")
-                results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
-            }
-
-            // Source 7: Curated fallback seeds when everything else fails
+            // Source 6: Curated fallback seeds when everything else fails
             if (results.isEmpty()) {
                 val seeds = curatedVideoSeeds(category)
                 println("[Video Feed] ${category.name}: Using curated seeds (${seeds.size})")
@@ -457,6 +460,14 @@ class NovelSearchRepository(
         cachedFeed("video_search:${category.name}:$query:$page") {
             val results = mutableListOf<UnifiedSearchResult>()
             val normalizedQuery = query.trim()
+
+            // ── NIGERIAN is YouTube-only — no TMDB, no embed servers ──
+            if (category == VideoCategory.NIGERIAN) {
+                val youtubeNollywood = youtubeNollywoodScraper.search(query, page)
+                println("[Video Search] NIGERIAN: YouTube Nollywood returned ${youtubeNollywood.size} items for '$query'")
+                results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
+                return@cachedFeed results.distinctBy { it.id }.take(48)
+            }
 
             // ── Source 1: Client-side TMDB search (type-specific), search pages 1-3 ──
             // Search multiple TMDB pages in parallel for best coverage
@@ -524,16 +535,7 @@ class NovelSearchRepository(
                 results.addAll(wcoStream)
             }
 
-            // ── Source 5b: YouTube Nollywood via Piped API (for NIGERIAN category)
-            // Searches YouTube for Nigerian movie content when TMDB returns thin results.
-            // Piped returns ad-free direct .mp4 streams, no ads or tracking.
-            if (category == VideoCategory.NIGERIAN && query.isNotBlank() && results.size < 12) {
-                val youtubeNollywood = youtubeNollywoodScraper.search(query, page)
-                println("[Video Search] ${category.name}: YouTube Nollywood returned ${youtubeNollywood.size} items for '$query'")
-                results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
-            }
-
-            // ── Source 6: TMDB trending title-match fallback (broadest net) ──
+            // ── Source 5: TMDB trending title-match fallback (broadest net) ──
             if (results.size < 6 && query.isNotBlank()) {
                 val searchTerms = normalizedQuery.split(" ").filter { it.length > 2 }
                 val trendingMovies = runCatching {
@@ -1047,36 +1049,29 @@ class NovelSearchRepository(
     suspend fun fetchMangaChapters(mangaUrl: String, sourceName: String): List<MangaChapter> {
         val comicSource = comicSources.find { it.sourceName == sourceName }
         if (comicSource != null) {
-            val live = try { comicSource.fetchChapters(mangaUrl).normalizedComicChapterOrder() } catch (e: Exception) { emptyList() }
-            if (live.isNotEmpty()) return live
-            // Synthetic fallback — so the UI never says "No chapters"
-            return (1..20).map { i ->
-                MangaChapter(
-                    title = "Issue $i",
-                    url = if (mangaUrl.startsWith("http")) "${mangaUrl.trimEnd('/')}/issue-$i" else "comic:issue:$i",
-                    chapterNumber = i
-                )
+            return try {
+                comicSource.fetchChapters(mangaUrl).normalizedComicChapterOrder()
+            } catch (e: Exception) {
+                println("[Comic Chapters] ${comicSource.sourceName} failed: ${e.message}")
+                emptyList()
             }
         }
         val scraper = mangaSources.find { it.sourceName == sourceName } ?: mangaSources.first()
-        val live = try { scraper.fetchMangaChapters(mangaUrl).normalizedMangaChapterOrder() } catch (e: Exception) { emptyList() }
-        return live
+        return try { scraper.fetchMangaChapters(mangaUrl).normalizedMangaChapterOrder() } catch (e: Exception) { emptyList() }
     }
 
     suspend fun fetchMangaPages(chapterUrl: String, sourceName: String): List<String> {
         val comicSource = comicSources.find { it.sourceName == sourceName }
         if (comicSource != null) {
-            val live = try { comicSource.fetchPages(chapterUrl) } catch (e: Exception) { emptyList() }
-            if (live.isNotEmpty()) return live
-            // Synthetic fallback — generate dummy comic-style pages so the viewer never shows blank
-            val seed = (chapterUrl.hashCode().toLong() and 0xFFFF).toInt().coerceAtLeast(1) % 14 + 10
-            return (1..seed).map { p ->
-                "https://dummyimage.com/900x1350/1a1a2e/e94560.png&text=Page%20$p"
+            return try {
+                comicSource.fetchPages(chapterUrl)
+            } catch (e: Exception) {
+                println("[Comic Pages] ${comicSource.sourceName} failed: ${e.message}")
+                emptyList()
             }
         }
         val scraper = mangaSources.find { it.sourceName == sourceName } ?: mangaSources.first()
-        val live = try { scraper.fetchMangaPages(chapterUrl) } catch (e: Exception) { emptyList() }
-        return live
+        return try { scraper.fetchMangaPages(chapterUrl) } catch (e: Exception) { emptyList() }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1103,43 +1098,39 @@ class NovelSearchRepository(
 
     suspend fun fetchPopularComics(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
         cachedFeed("comics:$page") {
-            val seed = listOf("batman", "superman", "spider-man", "x-men", "avengers", "justice")
-                .getOrElse((page - 1).mod(6)) { "batman" }
-            comicSources.map { source ->
+            // Try NewComic's category pages first (most reliable: DC, Marvel, IDW, etc.)
+            val newComic = comicSources.filterIsInstance<NewComicScraper>().firstOrNull()
+            val categoryResults = newComic?.let {
+                try {
+                    sourceSemaphore.withPermit {
+                        withTimeoutOrNull(8_000) { it.fetchPopular(page) }.orEmpty()
+                    }
+                } catch (e: Exception) {
+                    println("[Comic Feed] NewComic category failed: ${e.message}")
+                    emptyList()
+                }
+            }.orEmpty()
+
+            // Also search across all 3 scrapers with popular seed queries
+            val seeds = listOf("batman", "superman", "spider-man", "x-men", "avengers", "justice")
+            val seed = seeds.getOrElse((page - 1).mod(seeds.size)) { "batman" }
+            val searchResults = comicSources.map { source ->
                 async {
                     try {
                         sourceSemaphore.withPermit {
                             withTimeoutOrNull(8_000) { source.search(seed) }.orEmpty()
                         }
                     } catch (e: Exception) {
-                        println("[Comic Feed] ${source.sourceName} failed: ${e.message}")
+                        println("[Comic Feed] ${source.sourceName} search failed: ${e.message}")
                         emptyList()
                     }
                 }
-            }.awaitAll()
-                .flatten()
+            }.awaitAll().flatten()
+
+            (categoryResults + searchResults)
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
                 .take(48)
-                .ifEmpty {
-                    // Fallback: curated comic seeds when scrapers fail
-                    listOf(
-                        "Batman: The Dark Knight Returns", "Superman: Red Son",
-                        "Spider-Man: Blue", "Watchmen", "V for Vendetta",
-                        "The Walking Dead", "Saga", "Invincible",
-                        "The Sandman", "Preacher", "Hellboy", "Sin City",
-                    ).mapIndexed { i, title ->
-                        UnifiedSearchResult(
-                            id = "curated_comic_$i",
-                            title = title,
-                            coverUrl = "",
-                            detailPageUrl = "comic:curated:$i",
-                            sourceName = "ZipComic",
-                            isComic = true,
-                            genre = "Western Comic"
-                        )
-                    }
-                }
         }
     }
 
