@@ -8,13 +8,92 @@ import kotlinx.serialization.json.*
 private val streamJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 /**
+ * Data class for a single CinePro stream source.
+ */
+data class CineProSource(
+    val url: String,
+    val provider: String = "",
+    val quality: String = "",
+    val headers: Map<String, String>? = null
+)
+
+/**
+ * Response from the main NovelApp server's POST /api/content/cinepro/sources endpoint.
+ */
+@kotlinx.serialization.Serializable
+data class CineProSourcesResponse(
+    val ok: Boolean = false,
+    val data: CineProSourcesData? = null
+)
+
+@kotlinx.serialization.Serializable
+data class CineProSourcesData(
+    val sources: List<CineProSourceData> = emptyList(),
+    val cineproEnabled: Boolean = false,
+    val message: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class CineProSourceData(
+    val url: String = "",
+    val provider: String = "",
+    val quality: String = "",
+    val headers: Map<String, String>? = null
+)
+
+/**
+ * Fetch ALL available stream sources from CinePro Core via the main NovelApp server.
+ *
+ * The main server proxies the request to the CinePro Core instance (configured via
+ * CINEPRO_BASE_URL env var) and returns ALL stream URLs from all discovered providers.
+ *
+ * POST /api/content/cinepro/sources
+ * Body: { type: "movie"|"tv", id: "12345", season: "1", episode: "1" }
+ *
+ * Returns a list of CineProSource ordered by quality (best first).
+ */
+suspend fun resolveAllCineProSources(
+    client: HttpClient,
+    serverBaseUrl: String,
+    type: String,
+    tmdbId: String,
+    season: String = "1",
+    episode: String = "1"
+): List<CineProSource> = runCatching {
+    val body = buildString {
+        append("{")
+        append("\"type\":\"$type\",")
+        append("\"id\":\"$tmdbId\",")
+        append("\"season\":\"$season\",")
+        append("\"episode\":\"$episode\"")
+        append("}")
+    }
+    val raw = client.post("$serverBaseUrl/api/content/cinepro/sources") {
+        header("Content-Type", "application/json")
+        header("Accept", "application/json")
+        header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+        setBody(body)
+    }.bodyAsText()
+    if (raw.isBlockedOrErrorPage()) return@runCatching emptyList()
+
+    val response = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        .decodeFromString<CineProSourcesResponse>(raw)
+    if (response.ok != true) return@runCatching emptyList()
+
+    response.data?.sources?.map { src ->
+        CineProSource(
+            url = src.url,
+            provider = src.provider,
+            quality = src.quality,
+            headers = src.headers
+        )
+    }?.filter { it.url.isNotBlank() } ?: emptyList()
+}.getOrDefault(emptyList())
+
+/**
  * Resolve a direct HLS stream URL from CinePro API.
- * CinePro is an OMSS-compliant backend that aggregates streaming providers.
- *
- * Movie: GET https://api.cinepro.cc/v1/movies/{tmdbId}
- * TV:    GET https://api.cinepro.cc/v1/tv/{tmdbId}/seasons/{s}/episodes/{e}
- *
- * Returns the first available HLS source URL, or null if none found.
+ * DEPRECATED: Use resolveAllCineProSources instead, which goes through the main server.
+ * Kept for backward compatibility with MovieDetailScreen.
  */
 suspend fun resolveCineProStream(
     client: HttpClient,
@@ -132,7 +211,9 @@ fun String.isDirectPlayableStreamUrl(): Boolean {
         clean.endsWith(".mp4") ||
         clean.endsWith(".mpd") ||
         clean.endsWith(".webm") ||
-        Regex("""/(playlist|manifest|hls|dash)(/|$)""").containsMatchIn(clean) ||
+        clean.endsWith(".mkv") ||
+        clean.endsWith(".mov") ||
+        clean.endsWith(".ts") ||
         startsWith("file:", ignoreCase = true)
 }
 

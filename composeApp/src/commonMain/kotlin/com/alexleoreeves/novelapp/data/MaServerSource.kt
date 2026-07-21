@@ -31,6 +31,19 @@ enum class StreamServer(
             if (type == "movie") "https://www.2embed.skin/embed/movie/$id"
             else "https://www.2embed.skin/embed/tv/$id/$s/$e"
         }
+    ),
+    EMBEDCC(
+        "Server 3",
+        3,
+        { id, type, s, e ->
+            if (type == "movie") "https://www.2embed.cc/embed/movie/$id"
+            else "https://www.2embed.cc/embed/tv/$id/$s/$e"
+        }
+    ),
+    CINEPRO(
+        "CinePro (10+ links)",
+        0,
+        { _, _, _, _ -> "" }
     );
 
     companion object {

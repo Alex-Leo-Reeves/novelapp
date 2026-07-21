@@ -339,6 +339,31 @@ fun MediaDetailScreen(
             }
             statusText = "Resolving stream via $serverLabel..."
 
+            // ── CinePro: Fetch ALL direct stream sources from the server ─────
+            if (!isDonghuaItem && selectedServer == StreamServer.CINEPRO) {
+                val urlParts = ep.url.split(":")
+                val tvId = urlParts.getOrNull(1) ?: tmdbId
+                val s = urlParts.getOrNull(2) ?: "1"
+                val e = urlParts.getOrNull(3) ?: "1"
+                val serverBase = "https://novelapp1.onrender.com"
+                val sources = resolveAllCineProSources(httpClient, serverBase, "tv", tvId, s, e)
+                if (sources.isEmpty()) {
+                    statusText = "CinePro returned no streams. Try another server."
+                    return@launch
+                }
+                // Try each source — first working one wins
+                for ((idx, source) in sources.withIndex()) {
+                    statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
+                    if (source.url.isDirectPlayableStreamUrl()) {
+                        statusText = ""
+                        onPlayStream(source.url, "${item.title} - ${ep.title}", null)
+                        return@launch
+                    }
+                }
+                statusText = "CinePro sources found but none are playable. Try another server."
+                return@launch
+            }
+
             // Build the embed URL using the selected server's URL builder
             val embedUrl = when {
                 isDonghuaItem -> {
@@ -396,8 +421,18 @@ fun MediaDetailScreen(
                 else -> ep.url
             }
 
-            // Route to ExoPlayer. Embed pages are resolved by AnimePlayerScreen's hidden WebView.
-            onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
+            // Route to player based on server type.
+            // Donghua S1: scraper produces direct .m3u8 → ExoPlayer.
+            // Donghua S2/S3: full-site embeds → visible WebView (handles anti-bot/redirects).
+            // Non-donghua: visible WebView for both S1/S2 (WebGL/anti-bot handling).
+            if (isDonghuaItem) {
+                when (selectedDonghuaServer) {
+                    DonghuaServer.DONGHUA_STREAM -> onPlayStream(embedUrl, "${item.title} - ${ep.title}", null)
+                    DonghuaServer.LUCIFER_DONGHUA, DonghuaServer.TWOEMBED -> onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
+                }
+            } else {
+                onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
+            }
         }
     }
 
@@ -607,9 +642,27 @@ fun MediaDetailScreen(
                     onClick = {
                         scope.launch {
                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
-                            statusText = "Opening stream via ${selectedServer.displayName}..."
+                            // ── CinePro: Fetch ALL direct stream sources from the server ─
+                            if (selectedServer == StreamServer.CINEPRO) {
+                                val serverBase = "https://novelapp1.onrender.com"
+                                val sources = resolveAllCineProSources(httpClient, serverBase, "movie", resolvedTmdbId)
+                                if (sources.isEmpty()) {
+                                    statusText = "CinePro returned no streams. Try another server."
+                                    return@launch
+                                }
+                                for ((idx, source) in sources.withIndex()) {
+                                    statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
+                                    if (source.url.isDirectPlayableStreamUrl()) {
+                                        statusText = ""
+                                        onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs)
+                                        return@launch
+                                    }
+                                }
+                                statusText = "CinePro sources found but none are playable. Try another server."
+                                return@launch
+                            }
                             val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                            playWithServer(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs)
+                            onPlayMaEmbed(embedUrl, item.title)
                         }
                     },
                         modifier = Modifier.weight(1f).height(50.dp),

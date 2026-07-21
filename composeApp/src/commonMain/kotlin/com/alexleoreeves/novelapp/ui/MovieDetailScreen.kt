@@ -66,7 +66,7 @@ fun MovieDetailScreen(
     fun buildMoviePlayUrl(type: String, id: String, season: String = "1", episode: String = "1"): String {
         if (id.isBlank()) return ""
         return when (selectedServer) {
-            0 -> { statusText = "Resolving via CinePro..."; return@buildMoviePlayUrl "" }  // handled by CinePro coroutine
+            0 -> { statusText = "Resolving via CinePro (10+ links)..."; return@buildMoviePlayUrl "" }
             1 -> buildSuperEmbedUrl(id, type, season, episode)
             2 -> if (type == "movie") "https://vidsrc.to/embed/movie/$id" else "https://vidsrc.to/embed/tv/$id/$season/$episode"
             3 -> if (type == "movie") "https://nontongo.win/embed/movie/$id" else "https://nontongo.win/embed/tv/$id/$season/$episode"
