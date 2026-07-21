@@ -103,121 +103,92 @@ fun WweScreen(
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
     ) {
-        // ── Header ─────────────────────────────────────────────────────────
-        Box(
+        // ── Filter controls (no header - parent SportsHomeScreen provides it) ──
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(wweDarkRed, currentTheme.backgroundColor())
-                    )
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 14.dp)
+                .padding(horizontal = 16.dp)
         ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.weight(1f)) {
+            Spacer(Modifier.height(4.dp))
+
+            // Filter tabs
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val tabs = listOf("All", "Upcoming", "Live", "Past")
+                items(tabs.size) { idx ->
+                    val selected = activeTab == idx
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) wweAccent else currentTheme.cardColor())
+                            .clickable { activeTab = idx }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
                         Text(
-                            "WWE",
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = currentTheme.textColor(),
-                            fontWeight = FontWeight.Black
+                            tabs[idx],
+                            color = if (selected) Color.White else currentTheme.subTextColor(),
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            style = MaterialTheme.typography.bodyMedium
                         )
-                        Text(
-                            "RAW · SmackDown · NXT · PPV",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = currentTheme.subTextColor()
-                        )
-                    }
-                    Icon(
-                        Icons.Default.FitnessCenter,
-                        null,
-                        tint = wweAccent,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // Filter tabs
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val tabs = listOf("All", "Upcoming", "Live", "Past")
-                    items(tabs.size) { idx ->
-                        val selected = activeTab == idx
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (selected) wweAccent else currentTheme.cardColor())
-                                .clickable { activeTab = idx }
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                tabs[idx],
-                                color = if (selected) Color.White else currentTheme.subTextColor(),
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                }
-
-                // Brand filter chips
-                if (brands.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        item {
-                            FilterChip(
-                                selected = selectedBrand.isEmpty(),
-                                onClick = { selectedBrand = "" },
-                                label = { Text("All Brands") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = wweAccent,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = currentTheme.cardColor(),
-                                    labelColor = currentTheme.subTextColor()
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true, selected = selectedBrand.isEmpty(),
-                                    selectedBorderColor = wweAccent,
-                                    borderColor = currentTheme.subTextColor().copy(0.3f)
-                                ),
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                        }
-                        items(brands) { brand ->
-                            FilterChip(
-                                selected = selectedBrand.equals(brand.name, ignoreCase = true),
-                                onClick = {
-                                    selectedBrand = if (selectedBrand.equals(brand.name, ignoreCase = true)) "" else brand.name
-                                },
-                                label = { Text(brand.name.take(12)) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = wweAccent,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = currentTheme.cardColor(),
-                                    labelColor = currentTheme.subTextColor()
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true, selected = selectedBrand.equals(brand.name, ignoreCase = true),
-                                    selectedBorderColor = wweAccent,
-                                    borderColor = currentTheme.subTextColor().copy(0.3f)
-                                ),
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                        }
                     }
                 }
             }
+
+            // Brand filter chips
+            if (brands.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item {
+                        FilterChip(
+                            selected = selectedBrand.isEmpty(),
+                            onClick = { selectedBrand = "" },
+                            label = { Text("All Brands") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = wweAccent,
+                                selectedLabelColor = Color.White,
+                                containerColor = currentTheme.cardColor(),
+                                labelColor = currentTheme.subTextColor()
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true, selected = selectedBrand.isEmpty(),
+                                selectedBorderColor = wweAccent,
+                                borderColor = currentTheme.subTextColor().copy(0.3f)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
+                    items(brands) { brand ->
+                        FilterChip(
+                            selected = selectedBrand.equals(brand.name, ignoreCase = true),
+                            onClick = {
+                                selectedBrand = if (selectedBrand.equals(brand.name, ignoreCase = true)) "" else brand.name
+                            },
+                            label = { Text(brand.name.take(12)) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = wweAccent,
+                                selectedLabelColor = Color.White,
+                                containerColor = currentTheme.cardColor(),
+                                labelColor = currentTheme.subTextColor()
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true, selected = selectedBrand.equals(brand.name, ignoreCase = true),
+                                selectedBorderColor = wweAccent,
+                                borderColor = currentTheme.subTextColor().copy(0.3f)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
 
         // ── Content ──────────────────────────────────────────────────────
         if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = wweAccent)
             }
         } else if (errorMessage != null && displayEvents.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Default.FitnessCenter, null, tint = currentTheme.subTextColor(), modifier = Modifier.size(64.dp))
                     Text(errorMessage ?: "No events.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.titleMedium)
@@ -232,7 +203,7 @@ fun WweScreen(
                 }
             }
         } else if (displayEvents.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("No events found", color = currentTheme.subTextColor())
             }
         } else {
@@ -240,7 +211,7 @@ fun WweScreen(
                 state = listState,
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.weight(1f).fillMaxWidth()
             ) {
                 items(displayEvents, key = { "${it.eventId}_${refreshTrigger.value}" }) { event ->
                     WweEventCard(

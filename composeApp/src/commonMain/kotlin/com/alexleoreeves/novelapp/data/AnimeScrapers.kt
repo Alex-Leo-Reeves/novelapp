@@ -765,35 +765,61 @@ class DonghuaSiteScraper private constructor(
         val directCandidates = config.directSlugSuffixes
             .map { suffix -> "${config.baseUrl}/anime/$slug$suffix/" }
 
-        val searchHtml = runCatching {
-            fetchHtml("${config.baseUrl}/?s=${query.encodeURLQueryComponent()}", config.baseUrl)
-        }.getOrNull()
+        // Search the site with multiple query variants to find the correct pinyin slug
+        val searchQueries = listOf(
+            query,
+            query.replace(Regex("""\([^)]*\)"""), " ").trim(),
+            query.replace(Regex("""\[[^]]*]"""), " ").trim(),
+            query.substringBefore(":").trim(),
+            query.split(" ").take(2).joinToString(" ")
+        ).filter { it.isNotBlank() }.distinctBy { it.lowercase() }
 
-        val searchCandidates = searchHtml
-            ?.takeUnless { it.isBlockedOrErrorPage() }
-            ?.let { html ->
-                val doc = Ksoup.parse(html)
-                doc.select("a[href*=/anime/]")
-                    .mapNotNull { link ->
-                        val href = link.attr("href").ifBlank { return@mapNotNull null }
-                        val title = link.attr("title")
-                            .ifBlank { link.select("h2, h3").firstOrNull()?.text().orEmpty() }
-                            .ifBlank { link.text() }
-                            .decodeHtmlEntitiesLite()
-                        val url = normalizeDonghuaUrl(href, config.baseUrl) ?: return@mapNotNull null
-                        title to url
-                    }
-                    .filter { (title, _) -> title.isNotBlank() }
-                    .distinctBy { it.second }
-                    .sortedWith(
-                        compareByDescending<Pair<String, String>> { animeTitleMatchScore(query, it.first) }
-                            .thenBy { it.first.length }
-                    )
-                    .map { it.second }
+        var searchCandidates = emptyList<String>()
+        for (searchQuery in searchQueries) {
+            val searchHtml = runCatching {
+                fetchHtml("${config.baseUrl}/?s=${searchQuery.encodeURLQueryComponent()}", config.baseUrl)
+            }.getOrNull()
+
+            val results = searchHtml
+                ?.takeUnless { it.isBlockedOrErrorPage() }
+                ?.let { html ->
+                    val doc = Ksoup.parse(html)
+                    doc.select("a[href*=/anime/]")
+                        .mapNotNull { link ->
+                            val href = link.attr("href").ifBlank { return@mapNotNull null }
+                            val title = link.attr("title")
+                                .ifBlank { link.select("h2, h3").firstOrNull()?.text().orEmpty() }
+                                .ifBlank { link.text() }
+                                .decodeHtmlEntitiesLite()
+                            val url = normalizeDonghuaUrl(href, config.baseUrl) ?: return@mapNotNull null
+                            title to url
+                        }
+                        .filter { (title, _) -> title.isNotBlank() }
+                        .distinctBy { it.second }
+                        .sortedWith(
+                            compareByDescending<Pair<String, String>> { animeTitleMatchScore(query, it.first) }
+                                .thenBy { it.first.length }
+                        )
+                        .map { it.second }
+                        // Also extract slugs from result URLs as additional direct candidates
+                        .flatMap { url ->
+                            val extractedSlug = url.substringAfter("/anime/").substringBefore("/").trim()
+                            if (extractedSlug.isNotBlank() && extractedSlug != slug) {
+                                listOf(url, "${config.baseUrl}/anime/$extractedSlug/")
+                            } else {
+                                listOf(url)
+                            }
+                        }
+                }
+                .orEmpty()
+            if (results.isNotEmpty()) {
+                searchCandidates = results
+                break
             }
-            .orEmpty()
+        }
 
-        return (directCandidates + searchCandidates).distinct()
+        // Search results first (contain correct pinyin slugs), then English slug guesses
+        return (searchCandidates + directCandidates).distinct()
     }
 
     private suspend fun fetchEpisodesFromSeries(seriesUrl: String, maxEpisodes: Int): List<MediaEpisode> {

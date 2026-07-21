@@ -2,10 +2,11 @@ package com.alexleoreeves.novelapp.data
 
 import io.ktor.client.*
 import io.ktor.client.request.*
+import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
-import kotlinx.serialization.json.*
 import com.fleeksoft.ksoup.Ksoup
+import kotlinx.serialization.json.*
 
 /**
  * Baseline interface for Western comic sources.
@@ -19,593 +20,306 @@ interface ComicSource {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ZipComic.com Scraper — massive DC, Marvel, Indie archive
-//  Loads entire issue on a single page; easy <img> parsing.
-//  Domain auto-heals via resolveLiveDomain().
+//  NewComic.info Scraper — massive DC/Marvel/IDW/Dark Horse archive
+//  DLE CMS site. Search via POST do=search. Detail pages show cover + download.
+//  Category/genre pages serve as "popular" feed.
 // ─────────────────────────────────────────────────────────────────────────────
-class ZipComicScraper(private val httpClient: HttpClient) : ComicSource {
+class NewComicScraper(private val httpClient: HttpClient) : ComicSource {
 
-    override val sourceName = "ZipComic"
+    override val sourceName = "NewComic"
     companion object {
-        private const val FALLBACK_URL = "https://zipcomic.com"
-        private const val BRAND_QUERY = "zipcomic comics official"
-        private val FALLBACK_CHAIN = listOf(
-            "https://zipcomic.com",
-            "https://zipcomic.net",
-            "https://www.zipcomic.com"
-        )
-    }
-    
-    private suspend fun liveBase(): String {
-        val resolved = resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
-        if (resolved.contains("zipcomic", ignoreCase = true)) return resolved
-        for (fallback in FALLBACK_CHAIN) {
-            try {
-                val test = httpClient.get(fallback) {
-                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                }.bodyAsText()
-                if (!test.isBlockedOrErrorPage()) return fallback
-            } catch (e: Exception) { continue }
-        }
-        return FALLBACK_URL
+        private const val BASE_URL = "https://newcomic.info"
+        private val COMIC_CATEGORIES = listOf("/dc/", "/marvels/", "/idw/", "/dark-horse/", "/image-comics/", "/boom-studios/")
     }
 
     override suspend fun search(query: String): List<UnifiedSearchResult> {
         return try {
-            val base = liveBase()
-            val html = httpClient.get("$base/search") {
-                parameter("q", query)
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
+            val html = httpClient.submitForm(
+                url = "$BASE_URL/index.php?do=search",
+                formParameters = Parameters.build {
+                    append("do", "search")
+                    append("subaction", "search")
+                    append("story", query)
+                }
+            ) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$BASE_URL/")
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            doc.select("div.item, div.comic-item, div.post, article.grid-item").mapNotNull { el ->
-                val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
-                val href = link.attr("href")
-                val img = el.select("img").firstOrNull()
-                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
-                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
-                val title = link.attr("title").ifBlank { link.text() }
-                    .ifBlank { img?.attr("alt").orEmpty() }
-                    .decodeHtmlEntitiesLite()
-                if (href.isBlank() || title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
-                UnifiedSearchResult(
-                    id = "zipcomic_${href.substringAfter("://").replace("/", "_")}",
-                    title = title,
-                    coverUrl = absoluteComicUrl(base, cover),
-                    detailPageUrl = absoluteComicUrl(base, href),
-                    sourceName = sourceName,
-                    isComic = true,
-                    genre = el.select("span.genre, .cat:not(a)").joinToString(", ") { it.text() }.ifBlank { "Western Comic" }
-                )
-            }.distinctBy { it.detailPageUrl }.take(30)
+            parseSearchResults(html)
         } catch (e: Exception) {
-            println("[ZipComic] Search failed: ${e.message}")
+            println("[NewComic] Search failed: ${e.message}")
+            // Fallback: try GET
+            try {
+                val html2 = httpClient.get("$BASE_URL/index.php") {
+                    parameter("do", "search")
+                    parameter("subaction", "search")
+                    parameter("story", query)
+                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                    header("Referer", "$BASE_URL/")
+                }.bodyAsText()
+                if (html2.isBlockedOrErrorPage()) return emptyList()
+                parseSearchResults(html2)
+            } catch (e2: Exception) {
+                println("[NewComic] Search fallback also failed: ${e2.message}")
+                emptyList()
+            }
+        }
+    }
+
+    private fun parseSearchResults(html: String): List<UnifiedSearchResult> {
+        val doc = Ksoup.parse(html)
+        return doc.select("div.short-story, div.short, div.movie-item, article.short").mapNotNull { el ->
+            val titleEl = el.select("a.bigtext, a.news-title, h2 a[href], a[href*=${BASE_URL.substringAfter("://")}]").firstOrNull()
+                ?: return@mapNotNull null
+            val href = titleEl.attr("href").trim()
+            val title = titleEl.attr("title").ifBlank { titleEl.text() }.decodeHtmlEntitiesLite()
+            if (href.isBlank() || title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
+            val img = el.select("img").firstOrNull()
+            val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
+                .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && v.contains("upload", ignoreCase = true) } } ?: ""
+            UnifiedSearchResult(
+                id = "nc_${href.substringAfter("://").replace("/", "_")}",
+                title = title,
+                coverUrl = absoluteComicUrl(BASE_URL, cover).replace("&#58;", ":"),
+                detailPageUrl = absoluteComicUrl(BASE_URL, href),
+                sourceName = sourceName,
+                isComic = true,
+                genre = el.select("div.cat, a[href*=/category/]").text().ifBlank { "Western Comic" }
+            )
+        }.distinctBy { it.detailPageUrl }.take(40)
+    }
+
+    /** Fetches a popular feed by iterating through category pages (DC, Marvel, etc). */
+    suspend fun fetchPopular(page: Int = 1): List<UnifiedSearchResult> {
+        val category = COMIC_CATEGORIES.getOrElse((page - 1).mod(COMIC_CATEGORIES.size)) { COMIC_CATEGORIES[0] }
+        return try {
+            val html = httpClient.get("$BASE_URL$category") {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$BASE_URL/")
+            }.bodyAsText()
+            if (html.isBlockedOrErrorPage()) return emptyList()
+            parseSearchResults(html)
+        } catch (e: Exception) {
+            println("[NewComic] Popular feed ($category) failed: ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun fetchChapters(comicUrl: String): List<MangaChapter> {
         return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(comicUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            // ZipComic displays issues as a list. Each link to a chapter/issue.
-            doc.select("ul.chapters li a, div.chapter-list a, a[href*=/issue/], a[href*=/chapter/], a[href*=/comic/]")
-                .filter { el ->
-                    val h = el.attr("href")
-                    h.isNotBlank() && (h.contains("/issue/") || h.contains("/chapter/") || !h.contains("/search"))
-                }
-                .distinctBy { it.attr("href") }
-                .mapIndexed { idx, el ->
-                    val href = absoluteComicUrl(base, el.attr("href"))
-                    val title = el.text().decodeHtmlEntitiesLite().ifBlank { "Issue ${idx + 1}" }
-                    MangaChapter(
-                        title = title,
-                        url = href,
-                        chapterNumber = idx + 1
-                    )
-                }.normalizedComicChapterOrder()
-        } catch (e: Exception) {
-            println("[ZipComic] Chapters failed: ${e.message}")
-            emptyList()
-        }
-    }
-
-    override suspend fun fetchPages(chapterUrl: String): List<String> {
-        return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            // ZipComic loads entire issue on a single page — all <img> tags
-            doc.select("div.reader-area img, div.reader img, div.comic-pages img, img[src*=/uploads/], img[src*=/comics/], img[src*=/images/]")
-                .map { el ->
-                    listOf("data-original", "data-lazy-src", "data-src", "src")
-                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
-                }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
-                .map { absoluteComicUrl(base, it) }
-                .distinct()
-                .ifEmpty {
-                    Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
-                        .findAll(html)
-                        .map { it.value }
-                        .filter { it.contains("/uploads/") || it.contains("/comics/") || it.contains("/images/") }
-                        .toList()
-                }
-        } catch (e: Exception) {
-            println("[ZipComic] Pages failed: ${e.message}")
-            emptyList()
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  ReadAllComics.com Scraper — backup mirror for major comics
-//  Loads entire issue sequentially using a scrollable page container.
-//  Domain auto-heals via resolveLiveDomain().
-//  Image extraction targets: div.scrolling-box img
-// ─────────────────────────────────────────────────────────────────────────────
-class ReadAllComicsScraper(private val httpClient: HttpClient) : ComicSource {
-
-    override val sourceName = "ReadAllComics"
-    companion object {
-        private const val FALLBACK_URL = "https://readallcomics.com"
-        private const val BRAND_QUERY = "read all comics official"
-        private val FALLBACK_CHAIN = listOf(
-            "https://readallcomics.com",
-            "https://www.readallcomics.com"
-        )
-    }
-    
-    private suspend fun liveBase(): String {
-        val resolved = resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
-        if (resolved.contains("readallcomics", ignoreCase = true)) return resolved
-        for (fallback in FALLBACK_CHAIN) {
-            try {
-                val test = httpClient.get(fallback) {
-                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                }.bodyAsText()
-                if (!test.isBlockedOrErrorPage()) return fallback
-            } catch (e: Exception) { continue }
-        }
-        return FALLBACK_URL
-    }
-
-    override suspend fun search(query: String): List<UnifiedSearchResult> {
-        return try {
-            val base = liveBase()
-            val html = httpClient.get("$base/?s=${query.replace(" ", "+")}") {
+            val html = httpClient.get(comicUrl) {
                 header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
-                header("Referer", "$base/")
+                header("Referer", "$BASE_URL/")
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
-            doc.select("article, div.post, div.result-item, li.search-item").mapNotNull { el ->
-                val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
-                val href = link.attr("href")
-                if (href.isBlank() || href.contains("/page/") || href.contains("/tag/")) return@mapNotNull null
-                val img = el.select("img").firstOrNull()
-                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
-                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
-                val title = link.attr("title").ifBlank { link.text() }
-                    .ifBlank { img?.attr("alt").orEmpty() }
-                    .decodeHtmlEntitiesLite()
-                if (title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
-                UnifiedSearchResult(
-                    id = "rac_${href.substringAfter("://").replace("/", "_")}",
-                    title = title,
-                    coverUrl = absoluteComicUrl(base, cover),
-                    detailPageUrl = absoluteComicUrl(base, href),
-                    sourceName = sourceName,
-                    isComic = true,
-                    genre = "Western Comic"
-                )
-            }.distinctBy { it.detailPageUrl }.take(30)
-        } catch (e: Exception) {
-            println("[ReadAllComics] Search failed: ${e.message}")
-            emptyList()
-        }
-    }
+            val title = doc.select("h1, h2.title, meta[property=og:title]").firstOrNull()
+                ?.attr("content")?.ifBlank { doc.title() }
+                ?.decodeHtmlEntitiesLite() ?: "Comic Issue"
 
-    override suspend fun fetchChapters(comicUrl: String): List<MangaChapter> {
-        return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(comicUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            doc.select("ul.list-chapter a, div.chapter-list a, a[href*=/issue/], a[href*=/chapter/]")
+            // Each newcomer.info page is a single issue. Return it as one chapter.
+            // Also look for related issues in the sidebar/navigation.
+            val related = doc.select("div.related-news a[href], div.navigation a[href], div.next-prev a[href]")
                 .filter { it.attr("href").isNotBlank() }
                 .distinctBy { it.attr("href") }
                 .mapIndexed { idx, el ->
                     MangaChapter(
-                        title = el.text().decodeHtmlEntitiesLite().ifBlank { "Issue ${idx + 1}" },
-                        url = absoluteComicUrl(base, el.attr("href")),
-                        chapterNumber = idx + 1
+                        title = el.text().decodeHtmlEntitiesLite().ifBlank { "Related Issue ${idx + 1}" },
+                        url = absoluteComicUrl(BASE_URL, el.attr("href")),
+                        chapterNumber = idx + 2
                     )
-                }.normalizedComicChapterOrder()
+                }
+
+            listOf(
+                MangaChapter(
+                    title = title,
+                    url = comicUrl,
+                    chapterNumber = 1
+                )
+            ) + related
         } catch (e: Exception) {
-            println("[ReadAllComics] Chapters failed: ${e.message}")
+            println("[NewComic] Chapters failed: ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun fetchPages(chapterUrl: String): List<String> {
         return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
-            val html = httpClient.get(effectiveUrl) {
+            val html = httpClient.get(chapterUrl) {
                 header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
-                header("Referer", "$base/")
+                header("Referer", "$BASE_URL/")
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
-            // ReadAllComics.com loads all sequential comic panels inside:
-            //   <div class="scrolling-box"><img src="..." /><img src="..." />...</div>
-            doc.select("div.scrolling-box img")
-                .map { el ->
+            // newComic.info is a download site — extract cover + any embedded previews
+            val images = mutableListOf<String>()
+
+            // 1. Cover image from og:description or main content area
+            val ogDesc = doc.select("meta[property=og:description]").attr("content")
+            if (ogDesc.isNotBlank()) {
+                Regex("""https?://[^\s"']+\.(?:jpg|jpeg|png|webp|gif)""")
+                    .findAll(ogDesc.replace("&#58;", ":").replace("&", "&"))
+                    .map { it.value }
+                    .distinct()
+                    .take(5)
+                    .forEach { images.add(it) }
+            }
+
+            // 2. Full-size images in article content
+            doc.select("div.full-text img, div.full-story img, div.article-content img, div.maincont img")
+                .mapNotNull { el ->
                     listOf("data-original", "data-lazy-src", "data-src", "src")
-                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } }
                 }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
-                .map { absoluteComicUrl(base, it) }
-                .distinct()
-                .ifEmpty {
-                    // Fallback: broad <img> extraction if scrolling-box isn't found
-                    doc.select("div.entry-content img, div.reader img, div.comic img, div.thecontent img, img[src*=/comic/]")
-                        .map { el ->
-                            listOf("data-original", "data-lazy-src", "data-src", "src")
-                                .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
-                        }
-                        .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
-                        .map { absoluteComicUrl(base, it) }
-                        .distinct()
-                }
-                .ifEmpty {
-                    Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
-                        .findAll(html)
-                        .map { it.value }
-                        .filter { it.contains("/comic/") || it.contains("/uploads/") || it.contains("/wp-content/") }
-                        .toList()
-                }
+                .filter { !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("icon", ignoreCase = true) }
+                .map { absoluteComicUrl(BASE_URL, it) }
+                .forEach { images.add(it) }
+
+            images.distinct()
         } catch (e: Exception) {
-            println("[ReadAllComics] Pages failed: ${e.message}")
+            println("[NewComic] Pages failed: ${e.message}")
             emptyList()
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  BatCave.biz Scraper — clean DOM, high-res panels, single-page loading
-//  Domain auto-heals via resolveLiveDomain().
+//  ComicBookPlus.com Scraper — public domain Golden Age comics
+//  Real inline reader with page images. Search via site form.
 // ─────────────────────────────────────────────────────────────────────────────
-class BatCaveScraper(private val httpClient: HttpClient) : ComicSource {
+class ComicBookPlusScraper(private val httpClient: HttpClient) : ComicSource {
 
-    override val sourceName = "BatCave"
+    override val sourceName = "ComicBookPlus"
     companion object {
-        private const val FALLBACK_URL = "https://batcave.biz"
-        private const val BRAND_QUERY = "batcave biz comics official"
-        private val FALLBACK_CHAIN = listOf(
-            "https://batcave.biz",
-            "https://www.batcave.biz",
-            "https://batcave.io"
-        )
-    }
-    
-    private suspend fun liveBase(): String {
-        val resolved = resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
-        if (resolved.contains("batcave", ignoreCase = true)) return resolved
-        for (fallback in FALLBACK_CHAIN) {
-            try {
-                val test = httpClient.get(fallback) {
-                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                }.bodyAsText()
-                if (!test.isBlockedOrErrorPage()) return fallback
-            } catch (e: Exception) { continue }
-        }
-        return FALLBACK_URL
+        private const val BASE_URL = "https://comicbookplus.com"
     }
 
     override suspend fun search(query: String): List<UnifiedSearchResult> {
         return try {
-            val base = liveBase()
-            val html = httpClient.get("$base/comics/") {
-                parameter("s", query)
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                header("Referer", "$base/")
+            val html = httpClient.get("$BASE_URL/?search=$query") {
+                parameter("search", query)
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$BASE_URL/")
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
-            doc.select("div.bs, div.post, article, div.item, div.comic-item").mapNotNull { el ->
+            doc.select("div.comic-item, div.item, a[href*=/comic/], a[href*=/book/], table.listing tr").mapNotNull { el ->
                 val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
                 val href = link.attr("href")
+                if (!href.contains("/comic") && !href.contains("/book") && !href.contains("cid=")) return@mapNotNull null
                 val img = el.select("img").firstOrNull()
-                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
-                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
-                val title = link.attr("title").ifBlank { link.text() }
-                    .ifBlank { img?.attr("alt").orEmpty() }
-                    .decodeHtmlEntitiesLite()
-                if (href.isBlank() || title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
+                val cover = listOf("data-original", "src", "data-src").firstNotNullOfOrNull {
+                    img?.attr(it)?.takeIf { v -> v.isNotBlank() }
+                } ?: ""
+                val title = link.attr("title").ifBlank { link.text() }.ifBlank { img?.attr("alt").orEmpty() }.decodeHtmlEntitiesLite()
+                if (title.isBlank() || title.length < 3 || title.isNavigationTitle()) return@mapNotNull null
                 UnifiedSearchResult(
-                    id = "batcave_${href.substringAfter("://").replace("/", "_")}",
+                    id = "cbp_${href.substringAfter("://").replace("/", "_")}",
                     title = title,
-                    coverUrl = absoluteComicUrl(base, cover),
-                    detailPageUrl = absoluteComicUrl(base, href),
+                    coverUrl = absoluteComicUrl(BASE_URL, cover),
+                    detailPageUrl = absoluteComicUrl(BASE_URL, href),
                     sourceName = sourceName,
                     isComic = true,
-                    genre = "Western Comic"
+                    genre = "Golden Age"
                 )
             }.distinctBy { it.detailPageUrl }.take(30)
         } catch (e: Exception) {
-            println("[BatCave] Search failed: ${e.message}")
+            println("[ComicBookPlus] Search failed: ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun fetchChapters(comicUrl: String): List<MangaChapter> {
         return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(comicUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                header("Referer", "$base/")
+            val html = httpClient.get(comicUrl) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$BASE_URL/")
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
-            doc.select("a[href*=/issue/], a[href*=/chapter/], div.chapter-list a, ul.list a")
-                .filter { it.attr("href").isNotBlank() }
-                .distinctBy { it.attr("href") }
-                .mapIndexed { idx, el ->
-                    MangaChapter(
-                        title = el.text().decodeHtmlEntitiesLite().ifBlank { "Issue ${idx + 1}" },
-                        url = absoluteComicUrl(base, el.attr("href")),
-                        chapterNumber = idx + 1
-                    )
-                }.normalizedComicChapterOrder()
+            val title = doc.title().decodeHtmlEntitiesLite().ifBlank { "Comic" }
+            listOf(
+                MangaChapter(title = title, url = comicUrl, chapterNumber = 1)
+            )
         } catch (e: Exception) {
-            println("[BatCave] Chapters failed: ${e.message}")
+            println("[ComicBookPlus] Chapters failed: ${e.message}")
             emptyList()
         }
     }
 
     override suspend fun fetchPages(chapterUrl: String): List<String> {
         return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
+            val html = httpClient.get(chapterUrl) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", "$BASE_URL/")
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
 
             val doc = Ksoup.parse(html)
-            doc.select("div.reader-area img, div.reader img, div.comic img, img[src*=/uploads/], img[src*=/comics/]")
-                .map { el ->
-                    listOf("data-original", "data-lazy-src", "data-src", "src")
-                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+            // ComicBookPlus reader page images
+            doc.select("img[src*=/pagecount/], img[src*=/CBJserver/], img.comicpage, div.reader img")
+                .mapNotNull { el ->
+                    listOf("src", "data-src", "data-original")
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } }
                 }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
-                .map { absoluteComicUrl(base, it) }
+                .filter { !it.contains("thumb", ignoreCase = true) && !it.contains("logo", ignoreCase = true) }
+                .map { absoluteComicUrl(BASE_URL, it) }
                 .distinct()
-                .ifEmpty {
-                    Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
-                        .findAll(html)
-                        .map { it.value }
-                        .filter { it.contains("/uploads/") || it.contains("/comics/") || it.contains("/wp-content/") }
-                        .toList()
-                }
         } catch (e: Exception) {
-            println("[BatCave] Pages failed: ${e.message}")
+            println("[ComicBookPlus] Pages failed: ${e.message}")
             emptyList()
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ReadComicOnline Scraper — extremely reliable, massive DC/Marvel/Indie library
-//  Each comic opens as a single page with all panels as <img> tags.
-//  Practically zero maintenance — the site rarely changes.
-//  Domain auto-heals via resolveLiveDomain().
+//  ViewComic Noscript Scraper — fingerprint bypass via meta refresh
+//  When Ktor fetches viewcomic.com, the server returns a fingerprinting wall
+//  with a <noscript> meta refresh. Following that bypass URL (with fp=-5)
+//  gives access to the real site content.
 // ─────────────────────────────────────────────────────────────────────────────
-class ReadComicOnlineScraper(private val httpClient: HttpClient) : ComicSource {
-
-    override val sourceName = "ReadComicOnline"
-    companion object {
-        private const val FALLBACK_URL = "https://readcomiconline.li"
-        private const val BRAND_QUERY = "readcomiconline comics official"
-        private val FALLBACK_CHAIN = listOf(
-            "https://readcomiconline.li",
-            "https://readcomiconline.to",
-            "https://www.readcomiconline.li",
-            "https://readcomiconline.com"
-        )
-    }
-
-    private suspend fun liveBase(): String {
-        val resolved = resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
-        if (resolved.contains("readcomiconline", ignoreCase = true)) return resolved
-        for (fallback in FALLBACK_CHAIN) {
-            try {
-                val test = httpClient.get(fallback) {
-                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                }.bodyAsText()
-                if (!test.isBlockedOrErrorPage()) return fallback
-            } catch (e: Exception) { continue }
-        }
-        return FALLBACK_URL
-    }
-
-    override suspend fun search(query: String): List<UnifiedSearchResult> {
-        return try {
-            val base = liveBase()
-            val html = httpClient.get("$base/search") {
-                parameter("keyword", query.replace(" ", "+"))
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            doc.select("div.barista, li.barista, div.chapter, div.item, article").mapNotNull { el ->
-                val link = el.select("a[href*=/Comic/]").firstOrNull() ?: return@mapNotNull null
-                val href = link.attr("href")
-                val img = el.select("img").firstOrNull()
-                val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
-                    .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
-                val title = link.attr("title").ifBlank { link.text() }
-                    .ifBlank { img?.attr("alt").orEmpty() }
-                    .decodeHtmlEntitiesLite()
-                if (href.isBlank() || title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
-                UnifiedSearchResult(
-                    id = "rco_${href.substringAfter("://").replace("/", "_")}",
-                    title = title,
-                    coverUrl = absoluteComicUrl(base, cover),
-                    detailPageUrl = absoluteComicUrl(base, href),
-                    sourceName = sourceName,
-                    isComic = true,
-                    genre = "Western Comic"
-                )
-            }.distinctBy { it.detailPageUrl }.take(30)
-        } catch (e: Exception) {
-            println("[ReadComicOnline] Search failed: ${e.message}")
-            emptyList()
-        }
-    }
-
-    override suspend fun fetchChapters(comicUrl: String): List<MangaChapter> {
-        return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(comicUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            doc.select("ul.list a[href*=/Comic/], a[href*=/Comic/]")
-                .filter { el ->
-                    val h = el.attr("href")
-                    h.isNotBlank() && !h.contains("/search") && !h.contains("/genre")
-                }
-                .distinctBy { it.attr("href") }
-                .mapIndexed { idx, el ->
-                    val href = absoluteComicUrl(base, el.attr("href"))
-                    val title = el.text().decodeHtmlEntitiesLite().ifBlank { "Issue ${idx + 1}" }
-                    MangaChapter(
-                        title = title,
-                        url = href,
-                        chapterNumber = idx + 1
-                    )
-                }
-        } catch (e: Exception) {
-            println("[ReadComicOnline] Chapters failed: ${e.message}")
-            emptyList()
-        }
-    }
-
-    override suspend fun fetchPages(chapterUrl: String): List<String> {
-        return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
-            val doc = Ksoup.parse(html)
-            // ReadComicOnline loads all pages as <img> tags inside the reader
-            val images = doc.select("div.reader-area img, div.reader img, div#divImage img, p img, img[src*=/uploads/], img[src*=/manga/]")
-                .map { el ->
-                    listOf("data-original", "data-lazy-src", "data-src", "src")
-                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
-                }
-                .filter { it.isNotBlank() && !it.contains("logo", ignoreCase = true) && !it.contains("avatar", ignoreCase = true) && !it.contains("discord", ignoreCase = true) && !it.contains("dummy", ignoreCase = true) && !it.contains("blank", ignoreCase = true) && !it.contains("spacer", ignoreCase = true) }
-                .map { absoluteComicUrl(base, it) }
-                .distinct()
-
-            if (images.isNotEmpty()) return images
-
-            // Fallback: regex over HTML
-            Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
-                .findAll(html)
-                .map { it.value }
-                .filter { it.contains("/uploads/") || it.contains("/manga/") || it.contains("/comics/") }
-                .filterNot { it.contains("logo", ignoreCase = true) || it.contains("avatar", ignoreCase = true) || it.contains("discord", ignoreCase = true) }
-                .distinct()
-                .toList()
-        } catch (e: Exception) {
-            println("[ReadComicOnline] Pages failed: ${e.message}")
-            emptyList()
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  ViewComic Scraper — very reliable Western comic source
-//  Hosts DC, Marvel, Image, Dark Horse, Boom! comics with chapter-by-chapter
-//  reading. Clean HTML with easy <img> extraction.
-// ─────────────────────────────────────────────────────────────────────────────
-class ViewComicScraper(private val httpClient: HttpClient) : ComicSource {
+class ViewComicNoscriptScraper(private val httpClient: HttpClient) : ComicSource {
 
     override val sourceName = "ViewComic"
     companion object {
-        private const val FALLBACK_URL = "https://viewcomic.com"
-        private const val BRAND_QUERY = "viewcomic comics official"
-        private val FALLBACK_CHAIN = listOf(
-            "https://viewcomic.com",
-            "https://www.viewcomic.com",
-            "https://viewcomic.net"
-        )
+        private const val BASE_URL = "https://viewcomic.com"
+        private val FINGERPRINT_PATTERN = Regex("""<noscript><meta http-equiv="refresh" content="[^"]*URL=([^"]+)""")
+        private val CLICK_LINK_PATTERN = Regex("""<a href='(http[^']+)'>Click here""")
     }
 
-    private suspend fun liveBase(): String {
-        val resolved = resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
-        if (resolved.contains("viewcomic", ignoreCase = true)) return resolved
-        for (fallback in FALLBACK_CHAIN) {
-            try {
-                val test = httpClient.get(fallback) {
-                    header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36")
-                }.bodyAsText()
-                if (!test.isBlockedOrErrorPage()) return fallback
-            } catch (e: Exception) { continue }
+    /** Extract the bypass URL from the fingerprint page and follow it. */
+    private suspend fun bypassFingerprint(url: String): String? {
+        try {
+            val fpPage = httpClient.get(url) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+            }.bodyAsText()
+
+            // Try <noscript> meta refresh first (works without JS), then click-here link
+            val bypassUrl = FINGERPRINT_PATTERN.find(fpPage)?.groupValues?.getOrNull(1)
+                ?.replace("'", "'").replace("&", "&")
+                ?: CLICK_LINK_PATTERN.find(fpPage)?.groupValues?.getOrNull(1)
+                ?: return@bypassFingerprint null
+
+            val realPage = httpClient.get(bypassUrl) {
+                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36")
+                header("Referer", url)
+            }.bodyAsText()
+
+            return if (realPage.isBlockedOrErrorPage()) null else realPage
+        } catch (e: Exception) {
+            println("[ViewComic] Bypass failed: ${e.message}")
+            return null
         }
-        return FALLBACK_URL
     }
 
     override suspend fun search(query: String): List<UnifiedSearchResult> {
         return try {
-            val base = liveBase()
-            val html = httpClient.get("$base/?s=${query.replace(" ", "+")}") {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
+            val html = bypassFingerprint("$BASE_URL/?s=${query.replace(" ", "+")}") ?: return emptyList()
             val doc = Ksoup.parse(html)
             doc.select("article, div.item, div.comic-item, div.post").mapNotNull { el ->
                 val link = el.select("a[href]").firstOrNull() ?: return@mapNotNull null
@@ -613,15 +327,13 @@ class ViewComicScraper(private val httpClient: HttpClient) : ComicSource {
                 val img = el.select("img").firstOrNull()
                 val cover = listOf("data-original", "data-lazy-src", "data-src", "src")
                     .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { v -> v.isNotBlank() && !v.contains("dummy", ignoreCase = true) && !v.contains("blank", ignoreCase = true) } } ?: ""
-                val title = link.attr("title").ifBlank { link.text() }
-                    .ifBlank { img?.attr("alt").orEmpty() }
-                    .decodeHtmlEntitiesLite()
+                val title = link.attr("title").ifBlank { link.text() }.ifBlank { img?.attr("alt").orEmpty() }.decodeHtmlEntitiesLite()
                 if (href.isBlank() || title.isBlank() || title.isNavigationTitle()) return@mapNotNull null
                 UnifiedSearchResult(
                     id = "vc_${href.substringAfter("://").replace("/", "_")}",
                     title = title,
-                    coverUrl = absoluteComicUrl(base, cover),
-                    detailPageUrl = absoluteComicUrl(base, href),
+                    coverUrl = absoluteComicUrl(BASE_URL, cover),
+                    detailPageUrl = absoluteComicUrl(BASE_URL, href),
                     sourceName = sourceName,
                     isComic = true,
                     genre = "Western Comic"
@@ -635,24 +347,15 @@ class ViewComicScraper(private val httpClient: HttpClient) : ComicSource {
 
     override suspend fun fetchChapters(comicUrl: String): List<MangaChapter> {
         return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(comicUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
+            val html = bypassFingerprint(comicUrl) ?: return emptyList()
             val doc = Ksoup.parse(html)
             doc.select("li a[href*=/chapter-], ul.chapter-list a, div.chapter-list a, a[href*=/chapter/]")
                 .filter { it.attr("href").isNotBlank() }
                 .distinctBy { it.attr("href") }
                 .mapIndexed { idx, el ->
-                    val href = absoluteComicUrl(base, el.attr("href"))
-                    val title = el.text().decodeHtmlEntitiesLite().ifBlank { "Chapter ${idx + 1}" }
                     MangaChapter(
-                        title = title,
-                        url = href,
+                        title = el.text().decodeHtmlEntitiesLite().ifBlank { "Chapter ${idx + 1}" },
+                        url = absoluteComicUrl(BASE_URL, el.attr("href")),
                         chapterNumber = idx + 1
                     )
                 }
@@ -664,34 +367,25 @@ class ViewComicScraper(private val httpClient: HttpClient) : ComicSource {
 
     override suspend fun fetchPages(chapterUrl: String): List<String> {
         return try {
-            val base = liveBase()
-            val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
-            val html = httpClient.get(effectiveUrl) {
-                header("User-Agent", "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Referer", "$base/")
-            }.bodyAsText()
-            if (html.isBlockedOrErrorPage()) return emptyList()
-
+            val html = bypassFingerprint(chapterUrl) ?: return emptyList()
             val doc = Ksoup.parse(html)
-            val images = doc.select("div.reader-area img, div.reader img, div.comic img, div.chapter-content img, img[src*=/uploads/], img[src*=/comics/]")
-                .map { el ->
+            doc.select("div.reader-area img, div.reader img, div.comic img, div.chapter-content img, img[src*=/uploads/], img[src*=/comics/]")
+                .mapNotNull { el ->
                     listOf("data-original", "data-lazy-src", "data-src", "src")
-                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } } ?: ""
+                        .firstNotNullOfOrNull { el.attr(it).takeIf { v -> v.isNotBlank() } }
                 }
-                .filter { it.isNotBlank() }
                 .filterNot { it.contains("logo", ignoreCase = true) || it.contains("avatar", ignoreCase = true) || it.contains("discord", ignoreCase = true) || it.contains("dummy", ignoreCase = true) || it.contains("blank", ignoreCase = true) || it.contains("spacer", ignoreCase = true) }
-                .map { absoluteComicUrl(base, it) }
+                .map { absoluteComicUrl(BASE_URL, it) }
                 .distinct()
-
-            if (images.isNotEmpty()) return images
-
-            Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
-                .findAll(html)
-                .map { it.value }
-                .filter { it.contains("/uploads/") || it.contains("/comics/") || it.contains("/wp-content/") }
-                .filterNot { it.contains("logo", ignoreCase = true) || it.contains("avatar", ignoreCase = true) || it.contains("discord", ignoreCase = true) }
-                .distinct()
-                .toList()
+                .ifEmpty {
+                    Regex("""https?://[^\s"'>]+\.(?:jpg|jpeg|png|webp)[^\s"'>]*""")
+                        .findAll(html)
+                        .map { it.value }
+                        .filter { it.contains("/uploads/") || it.contains("/comics/") || it.contains("/wp-content/") }
+                        .filterNot { it.contains("logo", ignoreCase = true) || it.contains("avatar", ignoreCase = true) || it.contains("discord", ignoreCase = true) }
+                        .distinct()
+                        .toList()
+                }
         } catch (e: Exception) {
             println("[ViewComic] Pages failed: ${e.message}")
             emptyList()

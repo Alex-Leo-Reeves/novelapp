@@ -167,172 +167,140 @@ fun FootballHomeScreen(
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
     ) {
-        // ── Header ─────────────────────────────────────────────────────────
-        Box(
+        // ── Filter controls (no header - parent SportsHomeScreen provides it) ──
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF003300), currentTheme.backgroundColor())
-                    )
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 14.dp)
+                .padding(horizontal = 16.dp)
         ) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "Football",
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = currentTheme.textColor(),
-                            fontWeight = FontWeight.Black
+            Spacer(Modifier.height(4.dp))
+
+            // Search bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search teams or leagues...", color = currentTheme.subTextColor()) },
+                leadingIcon = {
+                    if (isSearching) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = footballAccent
                         )
-                        Text(
-                            "Live scores & streaming",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = currentTheme.subTextColor()
-                        )
+                    } else {
+                        Icon(Icons.Default.Search, null, tint = footballAccent)
                     }
-                    Icon(
-                        Icons.Default.SportsSoccer,
-                        null,
-                        tint = footballAccent,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // Search bar
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search teams or leagues...", color = currentTheme.subTextColor()) },
-                    leadingIcon = {
-                        if (isSearching) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = footballAccent
-                            )
-                        } else {
-                            Icon(Icons.Default.Search, null, tint = footballAccent)
-                        }
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Close, null, tint = currentTheme.subTextColor())
-                            }
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = footballAccent,
-                        unfocusedBorderColor = currentTheme.subTextColor().copy(0.3f),
-                        focusedTextColor = currentTheme.textColor(),
-                        unfocusedTextColor = currentTheme.textColor(),
-                        cursorColor = footballAccent,
-                        unfocusedContainerColor = currentTheme.cardColor().copy(0.5f),
-                        focusedContainerColor = currentTheme.cardColor().copy(0.5f)
-                    ),
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp)
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                // Filter tabs: All | Live | Today | Upcoming
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val tabs = listOf("All", "Live", "Today", "Upcoming")
-                    items(tabs.size) { idx ->
-                        val selected = activeTab == idx
-                        val label = if (idx == 1) {
-                            val liveCount = fixtures.count { it.isLive }
-                            "Live${if (liveCount > 0) " ($liveCount)" else ""}"
-                        } else tabs[idx]
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (selected) footballAccent else currentTheme.cardColor())
-                                .clickable { activeTab = idx }
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                label,
-                                color = if (selected) Color.White else currentTheme.subTextColor(),
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, null, tint = currentTheme.subTextColor())
                         }
                     }
-                }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = footballAccent,
+                    unfocusedBorderColor = currentTheme.subTextColor().copy(0.3f),
+                    focusedTextColor = currentTheme.textColor(),
+                    unfocusedTextColor = currentTheme.textColor(),
+                    cursorColor = footballAccent,
+                    unfocusedContainerColor = currentTheme.cardColor().copy(0.5f),
+                    focusedContainerColor = currentTheme.cardColor().copy(0.5f)
+                ),
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp)
+            )
 
-                // League filter chips
-                if (leagues.isNotEmpty() && searchQuery.length < 2) {
-                    Spacer(Modifier.height(8.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Spacer(Modifier.height(10.dp))
+
+            // Filter tabs: All | Live | Today | Upcoming
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val tabs = listOf("All", "Live", "Today", "Upcoming")
+                items(tabs.size) { idx ->
+                    val selected = activeTab == idx
+                    val label = if (idx == 1) {
+                        val liveCount = fixtures.count { it.isLive }
+                        "Live${if (liveCount > 0) " ($liveCount)" else ""}"
+                    } else tabs[idx]
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) footballAccent else currentTheme.cardColor())
+                            .clickable { activeTab = idx }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        item {
-                            FilterChip(
-                                selected = selectedLeagueId == null,
-                                onClick = { selectedLeagueId = null },
-                                label = { Text("All Leagues") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = footballAccent,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = currentTheme.cardColor(),
-                                    labelColor = currentTheme.subTextColor()
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true, selected = selectedLeagueId == null,
-                                    selectedBorderColor = footballAccent,
-                                    borderColor = currentTheme.subTextColor().copy(0.3f)
-                                ),
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                        }
-                        items(leagues) { league ->
-                            FilterChip(
-                                selected = selectedLeagueId == league.id,
-                                onClick = {
-                                    selectedLeagueId = if (selectedLeagueId == league.id) null else league.id
-                                },
-                                label = { Text(league.name.take(14)) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = footballAccent,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = currentTheme.cardColor(),
-                                    labelColor = currentTheme.subTextColor()
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true, selected = selectedLeagueId == league.id,
-                                    selectedBorderColor = footballAccent,
-                                    borderColor = currentTheme.subTextColor().copy(0.3f)
-                                ),
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                        }
+                        Text(
+                            label,
+                            color = if (selected) Color.White else currentTheme.subTextColor(),
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
             }
+
+            // League filter chips
+            if (leagues.isNotEmpty() && searchQuery.length < 2) {
+                Spacer(Modifier.height(8.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedLeagueId == null,
+                            onClick = { selectedLeagueId = null },
+                            label = { Text("All Leagues") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = footballAccent,
+                                selectedLabelColor = Color.White,
+                                containerColor = currentTheme.cardColor(),
+                                labelColor = currentTheme.subTextColor()
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true, selected = selectedLeagueId == null,
+                                selectedBorderColor = footballAccent,
+                                borderColor = currentTheme.subTextColor().copy(0.3f)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
+                    items(leagues) { league ->
+                        FilterChip(
+                            selected = selectedLeagueId == league.id,
+                            onClick = {
+                                selectedLeagueId = if (selectedLeagueId == league.id) null else league.id
+                            },
+                            label = { Text(league.name.take(14)) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = footballAccent,
+                                selectedLabelColor = Color.White,
+                                containerColor = currentTheme.cardColor(),
+                                labelColor = currentTheme.subTextColor()
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true, selected = selectedLeagueId == league.id,
+                                selectedBorderColor = footballAccent,
+                                borderColor = currentTheme.subTextColor().copy(0.3f)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
 
         // ── Content ──────────────────────────────────────────────────────
         if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = footballAccent)
             }
         } else if (errorMessage != null && displayMatches.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Default.SportsSoccer, null, tint = currentTheme.subTextColor(), modifier = Modifier.size(64.dp))
                     Text(errorMessage ?: "No matches.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.titleMedium)
@@ -347,7 +315,7 @@ fun FootballHomeScreen(
                 }
             }
         } else if (displayMatches.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("No matches found", color = currentTheme.subTextColor())
             }
         } else {
@@ -355,7 +323,7 @@ fun FootballHomeScreen(
                 state = gridState,
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.weight(1f).fillMaxWidth()
             ) {
                 matchesByLeague.forEach { (leagueName, matches) ->
                     item {

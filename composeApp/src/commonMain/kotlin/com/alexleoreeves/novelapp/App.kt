@@ -567,7 +567,21 @@ fun App(
                     }
                 }
 
-                // ── 4. TMDB media detail screen ───────────────────────────
+                // ── 4a. MA Server WebView embed player (Server 1 & 2) ──
+                // MUST be before selectedMedia so the player renders above the detail screen.
+                maServerEmbedUrl.value != null -> {
+                    MaServerPlayerScreen(
+                        embedUrl = maServerEmbedUrl.value!!,
+                        episodeTitle = maServerEmbedTitle.value,
+                        currentTheme = appTheme.value,
+                        onBack = {
+                            maServerEmbedUrl.value = null
+                            maServerEmbedTitle.value = ""
+                        }
+                    )
+                }
+
+                // ── 4b. TMDB media detail screen ───────────────────────────
                 selectedMedia.value != null -> {
                     MediaDetailScreen(
                         item = selectedMedia.value!!,
@@ -592,19 +606,6 @@ fun App(
                             maServerEmbedTitle.value = title
                         },
                         onBack = { selectedMedia.value = null }
-                    )
-                }
-
-                // ── 4b. MA Server WebView embed player (Server 2/3/4) ──
-                maServerEmbedUrl.value != null -> {
-                    MaServerPlayerScreen(
-                        embedUrl = maServerEmbedUrl.value!!,
-                        episodeTitle = maServerEmbedTitle.value,
-                        currentTheme = appTheme.value,
-                        onBack = {
-                            maServerEmbedUrl.value = null
-                            maServerEmbedTitle.value = ""
-                        }
                     )
                 }
 
@@ -677,7 +678,15 @@ fun App(
                                         queueCloudSync()
                                     },
                                     onNovelSelected = { item ->
-                                        if (item.isAnime && item.animeResult != null) {
+                                        if (item.isVideo && item.mediaKind == VideoCategory.NIGERIAN.name) {
+                                            // Nigerian items are YouTube-only — route directly to YouTubePlayerScreen
+                                            val videoId = item.id.removePrefix("youtube_nollywood_")
+                                                .takeIf { it != item.id && it.isNotBlank() }
+                                            if (videoId != null) {
+                                                youtubeVideoId.value = videoId
+                                                youtubeVideoTitle.value = item.title
+                                            }
+                                        } else if (item.isAnime && item.animeResult != null) {
                                             selectedAnime.value = item.animeResult
                                         } else if (item.isVideo) {
                                             selectedMedia.value = item
@@ -725,28 +734,7 @@ fun App(
                                         selectedWweEvent.value = event
                                     }
                                 )
-                                BottomTab.NOLLYWOOD -> NollywoodHomeScreen(
-                    currentTheme = appTheme.value,
-                    onPlayStream = { url, title, previewLimitMs ->
-                        animeStreamUrl.value = url
-                        animeEpisodeTitle.value = title
-                        animePreviewLimitMs.value = previewLimitMs
-                        animeContentKind.value = ""
-                    },
-                    onPlayYtVideo = { videoId, title ->
-                        youtubeVideoId.value = videoId
-                        youtubeVideoTitle.value = title
-                    },
-                    onPlayMaEmbed = { embedUrl, title ->
-                        maServerEmbedUrl.value = embedUrl
-                        maServerEmbedTitle.value = title
-                    },
-                    onBack = { currentTab.value = BottomTab.DISCOVER },
-                    requireAuth = requireAuth,
-                    onSubscribe = { beginPremiumCheckout("premium_3_devices") },
-                    downloadRepo = downloadRepo
-                )
-                BottomTab.YOU -> {
+                                BottomTab.YOU -> {
                                     if (account == null) {
                                         showAuthSheet = true
                                         currentTab.value = BottomTab.DISCOVER
@@ -1059,7 +1047,6 @@ fun App(
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.Home),
     FAVORITES("Favorites", Icons.Default.Favorite),
-    NOLLYWOOD("Nollywood", Icons.Default.Flag),
     SPORTS("Sports", Icons.Default.SportsEsports),
     READ("Read", Icons.Default.MenuBook),
     YOU("You", Icons.Default.Person)

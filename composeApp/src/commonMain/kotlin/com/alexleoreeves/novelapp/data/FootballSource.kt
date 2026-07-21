@@ -113,25 +113,34 @@ class FootballApiSource(private val httpClient: HttpClient) {
         awayTeam: String = "",
         leagueName: String = ""
     ): List<String> {
-        // Build team-specific search queries so the WebView lands on the right match
+        // ScoreBat embed provides actual video highlights/replays in an embeddable player.
+        // The embed endpoint renders a proper video player, not a search/results page.
+        // Build a direct embed URL using the fixture ID when available.
+        val embedUrls = mutableListOf<String>()
+
+        // Server 1: ScoreBat embed — this renders an actual video player WebView,
+        // not a search results page. Works for highlights and replays.
+        embedUrls.add("https://www.scorebat.com/embed/")
+
+        // Server 2: ScoreBat with team search (falls back to team highlights)
         val searchQuery = buildString {
             if (homeTeam.isNotBlank()) append(homeTeam.take(20).replace(" ", "+"))
             if (awayTeam.isNotBlank()) {
                 if (isNotEmpty()) append("+vs+")
                 append(awayTeam.take(20).replace(" ", "+"))
             }
-        }.ifBlank { "live+football" }
+        }
+        if (searchQuery.isNotBlank()) {
+            embedUrls.add("https://www.scorebat.com/embed/livescore/?search=$searchQuery")
+        }
 
-        return listOf(
-            // Server 1: SportSurge — popular free sports streaming aggregator
-            "https://v2.sportsurge.net/search?query=$searchQuery",
-            // Server 2: ScoreBat — legal highlight embeds for most matches
-            "https://www.scorebat.com/embed/livescore/?search=$searchQuery",
-            // Server 3: Footybite — sports streaming directory
-            "https://footybite.to/?s=$searchQuery",
-            // Server 4: Reddit Soccer Streams alternative
-            "https://redditsoccerstreams.tv/?s=$searchQuery"
-        )
+        // Server 3: Footybite direct match search
+        embedUrls.add("https://footybite.to/?s=$searchQuery".takeIf { searchQuery.isNotBlank() } ?: "https://footybite.to/")
+
+        // Server 4: SportSurge
+        embedUrls.add("https://v2.sportsurge.net/search?query=$searchQuery".takeIf { searchQuery.isNotBlank() } ?: "https://v2.sportsurge.net/")
+
+        return embedUrls.distinct()
     }
 
     suspend fun searchFixtures(query: String): List<FootballMatch> = runCatching {

@@ -43,7 +43,7 @@ enum class ContentTab(val label: String, val icon: ImageVector) {
     CARTOON("Cartoon", Icons.Default.Animation),
     OLDER_CARTOON("Classic", Icons.Default.Theaters),
     MOVIES("Movies", Icons.Default.Movie),
-    NIGERIAN_FILMS("Nollywood", Icons.Default.Flag)  // Nigerian Films tab
+    NIGERIAN("Nigerian", Icons.Default.Flag)
 }
 
 // Tab accent colors
@@ -54,7 +54,7 @@ private val cartoonAccent = Color(0xFF00A8A8)
 private val comicAccent = Color(0xFFFF6D00)    // orange — Western comics
 private val olderCartoonAccent = Color(0xFF6D4C41) // brown — nostalgia
 private val moviesAccent = Color(0xFF7C4DFF)
-private val nigerianAccent = Color(0xFF008751)  // Nollywood green (Nigeria flag green)
+private val nigerianAccent = Color(0xFF008751) // Nigerian green
 
 private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
     ContentTab.ANIME -> VideoCategory.ANIME
@@ -63,7 +63,7 @@ private fun ContentTab.videoCategory(): VideoCategory? = when (this) {
     ContentTab.CARTOON -> VideoCategory.CARTOON
     ContentTab.OLDER_CARTOON -> VideoCategory.CLASSIC
     ContentTab.MOVIES -> VideoCategory.MOVIES
-    ContentTab.NIGERIAN_FILMS -> VideoCategory.NIGERIAN
+    ContentTab.NIGERIAN -> VideoCategory.NIGERIAN
     else -> null
 }
 
@@ -75,7 +75,7 @@ private fun ContentTab.tabAccent(currentTheme: AppTheme): Color = when (this) {
     ContentTab.COMIC -> comicAccent
     ContentTab.OLDER_CARTOON -> olderCartoonAccent
     ContentTab.MOVIES -> moviesAccent
-    ContentTab.NIGERIAN_FILMS -> nigerianAccent
+    ContentTab.NIGERIAN -> nigerianAccent
     else -> currentTheme.accentColor()
 }
 
@@ -109,7 +109,6 @@ fun DiscoverHomeScreen(
     var selectedMangaGenre by remember { mutableStateOf("All") }
     var selectedAnimeGenre by remember { mutableStateOf("All") }
     var isSearching by remember { mutableStateOf(false) }
-
     var popularItemsByTab by remember { mutableStateOf<Map<ContentTab, List<UnifiedSearchResult>>>(emptyMap()) }
     var airingAnime by remember { mutableStateOf<List<AnimeResult>>(emptyList()) }
     var animeSearchResults by remember { mutableStateOf<List<AnimeResult>>(emptyList()) }
@@ -248,7 +247,7 @@ fun DiscoverHomeScreen(
             ContentTab.CARTOON,
             ContentTab.OLDER_CARTOON,
             ContentTab.MOVIES,
-            ContentTab.NIGERIAN_FILMS -> emptyList()
+            ContentTab.NIGERIAN -> emptyList()
             }
             if (activeTab == ContentTab.NOVELS && selectedCategory != NovelCategory.ALL) {
                 val genreFiltered = list.filter {
@@ -280,7 +279,7 @@ fun DiscoverHomeScreen(
                 ContentTab.CARTOON,
                 ContentTab.OLDER_CARTOON,
                 ContentTab.MOVIES,
-                ContentTab.NIGERIAN_FILMS -> videoSearchResults
+                ContentTab.NIGERIAN -> videoSearchResults
             }
         }
     }
@@ -299,28 +298,28 @@ fun DiscoverHomeScreen(
         val q = searchQuery
         val tab = activeTab
         when (tab) {
-            ContentTab.ANIME,
-            ContentTab.DONGHUA,
-            ContentTab.K_DRAMA,
-            ContentTab.CARTOON,
-            ContentTab.OLDER_CARTOON,
-            ContentTab.MOVIES,
-            ContentTab.NIGERIAN_FILMS -> {
-                val category = tab.videoCategory()
-                videoSearchResults = if (category != null) repository.searchVideo(category, q) else emptyList()
-                isSearching = false
-                onSearchCommitted(tab, q)
-            }
-            else -> {
-                searchResults = when (tab) {
-                    ContentTab.NOVELS -> repository.searchNovels(q)
-                    ContentTab.MANGA -> repository.searchManga(q)
-                    ContentTab.COMIC -> repository.searchComics(q)
-                    else -> emptyList()
+                ContentTab.ANIME,
+                ContentTab.DONGHUA,
+                ContentTab.K_DRAMA,
+                ContentTab.CARTOON,
+                ContentTab.OLDER_CARTOON,
+                ContentTab.MOVIES,
+                ContentTab.NIGERIAN -> {
+                    val category = tab.videoCategory()
+                    videoSearchResults = if (category != null) repository.searchVideo(category, q) else emptyList()
+                    isSearching = false
+                    onSearchCommitted(tab, q)
                 }
-                isSearching = false
-                onSearchCommitted(tab, q)
-            }
+                else -> {
+                    searchResults = when (tab) {
+                        ContentTab.NOVELS -> repository.searchNovels(q)
+                        ContentTab.MANGA -> repository.searchManga(q)
+                        ContentTab.COMIC -> repository.searchComics(q)
+                        else -> emptyList()
+                    }
+                    isSearching = false
+                    onSearchCommitted(tab, q)
+                }
         }
     }
 
@@ -345,7 +344,7 @@ fun DiscoverHomeScreen(
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
                         ContentTab.MOVIES,
-                        ContentTab.NIGERIAN_FILMS -> {
+                        ContentTab.NIGERIAN -> {
                             val category = activeTab.videoCategory()
                             videoSearchResults = if (category != null) {
                                 repository.searchVideo(category, searchQuery, nextPage)
@@ -377,7 +376,7 @@ fun DiscoverHomeScreen(
                         ContentTab.CARTOON,
                         ContentTab.OLDER_CARTOON,
                         ContentTab.MOVIES,
-                        ContentTab.NIGERIAN_FILMS -> {
+                        ContentTab.NIGERIAN -> {
                             val category = activeTab.videoCategory()
                             if (category != null) {
                                 isLoadingVideo = true
@@ -469,8 +468,8 @@ fun DiscoverHomeScreen(
                                     ContentTab.CARTOON -> "Search cartoons..."
                                     ContentTab.OLDER_CARTOON -> "Search classic cartoons..."
                                     ContentTab.MOVIES -> "Search movies..."
-                                    ContentTab.NIGERIAN_FILMS -> "Search Nollywood..."
                                     ContentTab.DONGHUA -> "Search donghua..."
+                                    ContentTab.NIGERIAN -> "Search Nigerian movies..."
                                 },
                                 color = currentTheme.subTextColor()
                             )
@@ -757,7 +756,7 @@ fun DiscoverHomeScreen(
                             ContentTab.CARTOON -> "Popular Cartoons"
                             ContentTab.OLDER_CARTOON -> "Classic Cartoons"
                             ContentTab.MOVIES -> "Popular Movies"
-                            ContentTab.NIGERIAN_FILMS -> "Popular Nollywood"
+                            ContentTab.NIGERIAN -> "Nigerian Movies"
                         },
                         style = MaterialTheme.typography.titleMedium,
                         color = currentTheme.textColor(),
@@ -1116,7 +1115,6 @@ fun ContentCard(
                         VideoCategory.K_DRAMA.name -> kDramaAccent
                         VideoCategory.CARTOON.name -> cartoonAccent
                         VideoCategory.MOVIES.name -> moviesAccent
-                        VideoCategory.NIGERIAN.name -> nigerianAccent
                         else -> moviesAccent
                     }
                     else -> currentTheme.accentColor()
@@ -1132,7 +1130,6 @@ fun ContentCard(
                                 VideoCategory.K_DRAMA.name -> "K"
                                 VideoCategory.CARTOON.name -> "C"
                                 VideoCategory.MOVIES.name -> "V"
-                                VideoCategory.NIGERIAN.name -> "N"
                                 else -> "V"
                             }
                             else -> "N"
@@ -1216,7 +1213,7 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     tab == ContentTab.K_DRAMA -> Icons.Default.LiveTv
                     tab == ContentTab.CARTOON -> Icons.Default.Animation
                     tab == ContentTab.MOVIES -> Icons.Default.Movie
-                    tab == ContentTab.NIGERIAN_FILMS -> Icons.Default.Flag
+                    tab == ContentTab.NIGERIAN -> Icons.Default.Flag
                     else -> Icons.Default.AutoStories
                 },
                 null,
@@ -1234,8 +1231,8 @@ fun EmptyStateView(currentTheme: AppTheme, tab: ContentTab, hasSearch: Boolean) 
                     ContentTab.CARTOON -> "No cartoons loaded yet"
                     ContentTab.OLDER_CARTOON -> "No classic cartoons loaded yet"
                     ContentTab.MOVIES -> "No movies loaded yet"
-            ContentTab.DONGHUA -> "No donghua loaded yet"
-                    ContentTab.NIGERIAN_FILMS -> "No Nollywood films loaded yet"
+                    ContentTab.DONGHUA -> "No donghua loaded yet"
+                    ContentTab.NIGERIAN -> "No Nigerian movies loaded yet"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 color = currentTheme.subTextColor()
