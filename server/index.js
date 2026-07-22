@@ -222,6 +222,8 @@ function cleanBaseUrl(value) {
     return String(value || "").trim().replace(/\/+$/, "");
 }
 
+const APK_EXTERNAL_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.38/novelapp-android.apk";
+
 function buildAppVersionPayload() {
     const appVersionPath = path.join(SITE_DIR, "app-version.json");
     const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
@@ -245,11 +247,14 @@ function buildAppVersionPayload() {
         }
     }
 
+    // If APK is not on disk (no LFS on Render), use the external GitHub Release URL
     if (fs.existsSync(apkPath) && fs.statSync(apkPath).isFile()) {
         const stat = fs.statSync(apkPath);
         const buffer = fs.readFileSync(apkPath);
         payload.apkBytes = stat.size;
         payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+    } else {
+        payload.apkUrl = APK_EXTERNAL_URL;
     }
 
     return payload;
@@ -3795,6 +3800,16 @@ async function handleApi(request, response, pathname) {
 }
 
 function serveStatic(request, response, pathname) {
+  // If the APK is not present on disk (Render deploy without LFS), redirect to GitHub Release
+  if (pathname === "/downloads/novelapp-android.apk") {
+    const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
+    if (!fs.existsSync(apkPath)) {
+      const redirectUrl = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.38/novelapp-android.apk";
+      response.writeHead(302, { location: redirectUrl });
+      response.end();
+      return;
+    }
+  }
   if (pathname === "/assets/kokoro/model_quantized.onnx") {
     const modelPath = path.join(process.cwd(), "kokoro-assets", "kokoro", "model_quantized.onnx");
     if (fs.existsSync(modelPath) && fs.statSync(modelPath).isFile()) {
