@@ -15,21 +15,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.data.*
-import com.alexleoreeves.novelapp.platform.EmptyUserSessionStore
-import com.alexleoreeves.novelapp.platform.ExternalLinkOpener
-import com.alexleoreeves.novelapp.platform.NoOpExternalLinkOpener
-import com.alexleoreeves.novelapp.platform.PlatformBackHandler
-import com.alexleoreeves.novelapp.platform.SavedUserAccount
-import com.alexleoreeves.novelapp.platform.UserSessionStore
-import com.alexleoreeves.novelapp.platform.currentTimeMillis
-import com.alexleoreeves.novelapp.platform.platformHttpClient
+import com.alexleoreeves.novelapp.platform.*
 import com.alexleoreeves.novelapp.ui.*
 import com.alexleoreeves.novelapp.ui.components.MiniPlayerWidget
-import com.alexleoreeves.novelapp.ui.theme.NovelAppTheme
-import com.alexleoreeves.novelapp.ui.theme.accentColor
-import com.alexleoreeves.novelapp.ui.theme.backgroundColor
-import com.alexleoreeves.novelapp.ui.theme.subTextColor
-import com.alexleoreeves.novelapp.ui.theme.surfaceColor
+import com.alexleoreeves.novelapp.ui.theme.*
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.delay
@@ -37,9 +26,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Root composable — entry point for shared KMP UI
-// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun App(
     userSessionStore: UserSessionStore = EmptyUserSessionStore,
@@ -47,8 +33,6 @@ fun App(
 ) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
-    var discoverContentTab by remember { mutableStateOf(ContentTab.NOVELS) }
-    var discoverSearchQuery by remember { mutableStateOf("") }
     var showSplash by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
@@ -75,7 +59,6 @@ fun App(
     val selectedNovelTitle = remember { mutableStateOf("") }
     val selectedSourceName = remember { mutableStateOf("") }
 
-    // Anime navigation state
     val selectedAnime = remember { mutableStateOf<AnimeResult?>(null) }
     val animeStreamUrl = remember { mutableStateOf<String?>(null) }
     val animeEpisodeTitle = remember { mutableStateOf("") }
@@ -84,11 +67,9 @@ fun App(
     val animeContentKind = remember { mutableStateOf("") }
     val animeSubtitlesJson = remember { mutableStateOf<String?>(null) }
 
-    // MA Server WebView embed player state (for Server 2/3/4)
     val maServerEmbedUrl = remember { mutableStateOf<String?>(null) }
     val maServerEmbedTitle = remember { mutableStateOf("") }
 
-    // Football & WWE navigation states
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
     val footballStreamUrl = remember { mutableStateOf<String?>(null) }
     val footballStreamTitle = remember { mutableStateOf("") }
@@ -96,7 +77,6 @@ fun App(
     val wweStreamUrl = remember { mutableStateOf<String?>(null) }
     val wweStreamTitle = remember { mutableStateOf("") }
 
-    // YouTube / Nollywood navigation states
     val youtubeVideoId = remember { mutableStateOf<String?>(null) }
     val youtubeVideoTitle = remember { mutableStateOf("") }
 
@@ -107,9 +87,7 @@ fun App(
         )
     }
 
-    val ttsController = remember {
-        SherpaNarrationController()
-    }
+    val ttsController = remember { SherpaNarrationController() }
     val narrationSettings = ttsController.settings.collectAsState()
     val isNarrationPlaying = ttsController.isPlaying.collectAsState()
     val keepNarrationAlive by rememberUpdatedState(
@@ -117,18 +95,14 @@ fun App(
     )
     val updateClient = remember {
         platformHttpClient {
-            install(ContentNegotiation) {
-                json(Json { ignoreUnknownKeys = true })
-            }
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
         }
     }
     val updateProgress by AppUpdateProgressBus.state.collectAsState()
 
     DisposableEffect(Unit) {
         onDispose {
-            if (!keepNarrationAlive) {
-                ttsController.close()
-            }
+            if (!keepNarrationAlive) ttsController.close()
             updateClient.close()
         }
     }
@@ -136,949 +110,362 @@ fun App(
     fun mergeFavorites(remote: List<FavoriteNovel>) {
         val merged = (favorites + remote)
             .filter { it.id.isNotBlank() }
-            .groupBy { it.id }
-            .values
-            .mapNotNull { group -> group.maxByOrNull { it.addedAt } }
+            .groupBy { it.id }.values
+            .mapNotNull { g -> g.maxByOrNull { it.addedAt } }
             .sortedByDescending { it.addedAt }
-        favorites.clear()
-        favorites.addAll(merged)
+        favorites.clear(); favorites.addAll(merged)
     }
 
     suspend fun hydrateCloudState(token: String) {
         runCatching { authApi.getUserState(token) }
-            .onSuccess { state ->
-                downloadRepo.mergeUserState(state)
-                mergeFavorites(state.favorites)
-            }
+            .onSuccess { s -> downloadRepo.mergeUserState(s); mergeFavorites(s.favorites) }
         hasHydratedCloudState = true
     }
 
     fun queueCloudSync() {
-        if (account != null && hasHydratedCloudState) {
-            cloudSyncPulse += 1
-        }
+        if (account != null && hasHydratedCloudState) cloudSyncPulse += 1
     }
 
     fun beginPremiumCheckout(planId: String = "premium_3_devices") {
-        val activeAccount = account
-        if (activeAccount == null) {
-            showAuthSheet = true
-            return
-        }
+        val a = account ?: run { showAuthSheet = true; return }
         scope.launch {
             subscriptionMessage = "Starting subscription checkout..."
-            runCatching { authApi.createBillingCheckout(activeAccount.authToken, planId) }
-                .onSuccess { checkout ->
-                    if (checkout.alreadyPremium || checkout.premium) {
-                        runCatching { authApi.billingStatus(activeAccount.authToken) }
-                            .onSuccess { status ->
-                                account = status.account
-                                userSessionStore.saveAccount(status.account)
-                            }
-                        subscriptionMessage = "This plan is already active on this account."
-                    } else if (checkout.link.isNotBlank()) {
-                        linkOpener.open(checkout.link)
+            runCatching { authApi.createBillingCheckout(a.authToken, planId) }
+                .onSuccess { ch ->
+                    if (ch.alreadyPremium || ch.premium) {
+                        runCatching { authApi.billingStatus(a.authToken) }
+                            .onSuccess { s -> account = s.account; userSessionStore.saveAccount(s.account) }
+                        subscriptionMessage = "This plan is already active."
+                    } else if (ch.link.isNotBlank()) {
+                        linkOpener.open(ch.link)
                         subscriptionMessage = "Complete the Flutterwave checkout, then reopen the app to refresh your plan."
-                    } else {
-                        subscriptionMessage = "Checkout link was not returned. Try again."
-                    }
+                    } else subscriptionMessage = "Checkout link was not returned."
                 }
                 .onFailure { subscriptionMessage = it.message ?: "Could not start subscription." }
         }
     }
 
     LaunchedEffect(account?.authToken, cloudSyncPulse) {
-        val token = account?.authToken ?: return@LaunchedEffect
+        val t = account?.authToken ?: return@LaunchedEffect
         if (!hasHydratedCloudState || cloudSyncPulse == 0) return@LaunchedEffect
-        delay(1_200)
-        runCatching {
-            authApi.putUserState(token, downloadRepo.exportUserState(favorites.toList()))
-        }.onSuccess { state ->
-            downloadRepo.mergeUserState(state)
-            mergeFavorites(state.favorites)
-            searchHistoryPulse += 1
-        }
+        delay(1200)
+        runCatching { authApi.putUserState(t, downloadRepo.exportUserState(favorites.toList())) }
+            .onSuccess { s -> downloadRepo.mergeUserState(s); mergeFavorites(s.favorites); searchHistoryPulse++ }
     }
 
     LaunchedEffect(Unit) {
-        val savedAccount = userSessionStore.loadAccount()
-        if (savedAccount == null) {
-            isGuestSession = false
-            isAuthChecked = true
-            return@LaunchedEffect
-        }
-
-        runCatching { authApi.me(savedAccount.authToken) }
-            .onSuccess { verifiedAccount ->
-                userSessionStore.saveAccount(verifiedAccount)
-                account = verifiedAccount
-                isGuestSession = false
-                hydrateCloudState(verifiedAccount.authToken)
-                queueCloudSync()
-            }
+        val saved = userSessionStore.loadAccount()
+        if (saved == null) { isGuestSession = false; isAuthChecked = true; return@LaunchedEffect }
+        runCatching { authApi.me(saved.authToken) }
+            .onSuccess { v -> userSessionStore.saveAccount(v); account = v; hydrateCloudState(v.authToken); queueCloudSync() }
             .onFailure {
                 if ((it as? AuthApiException)?.statusCode in listOf(401, 403)) {
-                    userSessionStore.clearAccount()
-                    account = null
-                    isGuestSession = false
-                    hasHydratedCloudState = false
-                } else {
-                    account = savedAccount
-                    isGuestSession = false
-                    hasHydratedCloudState = true
-                    authError = "Saved account kept offline; sync will retry when the service responds."
-                }
+                    userSessionStore.clearAccount(); account = null; hasHydratedCloudState = false
+                } else { account = saved; hasHydratedCloudState = true; authError = "Offline mode" }
             }
         isAuthChecked = true
     }
 
     LaunchedEffect(showSplash, isAuthChecked) {
         if (!showSplash && isAuthChecked) {
-            val manifest = fetchAppUpdateManifest(updateClient)
-            startupUpdateManifest = manifest?.takeIf { it.isAvailable }
+            startupUpdateManifest = fetchAppUpdateManifest(updateClient)?.takeIf { it.isAvailable }
         }
     }
 
-    val requireAuth: (() -> Unit) -> Unit = { action ->
-        if (account != null) action() else showAuthSheet = true
+    val requireAuth: (() -> Unit) -> Unit = { act ->
+        if (account != null) act() else showAuthSheet = true
+    }
+
+    fun openReadHistory(item: ReadHistoryItem) {
+        selectedNovel.value = UnifiedSearchResult(
+            id = item.parentId, title = item.title, coverUrl = item.coverUrl,
+            detailPageUrl = item.chapterUrl, sourceName = item.sourceName, isManga = item.isManga
+        )
+        selectedNovelTitle.value = item.title; selectedChapterTitle.value = item.chapterTitle
+        selectedChapterUrl.value = item.chapterUrl; selectedSourceName.value = item.sourceName
+    }
+
+    fun openWatchHistory(item: WatchHistoryItem) {
+        selectedAnime.value = null; animeStreamUrl.value = item.streamUrl
+        animeEpisodeTitle.value = item.episodeTitle; animeEpisodeNumber.value = item.episodeNumber
+        animePreviewLimitMs.value = null
+        animeContentKind.value = if (item.contentType == ContentType.ANIME) "anime"
+            else if (item.mediaKind.uppercase() == "DONGHUA") "donghua" else ""
+    }
+
+    val canNavigateBack = listOf(
+        youtubeVideoId.value, animeStreamUrl.value, maServerEmbedUrl.value, footballStreamUrl.value,
+        selectedFootballMatch.value, wweStreamUrl.value, selectedWweEvent.value, selectedChapterUrl.value,
+        selectedAnime.value, selectedMedia.value, selectedNovel.value
+    ).any { it != null } || currentTab.value != BottomTab.DISCOVER
+
+    PlatformBackHandler(enabled = canNavigateBack) {
+        when {
+            youtubeVideoId.value != null -> { youtubeVideoId.value = null; youtubeVideoTitle.value = "" }
+            maServerEmbedUrl.value != null -> { maServerEmbedUrl.value = null; maServerEmbedTitle.value = "" }
+            animeStreamUrl.value != null -> { animeStreamUrl.value = null; animePreviewLimitMs.value = null }
+            footballStreamUrl.value != null -> { footballStreamUrl.value = null; footballStreamTitle.value = "" }
+            selectedFootballMatch.value != null -> selectedFootballMatch.value = null
+            wweStreamUrl.value != null -> { wweStreamUrl.value = null; wweStreamTitle.value = "" }
+            selectedWweEvent.value != null -> selectedWweEvent.value = null
+            selectedChapterUrl.value != null -> selectedChapterUrl.value = null
+            selectedAnime.value != null -> selectedAnime.value = null
+            selectedMedia.value != null -> selectedMedia.value = null
+            selectedNovel.value != null -> selectedNovel.value = null
+            currentTab.value != BottomTab.DISCOVER -> currentTab.value = BottomTab.DISCOVER
+        }
     }
 
     NovelAppTheme(appTheme = appTheme.value) {
-        if (showSplash) {
-            SplashScreen(onFinished = { showSplash = false })
-            return@NovelAppTheme
-        }
-
-        if (!isAuthChecked) {
-            AuthLoadingScreen(
-                currentTheme = appTheme.value,
-                message = "Checking your saved account..."
-            )
-            return@NovelAppTheme
-        }
-
+        if (showSplash) { SplashScreen(onFinished = { showSplash = false }); return@NovelAppTheme }
+        if (!isAuthChecked) { AuthLoadingScreen(currentTheme = appTheme.value, message = "Checking your saved account..."); return@NovelAppTheme }
         if (account == null && !isGuestSession) {
             AuthScreen(
-                currentTheme = appTheme.value,
-                isSubmitting = isAuthSubmitting,
-                errorMessage = authError,
+                currentTheme = appTheme.value, isSubmitting = isAuthSubmitting, errorMessage = authError,
                 onClearError = { authError = null },
-                onDismiss = {
-                    authError = null
-                    isGuestSession = true
-                    currentTab.value = BottomTab.DISCOVER
-                },
-                onSignIn = { email, password ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching { authApi.login(email, password) }
-                            .onSuccess { signedIn ->
-                                userSessionStore.saveAccount(signedIn)
-                                account = signedIn
-                                isGuestSession = false
-                                hydrateCloudState(signedIn.authToken)
-                                queueCloudSync()
-                                isAuthSubmitting = false
-                            }
-                            .onFailure { authError = it.message ?: "Sign in failed."; isAuthSubmitting = false }
-                    }
-                },
-                onCreateAccount = { username, email, password, recoverySecret ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching { authApi.register(username, email, password, recoverySecret) }
-                            .onSuccess { created ->
-                                userSessionStore.saveAccount(created)
-                                account = created
-                                isGuestSession = false
-                                hydrateCloudState(created.authToken)
-                                queueCloudSync()
-                                isAuthSubmitting = false
-                            }
-                            .onFailure { authError = it.message ?: "Account creation failed."; isAuthSubmitting = false }
-                    }
-                },
-                onRecoverAccount = { recoverySecret, newPassword ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching {
-                            val recovered = authApi.recoverAccount(recoverySecret)
-                            authApi.resetPassword(recovered.authToken, newPassword)
-                        }
-                            .onSuccess { recovered ->
-                                userSessionStore.saveAccount(recovered)
-                                account = recovered
-                                isGuestSession = false
-                                hydrateCloudState(recovered.authToken)
-                                queueCloudSync()
-                                isAuthSubmitting = false
-                            }
-                            .onFailure { authError = it.message ?: "Account recovery failed."; isAuthSubmitting = false }
-                    }
-                }
+                onDismiss = { authError = null; isGuestSession = true; currentTab.value = BottomTab.DISCOVER },
+                onSignIn = { e, p -> scope.launch {
+                    isAuthSubmitting = true; authError = null
+                    runCatching { authApi.login(e, p) }.onSuccess { u ->
+                        userSessionStore.saveAccount(u); account = u; isGuestSession = false
+                        hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                    }.onFailure { authError = it.message; isAuthSubmitting = false }
+                }},
+                onCreateAccount = { un, e, p, rs -> scope.launch {
+                    isAuthSubmitting = true; authError = null
+                    runCatching { authApi.register(un, e, p, rs) }.onSuccess { u ->
+                        userSessionStore.saveAccount(u); account = u; isGuestSession = false
+                        hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                    }.onFailure { authError = it.message; isAuthSubmitting = false }
+                }},
+                onRecoverAccount = { rs, np -> scope.launch {
+                    isAuthSubmitting = true; authError = null
+                    runCatching { val r = authApi.recoverAccount(rs); authApi.resetPassword(r.authToken, np) }
+                        .onSuccess { r ->
+                            userSessionStore.saveAccount(r); account = r; isGuestSession = false
+                            hydrateCloudState(r.authToken); queueCloudSync(); isAuthSubmitting = false
+                        }.onFailure { authError = it.message; isAuthSubmitting = false }
+                }}
             )
             return@NovelAppTheme
         }
 
-        fun openReadHistory(item: ReadHistoryItem) {
-            selectedNovel.value = UnifiedSearchResult(
-                id = item.parentId,
-                title = item.title,
-                coverUrl = item.coverUrl,
-                detailPageUrl = item.chapterUrl,
-                sourceName = item.sourceName,
-                isManga = item.isManga
-            )
-            selectedNovelTitle.value = item.title
-            selectedChapterTitle.value = item.chapterTitle
-            selectedChapterUrl.value = item.chapterUrl
-            selectedSourceName.value = item.sourceName
-        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            GlassBackground()
 
-        fun openWatchHistory(item: WatchHistoryItem) {
-            selectedAnime.value = null
-            animeStreamUrl.value = item.streamUrl
-            animeEpisodeTitle.value = item.episodeTitle
-            animeEpisodeNumber.value = item.episodeNumber
-            animePreviewLimitMs.value = null
-            animeContentKind.value = if (item.contentType == ContentType.ANIME) "anime" else if (item.mediaKind.uppercase() == "DONGHUA") "donghua" else ""
-        }
-
-        val canNavigateBack =
-            youtubeVideoId.value != null ||
-                animeStreamUrl.value != null ||
-                maServerEmbedUrl.value != null ||
-                footballStreamUrl.value != null ||
-                selectedFootballMatch.value != null ||
-                wweStreamUrl.value != null ||
-                selectedWweEvent.value != null ||
-                selectedChapterUrl.value != null ||
-                selectedAnime.value != null ||
-                selectedMedia.value != null ||
-                selectedNovel.value != null ||
-                currentTab.value != BottomTab.DISCOVER
-
-        PlatformBackHandler(enabled = canNavigateBack) {
             when {
-                youtubeVideoId.value != null -> {
-                    youtubeVideoId.value = null
-                    youtubeVideoTitle.value = ""
-                }
-                maServerEmbedUrl.value != null -> {
-                    maServerEmbedUrl.value = null
-                    maServerEmbedTitle.value = ""
-                }
-                animeStreamUrl.value != null -> {
-                    animeStreamUrl.value = null
-                    animePreviewLimitMs.value = null
-                }
-                footballStreamUrl.value != null -> {
-                    footballStreamUrl.value = null
-                    footballStreamTitle.value = ""
-                }
-                selectedFootballMatch.value != null -> selectedFootballMatch.value = null
-                wweStreamUrl.value != null -> {
-                    wweStreamUrl.value = null
-                    wweStreamTitle.value = ""
-                }
-                selectedWweEvent.value != null -> selectedWweEvent.value = null
-                selectedChapterUrl.value != null -> selectedChapterUrl.value = null
-                selectedAnime.value != null -> selectedAnime.value = null
-                selectedMedia.value != null -> selectedMedia.value = null
-                selectedNovel.value != null -> selectedNovel.value = null
-                currentTab.value != BottomTab.DISCOVER -> currentTab.value = BottomTab.DISCOVER
-            }
-        }
+                footballStreamUrl.value != null -> MaServerPlayerScreen(footballStreamUrl.value!!, footballStreamTitle.value, appTheme.value) { footballStreamUrl.value = null; footballStreamTitle.value = "" }
+                selectedFootballMatch.value != null -> FootballMatchScreen(selectedFootballMatch.value!!, appTheme.value, { u, t -> footballStreamUrl.value = u; footballStreamTitle.value = t }) { selectedFootballMatch.value = null }
+                wweStreamUrl.value != null -> MaServerPlayerScreen(wweStreamUrl.value!!, wweStreamTitle.value, appTheme.value) { wweStreamUrl.value = null; wweStreamTitle.value = "" }
+                selectedWweEvent.value != null -> WweMatchScreen(selectedWweEvent.value!!, appTheme.value, { u, t -> wweStreamUrl.value = u; wweStreamTitle.value = t }) { selectedWweEvent.value = null }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(appTheme.value.backgroundColor())
-        ) {
-            when {
-                // ── 0a. Football full-screen player ────────────────────────
-                footballStreamUrl.value != null -> {
-                    MaServerPlayerScreen(
-                        embedUrl = footballStreamUrl.value!!,
-                        episodeTitle = footballStreamTitle.value,
-                        currentTheme = appTheme.value,
-                        onBack = {
-                            footballStreamUrl.value = null
-                            footballStreamTitle.value = ""
-                        }
-                    )
-                }
+                animeStreamUrl.value != null -> AnimePlayerScreen(
+                    animeStreamUrl.value!!, animeEpisodeTitle.value, appTheme.value,
+                    initialPositionMs = downloadRepo.getWatchProgress(animeStreamUrl.value!!)?.positionMs ?: 0L,
+                    onProgress = { ms ->
+                        val a = selectedAnime.value
+                        downloadRepo.recordWatchProgress(WatchHistoryItem(parentId = a?.id ?: animeStreamUrl.value!!, title = a?.displayTitle ?: animeEpisodeTitle.value, coverUrl = a?.coverUrl.orEmpty(), episodeTitle = animeEpisodeTitle.value, streamUrl = animeStreamUrl.value!!, episodeNumber = animeEpisodeNumber.value, positionMs = ms))
+                        queueCloudSync()
+                    },
+                    previewLimitMs = animePreviewLimitMs.value,
+                    onPreviewFinished = { animeStreamUrl.value = null; animePreviewLimitMs.value = null; subscriptionMessage = "Free preview ended." },
+                    contentKind = animeContentKind.value, subtitlesJson = animeSubtitlesJson.value,
+                    onBack = { animeStreamUrl.value = null; animePreviewLimitMs.value = null }
+                )
 
-                // ── 0b. Football match detail screen ───────────────────────
-                selectedFootballMatch.value != null -> {
-                    FootballMatchScreen(
-                        match = selectedFootballMatch.value!!,
-                        currentTheme = appTheme.value,
-                        onPlayStream = { url, title ->
-                            footballStreamUrl.value = url
-                            footballStreamTitle.value = title
-                        },
-                        onBack = { selectedFootballMatch.value = null }
-                    )
-                }
+                selectedAnime.value != null -> AnimeDetailScreen(selectedAnime.value!!, repository, appTheme.value, downloadRepo,
+                    isPremium = account?.isPremium == true,
+                    { u, t -> animeStreamUrl.value = u; animeEpisodeTitle.value = t; animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0; animePreviewLimitMs.value = null; animeContentKind.value = "anime" },
+                    { selectedAnime.value = null }, requireAuth)
 
-                // ── 0c. WWE full-screen player ─────────────────────────────
-                wweStreamUrl.value != null -> {
-                    MaServerPlayerScreen(
-                        embedUrl = wweStreamUrl.value!!,
-                        episodeTitle = wweStreamTitle.value,
-                        currentTheme = appTheme.value,
-                        onBack = {
-                            wweStreamUrl.value = null
-                            wweStreamTitle.value = ""
-                        }
-                    )
-                }
-
-                // ── 0d. WWE event detail screen ────────────────────────────
-                selectedWweEvent.value != null -> {
-                    WweMatchScreen(
-                        event = selectedWweEvent.value!!,
-                        currentTheme = appTheme.value,
-                        onPlayStream = { url, title ->
-                            wweStreamUrl.value = url
-                            wweStreamTitle.value = title
-                        },
-                        onBack = { selectedWweEvent.value = null }
-                    )
-                }
-
-                // ── 1. Anime full-screen player ────────────────────────────
-                animeStreamUrl.value != null -> {
-                    AnimePlayerScreen(
-                        streamUrl = animeStreamUrl.value!!,
-                        episodeTitle = animeEpisodeTitle.value,
-                        currentTheme = appTheme.value,
-                        initialPositionMs = downloadRepo.getWatchProgress(animeStreamUrl.value!!)?.positionMs ?: 0L,
-                        onProgress = { positionMs ->
-                            val anime = selectedAnime.value
-                            downloadRepo.recordWatchProgress(
-                                WatchHistoryItem(
-                                    parentId = anime?.id ?: animeStreamUrl.value!!,
-                                    title = anime?.displayTitle ?: animeEpisodeTitle.value.substringBefore(" - EP").substringBefore(" – EP").ifBlank { animeEpisodeTitle.value },
-                                    coverUrl = anime?.coverUrl.orEmpty(),
-                                    episodeTitle = animeEpisodeTitle.value,
-                                    streamUrl = animeStreamUrl.value!!,
-                                    episodeNumber = animeEpisodeNumber.value,
-                                    positionMs = positionMs
-                                )
-                            )
-                            queueCloudSync()
-                        },
-                        previewLimitMs = animePreviewLimitMs.value,
-                        onPreviewFinished = {
-                            animeStreamUrl.value = null
-                            animePreviewLimitMs.value = null
-                            subscriptionMessage = "Free preview ended. Subscribe for full movies, cartoons, and K-drama."
-                        },
-                        contentKind = animeContentKind.value,
-                        subtitlesJson = animeSubtitlesJson.value,
-                        onBack = {
-                            animeStreamUrl.value = null
-                            animePreviewLimitMs.value = null
-                        }
-                    )
-                }
-
-                // ── 2. Anime detail screen ─────────────────────────────────
-                selectedAnime.value != null -> {
-                    AnimeDetailScreen(
-                        anime = selectedAnime.value!!,
-                        repository = repository,
-                        currentTheme = appTheme.value,
-                        downloadRepo = downloadRepo,
-                        onPlayEpisode = { streamUrl, epTitle ->
-                            animeStreamUrl.value = streamUrl
-                            animeEpisodeTitle.value = epTitle
-                            animeEpisodeNumber.value = epTitle.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
-                            animePreviewLimitMs.value = null
-                            animeContentKind.value = "anime"
-                        },
-                        onBack = { selectedAnime.value = null },
-                        requireAuth = requireAuth
-                    )
-                }
-
-                // ── 3. Chapter / manga / comic viewer ──────────────────────
                 selectedChapterUrl.value != null -> {
-                    if (selectedNovel.value?.isManga == true || selectedNovel.value?.isComic == true) {
-                        MangaViewerScreen(
-                            chapterUrl = selectedChapterUrl.value!!,
-                            mangaTitle = selectedNovelTitle.value,
-                            chapterTitle = selectedChapterTitle.value,
-                            sourceName = selectedSourceName.value,
-                            currentTheme = appTheme.value,
-                            ttsController = ttsController,
-                            initialPageIndex = downloadRepo.getReadProgress(selectedChapterUrl.value!!)?.positionIndex ?: 0,
-                            onProgress = { pageIndex ->
-                                selectedNovel.value?.let { item ->
-                                    downloadRepo.recordReadProgress(
-                                        ReadHistoryItem(
-                                            parentId = item.id,
-                                            title = selectedNovelTitle.value,
-                                            coverUrl = item.coverUrl,
-                                            sourceName = selectedSourceName.value,
-                                            chapterTitle = selectedChapterTitle.value,
-                                            chapterUrl = selectedChapterUrl.value!!,
-                                            isManga = true,
-                                            positionIndex = pageIndex
-                                        )
-                                    )
-                                    queueCloudSync()
-                                }
-                            },
-                            onBack = { selectedChapterUrl.value = null }
-                        )
-                    } else {
-                        ReaderScreen(
-                            chapterUrl = selectedChapterUrl.value!!,
-                            novelTitle = selectedNovelTitle.value,
-                            chapterTitle = selectedChapterTitle.value,
-                            sourceName = selectedSourceName.value,
-                            currentTheme = appTheme.value,
-                            ttsController = ttsController,
-                            onThemeChange = { appTheme.value = it },
-                            initialParagraphIndex = downloadRepo.getReadProgress(selectedChapterUrl.value!!)?.positionIndex ?: 0,
-                            onProgress = { paragraphIndex ->
-                                selectedNovel.value?.let { item ->
-                                    downloadRepo.recordReadProgress(
-                                        ReadHistoryItem(
-                                            parentId = item.id,
-                                            title = selectedNovelTitle.value,
-                                            coverUrl = item.coverUrl,
-                                            sourceName = selectedSourceName.value,
-                                            chapterTitle = selectedChapterTitle.value,
-                                            chapterUrl = selectedChapterUrl.value!!,
-                                            isManga = false,
-                                            positionIndex = paragraphIndex
-                                        )
-                                    )
-                                    queueCloudSync()
-                                }
-                            },
-                            onBack = { selectedChapterUrl.value = null }
-                        )
-                    }
-                }
-
-                // ── 4a. MA Server WebView embed player (Server 1 & 2) ──
-                // MUST be before selectedMedia so the player renders above the detail screen.
-                maServerEmbedUrl.value != null -> {
-                    MaServerPlayerScreen(
-                        embedUrl = maServerEmbedUrl.value!!,
-                        episodeTitle = maServerEmbedTitle.value,
-                        currentTheme = appTheme.value,
-                        onBack = {
-                            maServerEmbedUrl.value = null
-                            maServerEmbedTitle.value = ""
-                        }
+                    if (selectedNovel.value?.isManga == true || selectedNovel.value?.isComic == true) MangaViewerScreen(
+                        selectedChapterUrl.value!!, selectedNovelTitle.value, selectedChapterTitle.value, selectedSourceName.value, appTheme.value, ttsController,
+                        initialPageIndex = downloadRepo.getReadProgress(selectedChapterUrl.value!!)?.positionIndex ?: 0,
+                        onProgress = { i -> selectedNovel.value?.let { n -> downloadRepo.recordReadProgress(ReadHistoryItem(parentId = n.id, title = selectedNovelTitle.value, coverUrl = n.coverUrl, sourceName = selectedSourceName.value, chapterTitle = selectedChapterTitle.value, chapterUrl = selectedChapterUrl.value!!, isManga = true, positionIndex = i)); queueCloudSync() } },
+                        onBack = { selectedChapterUrl.value = null }
+                    )
+                    else ReaderScreen(
+                        selectedChapterUrl.value!!, selectedNovelTitle.value, selectedChapterTitle.value, selectedSourceName.value, appTheme.value, ttsController,
+                        onThemeChange = { appTheme.value = it },
+                        initialParagraphIndex = downloadRepo.getReadProgress(selectedChapterUrl.value!!)?.positionIndex ?: 0,
+                        onProgress = { i -> selectedNovel.value?.let { n -> downloadRepo.recordReadProgress(ReadHistoryItem(parentId = n.id, title = selectedNovelTitle.value, coverUrl = n.coverUrl, sourceName = selectedSourceName.value, chapterTitle = selectedChapterTitle.value, chapterUrl = selectedChapterUrl.value!!, isManga = false, positionIndex = i)); queueCloudSync() } },
+                        onBack = { selectedChapterUrl.value = null }
                     )
                 }
 
-                // ── 4b. TMDB media detail screen ───────────────────────────
-                selectedMedia.value != null -> {
-                    MediaDetailScreen(
-                        item = selectedMedia.value!!,
-                        currentTheme = appTheme.value,
-                        isPremium = account?.isPremium == true,
-                        downloadRepo = downloadRepo,
-                        requireAuth = requireAuth,
-                        onSubscribe = { beginPremiumCheckout("premium_3_devices") },
-                        onPlayStream = { url, title, previewLimitMs, subtitlesJson ->
-                            animeStreamUrl.value = url
-                            animeEpisodeTitle.value = title
-                            animePreviewLimitMs.value = previewLimitMs
-                            animeSubtitlesJson.value = subtitlesJson
-                            // Derive content kind from media kind for proper audio/sub labels
-                            animeContentKind.value = selectedMedia.value?.let { item ->
-                                if (item.mediaKind.equals(VideoCategory.ANIME.name, ignoreCase = true)) "anime"
-                                else if (item.mediaKind.equals(VideoCategory.DONGHUA.name, ignoreCase = true)) "donghua"
-                                else ""
-                            } ?: ""
-                        },
-                        onPlayMaEmbed = { embedUrl, title ->
-                            maServerEmbedUrl.value = embedUrl
-                            maServerEmbedTitle.value = title
-                        },
-                        onBack = { selectedMedia.value = null }
-                    )
-                }
+                maServerEmbedUrl.value != null -> MaServerPlayerScreen(maServerEmbedUrl.value!!, maServerEmbedTitle.value, appTheme.value) { maServerEmbedUrl.value = null; maServerEmbedTitle.value = "" }
 
-                // ── 5. Novel detail screen ─────────────────────────────────
-                selectedNovel.value != null -> {
-                    NovelDetailScreen(
-                        novel = selectedNovel.value!!,
-                        currentTheme = appTheme.value,
-                        isFavorite = favorites.any { it.id == selectedNovel.value!!.id },
-                        downloadRepo = downloadRepo,
-                        onToggleFavorite = { novel ->
-                            val fav = favorites.find { it.id == novel.id }
-                            if (fav != null) favorites.remove(fav)
-                            else favorites.add(
-                                FavoriteNovel(
-                                    id = novel.id,
-                                    title = novel.title,
-                                    coverUrl = novel.coverUrl,
-                                    detailPageUrl = novel.detailPageUrl,
-                                    sourceName = novel.sourceName,
-                                    author = novel.author,
-                                    genre = novel.genre,
-                                    addedAt = currentTimeMillis()
-                                )
-                            )
-                            queueCloudSync()
-                        },
-                        onChapterSelected = { chapter ->
-                            selectedNovelTitle.value = selectedNovel.value!!.title
-                            selectedChapterTitle.value = chapter.title
-                            selectedChapterUrl.value = chapter.url
-                            selectedSourceName.value = selectedNovel.value!!.sourceName
-                        },
-                        onBack = { selectedNovel.value = null },
-                        requireAuth = requireAuth,
-                        ttsController = ttsController
-                    )
-                }
+                selectedMedia.value != null -> MediaDetailScreen(
+                    selectedMedia.value!!, appTheme.value, isPremium = account?.isPremium == true, downloadRepo, requireAuth,
+                    onSubscribe = { beginPremiumCheckout("premium_3_devices") },
+                    onPlayStream = { u, t, l, sj ->
+                        animeStreamUrl.value = u; animeEpisodeTitle.value = t; animePreviewLimitMs.value = l; animeSubtitlesJson.value = sj
+                        animeContentKind.value = selectedMedia.value?.let { i -> if (i.mediaKind.equals(VideoCategory.ANIME.name, true)) "anime" else if (i.mediaKind.equals(VideoCategory.DONGHUA.name, true)) "donghua" else "" } ?: ""
+                    },
+                    onPlayMaEmbed = { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t },
+                    onBack = { selectedMedia.value = null }
+                )
 
-                // ── 5b. YouTube Player (Nollywood) ─────────────────────────
-                youtubeVideoId.value != null -> {
-                    YouTubePlayerScreen(
-                        videoId = youtubeVideoId.value!!,
-                        title = youtubeVideoTitle.value,
-                        currentTheme = appTheme.value,
-                        onBack = {
-                            youtubeVideoId.value = null
-                            youtubeVideoTitle.value = ""
-                        }
-                    )
-                }
+                selectedNovel.value != null -> NovelDetailScreen(
+                    selectedNovel.value!!, appTheme.value, isFavorite = favorites.any { it.id == selectedNovel.value!!.id }, downloadRepo,
+                    onToggleFavorite = { n ->
+                        val f = favorites.find { it.id == n.id }
+                        if (f != null) favorites.remove(f) else favorites.add(FavoriteNovel(id = n.id, title = n.title, coverUrl = n.coverUrl, detailPageUrl = n.detailPageUrl, sourceName = n.sourceName, author = n.author, genre = n.genre, addedAt = currentTimeMillis()))
+                        queueCloudSync()
+                    },
+                    onChapterSelected = { ch ->
+                        selectedNovelTitle.value = selectedNovel.value!!.title; selectedChapterTitle.value = ch.title; selectedChapterUrl.value = ch.url; selectedSourceName.value = selectedNovel.value!!.sourceName
+                    },
+                    onBack = { selectedNovel.value = null }, requireAuth, ttsController
+                )
 
-                // ── 6. Main tabbed dashboard ───────────────────────────────
+                youtubeVideoId.value != null -> YouTubePlayerScreen(youtubeVideoId.value!!, youtubeVideoTitle.value, appTheme.value) { youtubeVideoId.value = null; youtubeVideoTitle.value = "" }
+
                 else -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Box(modifier = Modifier.weight(1f)) {
                             when (currentTab.value) {
                                 BottomTab.DISCOVER -> DiscoverHomeScreen(
-                                    currentTheme = appTheme.value,
-                                    contentTab = discoverContentTab,
-                                    initialSearchQuery = discoverSearchQuery,
-                                    recentSearches = remember(discoverContentTab, searchHistoryPulse) {
-                                        downloadRepo.getSearchHistory(discoverContentTab.name).map { it.query }
+                                    currentTheme = appTheme.value, downloadRepo = downloadRepo,
+                                    onNovelSelected = { i ->
+                                        if (i.isVideo && i.mediaKind == VideoCategory.NIGERIAN.name) {
+                                            val vid = i.id.removePrefix("youtube_nollywood_").takeIf { it != i.id && it.isNotBlank() }
+                                            if (vid != null) { youtubeVideoId.value = vid; youtubeVideoTitle.value = i.title }
+                                        } else if (i.isAnime && i.animeResult != null) selectedAnime.value = i.animeResult
+                                        else if (i.isVideo) selectedMedia.value = i
+                                        else selectedNovel.value = i
                                     },
-                                    onContentTabChanged = { discoverContentTab = it },
-                                    onSearchQueryChanged = { discoverSearchQuery = it },
-                                    onSearchCommitted = { tab, query ->
-                                        downloadRepo.recordSearchQuery(tab.name, query)
-                                        searchHistoryPulse += 1
+                                    onSearchHistorySaved = { t, q -> downloadRepo.recordSearchQuery(t, q); searchHistoryPulse++; queueCloudSync() }
+                                )
+                                BottomTab.NMC -> NmcHomeScreen(
+                                    currentTheme = appTheme.value, repository = repository, downloadRepo = downloadRepo,
+                                    favorites = favorites.toList(),
+                                    onNovelSelected = { selectedNovel.value = it },
+                                    onChapterSelected = { ch ->
+                                        selectedNovelTitle.value = selectedNovel.value?.title ?: ""
+                                        selectedChapterTitle.value = ch.title; selectedChapterUrl.value = ch.url; selectedSourceName.value = selectedNovel.value?.sourceName ?: ""
+                                    },
+                                    onToggleFavorite = { n ->
+                                        val f = favorites.find { it.id == n.id }
+                                        if (f != null) favorites.remove(f) else favorites.add(FavoriteNovel(id = n.id, title = n.title, coverUrl = n.coverUrl, detailPageUrl = n.detailPageUrl, sourceName = n.sourceName, author = n.author, genre = n.genre, addedAt = currentTimeMillis()))
                                         queueCloudSync()
                                     },
-                                    onNovelSelected = { item ->
-                                        if (item.isVideo && item.mediaKind == VideoCategory.NIGERIAN.name) {
-                                            // Nigerian items are YouTube-only — route directly to YouTubePlayerScreen
-                                            val videoId = item.id.removePrefix("youtube_nollywood_")
-                                                .takeIf { it != item.id && it.isNotBlank() }
-                                            if (videoId != null) {
-                                                youtubeVideoId.value = videoId
-                                                youtubeVideoTitle.value = item.title
-                                            }
-                                        } else if (item.isAnime && item.animeResult != null) {
-                                            selectedAnime.value = item.animeResult
-                                        } else if (item.isVideo) {
-                                            selectedMedia.value = item
-                                        } else {
-                                            selectedNovel.value = item
-                                        }
-                                    }
+                                    onSearchHistorySaved = { t, q -> downloadRepo.recordSearchQuery(t, q); searchHistoryPulse++; queueCloudSync() }
                                 )
-                                BottomTab.FAVORITES -> FavoritesScreen(
-                                    favorites = favorites,
-                                    currentTheme = appTheme.value,
-                                    onNovelSelected = { fav ->
-                                        requireAuth {
-                                            selectedNovel.value = UnifiedSearchResult(
-                                                id = fav.id,
-                                                title = fav.title,
-                                                coverUrl = fav.coverUrl,
-                                                detailPageUrl = fav.detailPageUrl,
-                                                sourceName = fav.sourceName,
-                                                author = fav.author,
-                                                genre = fav.genre
-                                            )
-                                        }
-                                    },
-                                    onRemoveFavorite = { fav ->
-                                        favorites.remove(fav)
-                                        queueCloudSync()
-                                    }
-                                )
+                                BottomTab.SPORTS -> SportsHomeScreen(appTheme.value,
+                                    { selectedFootballMatch.value = it }, { selectedWweEvent.value = it })
                                 BottomTab.READ -> UniversalReadScreen(
-                                    currentTheme = appTheme.value,
-                                    ttsController = ttsController,
-                                    requireAuth = requireAuth,
-                                    account = account,
-                                    downloadRepo = downloadRepo,
+                                    currentTheme = appTheme.value, ttsController = ttsController,
+                                    requireAuth = requireAuth, account = account, downloadRepo = downloadRepo,
                                     favorites = favorites.toList(),
                                     onSubscribePlan = { planId -> beginPremiumCheckout(planId) }
                                 )
-                                BottomTab.SPORTS -> SportsHomeScreen(
-                                    currentTheme = appTheme.value,
-                                    onFootballMatchSelected = { match ->
-                                        selectedFootballMatch.value = match
-                                    },
-                                    onWweEventSelected = { event ->
-                                        selectedWweEvent.value = event
-                                    }
-                                )
                                 BottomTab.YOU -> {
-                                    if (account == null) {
-                                        showAuthSheet = true
-                                        currentTab.value = BottomTab.DISCOVER
-                                    } else {
-                                        YouScreen(
-                                            account = account!!,
-                                            currentTheme = appTheme.value,
-                                            downloadRepo = downloadRepo,
-                                            linkOpener = linkOpener,
-                                            ttsController = ttsController,
-                                            onPlayEpisode = { path, title ->
-                                                selectedAnime.value = null
-                                                animeStreamUrl.value = path
-                                                animeEpisodeTitle.value = title
-                                                animeEpisodeNumber.value = title.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
-                                                animePreviewLimitMs.value = null
-                                            },
-                                            onReadMangaChapter = { path, title ->
-                                                selectedNovel.value = UnifiedSearchResult(
-                                                    id = path,
-                                                    title = title,
-                                                    coverUrl = "",
-                                                    detailPageUrl = path,
-                                                    sourceName = "local",
-                                                    isManga = true
-                                                )
-                                                selectedChapterUrl.value = path
-                                                selectedChapterTitle.value = title
-                                                selectedNovelTitle.value = title
-                                                selectedSourceName.value = "local"
-                                            },
-                                            onReadNovelChapter = { path, title, source ->
-                                                selectedNovel.value = UnifiedSearchResult(
-                                                    id = path,
-                                                    title = title,
-                                                    coverUrl = "",
-                                                    detailPageUrl = path,
-                                                    sourceName = source
-                                                )
-                                                selectedChapterUrl.value = path
-                                                selectedChapterTitle.value = title
-                                                selectedNovelTitle.value = title
-                                                selectedSourceName.value = source
-                                            },
-                                            onResumeRead = { item -> openReadHistory(item) },
-                                            onResumeWatch = { item -> openWatchHistory(item) },
-                                            onSubscribePlan = { planId -> beginPremiumCheckout(planId) },
-                                            onSignOut = {
-                                                scope.launch {
-                                                    account?.authToken?.let { token ->
-                                                        runCatching { authApi.logout(token) }
-                                                    }
-                                                    userSessionStore.clearAccount()
-                                                    account = null
-                                                    isGuestSession = true
-                                                    hasHydratedCloudState = false
-                                                    currentTab.value = BottomTab.DISCOVER
-                                                }
+                                    if (account == null) { showAuthSheet = true; currentTab.value = BottomTab.DISCOVER }
+                                    else YouScreen(
+                                        account = account!!, currentTheme = appTheme.value, downloadRepo = downloadRepo, linkOpener = linkOpener, ttsController = ttsController,
+                                        favorites = favorites.toList(),
+                                        onPlayEpisode = { p, t -> selectedAnime.value = null; animeStreamUrl.value = p; animeEpisodeTitle.value = t; animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0; animePreviewLimitMs.value = null },
+                                        onReadMangaChapter = { p, t -> selectedNovel.value = UnifiedSearchResult(id = p, title = t, coverUrl = "", detailPageUrl = p, sourceName = "local", isManga = true); selectedChapterUrl.value = p; selectedChapterTitle.value = t; selectedNovelTitle.value = t; selectedSourceName.value = "local" },
+                                        onReadNovelChapter = { p, t, s -> selectedNovel.value = UnifiedSearchResult(id = p, title = t, coverUrl = "", detailPageUrl = p, sourceName = s); selectedChapterUrl.value = p; selectedChapterTitle.value = t; selectedNovelTitle.value = t; selectedSourceName.value = s },
+                                        onResumeRead = { openReadHistory(it) },
+                                        onResumeWatch = { openWatchHistory(it) },
+                                        onToggleFavorite = { f ->
+                                            val fav = favorites.find { it.id == f.id }
+                                            if (fav != null) favorites.remove(fav) else favorites.add(f)
+                                            queueCloudSync()
+                                        },
+                                        onSubscribePlan = { planId -> beginPremiumCheckout(planId) },
+                                        onSignOut = {
+                                            scope.launch {
+                                                account?.authToken?.let { t -> runCatching { authApi.logout(t) } }
+                                                userSessionStore.clearAccount(); account = null; isGuestSession = true; hasHydratedCloudState = false
+                                                currentTab.value = BottomTab.DISCOVER
                                             }
-                                        )
-                                    }
+                                        }
+                                    )
                                 }
                             }
                         }
-                        NovelBottomNav(
-                            currentTab = currentTab.value,
-                            onTabSelected = { currentTab.value = it },
-                            currentTheme = appTheme.value
-                        )
+                        GlassBottomBar(currentTab = currentTab.value, onTabSelected = { currentTab.value = it })
                     }
                 }
             }
 
-            // ── Floating Draggable Mini-Player ─────────────────────────
-            val isPlaying = ttsController.isPlaying.collectAsState()
-            if (isPlaying.value && animeStreamUrl.value == null) {
-                var isExpanded by remember { mutableStateOf(true) }
-                var offsetX by remember { mutableStateOf(60f) }
-                var offsetY by remember { mutableStateOf(450f) }
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragEnd = {
-                                    if (offsetX < 200f) { offsetX = 10f; isExpanded = false }
-                                    else { offsetX = 550f; isExpanded = false }
-                                }
-                            ) { change, dragAmount ->
-                                change.consume()
-                                offsetX = (offsetX + dragAmount.x).coerceIn(0f, 800f)
-                                offsetY = (offsetY + dragAmount.y).coerceIn(0f, 1500f)
-                            }
-                        }
-                ) {
-                    MiniPlayerWidget(
-                        novelTitle = selectedNovelTitle.value.ifEmpty { "Universal Read" },
-                        chapterTitle = selectedChapterTitle.value.ifEmpty { "Narration active..." },
-                        isPlaying = isPlaying.value,
-                        currentTheme = appTheme.value,
-                        isExpanded = isExpanded,
-                        onToggleExpand = { isExpanded = !isExpanded },
-                        onPlay = { ttsController.resume() },
-                        onPause = { ttsController.pause() },
-                        onSkipBack = { ttsController.skipBack() },
-                        onSkipForward = { ttsController.skipForward() }
-                    )
+            // Mini-player
+            val playing = ttsController.isPlaying.collectAsState()
+            if (playing.value && animeStreamUrl.value == null) {
+                var expanded by remember { mutableStateOf(true) }
+                var ox by remember { mutableStateOf(60f) }; var oy by remember { mutableStateOf(450f) }
+                Box(Modifier.offset { IntOffset(ox.roundToInt(), oy.roundToInt()) }.pointerInput(Unit) {
+                    detectDragGestures(onDragEnd = { if (ox < 200f) { ox = 10f; expanded = false } else { ox = 550f; expanded = false } }) { ch, d -> ch.consume(); ox = (ox + d.x).coerceIn(0f, 800f); oy = (oy + d.y).coerceIn(0f, 1500f) }
+                }) {
+                    MiniPlayerWidget(selectedNovelTitle.value.ifEmpty { "Universal Read" }, selectedChapterTitle.value.ifEmpty { "Narration active..." }, playing.value, appTheme.value, expanded, { expanded = !expanded }, { ttsController.resume() }, { ttsController.pause() }, { ttsController.skipBack() }, { ttsController.skipForward() })
                 }
             }
         }
 
-        if (showAuthSheet) {
-            AuthScreen(
-                currentTheme = appTheme.value,
-                isSubmitting = isAuthSubmitting,
-                errorMessage = authError,
-                onClearError = { authError = null },
-                onDismiss = {
-                    authError = null
-                    isGuestSession = true
-                    showAuthSheet = false
-                },
-                onSignIn = { email, password ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching { authApi.login(email, password) }
-                            .onSuccess { signedIn ->
-                                userSessionStore.saveAccount(signedIn)
-                                account = signedIn
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(signedIn.authToken)
-                                queueCloudSync()
-                                isAuthSubmitting = false
-                            }
-                            .onFailure { authError = it.message ?: "Sign in failed."; isAuthSubmitting = false }
-                    }
-                },
-                onCreateAccount = { username, email, password, recoverySecret ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching { authApi.register(username, email, password, recoverySecret) }
-                            .onSuccess { created ->
-                                userSessionStore.saveAccount(created)
-                                account = created
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(created.authToken)
-                                queueCloudSync()
-                                isAuthSubmitting = false
-                            }
-                            .onFailure { authError = it.message ?: "Account creation failed."; isAuthSubmitting = false }
-                    }
-                },
-                onRecoverAccount = { recoverySecret, newPassword ->
-                    scope.launch {
-                        isAuthSubmitting = true
-                        authError = null
-                        runCatching {
-                            val recovered = authApi.recoverAccount(recoverySecret)
-                            authApi.resetPassword(recovered.authToken, newPassword)
-                        }
-                            .onSuccess { recovered ->
-                                userSessionStore.saveAccount(recovered)
-                                account = recovered
-                                isGuestSession = false
-                                showAuthSheet = false
-                                hydrateCloudState(recovered.authToken)
-                                queueCloudSync()
-                                isAuthSubmitting = false
-                            }
-                            .onFailure { authError = it.message ?: "Account recovery failed."; isAuthSubmitting = false }
-                    }
-                }
-            )
-        }
+        if (showAuthSheet) AuthScreen(
+            currentTheme = appTheme.value, isSubmitting = isAuthSubmitting, errorMessage = authError,
+            onClearError = { authError = null },
+            onDismiss = { authError = null; isGuestSession = true; showAuthSheet = false },
+            onSignIn = { e, p -> scope.launch {
+                isAuthSubmitting = true; authError = null
+                runCatching { authApi.login(e, p) }.onSuccess { u ->
+                    userSessionStore.saveAccount(u); account = u; isGuestSession = false; showAuthSheet = false
+                    hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                }.onFailure { authError = it.message; isAuthSubmitting = false }
+            }},
+            onCreateAccount = { un, e, p, rs -> scope.launch {
+                isAuthSubmitting = true; authError = null
+                runCatching { authApi.register(un, e, p, rs) }.onSuccess { u ->
+                    userSessionStore.saveAccount(u); account = u; isGuestSession = false; showAuthSheet = false
+                    hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                }.onFailure { authError = it.message; isAuthSubmitting = false }
+            }},
+            onRecoverAccount = { rs, np -> scope.launch {
+                isAuthSubmitting = true; authError = null
+                runCatching { val r = authApi.recoverAccount(rs); authApi.resetPassword(r.authToken, np) }
+                    .onSuccess { r -> userSessionStore.saveAccount(r); account = r; isGuestSession = false; showAuthSheet = false
+                        hydrateCloudState(r.authToken); queueCloudSync(); isAuthSubmitting = false }
+                    .onFailure { authError = it.message; isAuthSubmitting = false }
+            }}
+        )
 
-        subscriptionMessage?.let { message ->
-            AlertDialog(
-                onDismissRequest = { subscriptionMessage = null },
-                title = { Text("Premium") },
-                text = { Text(message) },
-                confirmButton = {
-                    Button(onClick = { beginPremiumCheckout("premium_3_devices") }) {
-                        Text("Subscribe")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { subscriptionMessage = null }) {
-                        Text("Close")
-                    }
-                }
-            )
-        }
+        subscriptionMessage?.let { m -> AlertDialog(onDismissRequest = { subscriptionMessage = null }, title = { Text("Premium") }, text = { Text(m) }, confirmButton = { Button(onClick = { beginPremiumCheckout("premium_3_devices") }) { Text("Subscribe") } }, dismissButton = { TextButton(onClick = { subscriptionMessage = null }) { Text("Close") } }) }
 
-        val startupUpdate = startupUpdateManifest
-        if (updateProgress.isActive) {
-            AlertDialog(
-                onDismissRequest = {
-                    if (updateProgress.canDismiss) AppUpdateProgressBus.clear()
-                },
-                icon = {
-                    Icon(
-                        if (updateProgress.isError) Icons.Default.ErrorOutline else Icons.Default.Download,
-                        contentDescription = null,
-                        tint = appTheme.value.accentColor()
-                    )
-                },
-                title = {
-                    Text(
-                        when (updateProgress.phase) {
-                            AppUpdatePhase.Downloading -> "Downloading update"
-                            AppUpdatePhase.Verifying -> "Verifying update"
-                            AppUpdatePhase.ReadyToInstall -> "Preparing install"
-                            AppUpdatePhase.Installing -> "Finish install"
-                            AppUpdatePhase.Error -> "Update failed"
-                            AppUpdatePhase.Idle -> "Update"
-                        }
-                    )
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(updateProgress.message.ifBlank { "Preparing update..." })
-                        val fraction = updateProgress.fraction
-                        if (fraction != null) {
-                            LinearProgressIndicator(
-                                progress = { fraction },
-                                modifier = Modifier.fillMaxWidth(),
-                                color = appTheme.value.accentColor()
-                            )
-                            Text(
-                                "${(fraction * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = appTheme.value.subTextColor()
-                            )
-                        } else if (!updateProgress.canDismiss) {
-                            LinearProgressIndicator(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = appTheme.value.accentColor()
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    if (updateProgress.canDismiss) {
-                        Button(onClick = { AppUpdateProgressBus.clear() }) {
-                            Text(if (updateProgress.phase == AppUpdatePhase.Installing) "Done" else "Close")
-                        }
-                    }
+        if (updateProgress.isActive) AlertDialog(
+            onDismissRequest = { if (updateProgress.canDismiss) AppUpdateProgressBus.clear() },
+            icon = { Icon(if (updateProgress.isError) Icons.Default.ErrorOutline else Icons.Default.Download, null, tint = appTheme.value.accentColor()) },
+            title = { Text(when (updateProgress.phase) { AppUpdatePhase.Downloading -> "Downloading update"; AppUpdatePhase.Verifying -> "Verifying update"; AppUpdatePhase.ReadyToInstall -> "Preparing install"; AppUpdatePhase.Installing -> "Finish install"; AppUpdatePhase.Error -> "Update failed"; AppUpdatePhase.Idle -> "Update" }) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(updateProgress.message.ifBlank { "Preparing update..." })
+                    val f = updateProgress.fraction
+                    if (f != null) { LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth(), color = appTheme.value.accentColor()); Text("${(f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = appTheme.value.subTextColor()) }
+                    else if (!updateProgress.canDismiss) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = appTheme.value.accentColor())
                 }
-            )
-        } else if (startupUpdate != null && !isStartupUpdateDismissed && !showAuthSheet) {
+            },
+            confirmButton = { if (updateProgress.canDismiss) Button(onClick = { AppUpdateProgressBus.clear() }) { Text(if (updateProgress.phase == AppUpdatePhase.Installing) "Done" else "Close") } }
+        )
+        else startupUpdateManifest?.takeIf { !isStartupUpdateDismissed && !showAuthSheet }?.let { u ->
             AlertDialog(
-                onDismissRequest = {
-                    if (!startupUpdate.forceUpdate) {
-                        isStartupUpdateDismissed = true
-                    }
-                },
-                icon = {
-                    Icon(
-                        Icons.Default.Download,
-                        contentDescription = null,
-                        tint = appTheme.value.accentColor()
-                    )
-                },
-                title = {
-                    Text("Update available")
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Version ${startupUpdate.versionName} is ready to install.")
-                        if (startupUpdate.releaseNotes.isNotEmpty()) {
-                            Text(
-                                startupUpdate.releaseNotes.joinToString(separator = "\n") { "- $it" },
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            linkOpener.open(startupUpdate.apkUrl.ifBlank { com.alexleoreeves.novelapp.platform.AppReleaseConfig.DOWNLOAD_URL })
-                            if (!startupUpdate.forceUpdate) {
-                                isStartupUpdateDismissed = true
-                            }
-                        }
-                    ) {
-                        Text("Install update")
-                    }
-                },
-                dismissButton = {
-                    if (!startupUpdate.forceUpdate) {
-                        TextButton(onClick = { isStartupUpdateDismissed = true }) {
-                            Text("Later")
-                        }
-                    }
-                }
+                onDismissRequest = { if (!u.forceUpdate) isStartupUpdateDismissed = true },
+                icon = { Icon(Icons.Default.Download, null, tint = appTheme.value.accentColor()) },
+                title = { Text("Update available") },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Version ${u.versionName} is ready to install."); if (u.releaseNotes.isNotEmpty()) Text(u.releaseNotes.joinToString("\n") { "- $it" }, style = MaterialTheme.typography.bodyMedium) } },
+                confirmButton = { Button(onClick = { linkOpener.open(u.apkUrl.ifBlank { AppReleaseConfig.DOWNLOAD_URL }); if (!u.forceUpdate) isStartupUpdateDismissed = true }) { Text("Install update") } },
+                dismissButton = { if (!u.forceUpdate) TextButton(onClick = { isStartupUpdateDismissed = true }) { Text("Later") } }
             )
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Bottom Navigation
-// ─────────────────────────────────────────────────────────────────────────────
 enum class BottomTab(val label: String, val icon: ImageVector) {
-    DISCOVER("Discover", Icons.Default.Home),
-    FAVORITES("Favorites", Icons.Default.Favorite),
-    SPORTS("Sports", Icons.Default.SportsEsports),
+    DISCOVER("Discover", Icons.Default.PlayCircle),
+    NMC("NMC", Icons.Default.Book),
+    SPORTS("Sports", Icons.Default.EmojiEvents),
     READ("Read", Icons.Default.MenuBook),
     YOU("You", Icons.Default.Person)
-}
-
-@Composable
-fun NovelBottomNav(
-    currentTab: BottomTab,
-    onTabSelected: (BottomTab) -> Unit,
-    currentTheme: AppTheme
-) {
-    NavigationBar(
-        containerColor = currentTheme.surfaceColor(),
-        contentColor = currentTheme.accentColor()
-    ) {
-        BottomTab.values().forEach { tab ->
-            NavigationBarItem(
-                selected = currentTab == tab,
-                onClick = { onTabSelected(tab) },
-                icon = { Icon(tab.icon, contentDescription = tab.label) },
-                label = { Text(tab.label) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = currentTheme.accentColor(),
-                    selectedTextColor = currentTheme.accentColor(),
-                    indicatorColor = currentTheme.accentColor().copy(alpha = 0.15f),
-                    unselectedIconColor = currentTheme.subTextColor(),
-                    unselectedTextColor = currentTheme.subTextColor()
-                )
-            )
-        }
-    }
 }

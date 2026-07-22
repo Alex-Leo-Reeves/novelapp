@@ -67,7 +67,9 @@ fun DownloadsScreen(
     var activeSection by remember { mutableStateOf<DownloadSection?>(null) }
     var selectedItem by remember { mutableStateOf<DownloadedItem?>(null) }
 
-    AnimatedContent(
+    Box(modifier = Modifier.fillMaxSize()) {
+        GlassBackground()
+        AnimatedContent(
         targetState = Pair(activeSection, selectedItem),
         transitionSpec = {
             slideInHorizontally { it } + fadeIn() togetherWith
@@ -134,6 +136,7 @@ fun DownloadsScreen(
             )
         }
     }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,7 +155,7 @@ private fun DownloadsRootScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(currentTheme.backgroundColor())
+            .background(GlassOverlayColor)
             .statusBarsPadding()
     ) {
         // Header
@@ -164,13 +167,13 @@ private fun DownloadsRootScreen(
         ) {
             if (onBack != null) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                    Icon(Icons.Default.ArrowBack, null, tint = Color.White)
                 }
             }
             Icon(
                 Icons.Default.Download,
                 null,
-                tint = currentTheme.accentColor(),
+                tint = NeonMagenta,
                 modifier = Modifier.size(28.dp)
             )
             Spacer(Modifier.width(10.dp))
@@ -178,13 +181,13 @@ private fun DownloadsRootScreen(
                 Text(
                     "Downloads",
                     style = MaterialTheme.typography.headlineLarge,
-                    color = currentTheme.textColor(),
+                    color = Color.White,
                     fontWeight = FontWeight.Black
                 )
                 Text(
                     "Your offline content library",
                     style = MaterialTheme.typography.bodySmall,
-                    color = currentTheme.subTextColor()
+                    color = Color.White.copy(alpha = 0.5f)
                 )
             }
         }

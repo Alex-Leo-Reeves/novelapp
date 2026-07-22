@@ -138,14 +138,61 @@ data class SearchHistoryItem(
 )
 
 @Serializable
+data class DailyDownloadCount(
+    val dateKey: String,    // e.g. "2026-07-22"
+    val count: Int
+)
+
+@Serializable
 data class DownloadIndex(
     val items: List<DownloadedItem> = emptyList(),
     val episodes: List<DownloadedEpisode> = emptyList(),
     val chapters: List<DownloadedChapter> = emptyList(),
     val readHistory: List<ReadHistoryItem> = emptyList(),
     val watchHistory: List<WatchHistoryItem> = emptyList(),
-    val searchHistory: List<SearchHistoryItem> = emptyList()
-)
+    val searchHistory: List<SearchHistoryItem> = emptyList(),
+    val dailyMediaDownloadCounts: List<DailyDownloadCount> = emptyList()
+) {
+    companion object {
+        /** Content types that count toward the daily free download cap. */
+        val MEDIA_CONTENT_TYPES: Set<String> = setOf(
+            ContentType.ANIME, ContentType.MOVIE, ContentType.CARTOON,
+            ContentType.K_DRAMA, ContentType.CLASSIC, ContentType.NIGERIAN
+        )
+
+        /** Content types that are always unlimited (novels / manga / comics). */
+        val NMC_CONTENT_TYPES: Set<String> = setOf(
+            ContentType.NOVEL, ContentType.MANGA, ContentType.COMIC
+        )
+
+        /** Maximum media downloads per day for free users. */
+        const val FREE_DAILY_MEDIA_LIMIT = 5
+    }
+
+    /** Today's date key — epoch day number (days since 1970-01-01) as a string. */
+    fun todayKey(millis: Long): String {
+        return ((millis / 86_400_000L).toInt()).toString()
+    }
+
+    fun todayMediaDownloadCount(millis: Long): Int =
+        dailyMediaDownloadCounts.firstOrNull { it.dateKey == todayKey(millis) }?.count ?: 0
+
+    fun remainingMediaDownloadsToday(millis: Long): Int =
+        (FREE_DAILY_MEDIA_LIMIT - todayMediaDownloadCount(millis)).coerceAtLeast(0)
+
+    fun recordMediaDownload(millis: Long): DownloadIndex {
+        val key = todayKey(millis)
+        val existing = dailyMediaDownloadCounts.toMutableList()
+        val idx = existing.indexOfFirst { it.dateKey == key }
+        if (idx >= 0) {
+            existing[idx] = existing[idx].copy(count = existing[idx].count + 1)
+        } else {
+            existing.add(DailyDownloadCount(dateKey = key, count = 1))
+        }
+        // Keep only the last 35 days of data to avoid bloat
+        return copy(dailyMediaDownloadCounts = existing.takeLast(35))
+    }
+}
 
 @Serializable
 data class UserSyncState(

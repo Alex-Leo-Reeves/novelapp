@@ -40,6 +40,7 @@ fun AnimeDetailScreen(
     repository: NovelSearchRepository,
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
+    isPremium: Boolean = false,
     onPlayEpisode: (streamUrl: String, episodeTitle: String) -> Unit,
     onBack: () -> Unit,
     requireAuth: (() -> Unit) -> Unit
@@ -503,6 +504,12 @@ fun AnimeDetailScreen(
                                         downloadRepo.deleteItem(anime.id)
                                     }
                                     refreshTrigger++
+                                } else if (!downloadRepo.canDownloadMedia(ContentType.ANIME, isPremium)) {
+                                    val remaining = downloadRepo.remainingMediaDownloadsToday(isPremium)
+                                    snackMessage = if (remaining <= 0)
+                                        "Daily download limit (5) reached. Upgrade to premium for unlimited downloads."
+                                    else
+                                        "Download limit reached. Premium users get unlimited downloads."
                                 } else {
                                     downloadingEpisodes = downloadingEpisodes + episode.episodeNumber
                                     scope.launch {
@@ -533,6 +540,7 @@ fun AnimeDetailScreen(
                                                             fileSizeBytes = saved.fileSizeBytes
                                                         )
                                                     )
+                                                    downloadRepo.recordMediaDownload(ContentType.ANIME)
                                                     snackMessage = "Episode ${episode.episodeNumber} saved for offline playback."
                                                 } else {
                                                     if (downloadRepo.getEpisodesFor(anime.id).isEmpty()) {

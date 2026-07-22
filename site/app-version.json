@@ -4,14 +4,12 @@
     "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed subtitle toggle causing black screen in ExoPlayer",
-        "CinePro Sub 1 subtitles now reach ExoPlayer properly",
-        "Fixed 30 syntax errors in server/index.js (optional chaining)",
-        "Removed unused Kokoro TTS binary assets to free space",
-        "Improved anime, comic, football and WWE stream scrapers",
-        "TV app: revamped sports screen and navigation fixes"
+        "Fixed build errors in SportsHomeScreen, UniversalReadScreen, and YouScreen",
+        "Resolved conflicting val declarations causing compile failures",
+        "Fixed brace mismatch in UniversalReadScreen",
+        "Fixed BillingPlan argument order and testVoice type mismatch in YouScreen"
     ],
     "forceUpdate": false,
-    "apkBytes": 297106340,
-    "apkSha256": "1ba8a10843aa2b7506dd88d53ba9f242a11c80662eca256a23fe466ade57c1e2"
+    "apkBytes": 192937984,
+    "apkSha256": "6407ecd36b837ec8678e28f2cb114d68c9b31e8b24ca65b6abb1835c622ded4a"
 }

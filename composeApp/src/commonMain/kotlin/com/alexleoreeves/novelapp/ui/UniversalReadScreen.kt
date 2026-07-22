@@ -72,82 +72,88 @@ fun UniversalReadScreen(
     var activeTab by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.fillMaxSize().background(currentTheme.backgroundColor())) {
-        // Header
-        Box(modifier = Modifier.fillMaxWidth().background(
-            Brush.verticalGradient(listOf(currentTheme.surfaceColor(), currentTheme.backgroundColor()))
-        ).padding(horizontal = 20.dp, vertical = 16.dp)) {
-            Column {
-                Text("Universal Read", style = MaterialTheme.typography.headlineLarge,
-                    color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
-                Text("Listen to anything — text, URLs, docs, or AI novels",
-                    style = MaterialTheme.typography.bodyMedium, color = currentTheme.subTextColor())
-            }
-        }
+    Box(modifier = Modifier.fillMaxSize()) {
+        GlassBackground()
 
-        TabRow(selectedTabIndex = activeTab, containerColor = currentTheme.surfaceColor(), contentColor = currentTheme.accentColor()) {
-            Tab(selected = activeTab == 0, onClick = { activeTab = 0 }) {
-                Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.ContentPaste, null, tint = if (activeTab == 0) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
-                    Text("Paste Text", color = if (activeTab == 0) currentTheme.accentColor() else currentTheme.subTextColor())
+        Column(modifier = Modifier.fillMaxSize().background(GlassOverlayColor)) {
+            // Header
+            Box(modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .statusBarsPadding()
+            ) {
+                Column {
+                    Text("Universal Read", style = MaterialTheme.typography.headlineLarge,
+                        color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Listen to anything — text, URLs, docs, or AI novels",
+                        style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.5f))
                 }
             }
-            Tab(selected = activeTab == 1, onClick = { activeTab = 1 }) {
-                Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Link, null, tint = if (activeTab == 1) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
-                    Text("From URL", color = if (activeTab == 1) currentTheme.accentColor() else currentTheme.subTextColor())
-                }
-            }
-            Tab(selected = activeTab == 2, onClick = { activeTab = 2 }) {
-                Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AutoStories, null, tint = if (activeTab == 2) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
-                    Text("AI Novel", color = if (activeTab == 2) currentTheme.accentColor() else currentTheme.subTextColor())
-                }
-            }
-            Tab(selected = activeTab == 3, onClick = { requireAuth { activeTab = 3 } }) {
-                Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.EditNote, null, tint = if (activeTab == 3) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
-                    Text("Write", color = if (activeTab == 3) currentTheme.accentColor() else currentTheme.subTextColor())
-                }
-            }
-        }
 
-        val setupStatus = voiceSetupStatus.value
-        if (isBuffering.value || setupStatus.shouldShow) {
-            Column(modifier = Modifier.fillMaxWidth().background(currentTheme.surfaceColor()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                val percent = setupStatus.progressFraction
-                val statusMessage = if (isBuffering.value && !setupStatus.shouldShow) "Preparing narration audio."
-                else setupStatus.userMessage.ifBlank { "Preparing voice." }
-                Text(text = buildString { append(statusMessage); if (percent != null) { append(" "); append((percent * 100f).roundToInt()); append("%") } },
-                    style = MaterialTheme.typography.bodySmall, color = currentTheme.subTextColor())
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.72f).height(3.dp).padding(top = 6.dp),
-                    color = currentTheme.accentColor(), trackColor = currentTheme.cardColor().copy(alpha = 0.5f))
-                if (setupStatus.phase == VoiceSetupPhase.Error || setupStatus.phase == VoiceSetupPhase.Fallback) {
-                    TextButton(onClick = {
-                        val text = when { activeTab == 0 && pastedText.isNotBlank() -> pastedText
-                            activeTab == 1 && urlInput.isNotBlank() -> "Reading content from: $urlInput"
-                            else -> "" }
-                        if (text.isNotBlank()) scope.launch { ttsController.playText(GroqTextCleaner.cleanForKokoro(text)) }
-                    }) { Text("Retry voice setup", color = currentTheme.accentColor()) }
+            TabRow(selectedTabIndex = activeTab, containerColor = currentTheme.surfaceColor(), contentColor = currentTheme.accentColor()) {
+                Tab(selected = activeTab == 0, onClick = { activeTab = 0 }) {
+                    Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ContentPaste, null, tint = if (activeTab == 0) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
+                        Text("Paste Text", color = if (activeTab == 0) currentTheme.accentColor() else currentTheme.subTextColor())
+                    }
+                }
+                Tab(selected = activeTab == 1, onClick = { activeTab = 1 }) {
+                    Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Link, null, tint = if (activeTab == 1) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
+                        Text("From URL", color = if (activeTab == 1) currentTheme.accentColor() else currentTheme.subTextColor())
+                    }
+                }
+                Tab(selected = activeTab == 2, onClick = { activeTab = 2 }) {
+                    Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AutoStories, null, tint = if (activeTab == 2) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
+                        Text("AI Novel", color = if (activeTab == 2) currentTheme.accentColor() else currentTheme.subTextColor())
+                    }
+                }
+                Tab(selected = activeTab == 3, onClick = { requireAuth { activeTab = 3 } }) {
+                    Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.EditNote, null, tint = if (activeTab == 3) currentTheme.accentColor() else currentTheme.subTextColor(), modifier = Modifier.size(14.dp))
+                        Text("Write", color = if (activeTab == 3) currentTheme.accentColor() else currentTheme.subTextColor())
+                    }
                 }
             }
-        }
 
-        // Show last synthesis error (hidden when buffering clears it)
-        ttsError.value?.takeIf { it.isNotBlank() }?.let { error ->
-            Text(
-                text = error,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-        }
+            val setupStatus = voiceSetupStatus.value
+            if (isBuffering.value || setupStatus.shouldShow) {
+                Column(modifier = Modifier.fillMaxWidth().background(currentTheme.surfaceColor()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    val percent = setupStatus.progressFraction
+                    val statusMessage = if (isBuffering.value && !setupStatus.shouldShow) "Preparing narration audio."
+                    else setupStatus.userMessage.ifBlank { "Preparing voice." }
+                    Text(text = buildString { append(statusMessage); if (percent != null) { append(" "); append((percent * 100f).roundToInt()); append("%") } },
+                        style = MaterialTheme.typography.bodySmall, color = currentTheme.subTextColor())
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.72f).height(3.dp).padding(top = 6.dp),
+                        color = currentTheme.accentColor(), trackColor = currentTheme.cardColor().copy(alpha = 0.5f))
+                    if (setupStatus.phase == VoiceSetupPhase.Error || setupStatus.phase == VoiceSetupPhase.Fallback) {
+                        TextButton(onClick = {
+                            val text = when { activeTab == 0 && pastedText.isNotBlank() -> pastedText
+                                activeTab == 1 && urlInput.isNotBlank() -> "Reading content from: $urlInput"
+                                else -> "" }
+                            if (text.isNotBlank()) scope.launch { ttsController.playText(GroqTextCleaner.cleanForKokoro(text)) }
+                        }) { Text("Retry voice setup", color = currentTheme.accentColor()) }
+                    }
+                }
+            }
 
-        when (activeTab) {
-            0 -> PasteTextTab(pastedText, isPlaying.value, isBuffering.value, currentTheme, requireAuth, ttsController) { pastedText = it }
-            1 -> UrlInputTab(urlInput, isPlaying.value, isBuffering.value, currentTheme, requireAuth, ttsController) { urlInput = it }
-            2 -> AiNovelCreatorTab(currentTheme = currentTheme, account = account, downloadRepo = downloadRepo, favorites = favorites, requireAuth = requireAuth, ttsController = ttsController, onSubscribePlan = onSubscribePlan)
-            3 -> WriteNovelTab(currentTheme = currentTheme, account = account, ttsController = ttsController, requireAuth = requireAuth)
+            // Show last synthesis error (hidden when buffering clears it)
+            ttsError.value?.takeIf { it.isNotBlank() }?.let { error ->
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            when (activeTab) {
+                0 -> PasteTextTab(pastedText, isPlaying.value, isBuffering.value, currentTheme, requireAuth, ttsController) { pastedText = it }
+                1 -> UrlInputTab(urlInput, isPlaying.value, isBuffering.value, currentTheme, requireAuth, ttsController) { urlInput = it }
+                2 -> AiNovelCreatorTab(currentTheme = currentTheme, account = account, downloadRepo = downloadRepo, favorites = favorites, requireAuth = requireAuth, ttsController = ttsController, onSubscribePlan = onSubscribePlan)
+                3 -> WriteNovelTab(currentTheme = currentTheme, account = account, ttsController = ttsController, requireAuth = requireAuth)
+            }
         }
     }
 }
