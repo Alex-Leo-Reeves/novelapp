@@ -143,6 +143,15 @@ fun MediaDetailScreen(
 
     fun downloadEpisode(ep: MediaEpisode) {
         requireAuth {
+            val ct = contentTypeForItem()
+            if (!downloadRepo.canDownloadMedia(ct, isPremium)) {
+                val remaining = downloadRepo.remainingMediaDownloadsToday(isPremium)
+                statusText = if (remaining <= 0)
+                    "Daily download limit (5) reached. Upgrade to premium for unlimited downloads."
+                else
+                    "Download limit reached. Premium users get unlimited downloads."
+                return@requireAuth
+            }
             if (downloadRepo.isEpisodeDownloaded(item.id, ep.episodeNumber)) {
                 downloadRepo.deleteEpisode(item.id, ep.episodeNumber)
                 if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
@@ -206,19 +215,20 @@ fun MediaDetailScreen(
                                 episodeNumber = ep.episodeNumber,
                                 sourceUrl = downloadUrl
                             )
-                            if (saved.success) {
-                                downloadRepo.addEpisode(
-                                    DownloadedEpisode(
-                                        parentId = item.id,
-                                        episodeNumber = ep.episodeNumber,
-                                        episodeTitle = ep.title,
-                                        localFilePath = saved.localPath,
-                                        fileSizeBytes = saved.fileSizeBytes
+                                if (saved.success) {
+                                    downloadRepo.addEpisode(
+                                        DownloadedEpisode(
+                                            parentId = item.id,
+                                            episodeNumber = ep.episodeNumber,
+                                            episodeTitle = ep.title,
+                                            localFilePath = saved.localPath,
+                                            fileSizeBytes = saved.fileSizeBytes
+                                        )
                                     )
-                                )
-                                statusText = "Episode ${ep.episodeNumber} saved offline."
-                            } else {
-                                statusText = saved.error.ifBlank { "Download failed." }
+                                    downloadRepo.recordMediaDownload(ct)
+                                    statusText = "Episode ${ep.episodeNumber} saved offline."
+                                } else {
+                                    statusText = saved.error.ifBlank { "Download failed." }
                                 if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
                                     downloadRepo.deleteItem(item.id)
                                 }

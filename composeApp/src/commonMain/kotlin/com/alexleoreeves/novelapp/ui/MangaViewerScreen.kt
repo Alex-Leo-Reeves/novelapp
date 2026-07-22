@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.BuildKonfig
 import com.alexleoreeves.novelapp.audio.SherpaNarrationController
@@ -65,7 +66,8 @@ fun MangaViewerScreen(
     var isLoading by remember { mutableStateOf(true) }
     var showOverlays by remember { mutableStateOf(true) }
     var scrollMode by remember { mutableStateOf(MangaScrollMode.WEBTOON) }
-    var autoScrollEnabled by remember { mutableStateOf(true) }
+    var autoScrollEnabled by remember { mutableStateOf(false) }
+    var autoScrollIntervalSec by remember { mutableStateOf(4) }
     var usePureDarkReader by remember { mutableStateOf(true) }
     var preloadStatus by remember { mutableStateOf("Loading chapter pages...") }
     var preloadCompleted by remember { mutableStateOf(0) }
@@ -265,7 +267,11 @@ fun MangaViewerScreen(
                         lazyListState.animateScrollToItem(pageIndex, (targetY - 120).coerceAtLeast(0))
                     }
 
-                    ttsController.playText(panel.text, isDialogueOnly = true)
+                    runCatching {
+                        ttsController.playText(panel.text)
+                    }.onFailure { e ->
+                        ocrStatus = "TTS error: ${e.message}"
+                    }
                 }
 
                 if (autoScrollEnabled && pageIndex < pages.lastIndex) {
@@ -672,6 +678,33 @@ fun MangaViewerScreen(
                                     checkedTrackColor = currentTheme.accentColor().copy(alpha = 0.45f)
                                 )
                             )
+                        }
+
+                        if (autoScrollEnabled || isOcrActive) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Speed:", color = Color.White.copy(0.6f), fontSize = 12.sp)
+                                Spacer(Modifier.width(8.dp))
+                                listOf(2, 4, 8).forEach { secs ->
+                                    val isSpeedSelected = autoScrollIntervalSec == secs
+                                    Text(
+                                        "${secs}s",
+                                        color = if (isSpeedSelected) currentTheme.accentColor() else Color.White.copy(0.45f),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSpeedSelected) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (isSpeedSelected) currentTheme.accentColor().copy(0.2f) else Color.Transparent)
+                                            .clickable { autoScrollIntervalSec = secs }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                            }
                         }
                     }
                 }

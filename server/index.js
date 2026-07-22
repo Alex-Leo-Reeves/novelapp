@@ -784,18 +784,18 @@ async function fetchOpenSubtitlesTrack(context, language) {
     if (context.episode) url.searchParams.set("episode_number", String(context.episode));
 
     const payload = await fetchJson(url.toString(), { headers });
-    const results = Array.isArray(payload ?.data) ? payload.data : [];
+    const results = Array.isArray(payload ? .data) ? payload.data : [];
     for (const item of results) {
-        const attributes = item ?.attributes || item || {};
+        const attributes = item ? .attributes || item || {};
         const files = Array.isArray(attributes.files) ? attributes.files : [];
         for (const file of files) {
-            const fileId = Number(file ?.file_id || 0);
+            const fileId = Number(file ? .file_id || 0);
             if (!fileId) continue;
             const fileName = String(file.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
             if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
         }
-        const fileId = Number(attributes.file_id || item ?.file_id || 0);
+        const fileId = Number(attributes.file_id || item ? .file_id || 0);
         if (fileId) {
             const fileName = String(attributes.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
@@ -824,7 +824,7 @@ async function openSubtitlesHeaders() {
                 password: OPENSUBTITLES_PASSWORD
             })
         }).catch(() => null);
-        if (login ?.token) headers.Authorization = `Bearer ${login.token}`;
+        if (login ? .token) headers.Authorization = `Bearer ${login.token}`;
     }
     return headers;
 }
@@ -838,7 +838,7 @@ async function downloadOpenSubtitlesTrack(fileId, fileName, language, headers) {
         },
         body: JSON.stringify({ file_id: fileId })
     });
-    const link = payload ?.link || payload ?.download_link || payload ?.url;
+    const link = payload ? .link || payload ? .download_link || payload ? .url;
     if (!link) return null;
     const bytes = await fetchBuffer(link, {
         "Accept": "*/*",
@@ -870,7 +870,7 @@ async function fetchSubdlTrack(context, language) {
             "User-Agent": "NovelApp Render"
         }
     });
-    if (payload ?.status === false) {
+    if (payload ? .status === false) {
         return { tracksJson: null, message: String(payload.error || payload.message || "SubDL subtitle search failed.") };
     }
 
@@ -891,14 +891,14 @@ async function fetchSubdlTrack(context, language) {
 }
 
 function collectSubdlCandidates(payload, context) {
-    const subtitles = Array.isArray(payload ?.subtitles) ? payload.subtitles : [];
+    const subtitles = Array.isArray(payload ? .subtitles) ? payload.subtitles : [];
     const exact = [];
     const fallback = [];
 
     for (const subtitle of subtitles) {
         const target = subdlMatchesEpisode(subtitle, context) ? exact : fallback;
         for (const key of["unpack_files", "unpacked_files", "files"]) {
-            const files = Array.isArray(subtitle ?.[key]) ? subtitle[key] : [];
+            const files = Array.isArray(subtitle ? .[key]) ? subtitle[key] : [];
             for (const file of files) {
                 if (!subdlMatchesEpisode(file, context)) continue;
                 const url = firstString(file, ["url", "download_url", "download", "subtitle_url", "path"]);
@@ -914,7 +914,7 @@ function collectSubdlCandidates(payload, context) {
 
 function firstString(source, keys) {
     for (const key of keys) {
-        const value = source ?.[key];
+        const value = source ? .[key];
         if (typeof value === "string" && value.trim()) return value.trim();
     }
     return "";
@@ -923,9 +923,9 @@ function firstString(source, keys) {
 function subdlMatchesEpisode(value, context) {
     const wanted = Number(context.episode || 0);
     if (!wanted) return true;
-    const episode = Number(value ?.episode || 0);
-    const from = Number(value ?.episode_from || 0);
-    const end = Number(value ?.episode_end || 0);
+    const episode = Number(value ? .episode || 0);
+    const from = Number(value ? .episode_from || 0);
+    const end = Number(value ? .episode_end || 0);
     if (episode) return episode === wanted;
     if (from && end) return wanted >= from && wanted <= end;
     return true;
@@ -2046,10 +2046,10 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
       seen.add(key);
       return true;
     });
-    return { sources: deduped, subtitles };
+    return deduped;
   } catch (error) {
     console.warn("[cinepro] Source fetch failed:", error.message || error);
-    return { sources: [], subtitles: [] };
+    return [];
   }
 }
 

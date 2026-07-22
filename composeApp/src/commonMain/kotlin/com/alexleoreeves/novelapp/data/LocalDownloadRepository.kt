@@ -182,6 +182,40 @@ class LocalDownloadRepository {
                 isChapterLocalAvailable(it)
         }
 
+    // ── Daily download limit ────────────────────────────────────────────
+
+    /**
+     * How many more media downloads the user can perform today.
+     * Returns [DownloadIndex.FREE_DAILY_MEDIA_LIMIT] for premium users (unlimited).
+     * Returns the remaining count for free users.
+     * NMC content (novels, manga, comics) always returns a large number — no cap.
+     */
+    fun remainingMediaDownloadsToday(isPremium: Boolean): Int {
+        if (isPremium) return Int.MAX_VALUE
+        val now = currentTimeMillis()
+        return loadIndex().remainingMediaDownloadsToday(now)
+    }
+
+    /**
+     * Returns true if a media download is allowed right now.
+     * @param contentType the content type being downloaded (ANIME, MOVIE, etc.)
+     * @param isPremium whether the user has an active premium subscription
+     */
+    fun canDownloadMedia(contentType: String, isPremium: Boolean): Boolean {
+        if (isPremium) return true
+        // NMC content (novels, manga, comics) is always unlimited
+        if (contentType.uppercase() in DownloadIndex.NMC_CONTENT_TYPES) return true
+        return remainingMediaDownloadsToday(isPremium = false) > 0
+    }
+
+    /** Record a successful media download. Only call this after the download actually succeeded. */
+    fun recordMediaDownload(contentType: String) {
+        // Only count media types (not NMC)
+        if (contentType.uppercase() in DownloadIndex.NMC_CONTENT_TYPES) return
+        val idx = loadIndex()
+        saveIndex(idx.recordMediaDownload(currentTimeMillis()))
+    }
+
     private fun isChapterLocalAvailable(chapter: DownloadedChapter): Boolean {
         // Split by either comma (for manga pages) or pipe (for novel text|audio)
         val paths = chapter.localFilePath.split(Regex("[,|]"))
