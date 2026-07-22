@@ -41,7 +41,8 @@ class SherpaChapterNarrator(private val context: Context, private val modelManag
         paragraphs: List<String>, 
         voiceId: Int, 
         chapterName: String, 
-        onComplete: (Pair<File, List<ParagraphTiming>>) -> Unit
+        onComplete: (Pair<File, List<ParagraphTiming>>) -> Unit,
+        volumeGain: Float = 1.0f
     ) = withContext(Dispatchers.IO) {
         initializeTts()
         val engine = tts ?: return@withContext
@@ -85,7 +86,8 @@ class SherpaChapterNarrator(private val context: Context, private val modelManag
             currentPosition += segment.size
         }
 
-        val wavBytes = floatArrayToWavBytes(finalBuffer, sampleRate)
+        val appliedGain = maxOf(0.5f, volumeGain)
+        val wavBytes = floatArrayToWavBytes(finalBuffer, sampleRate, appliedGain)
         FileOutputStream(targetOutputFile).use { it.write(wavBytes) }
         withContext(Dispatchers.Main) {
             onComplete(Pair(targetOutputFile, timings))
@@ -131,7 +133,9 @@ class SherpaChapterNarrator(private val context: Context, private val modelManag
         }
 
         val durationMs = max(1L, (finalBuffer.size * 1000L) / sampleRate)
-        val wavBytes = floatArrayToWavBytes(finalBuffer, sampleRate)
+        // Apply user-set volume gain (0.0-2.0 range, minimum 0.5 boost so it's never silent)
+        val volumeGain = maxOf(0.5f, settings.narratorVolume)
+        val wavBytes = floatArrayToWavBytes(finalBuffer, sampleRate, volumeGain)
         return Pair(wavBytes, durationMs)
     }
 
@@ -171,15 +175,15 @@ class SherpaChapterNarrator(private val context: Context, private val modelManag
         
         val audioResult = engine.generate(text, sid = voiceId, speed = 1.0f) ?: return null
         val durationMs = max(1L, (audioResult.samples.size * 1000L) / audioResult.sampleRate)
-        val wavBytes = floatArrayToWavBytes(audioResult.samples, audioResult.sampleRate)
+        val wavBytes = floatArrayToWavBytes(audioResult.samples, audioResult.sampleRate, 1.5f) // Boost test voice by default
         return Pair(wavBytes, durationMs)
     }
 
-    private fun floatArrayToWavBytes(samples: FloatArray, sampleRate: Int): ByteArray {
+    private fun floatArrayToWavBytes(samples: FloatArray, sampleRate: Int, gain: Float = 1.0f): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         val pcmData = ShortArray(samples.size)
         for (i in samples.indices) {
-            pcmData[i] = (samples[i] * 32767).toInt().coerceIn(-32768, 32767).toShort()
+            pcmData[i] = (samples[i] * 32767 * gain).toInt().coerceIn(-32768, 32767).toShort()
         }
         
         val header = ByteArray(44)

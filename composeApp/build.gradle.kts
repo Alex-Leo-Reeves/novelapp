@@ -199,15 +199,15 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
-            packageName = "NovelApp"
+            packageName = "NovaRead TV"
             packageVersion = "1.39.0"
-            description = "Watch Anime · Read Novels · Read Manga — All in One"
+            description = "NovaRead TV"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"
 
             windows {
                 iconFile.set(project.file("src/desktopMain/resources/icons/novelapp.ico"))
-                menuGroup = "NovelApp"
+                menuGroup = "NovaRead TV"
                 upgradeUuid = "055ef1e1-ffe1-4d5a-89b5-efd053023af0"
             }
         }

@@ -141,8 +141,8 @@ fun TvMangaViewerScreen(
                     Surface(
                         onClick = onBack,
                         shape = CircleShape,
-                        color = if (backFocused) Color(0xFFFF2A85) else Color.Black.copy(0.6f),
-                        border = if (backFocused) BorderStroke(2.dp, Color(0xFFFF2A85)) else null,
+                        color = if (backFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                        border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(44.dp)
                             .onFocusChanged { backFocused = it }

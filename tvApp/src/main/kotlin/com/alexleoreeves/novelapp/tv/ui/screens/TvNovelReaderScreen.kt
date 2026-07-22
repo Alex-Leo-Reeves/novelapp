@@ -188,7 +188,7 @@ fun TvNovelReaderScreen(
                         LinearProgressIndicator(
                             progress = { ttsSettings.currentProgress },
                             modifier = Modifier.fillMaxWidth().height(3.dp),
-                            color = Color(0xFFFF2A85),
+                            color = Color(0xFF00BFFF),
                             trackColor = Color.White.copy(0.1f)
                         )
                         Row(
@@ -269,8 +269,8 @@ private fun TtsControlStrip(
         Surface(
             onClick = { ttsEngine.stop() },
             shape = CircleShape,
-            color = if (stopFocused) Color(0xFFFF2A85).copy(0.5f) else Color(0xFF1C1C2E),
-            border = if (stopFocused) BorderStroke(2.dp, Color(0xFFFF2A85)) else null,
+            color = if (stopFocused) Color(0xFF00BFFF).copy(0.5f) else Color(0xFF1C1C2E),
+            border = if (stopFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
             modifier = Modifier
                 .size(44.dp)
                 .onFocusChanged { stopFocused = it }
@@ -353,7 +353,7 @@ private fun TtsSettingsPanel(
                     ) {
                         Text(
                             "${"%.1f".format(ttsSettings.speed)}x",
-                            color = Color(0xFFFF2A85),
+                            color = Color(0xFF00BFFF),
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
@@ -407,7 +407,7 @@ private fun TtsSettingsPanel(
                     ) {
                         Text(
                             "${"%.1f".format(ttsSettings.pitch)}x",
-                            color = Color(0xFF8B5CF6),
+                            color = Color(0xFF00BFFF),
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )

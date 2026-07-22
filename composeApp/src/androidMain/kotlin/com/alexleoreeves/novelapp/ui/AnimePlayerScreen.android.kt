@@ -824,12 +824,27 @@ private fun formatMs(ms: Long): String {
 }
 
 private fun String.isDirectPlayableMediaUrl(): Boolean {
+    val fullLower = lowercase()
     val clean = substringBefore("?").substringBefore("#").lowercase()
-    // Extension-only for the same reason as the WebView scraper —
-    // path patterns like /hls/ or /manifest/ match VidLink's own API
-    // endpoints, causing crashes.
-    return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") ||
-           clean.endsWith(".webm") || clean.endsWith(".mkv") || clean.endsWith(".mov") || clean.endsWith(".ts")
+
+    // Standard extension-based check (strict — path only, no query params)
+    if (clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mpd") ||
+        clean.endsWith(".webm") || clean.endsWith(".mkv") || clean.endsWith(".mov") || clean.endsWith(".ts")) {
+        return true
+    }
+
+    // Also check query params for embedded stream URLs — some scrapers return
+    // URLs like https://example.com/redirect?url=https://cdn.example.com/master.m3u8
+    if (fullLower.contains(".m3u8") || fullLower.contains(".mp4") || fullLower.contains(".mpd")) {
+        return true
+    }
+
+    // Stream path patterns (avoiding /hls/ and /manifest/ which match VidLink API)
+    if (fullLower.contains("/dash/") || fullLower.contains("/stream/") || fullLower.contains("/playlist/")) {
+        return true
+    }
+
+    return false
 }
 
 @Composable
@@ -844,15 +859,15 @@ private fun PlayerLoadingOverlay(
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.78f)), contentAlignment = Alignment.Center) {
             Column(modifier = Modifier.widthIn(max = 420.dp).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (isError) Icon(Icons.Default.CloudOff, null, tint = Color(0xFFFF7A1A), modifier = Modifier.size(42.dp))
-                else CircularProgressIndicator(color = Color(0xFFFF7A1A))
+                if (isError) Icon(Icons.Default.CloudOff, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(42.dp))
+                else CircularProgressIndicator(color = Color(0xFF00BFFF))
                 Text(title, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2)
                 Text(message, color = Color.White.copy(alpha = 0.82f), style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(onClick = onBack, border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
                         Icon(Icons.Default.ArrowBack, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Back")
                     }
-                    Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A1A))) {
+                    Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))) {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Retry")
                     }
                 }

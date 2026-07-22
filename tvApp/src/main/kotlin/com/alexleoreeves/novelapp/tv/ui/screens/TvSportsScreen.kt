@@ -123,7 +123,7 @@ fun TvSportsScreen(
             val bi = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             val bf by bi.collectIsFocusedAsState()
             Surface(onClick = onBack, shape = RoundedCornerShape(10.dp), color = if (bf) Color(0xFF1C1C2E) else Color.Transparent,
-                border = if (bf) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null, interactionSource = bi) {
+                border = if (bf) BorderStroke(2.dp, Color(0xFF00BFFF)) else null, interactionSource = bi) {
                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(20.dp))
                     Text("Back", color = Color.White)
@@ -137,7 +137,7 @@ fun TvSportsScreen(
                 val int = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                 val foc by int.collectIsFocusedAsState()
                 Button(onClick = { activeTab = index }, interactionSource = int,
-                    colors = ButtonDefaults.buttonColors(containerColor = if (activeTab == index) Color(0xFF8B5CF6) else Color(0xFF14141E)),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (activeTab == index) Color(0xFF00BFFF) else Color(0xFF14141E)),
                     shape = RoundedCornerShape(8.dp)) {
                     Text(label, color = Color.White, fontWeight = if (activeTab == index) FontWeight.Bold else FontWeight.Normal)
                 }
@@ -146,7 +146,7 @@ fun TvSportsScreen(
 
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color(0xFF8B5CF6), modifier = Modifier.size(48.dp))
+                CircularProgressIndicator(color = Color(0xFF00BFFF), modifier = Modifier.size(48.dp))
             }
         } else {
             when (activeTab) {
@@ -166,7 +166,7 @@ fun TvSportsScreen(
                                     selectedUrl = "https://v2.sportsurge.net/search?query=$query"
                                     selectedTitle = "${m.homeTeam} vs ${m.awayTeam}"
                                 }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (foc) Color(0xFF1E1E2E) else Color(0xFF0C0C12)),
-                                    border = if (foc) BorderStroke(2.dp, if (isLive) Color(0xFF4CAF50) else Color(0xFF8B5CF6)) else BorderStroke(1.dp, Color.White.copy(0.05f)),
+                                    border = if (foc) BorderStroke(2.dp, if (isLive) Color(0xFF4CAF50) else Color(0xFF00BFFF)) else BorderStroke(1.dp, Color.White.copy(0.05f)),
                                     interactionSource = int, modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }) {
                                     Column(modifier = Modifier.padding(16.dp)) {
                                         if (m.leagueName.isNotBlank()) {

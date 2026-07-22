@@ -1,4 +1,4 @@
-name: AnimeNovelManga
+name: NovaRead TV
 options:
   bundleIdPrefix: com.alexleoreeves
   deploymentTarget:
@@ -10,7 +10,7 @@ settings:
     MARKETING_VERSION: "1.38"
     SWIFT_VERSION: "5.0"
 targets:
-  AnimeNovelManga:
+  NovaRead TV:
     type: application
     platform: iOS
     deploymentTarget: "16.0"
@@ -34,15 +34,15 @@ targets:
           - "$(inherited)"
           - "@executable_path/Frameworks"
         PRODUCT_BUNDLE_IDENTIFIER: com.alexleoreeves.novelapp.ios
-        PRODUCT_NAME: AnimeNovelManga
+        PRODUCT_NAME: NovaRead TV
     dependencies:
       - framework: onnxruntime.xcframework
         embed: true
 schemes:
-  AnimeNovelManga:
+  NovaRead TV:
     build:
       targets:
-        AnimeNovelManga: all
+        NovaRead TV: all
     run:
       config: Debug
     archive:

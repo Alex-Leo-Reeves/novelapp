@@ -475,7 +475,7 @@ fun MangaViewerScreen(
                 ) {
                     Row(
                         modifier = Modifier
-                            .statusBarsPadding()
+                            
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {

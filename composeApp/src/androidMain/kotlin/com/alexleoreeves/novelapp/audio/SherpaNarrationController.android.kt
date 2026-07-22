@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.audio
 
+import android.content.Context
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,7 @@ import kotlinx.coroutines.launch
 actual class SherpaNarrationController actual constructor() {
     
     private val context = AppContextHolder.applicationContext ?: error("App context not initialized")
+    private val prefs = context.getSharedPreferences("narration_settings", Context.MODE_PRIVATE)
     private val modelManager = SherpaModelManager(context)
     private val chapterNarrator = SherpaChapterNarrator(context, modelManager)
     private val stutterFreeNarrator = SherpaStutterFreeNarrator(context, chapterNarrator)
@@ -38,13 +40,46 @@ actual class SherpaNarrationController actual constructor() {
     private val _lastError = MutableStateFlow<String?>(null)
     actual val lastError: StateFlow<String?> = _lastError
     
-    private val _settings = MutableStateFlow(NarrationSettings())
+    /** Load persisted settings or use defaults */
+    private val _settings = MutableStateFlow(loadSavedSettings())
     actual val settings: StateFlow<NarrationSettings> = _settings
     
     actual val sleepTimerMinutes = MutableStateFlow(0)
 
+    /** Load narration settings from SharedPreferences, falling back to defaults */
+    private fun loadSavedSettings(): NarrationSettings {
+        val narratorVoiceId = prefs.getInt("narrator_voice_id", 0)
+        val characterVoiceId = prefs.getInt("character_voice_id", 17)
+        val narratorVolume = prefs.getFloat("narrator_volume", 1.0f)
+        val ambienceVolume = prefs.getFloat("ambience_volume", 0.18f)
+        val ambienceEnabled = prefs.getBoolean("ambience_enabled", false)
+        val voiceModeOrdinal = prefs.getInt("voice_mode", VoiceMode.NarratorOnly.ordinal)
+        val voiceMode = VoiceMode.entries.getOrElse(voiceModeOrdinal) { VoiceMode.NarratorOnly }
+        val backgroundPlayback = prefs.getBoolean("background_playback", false)
+        return NarrationSettings(
+            narratorVolume = narratorVolume,
+            ambienceVolume = ambienceVolume,
+            ambienceEnabled = ambienceEnabled,
+            voiceMode = voiceMode,
+            narratorVoiceId = narratorVoiceId,
+            characterVoiceId = characterVoiceId,
+            backgroundPlaybackEnabled = backgroundPlayback
+        )
+    }
+
+    /** Persist settings to SharedPreferences whenever they change */
     actual fun updateSettings(transform: (NarrationSettings) -> NarrationSettings) {
-        _settings.value = transform(_settings.value)
+        val newSettings = transform(_settings.value)
+        _settings.value = newSettings
+        prefs.edit()
+            .putInt("narrator_voice_id", newSettings.narratorVoiceId)
+            .putInt("character_voice_id", newSettings.characterVoiceId)
+            .putFloat("narrator_volume", newSettings.narratorVolume)
+            .putFloat("ambience_volume", newSettings.ambienceVolume)
+            .putBoolean("ambience_enabled", newSettings.ambienceEnabled)
+            .putInt("voice_mode", newSettings.voiceMode.ordinal)
+            .putBoolean("background_playback", newSettings.backgroundPlaybackEnabled)
+            .apply()
     }
 
     actual fun startSleepTimer(minutes: Int, onTimerFinished: () -> Unit) {
@@ -64,9 +99,27 @@ actual class SherpaNarrationController actual constructor() {
         sleepTimerMinutes.value = 0
     }
 
+    private fun startForegroundServiceIfEnabled() {
+        val s = _settings.value
+        if (s.backgroundPlaybackEnabled) {
+            updateNarrationForegroundService(
+                enabled = true,
+                title = s.backgroundTitle.ifBlank { "NovelApp narration" },
+                subtitle = s.backgroundSubtitle.ifBlank { "Reading in background" }
+            )
+        }
+    }
+
+    private fun stopForegroundService() {
+        updateNarrationForegroundService(enabled = false, title = "", subtitle = "")
+    }
+
     actual fun playText(text: String, cacheKey: String?, persistAudioCache: Boolean, isDialogueOnly: Boolean) {
         val paragraphs = text.toNarrationBlocks()
         if (paragraphs.isEmpty()) return
+        
+        // Start foreground service if background playback is enabled
+        startForegroundServiceIfEnabled()
         
         scope.launch {
             _lastError.value = null
@@ -113,18 +166,23 @@ actual class SherpaNarrationController actual constructor() {
 
     actual fun pause() {
         stutterFreeNarrator.pause()
+        // Keep foreground service alive while paused (user may resume)
     }
 
     actual fun resume() {
         stutterFreeNarrator.resume()
+        // Re-start foreground service in case Android killed it while paused
+        startForegroundServiceIfEnabled()
     }
 
     actual fun stop() {
         stutterFreeNarrator.stop()
+        // Stop foreground service when narration ends
+        stopForegroundService()
+        _lastError.value = null
     }
 
     actual fun skipForward() {
-        // Skip logic (e.g. advance 15 seconds or next paragraph)
         stutterFreeNarrator.seekToProgress((stutterFreeNarrator.playbackProgress.value + 0.05f).coerceIn(0f, 1f))
     }
 
@@ -153,7 +211,8 @@ actual class SherpaNarrationController actual constructor() {
                     chapterName = chapterName,
                     onComplete = { (file, _) ->
                         continuation.resume(file.absolutePath) {}
-                    }
+                    },
+                    volumeGain = settings.value.narratorVolume
                 )
             }
         }

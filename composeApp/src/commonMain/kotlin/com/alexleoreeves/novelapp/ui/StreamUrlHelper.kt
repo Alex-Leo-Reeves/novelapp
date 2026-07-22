@@ -150,7 +150,7 @@ suspend fun resolveCineProStream(
     season: String = "1",
     episode: String = "1"
 ): String? = runCatching {
-    val cineproBase = "https://api.cinepro.cc"
+    val cineproBase = "https://cinepro-core-esmh.onrender.com"
     val url = if (type == "movie") {
         "$cineproBase/v1/movies/$tmdbId"
     } else {
@@ -168,14 +168,24 @@ suspend fun resolveCineProStream(
         val obj = source.jsonObject
         val sourceUrl = obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (sourceUrl.isNotBlank()) {
-            if (sourceUrl.startsWith("http")) return@runCatching sourceUrl
-            if (sourceUrl.startsWith("/v1/proxy")) {
+            // Rewrite localhost proxy URLs to the actual CinePro Core instance
+            val resolved = if (sourceUrl.startsWith("http://localhost:10000") && sourceUrl.contains("/v1/proxy?data=")) {
+                val rewritten = sourceUrl.replace("http://localhost:10000", cineproBase)
+                // Resolve the proxy to get the actual .m3u8
+                try {
+                    val proxyResponse = client.get(rewritten).bodyAsText()
+                    val proxyData = streamJson.parseToJsonElement(proxyResponse).jsonObject
+                    proxyData["url"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { rewritten }
+                } catch (_: Exception) { rewritten }
+            } else if (sourceUrl.startsWith("http")) {
+                sourceUrl
+            } else if (sourceUrl.startsWith("/v1/proxy")) {
                 val proxyUrl = "$cineproBase$sourceUrl"
                 val proxyResponse = client.get(proxyUrl).bodyAsText()
                 val proxyData = streamJson.parseToJsonElement(proxyResponse).jsonObject
-                val resolvedUrl = proxyData["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                if (resolvedUrl.isNotBlank()) return@runCatching resolvedUrl
-            }
+                proxyData["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            } else null
+            if (!resolved.isNullOrBlank()) return@runCatching resolved
         }
     }
     null

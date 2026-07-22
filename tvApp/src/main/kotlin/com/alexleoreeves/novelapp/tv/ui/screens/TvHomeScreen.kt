@@ -98,17 +98,17 @@ fun TvHomeScreen(
                 // Premium badge
                 if (account?.isPremium == true) {
                     Surface(
-                        color = Color(0xFF8B5CF6).copy(0.2f),
+                        color = Color(0xFF00BFFF).copy(0.2f),
                         shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(0.4f))
+                        border = BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.4f))
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Icon(Icons.Default.Verified, null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(16.dp))
-                            Text("PREMIUM", color = Color(0xFF8B5CF6), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                            Icon(Icons.Default.Verified, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(16.dp))
+                            Text("PREMIUM", color = Color(0xFF00BFFF), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -351,8 +351,8 @@ fun TvMediaCard(
             }
             // Media type badge
             val badgeColor = when {
-                item.isAnime -> Color(0xFFFF2A85)
-                item.isManga || item.isComic -> Color(0xFF8B5CF6)
+                item.isAnime -> Color(0xFF00BFFF)
+                item.isManga || item.isComic -> Color(0xFF00BFFF)
                 item.isVideo -> Color(0xFF06D6A0)
                 else -> Color(0xFFF59E0B)
             }

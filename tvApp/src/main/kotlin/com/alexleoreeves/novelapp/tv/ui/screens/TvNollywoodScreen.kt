@@ -83,7 +83,7 @@ fun TvNollywoodScreen(
             val backInt = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             val backFoc by backInt.collectIsFocusedAsState()
             Surface(onClick = onBack, shape = RoundedCornerShape(10.dp), color = if (backFoc) Color(0xFF1C1C2E) else Color.Transparent,
-                border = if (backFoc) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null, interactionSource = backInt) {
+                border = if (backFoc) BorderStroke(2.dp, Color(0xFF00BFFF)) else null, interactionSource = backInt) {
                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(20.dp))
                     Text("Back", color = Color.White)

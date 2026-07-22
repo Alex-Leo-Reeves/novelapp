@@ -74,6 +74,7 @@ fun NollywoodHomeScreen(
     var isLoading by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedYtItem by remember { mutableStateOf<NollywoodYouTubeItem?>(null) }
+    var isResolvingYt by remember { mutableStateOf(false) }
     var selectedTmdbItem by remember { mutableStateOf<UnifiedSearchResult?>(null) }
 
     val feedItems = remember(tmdbItems, youtubeItems, searchQuery) {
@@ -132,23 +133,15 @@ fun NollywoodHomeScreen(
     LaunchedEffect(Unit) { loadFeeds() }
 
     if (selectedYtItem != null) {
-        YouTubeNollywoodDetailScreen(
-            item = selectedYtItem!!,
-            currentTheme = currentTheme,
-            onPlayInYtPlayer = { videoId, title ->
-                onPlayYtVideo(videoId, title)
-            },
-            onPlayInExoPlayer = { videoId, title ->
-                scope.launch {
-                    val streamUrl = resolveYouTubePipedStream(httpClient, videoId)
-                    if (streamUrl != null) {
-                        onPlayStream(streamUrl, title, null, null)
-                    }
-                }
-            },
-            onBack = { selectedYtItem = null }
-        )
-        return
+        // Play directly in ExoPlayer — skip the intermediate detail screen
+        scope.launch {
+            val streamUrl = resolveYouTubePipedStream(httpClient, selectedYtItem!!.videoId)
+            val title = selectedYtItem!!.title
+            selectedYtItem = null
+            if (streamUrl != null) {
+                onPlayStream(streamUrl, title, null, null)
+            }
+        }
     }
 
     if (selectedTmdbItem != null) {
@@ -170,7 +163,7 @@ fun NollywoodHomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
-            .statusBarsPadding()
+            
     ) {
         // Header
         Box(

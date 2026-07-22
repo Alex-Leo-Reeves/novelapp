@@ -211,7 +211,7 @@ fun TvPlayerScreen(
                     var backFocused by remember { mutableStateOf(false) }
                     Button(
                         onClick = onBack,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF)),
                         modifier = Modifier.onFocusChanged { backFocused = it }
                     ) {
                         Text("Go Back", fontWeight = FontWeight.Bold)
@@ -250,8 +250,8 @@ fun TvPlayerScreen(
                     Surface(
                         onClick = onBack,
                         shape = CircleShape,
-                        color = if (backFocused) Color(0xFFFF2A85) else Color.Black.copy(0.6f),
-                        border = if (backFocused) BorderStroke(2.dp, Color(0xFFFF2A85)) else null,
+                        color = if (backFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                        border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(44.dp)
                             .onFocusChanged { backFocused = it }
@@ -285,8 +285,8 @@ fun TvPlayerScreen(
                     Surface(
                         onClick = { exoPlayer?.seekTo((exoPlayer.currentPosition - 15000).coerceAtLeast(0)) },
                         shape = CircleShape,
-                        color = if (rwFocused) Color(0xFF8B5CF6).copy(0.5f) else Color.Black.copy(0.5f),
-                        border = if (rwFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
+                        color = if (rwFocused) Color(0xFF00BFFF).copy(0.5f) else Color.Black.copy(0.5f),
+                        border = if (rwFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(56.dp)
                             .onFocusChanged { rwFocused = it }
@@ -307,8 +307,8 @@ fun TvPlayerScreen(
                             }
                         },
                         shape = CircleShape,
-                        color = if (ppFocused) Color(0xFFFF2A85) else Color.Black.copy(0.6f),
-                        border = if (ppFocused) BorderStroke(3.dp, Color(0xFFFF2A85)) else null,
+                        color = if (ppFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                        border = if (ppFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(72.dp)
                             .onFocusChanged { ppFocused = it }
@@ -330,8 +330,8 @@ fun TvPlayerScreen(
                     Surface(
                         onClick = { exoPlayer?.seekTo((exoPlayer.currentPosition + 30000).coerceAtMost(exoPlayer.duration)) },
                         shape = CircleShape,
-                        color = if (ffFocused) Color(0xFF8B5CF6).copy(0.5f) else Color.Black.copy(0.5f),
-                        border = if (ffFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
+                        color = if (ffFocused) Color(0xFF00BFFF).copy(0.5f) else Color.Black.copy(0.5f),
+                        border = if (ffFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(56.dp)
                             .onFocusChanged { ffFocused = it }
@@ -355,7 +355,7 @@ fun TvPlayerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(4.dp),
-                        color = Color(0xFFFF2A85),
+                        color = Color(0xFF00BFFF),
                         trackColor = Color.White.copy(0.15f)
                     )
                     Spacer(Modifier.height(8.dp))

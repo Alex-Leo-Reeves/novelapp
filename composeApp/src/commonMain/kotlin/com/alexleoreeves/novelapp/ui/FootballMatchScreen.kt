@@ -29,7 +29,7 @@ import kotlinx.serialization.json.Json
 fun FootballMatchScreen(
     match: FootballMatch,
     currentTheme: AppTheme,
-    onPlayStream: (streamUrl: String, title: String) -> Unit,
+    onPlayStream: (result: StreamResult, title: String) -> Unit,
     onBack: () -> Unit
 ) {
     val httpClient = remember {
@@ -46,9 +46,7 @@ fun FootballMatchScreen(
     val footballApi = remember { FootballApiSource(httpClient) }
 
     var isLoadingStream by remember { mutableStateOf(false) }
-    var streamUrl by remember { mutableStateOf<String?>(null) }
-    var streamUrls by remember { mutableStateOf<List<String>>(emptyList()) }
-    var currentFallbackIndex by remember { mutableIntStateOf(0) }
+    var streamResult by remember { mutableStateOf<StreamResult?>(null) }
     var streamError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -57,43 +55,47 @@ fun FootballMatchScreen(
         scope.launch {
             isLoadingStream = true
             streamError = null
-            streamUrl = null
-            streamUrls = emptyList()
-            currentFallbackIndex = 0
-            val urls = footballApi.resolveStreamUrls(
-                fixtureId = match.fixtureId,
+            streamResult = null
+
+            // Ladder approach:
+            // 1. Try Server 2 (backend .m3u8 scraper) for a direct stream
+            // 2. If that fails, fall back to embed URLs
+            val result = footballApi.resolveStream(
                 homeTeam = match.homeTeam,
                 awayTeam = match.awayTeam,
                 leagueName = match.leagueName
             )
-            streamUrls = urls
-            if (urls.isEmpty()) {
-                streamError = "No stream available for this match yet. Try again closer to kickoff."
-                isLoadingStream = false
-                return@launch
-            }
-            currentFallbackIndex = 0
-            streamUrl = urls[0]
-            onPlayStream(urls[0], "${match.homeTeam} vs ${match.awayTeam}")
+
+            streamResult = result
             isLoadingStream = false
+
+            when (result) {
+                is StreamResult.Direct -> {
+                    // Direct .m3u8 from backend → AnimePlayerScreen (ExoPlayer)
+                    onPlayStream(result, "${match.homeTeam} vs ${match.awayTeam}")
+                }
+                is StreamResult.Embed -> {
+                    if (result.url.isBlank()) {
+                        streamError = "No stream available for this match yet. Try again closer to kickoff."
+                    } else {
+                        // Embed URL → MaServerPlayerScreen (WebView)
+                        onPlayStream(result, "${match.homeTeam} vs ${match.awayTeam}")
+                    }
+                }
+            }
         }
     }
 
     fun tryNextServer() {
-        if (streamUrls.isEmpty()) {
+        // Re-resolve — the resolver tries Server 2 first, then falls back to embeds.
+        // If already an Embed, suggest using the same fallback again (may work after reload).
+        if (streamResult == null) {
             resolveStream()
             return
         }
-        if (streamUrls.size == 1) {
-            streamError = "Only one stream source available. Try the same source again."
-            return
-        }
-        val nextIndex = if (currentFallbackIndex + 1 < streamUrls.size) currentFallbackIndex + 1 else 0
-        currentFallbackIndex = nextIndex
-        val nextUrl = streamUrls[nextIndex]
-        streamUrl = nextUrl
-        streamError = null
-        onPlayStream(nextUrl, "${match.homeTeam} vs ${match.awayTeam}")
+        // Reset and re-resolve
+        streamResult = null
+        resolveStream()
     }
 
     Column(
@@ -120,7 +122,7 @@ fun FootballMatchScreen(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .statusBarsPadding()
+                    
                     .padding(10.dp)
                     .align(Alignment.TopStart)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
@@ -263,14 +265,15 @@ fun FootballMatchScreen(
                                 }
                             }
                         }
-                        streamUrl != null -> {
+                        streamResult != null -> {
+                            val label = when (streamResult) {
+                                is StreamResult.Direct -> "Direct stream ready!"
+                                is StreamResult.Embed -> "Embed stream ready!"
+                                null -> "Stream ready!"
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(Icons.Default.Check, null, tint = footballAccent, modifier = Modifier.size(18.dp))
-                                Text("Stream ready!", color = footballAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                if (streamUrls.size > 1) {
-                                    Spacer(Modifier.weight(1f))
-                                    Text("Server ${currentFallbackIndex + 1}/${streamUrls.size}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
-                                }
+                                Text(label, color = footballAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                             }
                         }
                         streamError != null -> {
@@ -283,8 +286,8 @@ fun FootballMatchScreen(
                     // Main watch button
                     Button(
                         onClick = {
-                            if (streamUrl != null) {
-                                onPlayStream(streamUrl!!, "${match.homeTeam} vs ${match.awayTeam}")
+                            if (streamResult != null) {
+                                onPlayStream(streamResult!!, "${match.homeTeam} vs ${match.awayTeam}")
                             } else {
                                 resolveStream()
                             }
@@ -299,7 +302,7 @@ fun FootballMatchScreen(
                         Text(
                             when {
                                 isLoadingStream -> "Resolving..."
-                                streamUrl != null -> "Launch Stream"
+                                streamResult != null -> "Launch Stream"
                                 match.isLive -> "Find Live Stream"
                                 match.isFinished -> "Find Replay"
                                 else -> "Check Stream"
@@ -308,8 +311,8 @@ fun FootballMatchScreen(
                         )
                     }
 
-                    // Try another server button (shown when streams exist but user needs to cycle)
-                    if (streamUrls.isNotEmpty()) {
+                    // Try another server button
+                    if (streamResult != null || streamError != null) {
                         OutlinedButton(
                             onClick = { tryNextServer() },
                             modifier = Modifier.fillMaxWidth(),
@@ -317,17 +320,13 @@ fun FootballMatchScreen(
                         ) {
                             Icon(Icons.Default.SwapHoriz, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(
-                                if (streamUrls.size > 1) "Try Server ${(currentFallbackIndex % streamUrls.size) + 2}/${streamUrls.size}"
-                                else "Retry Same Source",
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Text("Try Another Source", fontWeight = FontWeight.SemiBold)
                         }
                     }
 
                     if (streamError != null) {
                         Text(
-                            "Tip: Different stream sources work at different times. Tap 'Try' to cycle through available servers (${streamUrls.size} found).",
+                            "Tip: Different stream sources work at different times. Tap 'Try Another Source' to retry.",
                             color = currentTheme.subTextColor().copy(alpha = 0.6f),
                             style = MaterialTheme.typography.labelSmall
                         )

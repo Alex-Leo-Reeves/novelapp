@@ -1,11 +1,24 @@
 package com.alexleoreeves.novelapp.data
 
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import kotlinx.serialization.json.*
 
 private val footballJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+/**
+ * Result of resolving a football match stream.
+ * Server 2: Direct .m3u8 URL from backend → AnimePlayerScreen (ExoPlayer).
+ * Server 1/3/4/5: Embed URL → MaServerPlayerScreen (WebView).
+ */
+sealed class StreamResult {
+    /** A direct HLS/MP4 URL from the backend scraper — route to AnimePlayerScreen */
+    data class Direct(val url: String) : StreamResult()
+    /** An embed page URL — route to MaServerPlayerScreen */
+    data class Embed(val url: String) : StreamResult()
+}
 
 data class FootballMatch(
     val fixtureId: Int,
@@ -118,11 +131,7 @@ class FootballApiSource(private val httpClient: HttpClient) {
         // Build a direct embed URL using the fixture ID when available.
         val embedUrls = mutableListOf<String>()
 
-        // Server 1: ScoreBat embed — this renders an actual video player WebView,
-        // not a search results page. Works for highlights and replays.
-        embedUrls.add("https://www.scorebat.com/embed/")
-
-        // Server 2: ScoreBat with team search (falls back to team highlights)
+        // Server 1: ScoreBat with team search — shows match-specific highlights
         val searchQuery = buildString {
             if (homeTeam.isNotBlank()) append(homeTeam.take(20).replace(" ", "+"))
             if (awayTeam.isNotBlank()) {
@@ -134,6 +143,9 @@ class FootballApiSource(private val httpClient: HttpClient) {
             embedUrls.add("https://www.scorebat.com/embed/livescore/?search=$searchQuery")
         }
 
+        // Server 2: Generic ScoreBat embed (fallback — shows whatever is featured)
+        embedUrls.add("https://www.scorebat.com/embed/")
+
         // Server 3: Footybite direct match search
         embedUrls.add("https://footybite.to/?s=$searchQuery".takeIf { searchQuery.isNotBlank() } ?: "https://footybite.to/")
 
@@ -141,6 +153,73 @@ class FootballApiSource(private val httpClient: HttpClient) {
         embedUrls.add("https://v2.sportsurge.net/search?query=$searchQuery".takeIf { searchQuery.isNotBlank() } ?: "https://v2.sportsurge.net/")
 
         return embedUrls.distinct()
+    }
+
+    /**
+     * Server 2: Cricfy-style backend direct-stream resolver.
+     * Calls POST /api/football/direct-stream on the main server to scrape
+     * streaming aggregators for a raw .m3u8 URL.
+     *
+     * Returns StreamResult.Direct if a direct .m3u8 was found,
+     * or null if the server couldn't resolve one via HTTP scraping.
+     */
+    suspend fun resolveServerDirectStream(
+        homeTeam: String,
+        awayTeam: String,
+        leagueName: String = ""
+    ): StreamResult? = runCatching {
+        val body = buildJsonObject {
+            put("homeTeam", homeTeam)
+            put("awayTeam", awayTeam)
+            put("leagueName", leagueName)
+        }.toString()
+        val raw = httpClient.post("${AppReleaseConfig.API_BASE_URL}/football/direct-stream") {
+            header("Content-Type", "application/json")
+            header("Accept", "application/json")
+            header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+            setBody(body)
+        }.bodyAsText()
+        if (raw.isBlank()) return@runCatching null
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        val ok = root["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (!ok) return@runCatching null
+        val data = root["data"]?.jsonObject ?: return@runCatching null
+        val url = data["url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching null
+        val isDirect = data["direct"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (isDirect && url.isNotBlank()) {
+            StreamResult.Direct(url)
+        } else null
+    }.getOrElse { error ->
+        println("[FootballDirect] Server scrape failed: ${error.message}")
+        null
+    }
+
+    /**
+     * Resolve a match stream using the ladder approach:
+     * 1. Try Server 2 (backend .m3u8 scraper) → StreamResult.Direct
+     * 2. If that fails, return the first embed URL → StreamResult.Embed
+     */
+    suspend fun resolveStream(
+        homeTeam: String,
+        awayTeam: String,
+        leagueName: String = ""
+    ): StreamResult {
+        // Step 1: Try Server 2 — backend direct-stream scraper
+        val direct = resolveServerDirectStream(homeTeam, awayTeam, leagueName)
+        if (direct != null) return direct
+
+        // Step 2: Fall back to embed URLs (Servers 1, 3, 4, 5)
+        val embedUrls = resolveStreamUrls(
+            fixtureId = 0,
+            homeTeam = homeTeam,
+            awayTeam = awayTeam,
+            leagueName = leagueName
+        )
+        val firstEmbed = embedUrls.firstOrNull()
+        if (firstEmbed != null) return StreamResult.Embed(firstEmbed)
+
+        // No stream available at all
+        return StreamResult.Embed("")
     }
 
     suspend fun searchFixtures(query: String): List<FootballMatch> = runCatching {

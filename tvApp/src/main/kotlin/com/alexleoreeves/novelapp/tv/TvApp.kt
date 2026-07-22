@@ -257,7 +257,7 @@ fun TvSplashScreen(onFinished: () -> Unit) {
                                 CircleShape
                             )
                     )
-                    Icon(Icons.Default.AutoStories, null, tint = Color(0xFFFF2A85), modifier = Modifier.size(80.dp))
+                    Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(80.dp))
                 }
             }
             Spacer(Modifier.height(30.dp))
@@ -273,7 +273,7 @@ fun TvSplashScreen(onFinished: () -> Unit) {
                     Text(
                         "— All in One —",
                         style = MaterialTheme.typography.titleLarge,
-                        color = Color(0xFFFF2A85).copy(0.9f)
+                        color = Color(0xFF00BFFF).copy(0.9f)
                     )
                 }
             }
@@ -297,7 +297,7 @@ fun TvSplashScreen(onFinished: () -> Unit) {
                 Text(
                     "masteralexleoreevesd1@gmail.com",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF8B5CF6)
+                    color = Color(0xFF00BFFF)
                 )
             }
         }
@@ -346,7 +346,7 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Brush.linearGradient(listOf(Color(0xFFFF2A85), Color(0xFF8B5CF6)))),
+                        .background(Brush.linearGradient(listOf(Color(0xFF00BFFF), Color(0xFF00BFFF)))),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Default.AutoStories, null, tint = Color.White, modifier = Modifier.size(22.dp))
@@ -377,11 +377,11 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
                         onClick = { onSectionChange(section) },
                         shape = RoundedCornerShape(10.dp),
                         color = when {
-                            selected -> Color(0xFF8B5CF6).copy(0.25f)
+                            selected -> Color(0xFF00BFFF).copy(0.25f)
                             isFocused -> Color.White.copy(0.08f)
                             else -> Color.Transparent
                         },
-                        border = if (isFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
+                        border = if (isFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         interactionSource = interactionSource,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -399,7 +399,7 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
                             Icon(
                                 section.icon,
                                 null,
-                                tint = if (selected || isFocused) Color(0xFF8B5CF6) else Color.White.copy(0.5f),
+                                tint = if (selected || isFocused) Color(0xFF00BFFF) else Color.White.copy(0.5f),
                                 modifier = Modifier.size(20.dp)
                             )
                             Text(
@@ -426,7 +426,7 @@ private fun TvSidebar(currentSection: TvSection, onSectionChange: (TvSection) ->
             Text(
                 "masteralexleoreevesd1@gmail.com",
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF8B5CF6).copy(0.8f)
+                color = Color(0xFF00BFFF).copy(0.8f)
             )
         }
     }
@@ -471,7 +471,7 @@ fun TvMediaHomeScreen(
 
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color(0xFF8B5CF6), modifier = Modifier.size(48.dp))
+                CircularProgressIndicator(color = Color(0xFF00BFFF), modifier = Modifier.size(48.dp))
             }
         } else {
             LazyVerticalGrid(
@@ -591,7 +591,7 @@ fun TvTmdbHomeScreen(
                         onClick = { selectedItem = null; episodesList = emptyList() },
                         shape = RoundedCornerShape(10.dp),
                         color = if (isFocused) Color(0xFF1C1C2E) else Color.Transparent,
-                        border = if (isFocused) BorderStroke(2.dp, Color(0xFF8B5CF6)) else null,
+                        border = if (isFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         interactionSource = interactionSource
                     ) {
                         Row(
@@ -606,7 +606,7 @@ fun TvTmdbHomeScreen(
                     Spacer(Modifier.width(20.dp))
                     Column {
                         Text(item.title, style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Black)
-                        Text(item.genres, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF8B5CF6))
+                        Text(item.genres, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF00BFFF))
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(28.dp), modifier = Modifier.weight(1f)) {
@@ -627,8 +627,8 @@ fun TvTmdbHomeScreen(
                                     onPlayStream(url, item.title)
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (isFocused) Color(0xFF8B5CF6) else Color(0xFF1C1C2E),
-                                border = if (isFocused) BorderStroke(3.dp, Color(0xFF8B5CF6)) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                color = if (isFocused) Color(0xFF00BFFF) else Color(0xFF1C1C2E),
+                                border = if (isFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else BorderStroke(1.dp, Color.White.copy(0.1f)),
                                 interactionSource = interactionSource,
                                 modifier = Modifier.fillMaxWidth().height(60.dp)
                             ) {
@@ -645,7 +645,7 @@ fun TvTmdbHomeScreen(
                             Text("Episodes", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
                             if (isLoadingEps) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = Color(0xFF8B5CF6))
+                                    CircularProgressIndicator(color = Color(0xFF00BFFF))
                                 }
                             } else {
                                 LazyVerticalGrid(
@@ -660,7 +660,7 @@ fun TvTmdbHomeScreen(
                                         Button(
                                             onClick = { onPlayStream(epUrl, "${item.title} - $epTitle") },
                                             interactionSource = interactionSource,
-                                            colors = ButtonDefaults.buttonColors(containerColor = if (isFocused) Color(0xFF8B5CF6) else Color(0xFF14141E)),
+                                            colors = ButtonDefaults.buttonColors(containerColor = if (isFocused) Color(0xFF00BFFF) else Color(0xFF14141E)),
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Text(epTitle, color = Color.White, style = MaterialTheme.typography.bodySmall)
@@ -678,7 +678,7 @@ fun TvTmdbHomeScreen(
             Text(title, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 20.dp))
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFF8B5CF6), modifier = Modifier.size(48.dp))
+                    CircularProgressIndicator(color = Color(0xFF00BFFF), modifier = Modifier.size(48.dp))
                 }
             } else {
                 LazyVerticalGrid(
@@ -705,7 +705,7 @@ fun TvTmdbHomeScreen(
                             },
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = if (isFocused) Color(0xFF14141E) else Color(0xFF0C0C12)),
-                            border = if (isFocused) BorderStroke(3.dp, Color(0xFF8B5CF6)) else BorderStroke(1.dp, Color.White.copy(0.05f)),
+                            border = if (isFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else BorderStroke(1.dp, Color.White.copy(0.05f)),
                             interactionSource = interactionSource,
                             modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }
                         ) {
@@ -718,7 +718,7 @@ fun TvTmdbHomeScreen(
                                 )
                                 Column(modifier = Modifier.padding(10.dp)) {
                                     Text(item.title, style = MaterialTheme.typography.bodySmall, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(item.genres.take(30), style = MaterialTheme.typography.labelSmall, color = Color(0xFF8B5CF6), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(item.genres.take(30), style = MaterialTheme.typography.labelSmall, color = Color(0xFF00BFFF), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -805,7 +805,7 @@ fun TvMediaCard(media: TvMediaItem, onClick: () -> Unit) {
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (isFocused) 1.08f else 1.0f)
-    val accent = if (media.format == "ANIME") Color(0xFFFF2A85) else Color(0xFF8B5CF6)
+    val accent = if (media.format == "ANIME") Color(0xFF00BFFF) else Color(0xFF00BFFF)
 
     Card(
         onClick = onClick,
@@ -943,7 +943,7 @@ fun TvDetailScreen(
                     Text(
                         media.genres.joinToString(" · "),
                         style = MaterialTheme.typography.titleMedium,
-                        color = Color(0xFF8B5CF6)
+                        color = Color(0xFF00BFFF)
                     )
                 }
             }
@@ -993,7 +993,7 @@ fun TvDetailScreen(
 
                     if (isLoadingContent) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color(0xFFFF2A85))
+                            CircularProgressIndicator(color = Color(0xFF00BFFF))
                         }
                     } else {
                         when (media.format) {
@@ -1025,7 +1025,7 @@ fun TvDetailScreen(
                                                 },
                                                 interactionSource = interactionSource,
                                                 colors = ButtonDefaults.buttonColors(
-                                                    containerColor = if (isFocused) Color(0xFFFF2A85) else Color(0xFF14141E)
+                                                    containerColor = if (isFocused) Color(0xFF00BFFF) else Color(0xFF14141E)
                                                 ),
                                                 shape = RoundedCornerShape(8.dp)
                                             ) {
@@ -1059,7 +1059,7 @@ fun TvDetailScreen(
                                             },
                                             interactionSource = interactionSource,
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (isFocused) Color(0xFF8B5CF6) else Color(0xFF14141E)
+                                                containerColor = if (isFocused) Color(0xFF00BFFF) else Color(0xFF14141E)
                                             ),
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
@@ -1091,7 +1091,7 @@ fun TvDetailScreen(
                                             },
                                             interactionSource = interactionSource,
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (isFocused) Color(0xFF8B5CF6) else Color(0xFF14141E)
+                                                containerColor = if (isFocused) Color(0xFF00BFFF) else Color(0xFF14141E)
                                             ),
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
@@ -1224,7 +1224,7 @@ fun TvDownloadsScreen(
                     interactionSource = interactionSource,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = when {
-                            selected -> Color(0xFF8B5CF6)
+                            selected -> Color(0xFF00BFFF)
                             isFocused -> Color.White.copy(0.12f)
                             else -> Color(0xFF14141E)
                         }
@@ -1251,7 +1251,7 @@ fun TvDownloadsScreen(
                         Button(
                             onClick = { onPlayEpisode("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "Offline Anime demo") },
                             interactionSource = int1,
-                            colors = ButtonDefaults.buttonColors(containerColor = if (isF1) Color(0xFFFF2A85) else Color(0xFF1E1E2E))
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isF1) Color(0xFF00BFFF) else Color(0xFF1E1E2E))
                         ) {
                             Text("Play Offline Anime")
                         }
@@ -1269,7 +1269,7 @@ fun TvDownloadsScreen(
                                 ) 
                             },
                             interactionSource = int2,
-                            colors = ButtonDefaults.buttonColors(containerColor = if (isF2) Color(0xFF8B5CF6) else Color(0xFF1E1E2E))
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isF2) Color(0xFF00BFFF) else Color(0xFF1E1E2E))
                         ) {
                             Text("Read Offline Manga")
                         }
@@ -1511,7 +1511,7 @@ fun TvMangaViewerScreen(title: String, pages: List<String>, onBack: () -> Unit) 
                     enabled = currentPage > 0,
                     interactionSource = backInt,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (backFoc) Color(0xFF8B5CF6) else Color.Black.copy(0.6f)
+                        containerColor = if (backFoc) Color(0xFF00BFFF) else Color.Black.copy(0.6f)
                     )
                 ) {
                     Text("◀ Prev Page")
@@ -1528,7 +1528,7 @@ fun TvMangaViewerScreen(title: String, pages: List<String>, onBack: () -> Unit) 
                     enabled = currentPage < pages.size - 1,
                     interactionSource = nextInt,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (nextFoc) Color(0xFF8B5CF6) else Color.Black.copy(0.6f)
+                        containerColor = if (nextFoc) Color(0xFF00BFFF) else Color.Black.copy(0.6f)
                     )
                 ) {
                     Text("Next Page ▶")

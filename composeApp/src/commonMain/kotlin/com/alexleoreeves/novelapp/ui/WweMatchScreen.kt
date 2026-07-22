@@ -26,11 +26,29 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 
+/**
+ * Stream types enum — corresponds to WweStreamResult sealed class.
+ */
+private enum class StreamPlaybackType {
+    /**
+     * Option A: Embed URL → MaServerPlayerScreen (WebView)
+     * For sites like doodstream, vidmoly, streamtape, etc.
+     */
+    EMBED,
+
+    /**
+     * Option B: Direct HLS URL → AnimePlayerScreen (ExoPlayer)
+     * For .m3u8 direct stream URLs
+     */
+    DIRECT
+}
+
 @Composable
 fun WweMatchScreen(
     event: WweEvent,
     currentTheme: AppTheme,
-    onPlayStream: (streamUrl: String, title: String) -> Unit,
+    onPlayEmbed: (embedUrl: String, title: String) -> Unit,
+    onPlayDirect: (streamUrl: String, title: String) -> Unit,
     onBack: () -> Unit
 ) {
     val httpClient = remember {
@@ -44,11 +62,10 @@ fun WweMatchScreen(
     }
     val wweSource = remember { WweSource(httpClient) }
 
-    var isLoadingStream by remember { mutableStateOf(false) }
-    var streamUrl by remember { mutableStateOf<String?>(null) }
-    var streamUrls by remember { mutableStateOf<List<String>>(emptyList()) }
-    var currentFallbackIndex by remember { mutableIntStateOf(0) }
+    var isResolving by remember { mutableStateOf(false) }
+    var resolvedResult by remember { mutableStateOf<WweStreamResult?>(null) }
     var streamError by remember { mutableStateOf<String?>(null) }
+    var streamPlaybackType by remember { mutableStateOf(StreamPlaybackType.EMBED) }
     var matches by remember { mutableStateOf(event.matches) }
     var isLoadingMatches by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -63,33 +80,39 @@ fun WweMatchScreen(
     }
 
     fun resolveStream() {
-        if (isLoadingStream) return
+        if (isResolving) return
         scope.launch {
-            isLoadingStream = true
+            isResolving = true
             streamError = null
-            streamUrl = null
-            streamUrls = emptyList()
-            currentFallbackIndex = 0
-            val urls = wweSource.resolveStreamUrls(event.eventId)
-            streamUrls = urls
-            if (urls.isEmpty()) {
-                streamError = "No stream available yet. Try again closer to showtime."
-                isLoadingStream = false
-                return@launch
+            resolvedResult = null
+
+            // Use the full pipeline: try Direct first, then Embed, then error
+            val result = wweSource.resolveStream(event.eventId, event.title)
+            if (result != null) {
+                resolvedResult = result
+                // Auto-launch based on type
+                when (result) {
+                    is WweStreamResult.Direct -> {
+                        streamPlaybackType = StreamPlaybackType.DIRECT
+                        onPlayDirect(result.url, event.title)
+                    }
+                    is WweStreamResult.Embed -> {
+                        streamPlaybackType = StreamPlaybackType.EMBED
+                        onPlayEmbed(result.url, event.title)
+                    }
+                }
+            } else {
+                streamError = "No stream URL could be resolved. Try again later."
             }
-            streamUrl = urls[0]
-            onPlayStream(urls[0], event.title)
-            isLoadingStream = false
+            isResolving = false
         }
     }
 
-    fun tryNextServer() {
-        if (streamUrls.isEmpty()) { resolveStream(); return }
-        val nextIndex = if (currentFallbackIndex + 1 < streamUrls.size) currentFallbackIndex + 1 else 0
-        currentFallbackIndex = nextIndex
-        streamUrl = streamUrls[nextIndex]
-        streamError = null
-        onPlayStream(streamUrls[nextIndex], event.title)
+    fun launchStream(wweResult: WweStreamResult) {
+        when (wweResult) {
+            is WweStreamResult.Direct -> onPlayDirect(wweResult.url, event.title)
+            is WweStreamResult.Embed -> onPlayEmbed(wweResult.url, event.title)
+        }
     }
 
     Column(
@@ -117,7 +140,7 @@ fun WweMatchScreen(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .statusBarsPadding()
+                    
                     .padding(10.dp)
                     .align(Alignment.TopStart)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
@@ -218,23 +241,24 @@ fun WweMatchScreen(
                 ) {
                     Text("Watch Event", style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
 
+                    // Status messages
                     when {
-                        isLoadingStream -> {
+                        isResolving -> {
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = wweAccent)
-                                    Text("Resolving stream link...", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
+                                    Text("Finding stream... trying multiple sources", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
-                        streamUrl != null -> {
+                        resolvedResult != null -> {
+                            val typeLabel = when (resolvedResult) {
+                                is WweStreamResult.Direct -> "Direct HLS Stream"
+                                is WweStreamResult.Embed -> "Embed Player"
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(Icons.Default.Check, null, tint = wweAccent, modifier = Modifier.size(18.dp))
-                                Text("Stream ready!", color = wweAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                if (streamUrls.size > 1) {
-                                    Spacer(Modifier.weight(1f))
-                                    Text("Server ${currentFallbackIndex + 1}/${streamUrls.size}", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
-                                }
+                                Text("Stream ready! ($typeLabel)", color = wweAccent, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                             }
                         }
                         streamError != null -> {
@@ -244,22 +268,28 @@ fun WweMatchScreen(
                         }
                     }
 
+                    // Main watch button
                     Button(
                         onClick = {
-                            if (streamUrl != null) onPlayStream(streamUrl!!, event.title)
+                            if (resolvedResult != null) launchStream(resolvedResult!!)
                             else resolveStream()
                         },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = if (event.status == "LIVE") Color(0xFFB71C1C) else wweAccent),
-                        enabled = !isLoadingStream
+                        enabled = !isResolving
                     ) {
-                        Icon(if (isLoadingStream) Icons.Default.HourglassEmpty else Icons.Default.PlayArrow, null, modifier = Modifier.size(22.dp))
+                        Icon(if (isResolving) Icons.Default.HourglassEmpty else Icons.Default.PlayArrow, null, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(
                             when {
-                                isLoadingStream -> "Resolving..."
-                                streamUrl != null -> "Launch Stream"
+                                isResolving -> "Finding Stream..."
+                                resolvedResult != null -> {
+                                    when (resolvedResult) {
+                                        is WweStreamResult.Direct -> "Launch Direct Stream"
+                                        is WweStreamResult.Embed -> "Launch Player"
+                                    }
+                                }
                                 event.status == "LIVE" -> "Find Live Stream"
                                 event.status == "COMPLETED" -> "Watch Replay"
                                 else -> "Check Stream"
@@ -268,15 +298,62 @@ fun WweMatchScreen(
                         )
                     }
 
-                    if (streamUrls.isNotEmpty()) {
+                    // Second attempt button — try the other method
+                    if (resolvedResult != null) {
+                        val altMethodLabel = when (resolvedResult) {
+                            is WweStreamResult.Direct -> "Try Embed Player Instead"
+                            is WweStreamResult.Embed -> "Try Direct Stream Instead"
+                        }
                         OutlinedButton(
-                            onClick = { tryNextServer() },
+                            onClick = {
+                                // Force resolve the other type
+                                scope.launch {
+                                    isResolving = true
+                                    streamError = null
+                                    // Determine which method to try
+                                    val altResults = when (resolvedResult) {
+                                        is WweStreamResult.Direct -> {
+                                            // Already tried Direct, now try Embed
+                                            val embeds = wweSource.resolveEmbedUrls(event.eventId, event.title)
+                                            embeds.map { WweStreamResult.Embed(it) }
+                                        }
+                                        is WweStreamResult.Embed -> {
+                                            // Already tried Embed, now try Direct
+                                            wweSource.resolveDirectStreamUrls(event.eventId, event.title)
+                                        }
+                                    }
+                                    val altResult = altResults.firstOrNull()
+                                    if (altResult != null) {
+                                        resolvedResult = altResult
+                                        when (altResult) {
+                                            is WweStreamResult.Direct -> streamPlaybackType = StreamPlaybackType.DIRECT
+                                            is WweStreamResult.Embed -> streamPlaybackType = StreamPlaybackType.EMBED
+                                        }
+                                    } else {
+                                        streamError = "No alternative stream method available."
+                                    }
+                                    isResolving = false
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.SwapHoriz, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (streamUrls.size > 1) "Try Server ${(currentFallbackIndex % streamUrls.size) + 2}/${streamUrls.size}" else "Retry Same Source", fontWeight = FontWeight.SemiBold)
+                            Text(altMethodLabel, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Error state: retry
+                    if (streamError != null && resolvedResult == null) {
+                        OutlinedButton(
+                            onClick = { resolveStream() },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Retry Stream Resolution", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -319,7 +396,6 @@ fun WweMatchScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            // Match title (participants)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 if (match.isTitleMatch && match.titleName.isNotBlank()) {
                                     Surface(
@@ -353,7 +429,6 @@ fun WweMatchScreen(
 
                             Spacer(Modifier.height(8.dp))
 
-                            // Participants
                             Text(
                                 match.participantDisplay.ifBlank { match.title },
                                 color = currentTheme.textColor(),
@@ -366,7 +441,6 @@ fun WweMatchScreen(
                                 Text(match.matchType, color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelMedium)
                             }
 
-                            // Result/winner
                             if (match.hasResult) {
                                 Spacer(Modifier.height(6.dp))
                                 Surface(

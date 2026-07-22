@@ -177,11 +177,11 @@ private fun PlayerLoadingOverlay(
                 Icon(
                     Icons.Default.Refresh,
                     contentDescription = null,
-                    tint = Color(0xFFFF7A1A),
+                    tint = Color(0xFF00BFFF),
                     modifier = Modifier.size(42.dp)
                 )
             } else {
-                CircularProgressIndicator(color = Color(0xFFFF7A1A))
+                CircularProgressIndicator(color = Color(0xFF00BFFF))
             }
             Text(
                 title,
@@ -208,7 +208,7 @@ private fun PlayerLoadingOverlay(
                 }
                 Button(
                     onClick = onRetry,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A1A))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))
                 ) {
                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))

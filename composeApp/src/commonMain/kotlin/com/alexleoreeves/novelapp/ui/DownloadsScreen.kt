@@ -156,7 +156,7 @@ private fun DownloadsRootScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(GlassOverlayColor)
-            .statusBarsPadding()
+            
     ) {
         // Header
         Row(
@@ -173,7 +173,7 @@ private fun DownloadsRootScreen(
             Icon(
                 Icons.Default.Download,
                 null,
-                tint = NeonMagenta,
+                tint = NeonBlue,
                 modifier = Modifier.size(28.dp)
             )
             Spacer(Modifier.width(10.dp))
@@ -375,7 +375,7 @@ private fun DownloadedItemsListScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
-            .statusBarsPadding()
+            
     ) {
         // Top bar
         Row(
@@ -541,7 +541,7 @@ private fun DownloadedEpisodesScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
-            .statusBarsPadding()
+            
     ) {
         Row(
             modifier = Modifier
@@ -646,7 +646,7 @@ private fun DownloadedChaptersScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
-            .statusBarsPadding()
+            
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -713,7 +713,7 @@ private fun DownloadedNovelChaptersScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(currentTheme.backgroundColor())
-            .statusBarsPadding()
+            
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),

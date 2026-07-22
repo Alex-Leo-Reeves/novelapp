@@ -63,10 +63,10 @@ data class Chapter(
 //  App Themes
 // ───────────────────────────────────────────────
 enum class AppTheme(val displayName: String) {
-    DARK("Amethyst Black"),
-    WHITE_PINK("Rose Black"),
-    LAVENDER_MINT("Lavender Black"),
-    GREEN("Emerald Black")
+    DARK("Neon Black"),
+    WHITE_PINK("Cyber Blue"),
+    LAVENDER_MINT("Deep Blue"),
+    GREEN("Electric Cyan")
 }
 
 // ───────────────────────────────────────────────

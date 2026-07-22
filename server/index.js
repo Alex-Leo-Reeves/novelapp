@@ -43,7 +43,13 @@ const DATA_FILE = path.join(DATA_DIR, "auth.json");
 const SITE_DIR = path.join(process.cwd(), "site");
 const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || "");
 const VIDLINK_RESOLVER_BASE_URL = cleanBaseUrl(process.env.VIDLINK_RESOLVER_BASE_URL || process.env.VIDLINK_API_BASE_URL || "");
-const CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.env.CINEHUB_BASE_URL || process.env.CINEPRO_API_BASE_URL || "");
+let CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.env.CINEHUB_BASE_URL || process.env.CINEPRO_API_BASE_URL || "");
+// Auto-correct old/deprecated cinepro domain to the actual Render instance
+if (CINEPRO_BASE_URL && CINEPRO_BASE_URL.includes("cinepro-core.onrender.com") && !CINEPRO_BASE_URL.includes("cinepro-core-esmh")) {
+    const corrected = CINEPRO_BASE_URL.replace("cinepro-core.onrender.com", "cinepro-core-esmh.onrender.com");
+    console.warn("[cinepro] Auto-corrected CINEPRO_BASE_URL from", CINEPRO_BASE_URL, "to", corrected);
+    CINEPRO_BASE_URL = corrected;
+}
 const CONSUMET_BASE_URL = cleanBaseUrl(process.env.CONSUMET_BASE_URL || process.env.CONSUMET_API_BASE_URL || "");
 const SUPABASE_URL = cleanBaseUrl(process.env.SUPABASE_URL || process.env.supabase_url || process.env.project_url || "");
 const SUPABASE_SECRET_KEY = String(process.env.SUPABASE_SECRET_KEY || process.env.supabase_secret_key || process.env.service_role_key || "").trim();
@@ -789,18 +795,18 @@ async function fetchOpenSubtitlesTrack(context, language) {
     if (context.episode) url.searchParams.set("episode_number", String(context.episode));
 
     const payload = await fetchJson(url.toString(), { headers });
-    const results = Array.isArray(payload ?.data) ? payload.data : [];
+    const results = Array.isArray(payload ? .data) ? payload.data : [];
     for (const item of results) {
-        const attributes = item ?.attributes || item || {};
+        const attributes = item ? .attributes || item || {};
         const files = Array.isArray(attributes.files) ? attributes.files : [];
         for (const file of files) {
-            const fileId = Number(file ?.file_id || 0);
+            const fileId = Number(file ? .file_id || 0);
             if (!fileId) continue;
             const fileName = String(file.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
             if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
         }
-        const fileId = Number(attributes.file_id || item ?.file_id || 0);
+        const fileId = Number(attributes.file_id || item ? .file_id || 0);
         if (fileId) {
             const fileName = String(attributes.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
@@ -829,7 +835,7 @@ async function openSubtitlesHeaders() {
                 password: OPENSUBTITLES_PASSWORD
             })
         }).catch(() => null);
-        if (login ?.token) headers.Authorization = `Bearer ${login.token}`;
+        if (login ? .token) headers.Authorization = `Bearer ${login.token}`;
     }
     return headers;
 }
@@ -843,7 +849,7 @@ async function downloadOpenSubtitlesTrack(fileId, fileName, language, headers) {
         },
         body: JSON.stringify({ file_id: fileId })
     });
-    const link = payload ?.link || payload ?.download_link || payload ?.url;
+    const link = payload ? .link || payload ? .download_link || payload ? .url;
     if (!link) return null;
     const bytes = await fetchBuffer(link, {
         "Accept": "*/*",
@@ -875,7 +881,7 @@ async function fetchSubdlTrack(context, language) {
             "User-Agent": "NovelApp Render"
         }
     });
-    if (payload ?.status === false) {
+    if (payload ? .status === false) {
         return { tracksJson: null, message: String(payload.error || payload.message || "SubDL subtitle search failed.") };
     }
 
@@ -896,14 +902,14 @@ async function fetchSubdlTrack(context, language) {
 }
 
 function collectSubdlCandidates(payload, context) {
-    const subtitles = Array.isArray(payload ?.subtitles) ? payload.subtitles : [];
+    const subtitles = Array.isArray(payload ? .subtitles) ? payload.subtitles : [];
     const exact = [];
     const fallback = [];
 
     for (const subtitle of subtitles) {
         const target = subdlMatchesEpisode(subtitle, context) ? exact : fallback;
         for (const key of["unpack_files", "unpacked_files", "files"]) {
-            const files = Array.isArray(subtitle ?.[key]) ? subtitle[key] : [];
+            const files = Array.isArray(subtitle ? .[key]) ? subtitle[key] : [];
             for (const file of files) {
                 if (!subdlMatchesEpisode(file, context)) continue;
                 const url = firstString(file, ["url", "download_url", "download", "subtitle_url", "path"]);
@@ -919,7 +925,7 @@ function collectSubdlCandidates(payload, context) {
 
 function firstString(source, keys) {
     for (const key of keys) {
-        const value = source ?.[key];
+        const value = source ? .[key];
         if (typeof value === "string" && value.trim()) return value.trim();
     }
     return "";
@@ -928,9 +934,9 @@ function firstString(source, keys) {
 function subdlMatchesEpisode(value, context) {
     const wanted = Number(context.episode || 0);
     if (!wanted) return true;
-    const episode = Number(value ?.episode || 0);
-    const from = Number(value ?.episode_from || 0);
-    const end = Number(value ?.episode_end || 0);
+    const episode = Number(value ? .episode || 0);
+    const from = Number(value ? .episode_from || 0);
+    const end = Number(value ? .episode_end || 0);
     if (episode) return episode === wanted;
     if (from && end) return wanted >= from && wanted <= end;
     return true;
@@ -1962,11 +1968,16 @@ async function vidlinkDirectRoute(mediaType, id, season = "1", episode = "1") {
 async function cineProviderRoute(mediaType, id, season = "1", episode = "1") {
   if (!CINEPRO_BASE_URL || typeof fetch !== "function") return null;
   const endpoint = mediaType === "movie"
-    ? `${CINEPRO_BASE_URL}/movie/${encodeURIComponent(id)}`
-    : `${CINEPRO_BASE_URL}/tv/${encodeURIComponent(id)}?s=${encodeURIComponent(season || "1")}&e=${encodeURIComponent(episode || "1")}`;
+    ? `${CINEPRO_BASE_URL}/v1/movies/${encodeURIComponent(id)}?platform=web`
+    : `${CINEPRO_BASE_URL}/v1/tv/${encodeURIComponent(id)}/seasons/${encodeURIComponent(season || "1")}/episodes/${encodeURIComponent(episode || "1")}?platform=web`;
+  console.warn("[cineProviderRoute] Fetching:", endpoint);
   const payload = await fetchWithTimeout(endpoint, {
     headers: { accept: "application/json" }
-  }, 20000).catch(() => null);
+  }, 20000).catch((err) => {
+    console.warn("[cineProviderRoute] Failed:", err.message || err);
+    return null;
+  });
+  if (payload) console.warn("[cineProviderRoute] Got payload keys:", Object.keys(payload));
   const stream = firstDirectStreamFromPayload(payload);
   if (!stream?.url) return null;
   return {
@@ -1991,21 +2002,29 @@ async function cineProviderRoute(mediaType, id, season = "1", episode = "1") {
  */
 async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
   if (!CINEPRO_BASE_URL || typeof fetch !== "function") return { sources: [], subtitles: [] };
+  // CinePro Core uses OMSS standard API format
   const endpoint = mediaType === "movie"
-    ? `${CINEPRO_BASE_URL}/movie/${encodeURIComponent(id)}`
-    : `${CINEPRO_BASE_URL}/tv/${encodeURIComponent(id)}?s=${encodeURIComponent(season || "1")}&e=${encodeURIComponent(episode || "1")}`;
+    ? `${CINEPRO_BASE_URL}/v1/movies/${encodeURIComponent(id)}?platform=web`
+    : `${CINEPRO_BASE_URL}/v1/tv/${encodeURIComponent(id)}/seasons/${encodeURIComponent(season || "1")}/episodes/${encodeURIComponent(episode || "1")}?platform=web`;
+  console.warn("[cineproAllSources] Fetching:", endpoint);
   try {
     const payload = await fetchWithTimeout(endpoint, {
       headers: { accept: "application/json" }
     }, 20000);
+    console.warn("[cineproAllSources] Response keys:", Object.keys(payload || {}), "sources:", Array.isArray(payload?.sources) ? payload.sources.length : 0);
     const sources = Array.isArray(payload?.sources) ? payload.sources : [];
     const subtitles = Array.isArray(payload?.subtitles) ? payload.subtitles : [];
     // Flatten: collect ALL source URLs (not just the first direct one)
     const results = [];
     const collectSources = (obj, depth = 0) => {
       if (!obj || depth > 3) return;
-      if (typeof obj === "string" && isDirectStreamUrl(obj)) {
-        results.push({ url: obj, provider: "", quality: "" });
+      if (typeof obj === "string") {
+        if (isDirectStreamUrl(obj)) {
+          results.push({ url: obj, provider: "", quality: "" });
+        } else if (obj.includes("/v1/proxy?data=")) {
+          const rewritten = obj.replace("http://localhost:10000", CINEPRO_BASE_URL);
+          results.push({ url: rewritten, provider: "", quality: "" });
+        }
         return;
       }
       if (Array.isArray(obj)) {
@@ -2032,7 +2051,20 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
     for (const source of sources) {
       const url = source?.url || "";
       const provider = source?.provider?.name || source?.provider?.id || source?.provider || "";
-      if (url && isDirectStreamUrl(url)) {
+      
+      // Check if URL is a CinePro proxy URL (wraps a real stream)
+      // CinePro Core returns URLs like http://localhost:10000/v1/proxy?data={...}
+      // We rewrite localhost:10000 to CINEPRO_BASE_URL so the proxy works remotely
+      const isCineproProxy = url.includes("/v1/proxy?data=");
+      if (url && isCineproProxy) {
+        const rewrittenUrl = url.replace("http://localhost:10000", CINEPRO_BASE_URL);
+        results.push({
+          url: rewrittenUrl,
+          provider: String(provider),
+          quality: source?.quality || source?.resolution || "",
+          headers: source?.headers || null
+        });
+      } else if (url && isDirectStreamUrl(url)) {
         results.push({
           url,
           provider: String(provider),
@@ -2051,10 +2083,10 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
       seen.add(key);
       return true;
     });
-    return deduped;
+    return { sources: deduped, subtitles: [] };
   } catch (error) {
     console.warn("[cinepro] Source fetch failed:", error.message || error);
-    return [];
+    return { sources: [], subtitles: [] };
   }
 }
 
@@ -3639,6 +3671,184 @@ async function handleFootballSearch(request, response, requestUrl) {
   }
 }
 
+/**
+ * Server 2: Cricfy-style direct .m3u8 stream resolver for football.
+ * Accepts a match query via POST and tries to scrape streaming aggregators
+ * for an actual HLS stream URL (not an embed page).
+ *
+ * POST /api/football/direct-stream
+ * Body: { homeTeam, awayTeam, leagueName }
+ * Returns: { ok, data: { url: "..." } } or { ok: false, error: "..." }
+ */
+async function handleFootballDirectStream(request, response) {
+  if (request.method !== "POST") {
+    return sendApiError(response, 405, "Direct stream requires POST.");
+  }
+  try {
+    const body = await readBody(request);
+    const homeTeam = String(body.homeTeam || "").trim();
+    const awayTeam = String(body.awayTeam || "").trim();
+    const leagueName = String(body.leagueName || "").trim();
+
+    if (!homeTeam || !awayTeam) {
+      return sendApiError(response, 400, "homeTeam and awayTeam are required.");
+    }
+
+    // ── Try multiple streaming aggregators for a direct .m3u8 URL ──
+
+    const foundUrl = await findDirectStreamUrl(homeTeam, awayTeam, leagueName);
+
+    if (foundUrl) {
+      return sendApiData(response, 200, {
+        url: foundUrl,
+        direct: true,
+        message: "Direct stream resolved via server-side scraping."
+      });
+    }
+
+    // Fallback: return the team names so the client can try its own WebView scraping
+    return sendApiData(response, 200, {
+      url: null,
+      direct: false,
+      message: "No direct stream found via server scrape. Client-side WebView scraping may still work."
+    });
+  } catch (error) {
+    console.error("[FootballDirect] Error:", error.message || error);
+    return sendApiData(response, 200, {
+      url: null,
+      direct: false,
+      message: "Server scrape failed. Falling back to client-side embed."
+    });
+  }
+}
+
+/**
+ * Try multiple streaming aggregators to find a direct .m3u8 stream URL
+ * for the given match.
+ *
+ * Strategy:
+ * 1. Construct plausible URLs for each aggregator based on team names
+ * 2. Fetch each page as plain HTML (no JavaScript — just the initial DOM)
+ * 3. Search the HTML for .m3u8 URLs using regex patterns
+ * 4. Return the first valid .m3u8 found
+ *
+ * This works because some streaming sites embed the HLS URL directly
+ * in a <source> or <video> tag, or in a script variable.
+ */
+async function findDirectStreamUrl(homeTeam, awayTeam, leagueName) {
+  const homeSlug = footballTeamSlug(homeTeam);
+  const awaySlug = footballTeamSlug(awayTeam);
+  const searchQuery = `${homeTeam} vs ${awayTeam}`;
+  const encodedSearch = encodeURIComponent(searchQuery);
+
+  // Order of attempts: most likely to yield direct .m3u8 first
+  const attempts = [
+    // 1. streamed.su — often has .m3u8 in initial HTML
+    { url: `https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}-live`, label: "streamed.su" },
+    { url: `https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}`, label: "streamed.su (alt)" },
+    // 2. sportshub.stream
+    { url: `https://sportshub.stream/embed/football/${homeSlug}-vs-${awaySlug}`, label: "sportshub.stream" },
+    // 3. crackstreams
+    { url: `https://crackstreams.biz/stream/embed-football/${homeSlug}-vs-${awaySlug}-live`, label: "crackstreams" },
+    // 4. the-football.tv (scorebat-style direct)
+    { url: `https://www.scorebat.com/embed/livescore/?search=${encodedSearch}`, label: "scorebat search" },
+    // 5. Generic football streaming aggregator
+    { url: `https://v2.sportsurge.net/search?q=${encodedSearch}`, label: "sportsurge" },
+    // 6. embed.su generic
+    { url: `https://embed.su/embed/sports?q=${encodedSearch}`, label: "embed.su" }
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const response = await fetchWithAbort(attempt.url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5"
+        }
+      }, 10000);
+      const html = await response.text();
+      if (!html || html.length < 200) continue;
+
+      // Search for .m3u8 URLs in the HTML
+      const m3u8Urls = extractM3u8Urls(html);
+      if (m3u8Urls.length > 0) {
+        // Pick the first valid m3u8
+        const valid = m3u8Urls.find(url =>
+          url.startsWith("http") &&
+          (url.includes(".m3u8") || url.includes("m3u8"))
+        );
+        if (valid) {
+          console.log(`[FootballDirect] Found .m3u8 at ${attempt.label}: ${valid.slice(0, 80)}...`);
+          return valid;
+        }
+      }
+
+      // Also look for playlist/manifest URLs (some providers use these)
+      const manifestUrl = extractManifestUrl(html);
+      if (manifestUrl && manifestUrl.startsWith("http")) {
+        console.log(`[FootballDirect] Found manifest at ${attempt.label}: ${manifestUrl.slice(0, 80)}...`);
+        return manifestUrl;
+      }
+    } catch (err) {
+      // Individual attempt failure is non-fatal — try the next one
+      continue;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extract all .m3u8 URLs from an HTML page using regex.
+ * Catches URLs in <source> tags, data-setup attributes, script variables, etc.
+ */
+function extractM3u8Urls(html) {
+  const urls = [];
+  // Pattern 1: src="..." or data-src="..." containing .m3u8
+  const srcPattern = /(?:src|data-src|href)=["']([^"']*\.m3u8[^"']*)["']/gi;
+  let match;
+  while ((match = srcPattern.exec(html)) !== null) {
+    urls.push(match[1]);
+  }
+
+  // Pattern 2: Inline JavaScript variables containing .m3u8
+  const varPattern = /["']([^"']*\.m3u8[^"']*?)["']/gi;
+  while ((match = varPattern.exec(html)) !== null) {
+    const url = match[1];
+    if (url.startsWith("http") || url.startsWith("//")) {
+      if (url.startsWith("//")) urls.push(`https:${url}`);
+      else urls.push(url);
+    }
+  }
+
+  // Pattern 3: Plain .m3u8 URLs in the text (not in quotes)
+  const textPattern = /(https?:\/\/[^\s<>"']+\.m3u8[^\s<>"']*)/gi;
+  while ((match = textPattern.exec(html)) !== null) {
+    urls.push(match[1]);
+  }
+
+  // Deduplicate
+  return [...new Set(urls)];
+}
+
+/**
+ * Extract video manifest URLs (like playlist, manifest.mpd etc) that might
+ * serve as streaming endpoints. Some sites use manifest files that redirect
+ * to .m3u8 or contain the stream URL.
+ */
+function extractManifestUrl(html) {
+  const patterns = [
+    /(?:src|data-src|href)=["']([^"']*\/(?:playlist|manifest|master)[^"']*)["']/gi,
+    /["']([^"']*\/(?:playlist|manifest|master)\.[^"']*?)["']/gi
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(html);
+    if (match && match[1] && match[1].startsWith("http")) return match[1];
+  }
+  return null;
+}
+
 async function handleApi(request, response, pathname) {
   try {
     const requestUrl = new URL(request.url, `http://${request.headers.host || "localhost"}`);
@@ -3656,6 +3866,9 @@ async function handleApi(request, response, pathname) {
     if (pathname === "/api/football/search") {
       return await handleFootballSearch(request, response, requestUrl);
     }
+    if (pathname === "/api/football/direct-stream") {
+      return await handleFootballDirectStream(request, response);
+    }
 
     // ── WWE API routes ──────────────────────────────────────────────────
     if (pathname === "/api/wwe/events") {
@@ -3672,6 +3885,9 @@ async function handleApi(request, response, pathname) {
     }
     if (pathname === "/api/wwe/stream") {
       return await wweHandlers.handleWweStream(request, response, requestUrl);
+    }
+    if (pathname === "/api/wwe/direct-stream") {
+      return await wweHandlers.handleWweDirectStream(request, response, requestUrl);
     }
 
     // ── YouTube API routes (Nollywood + general) ──────────────────────────
@@ -3957,5 +4173,38 @@ ensurePremiumSeedUser()
 
     server.listen(PORT, () => {
       console.log(`NovelApp server listening on ${PORT}`);
+
+      // ── Keep-alive ping for CinePro Core ──────────────────────────
+      // Free-tier Render services spin down after 15 minutes of inactivity.
+      // This pings CinePro Core every 5 minutes to keep it warm so users
+      // don't hit cold-start delays when streaming.
+      const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+      const KEEPALIVE_TARGETS = [
+        { url: CINEPRO_BASE_URL + "/health", label: "CinePro Health" },
+        { url: CINEPRO_BASE_URL + "/v1/movies/550?platform=web", label: "CinePro Movies" }
+      ].filter(t => t.url.startsWith("http"));
+
+      if (KEEPALIVE_TARGETS.length > 0) {
+        console.log("[keepalive] Starting CinePro Core keep-alive (every 5 min)");
+        const ping = (target) => {
+          const lib = target.url.startsWith("https") ? require("https") : require("http");
+          const req = lib.get(target.url, { timeout: 15000 }, (res) => {
+            let body = "";
+            res.on("data", (c) => { body += c; });
+            res.on("end", () => {
+              console.log(`[keepalive] ${target.label}: HTTP ${res.statusCode}`);
+            });
+          });
+          req.on("error", (err) => {
+            console.warn(`[keepalive] ${target.label}: ${err.message}`);
+          });
+          req.end();
+        };
+        // Ping immediately on startup, then every 5 minutes
+        KEEPALIVE_TARGETS.forEach(ping);
+        setInterval(() => KEEPALIVE_TARGETS.forEach(ping), KEEPALIVE_INTERVAL_MS);
+      } else {
+        console.log("[keepalive] No CinePro base URL configured — keep-alive skipped");
+      }
     });
   });

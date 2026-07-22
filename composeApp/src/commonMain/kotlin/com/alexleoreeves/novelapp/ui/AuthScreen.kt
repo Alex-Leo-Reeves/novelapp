@@ -259,7 +259,7 @@ fun AuthScreen(
                     Text(
                         shownError,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFFCF6679),
+                        color = Color(0xFFEF4444),
                         textAlign = TextAlign.Center
                     )
                 }

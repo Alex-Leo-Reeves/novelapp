@@ -104,10 +104,10 @@ fun TvYouScreen(
                     Column {
                         Text(account.username, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White)
                         Text(account.email, color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodyLarge)
-                        Surface(color = if (account.isPremium) Color(0xFF8B5CF6).copy(0.2f) else Color(0xFF14141E), shape = RoundedCornerShape(8.dp)) {
+                        Surface(color = if (account.isPremium) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E), shape = RoundedCornerShape(8.dp)) {
                             Text(
                                 if (account.isPremium) "✦ PREMIUM" else "FREE",
-                                color = if (account.isPremium) Color(0xFF8B5CF6) else Color.White.copy(0.5f),
+                                color = if (account.isPremium) Color(0xFF00BFFF) else Color.White.copy(0.5f),
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
@@ -196,9 +196,9 @@ fun TvYouScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                StatCard("Premium", if (account.isPremium) "Active" else "Free", Color(0xFF8B5CF6))
+                StatCard("Premium", if (account.isPremium) "Active" else "Free", Color(0xFF00BFFF))
                 StatCard("Devices", "${account.maxDevices ?: 2}", Color(0xFF06D6A0))
-                StatCard("Plan", account.plan.replace("premium_", "").replace("_", " ").ifBlank { "free" }, Color(0xFFFF2A85))
+                StatCard("Plan", account.plan.replace("premium_", "").replace("_", " ").ifBlank { "free" }, Color(0xFF00BFFF))
             }
 
             Spacer(Modifier.height(24.dp))
@@ -208,8 +208,8 @@ fun TvYouScreen(
             Surface(
                 onClick = onSignOut,
                 shape = RoundedCornerShape(10.dp),
-                color = if (signOutFocused) Color(0xFFFF2A85).copy(0.2f) else Color(0xFF14141E),
-                border = if (signOutFocused) BorderStroke(2.dp, Color(0xFFFF2A85)) else null,
+                color = if (signOutFocused) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E),
+                border = if (signOutFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .onFocusChanged { signOutFocused = it.isFocused }
@@ -219,9 +219,9 @@ fun TvYouScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(Icons.Default.Logout, null, tint = Color(0xFFFF2A85), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Logout, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Sign Out", color = Color(0xFFFF2A85), fontWeight = FontWeight.Bold)
+                    Text("Sign Out", color = Color(0xFF00BFFF), fontWeight = FontWeight.Bold)
                 }
             }
 

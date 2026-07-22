@@ -25,24 +25,25 @@ import com.alexleoreeves.novelapp.BottomTab
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Glassmorphism Design Tokens & Shared Composables
+//  Theme: Neon Black & Blue
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Ultra-vibrant background gradient (Neon Magenta → Deep Violet)
+// Ultra-vibrant background gradient (Neon Blue → Deep Black)
 val GlassBackgroundBrush = Brush.verticalGradient(
     colors = listOf(
-        Color(0xFFFF007F), // Neon Magenta
-        Color(0xFF7F00FF)  // Deep Violet
+        Color(0xFF0A1628), // Deep navy
+        Color(0xFF000000)  // Pure black
     )
 )
 
 // Dark translucent overlay
-val GlassOverlayColor = Color(0xFF121212).copy(alpha = 0.45f)
+val GlassOverlayColor = Color(0xFF0D0D0D).copy(alpha = 0.6f)
 
 // Card glass fill — vertical gradient: top bright, bottom dim
 fun glassCardBrush(): Brush = Brush.verticalGradient(
     colors = listOf(
-        Color.White.copy(alpha = 0.12f),
-        Color.White.copy(alpha = 0.03f)
+        Color.White.copy(alpha = 0.08f),
+        Color.White.copy(alpha = 0.02f)
     )
 )
 
@@ -51,16 +52,16 @@ fun glassBorderBrush(width: Float, height: Float): Brush = Brush.linearGradient(
     start = Offset(0f, 0f),
     end = Offset(width, height),
     colors = listOf(
-        Color.White.copy(alpha = 0.35f),
+        Color.White.copy(alpha = 0.25f),
         Color.Transparent
     )
 )
 
 // Shimmer placeholder color
-val GlassShimmerColor = Color.White.copy(alpha = 0.05f)
+val GlassShimmerColor = Color.White.copy(alpha = 0.04f)
 
 // Bottom bar background
-val GlassBottomBarColor = Color.White.copy(alpha = 0.08f)
+val GlassBottomBarColor = Color.White.copy(alpha = 0.06f)
 
 // Card corner radius
 val GlassCardShape = RoundedCornerShape(28.dp)
@@ -68,12 +69,13 @@ val GlassImageShape = RoundedCornerShape(16.dp)
 val GlassChipShape = RoundedCornerShape(20.dp)
 val GlassPillShape = RoundedCornerShape(50)
 
-// Neon glow active tab
-val NeonMagenta = Color(0xFFFF007F)
-val NeonViolet = Color(0xFFB366FF)
+// Neon glow accent — Blue instead of Magenta
+val NeonBlue = Color(0xFF00BFFF)
+val NeonCyan = Color(0xFF00E5FF)
+val NeonDeepBlue = Color(0xFF1565C0)
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Background Layer — Vibrant gradient + blur overlay
+//  Background Layer — Dark gradient + subtle overlay
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun GlassBackground(
@@ -84,16 +86,16 @@ fun GlassBackground(
             .fillMaxSize()
             .background(GlassBackgroundBrush)
     ) {
-        // Soft blur overlay simulating ambient light
+        // Deep overlay for extra darkness
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF1A0033).copy(alpha = 0.3f),
-                            Color(0xFF0D001A).copy(alpha = 0.6f),
-                            Color(0xFF1A0033).copy(alpha = 0.3f)
+                            Color(0xFF000814).copy(alpha = 0.4f),
+                            Color(0xFF000000).copy(alpha = 0.7f),
+                            Color(0xFF000814).copy(alpha = 0.4f)
                         )
                     )
                 )
@@ -147,9 +149,9 @@ fun GlassCard(
                     width = 1.dp,
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.35f),
+                            Color.White.copy(alpha = 0.25f),
                             Color.Transparent,
-                            Color.White.copy(alpha = 0.05f)
+                            Color.White.copy(alpha = 0.03f)
                         )
                     ),
                     shape = GlassCardShape
@@ -198,7 +200,7 @@ fun GlassImagePlaceholder(
                     Brush.horizontalGradient(
                         colors = listOf(
                             Color.White.copy(alpha = 0.0f),
-                            Color.White.copy(alpha = 0.12f),
+                            Color.White.copy(alpha = 0.08f),
                             Color.White.copy(alpha = 0.0f)
                         ),
                         startX = shimmerOffset * 500f,
@@ -220,9 +222,9 @@ fun GlassCapsuleTab(
     modifier: Modifier = Modifier
 ) {
     val bgColor = if (isSelected) {
-        Color.White.copy(alpha = 0.18f)
+        Color.White.copy(alpha = 0.14f)
     } else {
-        Color.White.copy(alpha = 0.06f)
+        Color.White.copy(alpha = 0.05f)
     }
     val textColor = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f)
 
@@ -232,7 +234,7 @@ fun GlassCapsuleTab(
             .background(bgColor)
             .border(
                 width = if (isSelected) 1.5.dp else 0.5.dp,
-                color = if (isSelected) NeonMagenta.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
+                color = if (isSelected) NeonBlue.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
                 shape = GlassChipShape
             )
             .clickable(onClick = onClick)
@@ -260,7 +262,7 @@ fun GlassSectionLabel(
         modifier = modifier.padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Neon accent bar
+        // Neon blue accent bar
         Box(
             modifier = Modifier
                 .width(4.dp)
@@ -268,7 +270,7 @@ fun GlassSectionLabel(
                 .clip(RoundedCornerShape(2.dp))
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(NeonMagenta, NeonViolet)
+                        colors = listOf(NeonBlue, NeonCyan)
                     )
                 )
         )
@@ -293,10 +295,10 @@ fun GlassGenreChip(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.08f))
+            .background(Color.White.copy(alpha = 0.06f))
             .border(
                 width = 0.5.dp,
-                color = Color.White.copy(alpha = 0.15f),
+                color = Color.White.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(8.dp)
             )
             .padding(horizontal = 10.dp, vertical = 4.dp)
@@ -413,7 +415,7 @@ private fun GlassBottomNavItem(
             .clip(RoundedCornerShape(16.dp))
             .then(
                 if (isSelected) {
-                    Modifier.background(NeonMagenta.copy(alpha = 0.12f))
+                    Modifier.background(NeonBlue.copy(alpha = 0.10f))
                 } else {
                     Modifier
                 }
@@ -444,7 +446,7 @@ private fun GlassBottomNavItem(
                     .clip(RoundedCornerShape(1.dp))
                     .background(
                         Brush.horizontalGradient(
-                            colors = listOf(NeonMagenta, NeonViolet)
+                            colors = listOf(NeonBlue, NeonCyan)
                         )
                     )
             )
@@ -465,10 +467,10 @@ fun GlassSearchBar(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.08f))
+            .background(Color.White.copy(alpha = 0.06f))
             .border(
                 width = 0.5.dp,
-                color = Color.White.copy(alpha = 0.15f),
+                color = Color.White.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(16.dp)
             )
             .padding(horizontal = 16.dp, vertical = 12.dp)
