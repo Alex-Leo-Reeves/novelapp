@@ -1,13 +1,11 @@
 {
-    "versionCode": 38,
-    "versionName": "1.38",
-    "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.38/novelapp-android.apk",
+    "versionCode": 39,
+    "versionName": "1.39",
+    "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed build errors in SportsHomeScreen, UniversalReadScreen, and YouScreen",
-        "Resolved conflicting val declarations causing compile failures",
-        "Fixed brace mismatch in UniversalReadScreen",
-        "Fixed BillingPlan argument order and testVoice type mismatch in YouScreen"
+        "Fixed update failing after 100% download — corrected apkBytes in manifest and made SHA-256 the primary integrity check",
+        "Bumped to v1.39"
     ],
     "forceUpdate": false,
     "apkBytes": 192545673,
