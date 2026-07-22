@@ -5,6 +5,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import com.fleeksoft.ksoup.Ksoup
 import kotlinx.serialization.json.*
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 
 private val wweJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -52,11 +53,30 @@ data class WweBrand(
     val logo: String = ""
 )
 
+/**
+ * Result of resolving a WWE event stream.
+ * Option A: Embed URLs → MaServerPlayerScreen (WebView)
+ * Option B: Direct HLS URLs → AnimePlayerScreen (ExoPlayer)
+ */
+sealed class WweStreamResult {
+    /** Embed URL suitable for MaServerPlayerScreen WebView player */
+    data class Embed(val url: String) : WweStreamResult()
+    /** Direct HLS .m3u8 URL suitable for AnimePlayerScreen ExoPlayer */
+    data class Direct(val url: String) : WweStreamResult()
+}
+
 class WweSource(private val httpClient: HttpClient) {
 
     private val baseUrl = "https://watchwrestling.ae"
 
     suspend fun fetchEvents(brand: String = "", status: String = ""): List<WweEvent> = runCatching {
+        // Try server API first for better reliability
+        val serverEvents = fetchEventsFromServer(brand)
+        if (serverEvents.isNotEmpty()) {
+            return@runCatching serverEvents
+        }
+
+        // Fallback: scrape watchwrestling.ae directly
         val url = if (brand.isNotBlank()) {
             when (brand.lowercase()) {
                 "raw" -> "$baseUrl/category/wwe/raw/"
@@ -106,19 +126,120 @@ class WweSource(private val httpClient: HttpClient) {
         emptyList()
     }
 
-    suspend fun fetchMatches(eventId: String): List<WweMatch> = runCatching {
-        // Since we scrape posts, we don't have individual matches upfront.
-        // We return a single dummy match that represents the full show replay.
-        val href = eventId.replace("_", "/").let { "https://$it" }
-        listOf(
-            WweMatch(
-                matchId = "${eventId}_full",
+    /**
+     * Fetch events from the server API for more reliable results.
+     */
+    private suspend fun fetchEventsFromServer(brand: String): List<WweEvent> = runCatching {
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/events"
+        val response = httpClient.get(url) {
+            header("Accept", "application/json")
+            header("User-Agent", "NovelApp/1.0")
+        }.bodyAsText()
+
+        if (response.isBlank() || response.contains("<!doctype", ignoreCase = true)) return@runCatching emptyList()
+
+        val root = wweJson.parseToJsonElement(response).jsonObject
+        if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return@runCatching emptyList()
+        val data = root["data"]?.jsonArray ?: return@runCatching emptyList()
+
+        data.mapNotNull { el ->
+            val obj = el.jsonObject
+            val eventId = obj["eventId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val brandVal = obj["brand"]?.jsonPrimitive?.contentOrNull ?: ""
+            val poster = obj["posterUrl"]?.jsonPrimitive?.contentOrNull ?: ""
+            val detailPageUrl = obj["detailPageUrl"]?.jsonPrimitive?.contentOrNull ?: ""
+            val eventType = obj["eventType"]?.jsonPrimitive?.contentOrNull ?: "TV Show"
+            val date = obj["date"]?.jsonPrimitive?.contentOrNull ?: ""
+            val status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "COMPLETED"
+
+            WweEvent(
                 eventId = eventId,
-                title = "Full Show Replay / Live Stream",
-                status = "COMPLETED",
-                detailUrl = href
+                title = title,
+                brand = brandVal,
+                eventType = eventType,
+                date = date,
+                status = status,
+                posterUrl = poster,
+                detailPageUrl = detailPageUrl
             )
-        )
+        }
+    }.getOrElse { emptyList() }
+
+    suspend fun fetchMatches(eventId: String): List<WweMatch> = runCatching {
+        // Try server API first
+        val serverMatches = fetchMatchesFromServer(eventId)
+        if (serverMatches.isNotEmpty()) return@runCatching serverMatches
+
+        // Fallback: scrape directly
+        val href = eventId.replace("_", "/").let { "https://$it" }
+        val html = httpClient.get(href).bodyAsText()
+        val doc = Ksoup.parse(html)
+
+        // Extract wrestler names from page
+        val wrestlerNames = doc.select("strong").mapNotNull { el ->
+            val text = el.text().trim()
+            text.takeIf { it.length > 3 && it.matches(Regex("^[A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*$")) && !text.contains(":") }
+        }.distinct()
+
+        if (wrestlerNames.size >= 2) {
+            wrestlerNames.chunked(2).mapIndexed { i, chunk ->
+                val w1 = chunk.getOrNull(0) ?: "TBA"
+                val w2 = chunk.getOrNull(1) ?: "TBA"
+                WweMatch(
+                    matchId = "${eventId}_match_$i",
+                    eventId = eventId,
+                    title = "$w1 vs $w2",
+                    participants = listOf(w1, w2),
+                    matchType = "Singles",
+                    status = "COMPLETED"
+                )
+            }
+        } else {
+            // Fallback: return full show replay match
+            listOf(
+                WweMatch(
+                    matchId = "${eventId}_full",
+                    eventId = eventId,
+                    title = "Full Show Replay / Live Stream",
+                    status = "COMPLETED",
+                    detailUrl = href
+                )
+            )
+        }
+    }.getOrElse { error ->
+        println("[WWE] Matches fetch failed: ${error.message}")
+        emptyList()
+    }
+
+    private suspend fun fetchMatchesFromServer(eventId: String): List<WweMatch> = runCatching {
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/matches?eventId=${java.net.URLEncoder.encode(eventId, "UTF-8")}"
+        val response = httpClient.get(url) {
+            header("Accept", "application/json")
+        }.bodyAsText()
+
+        if (response.isBlank() || response.contains("<!doctype", ignoreCase = true)) return@runCatching emptyList()
+
+        val root = wweJson.parseToJsonElement(response).jsonObject
+        if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return@runCatching emptyList()
+        val data = root["data"]?.jsonArray ?: return@runCatching emptyList()
+
+        data.mapNotNull { el ->
+            val obj = el.jsonObject
+            WweMatch(
+                matchId = obj["matchId"]?.jsonPrimitive?.contentOrNull ?: "",
+                eventId = obj["eventId"]?.jsonPrimitive?.contentOrNull ?: eventId,
+                title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "",
+                participants = obj["participants"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
+                matchType = obj["matchType"]?.jsonPrimitive?.contentOrNull ?: "",
+                stipulation = obj["stipulation"]?.jsonPrimitive?.contentOrNull ?: "",
+                isTitleMatch = obj["isTitleMatch"]?.jsonPrimitive?.booleanOrNull ?: false,
+                titleName = obj["titleName"]?.jsonPrimitive?.contentOrNull ?: "",
+                status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "",
+                winner = obj["winner"]?.jsonPrimitive?.contentOrNull ?: "",
+                result = obj["result"]?.jsonPrimitive?.contentOrNull ?: ""
+            )
+        }
     }.getOrElse { emptyList() }
 
     suspend fun fetchBrands(): List<WweBrand> = runCatching {
@@ -131,8 +252,31 @@ class WweSource(private val httpClient: HttpClient) {
     }.getOrElse { emptyList() }
 
     suspend fun searchEvents(query: String): List<WweEvent> = runCatching {
-        val url = "$baseUrl/?s=${query.replace(" ", "+")}"
-        val html = httpClient.get(url) {
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+        val response = httpClient.get(url) {
+            header("Accept", "application/json")
+        }.bodyAsText()
+
+        if (response.isNotBlank() && !response.contains("<!doctype", ignoreCase = true)) {
+            val root = wweJson.parseToJsonElement(response).jsonObject
+            if (root["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                val data = root["data"]?.jsonArray ?: return@runCatching emptyList()
+                val results = data.mapNotNull { obj ->
+                    val el = obj.jsonObject
+                    WweEvent(
+                        eventId = el["eventId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        title = el["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        brand = el["brand"]?.jsonPrimitive?.contentOrNull ?: "",
+                        posterUrl = el["posterUrl"]?.jsonPrimitive?.contentOrNull ?: "",
+                        detailPageUrl = el["detailPageUrl"]?.jsonPrimitive?.contentOrNull ?: ""
+                    )
+                }
+                if (results.isNotEmpty()) return@runCatching results
+            }
+        }
+
+        // Fallback: scrape watchwrestling
+        val html = httpClient.get("$baseUrl/?s=${query.replace(" ", "+")}") {
             header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         }.bodyAsText()
 
@@ -160,64 +304,123 @@ class WweSource(private val httpClient: HttpClient) {
         }.distinctBy { it.eventId }
     }.getOrElse { emptyList() }
 
-    suspend fun resolveStreamUrl(eventId: String): String? {
-        val urls = resolveStreamUrls(eventId)
-        return urls.firstOrNull()
-    }
-
-    suspend fun resolveStreamUrls(eventId: String): List<String> = runCatching {
-        val pageUrl = eventId.replace("_", "/").let { "https://$it" }
-        val html = httpClient.get(pageUrl) {
-            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            header("Referer", "https://watchwrestling.ae/")
+    /**
+     * Option A: Resolve embed URLs from the server.
+     * Returns embed URLs suitable for MaServerPlayerScreen (WebView).
+     */
+    suspend fun resolveEmbedUrls(eventId: String, eventTitle: String = ""): List<String> = runCatching {
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/stream?event=${java.net.URLEncoder.encode(eventId, "UTF-8")}&title=${java.net.URLEncoder.encode(eventTitle, "UTF-8")}"
+        val response = httpClient.get(url) {
+            header("Accept", "application/json")
+            header("User-Agent", "NovelApp/1.0")
         }.bodyAsText()
 
-        val doc = Ksoup.parse(html)
-        val embedUrls = mutableListOf<String>()
-        
-        // 1. Extract iframe src with video host patterns
-        doc.select("iframe").mapNotNull { it.attr("src") }
-            .filter { src ->
-                src.isNotBlank() && (
-                    src.contains("dailymotion") || src.contains("vidmoly") ||
-                    src.contains("dood") || src.contains("embed") ||
-                    src.contains("voe") || src.contains("stream") ||
-                    src.contains("player") || src.contains("watch") ||
-                    src.contains("video")
-                )
-            }
-            .forEach { embedUrls.add(it) }
-        
-        // 2. Links pointing to video hosters or embed pages
-        doc.select("a[href]").mapNotNull { el ->
-            val link = el.attr("href")
-            val text = el.text().lowercase()
-            link.takeIf {
-                it.isNotBlank() && (
-                    it.contains("embed") || it.contains("dailymotion") ||
-                    it.contains("vidmoly") || it.contains("dood") ||
-                    it.contains("voe.sx") || it.contains("streamtape") ||
-                    it.contains("watchwrestling") || it.contains("play") ||
-                    text.contains("server") || text.contains("watch") ||
-                    text.contains("stream")
-                )
-            }
-        }.forEach { embedUrls.add(it) }
+        if (response.isBlank() || response.contains("<!doctype", ignoreCase = true)) return@runCatching emptyList()
 
-        // 3. Any link with known video host domains
-        doc.select("a[href*='dailymotion'], a[href*='vidmoly'], a[href*='dood'], a[href*='voe'], a[href*='streamtape'], a[href*='watchwrestling']")
-            .mapNotNull { it.attr("href").takeIf { h -> h.isNotBlank() } }
-            .forEach { embedUrls.add(it) }
+        val root = wweJson.parseToJsonElement(response).jsonObject
+        if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return@runCatching emptyList()
+        val data = root["data"]?.jsonArray ?: return@runCatching emptyList()
 
-        val distinct = embedUrls.distinct()
-        
-        // If we found real video embeds, return them.
-        // Otherwise fall back to the post page URL — watchwrestling uses AJAX
-        // to load video players dynamically, so the WebView loading the page
-        // will execute JS and show the video player.
-        distinct.ifEmpty { listOf(pageUrl) }
-    }.getOrElse { e ->
-        println("[WWE] Stream resolve failed: ${e.message}")
+        data.mapNotNull { it.jsonPrimitive.contentOrNull }
+    }.getOrElse {
+        println("[WWE] Embed URL resolution failed: ${it.message}")
         emptyList()
+    }
+
+    /**
+     * Option B: Resolve direct .m3u8 stream URLs from the server.
+     * Returns WweStreamResult.Direct with the HLS URL.
+     */
+    suspend fun resolveDirectStreamUrls(eventId: String, eventTitle: String = ""): List<WweStreamResult> = runCatching {
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/direct-stream"
+        val body = buildJsonObject {
+            put("eventId", eventId)
+            put("eventTitle", eventTitle)
+        }.toString()
+
+        val response = httpClient.post(url) {
+            header("Content-Type", "application/json")
+            header("Accept", "application/json")
+            header("User-Agent", "NovelApp/1.0")
+            setBody(body)
+        }.bodyAsText()
+
+        if (response.isBlank() || response.contains("<!doctype", ignoreCase = true)) return@runCatching emptyList()
+
+        val root = wweJson.parseToJsonElement(response).jsonObject
+        if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return@runCatching emptyList()
+        val data = root["data"]?.jsonObject ?: return@runCatching emptyList()
+
+        val results = mutableListOf<WweStreamResult>()
+
+        // Direct stream URLs
+        val urls = data["urls"]?.jsonArray
+        if (urls != null) {
+            for (el in urls) {
+                val urlStr = el.jsonPrimitive.contentOrNull
+                if (urlStr != null) {
+                    results.add(WweStreamResult.Direct(urlStr))
+                }
+            }
+        }
+
+        // Also return embed URLs (from the same endpoint)
+        val embedUrls = data["embedUrls"]?.jsonArray
+        if (embedUrls != null && results.isEmpty()) {
+            for (el in embedUrls) {
+                val urlStr = el.jsonPrimitive.contentOrNull
+                if (urlStr != null) {
+                    results.add(WweStreamResult.Embed(urlStr))
+                }
+            }
+        }
+
+        results
+    }.getOrElse {
+        println("[WWE] Direct stream resolution failed: ${it.message}")
+        emptyList()
+    }
+
+    /**
+     * Full resolution pipeline:
+     * 1. Try Option B (server-side direct .m3u8 extraction) first — returns Direct stream
+     * 2. Fall back to Option A (server-side embed extraction) — returns Embed
+     * 3. Last resort: reconstruct the watchwrestling page URL as an embed fallback
+     */
+    suspend fun resolveStream(eventId: String, eventTitle: String = ""): WweStreamResult? {
+        // Try Option B first — direct .m3u8
+        val directResults = resolveDirectStreamUrls(eventId, eventTitle)
+        val directUrl = directResults.firstOrNull { it is WweStreamResult.Direct }
+        if (directUrl != null) return directUrl
+
+        // Try Option A — embed URLs
+        val embedUrls = resolveEmbedUrls(eventId, eventTitle)
+        if (embedUrls.isNotEmpty()) return WweStreamResult.Embed(embedUrls.first())
+
+        // Last resort: return the watchwrestling page itself as an embed
+        val pageUrl = eventId.replace("_", "/").let { "https://$it" }.takeIf { it.startsWith("https://") }
+        return if (pageUrl != null) WweStreamResult.Embed(pageUrl) else null
+    }
+
+    suspend fun resolveStreamUrl(eventId: String): String? {
+        val result = resolveStream(eventId)
+        return when (result) {
+            is WweStreamResult.Direct -> result.url
+            is WweStreamResult.Embed -> result.url
+            else -> null
+        }
+    }
+
+    suspend fun resolveStreamUrls(eventId: String): List<String> {
+        val embedUrls = resolveEmbedUrls(eventId)
+        return embedUrls.ifEmpty {
+            val directUrls = resolveDirectStreamUrls(eventId)
+            directUrls.mapNotNull {
+                when (it) {
+                    is WweStreamResult.Direct -> it.url
+                    is WweStreamResult.Embed -> it.url
+                }
+            }
+        }
     }
 }

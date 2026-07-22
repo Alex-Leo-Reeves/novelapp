@@ -109,7 +109,7 @@ fun NmcHomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(GlassOverlayColor)
-            .statusBarsPadding()
+            
     ) {
         // ── Search bar ──────────────────────────────────────────────────────
         Box(
@@ -126,7 +126,7 @@ fun NmcHomeScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
-                        color = NeonMagenta
+                        color = NeonBlue
                     )
                 } else {
                     Icon(
@@ -451,7 +451,7 @@ private fun NmcCardItem(
                             Icon(
                                 if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = "Favorite",
-                                tint = if (isFavorite) NeonMagenta else Color.White.copy(alpha = 0.3f),
+                                tint = if (isFavorite) NeonBlue else Color.White.copy(alpha = 0.3f),
                                 modifier = Modifier.size(20.dp)
                             )
                         }

@@ -98,7 +98,7 @@ fun HistoryScreen(
                         listOf(currentTheme.surfaceColor(), currentTheme.backgroundColor())
                     )
                 )
-                .statusBarsPadding()
+                
         ) {
             Row(
                 modifier = Modifier
@@ -536,7 +536,7 @@ private fun HistorySearchScreen(
 
     Column(modifier = Modifier.fillMaxSize().background(currentTheme.backgroundColor())) {
         Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose) {

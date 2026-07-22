@@ -42,12 +42,12 @@ fun TvSplashScreen(onFinished: () -> Unit) {
                 Box(modifier = Modifier.size(130.dp).background(
                     Brush.radialGradient(listOf(Color(0xFF7C3AED).copy(0.4f), Color.Transparent)), CircleShape
                 ))
-                Icon(Icons.Default.AutoStories, null, tint = Color(0xFFFF2A85), modifier = Modifier.size(72.dp))
+                Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(72.dp))
             }
             Spacer(Modifier.height(24.dp))
             Text("NovaRead TV", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black, color = Color.White)
             Spacer(Modifier.height(8.dp))
-            Text("Anime · Novels · Manga · Movies", style = MaterialTheme.typography.titleLarge, color = Color(0xFFFF2A85).copy(0.9f))
+            Text("Anime · Novels · Manga · Movies", style = MaterialTheme.typography.titleLarge, color = Color(0xFF00BFFF).copy(0.9f))
         }
     }
 }
@@ -78,7 +78,7 @@ fun TvAuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Icon(Icons.Default.AutoStories, null, tint = Color(0xFFFF2A85), modifier = Modifier.size(56.dp))
+            Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(56.dp))
             Text(
                 if (isLogin.value) "Sign In to NovaRead" else "Create Account",
                 style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White
@@ -107,7 +107,7 @@ fun TvAuthScreen(
                     else onCreateAccount(username, email, password, recoverySecret)
                 },
                 enabled = !isSubmitting && email.isNotBlank() && password.length >= 6,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF)),
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(10.dp)
             ) {
@@ -118,7 +118,7 @@ fun TvAuthScreen(
             TextButton(onClick = { isLogin.value = !isLogin.value; localError = null }) {
                 Text(
                     if (isLogin.value) "Don't have an account? Create one" else "Already have an account? Sign in",
-                    color = Color(0xFF8B5CF6)
+                    color = Color(0xFF00BFFF)
                 )
             }
 
@@ -144,12 +144,12 @@ private fun TvTextField(
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF8B5CF6),
+            focusedBorderColor = Color(0xFF00BFFF),
             unfocusedBorderColor = Color.White.copy(0.2f),
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
-            cursorColor = Color(0xFF8B5CF6),
-            focusedLabelColor = Color(0xFF8B5CF6),
+            cursorColor = Color(0xFF00BFFF),
+            focusedLabelColor = Color(0xFF00BFFF),
             unfocusedLabelColor = Color.White.copy(0.5f)
         ),
         modifier = Modifier.fillMaxWidth().onFocusChanged { isFocused = it },

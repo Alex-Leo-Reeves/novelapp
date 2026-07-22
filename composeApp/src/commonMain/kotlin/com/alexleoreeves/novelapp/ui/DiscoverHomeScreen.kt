@@ -119,7 +119,7 @@ fun DiscoverHomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(GlassOverlayColor)
-            .statusBarsPadding()
+            
     ) {
         // ── Search bar ──────────────────────────────────────────────────────
         Box(
@@ -136,7 +136,7 @@ fun DiscoverHomeScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
-                        color = NeonMagenta
+                        color = NeonBlue
                     )
                 } else {
                     Icon(
@@ -380,13 +380,13 @@ private fun VideoCardItem(
                         Icon(
                             Icons.Default.PlayArrow,
                             contentDescription = "Play",
-                            tint = NeonMagenta,
+                            tint = NeonBlue,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = "Watch",
-                            color = NeonMagenta,
+                            color = NeonBlue,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )

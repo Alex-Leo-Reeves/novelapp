@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.tv.ui.theme.Purple500
 import com.alexleoreeves.novelapp.tv.ui.theme.TvSubtext
 
-private val KeyBlue = Color(0xFF8B5CF6)
+private val KeyBlue = Color(0xFF00BFFF)
 private val KeyGray = Color(0xFF2A2A3A)
 private val KeyDark = Color(0xFF1A1A2A)
 private val KeyText = Color(0xFFFFFFFF)
@@ -208,7 +208,7 @@ fun TvSearchKeyboard(
                     onSearch()
                 },
                 shape = RoundedCornerShape(8.dp),
-                color = if (searchFocused) KeyBlue.copy(0.8f) else Color(0xFFFF2A85),
+                color = if (searchFocused) KeyBlue.copy(0.8f) else Color(0xFF00BFFF),
                 border = if (searchFocused) BorderStroke(2.dp, KeyBlue) else null,
                 modifier = Modifier
                     .widthIn(min = 80.dp)

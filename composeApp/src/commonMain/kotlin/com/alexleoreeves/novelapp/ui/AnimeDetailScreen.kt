@@ -178,7 +178,7 @@ fun AnimeDetailScreen(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(16.dp)
-                            .statusBarsPadding()
+                            
                     ) {
                         Surface(
                             shape = CircleShape,
@@ -205,7 +205,7 @@ fun AnimeDetailScreen(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(16.dp)
-                            .statusBarsPadding()
+                            
                     ) {
                         Text(
                             text = when (anime.status) {

@@ -194,9 +194,13 @@ actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
     return file.exists() && file.length() > 0L
 }
 
+private var embedScrapeCallCount = 0
+
 actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? {
     val ctx = com.alexleoreeves.novelapp.sensor.AppContextHolder.applicationContext ?: return null
-    return com.alexleoreeves.novelapp.ui.extractStreamFromEmbed(ctx, embedUrl, timeoutMs)?.url
+    // Auto-rotate user agents across scrape attempts for WASM/bot detection bypass
+    val agentIndex = (embedScrapeCallCount++).coerceAtMost(3)
+    return com.alexleoreeves.novelapp.ui.extractStreamFromEmbed(ctx, embedUrl, timeoutMs, userAgentIndex = agentIndex)?.url
 }
 
 private fun getVideoDownloadsDir(parentId: String, episodeNumber: Int): File {
@@ -319,11 +323,13 @@ private fun downloadToFile(url: String, file: File): Long {
 
 private fun openConnection(url: String): HttpURLConnection =
     (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15_000
-        readTimeout = 30_000
+        connectTimeout = 20_000
+        readTimeout = 60_000
         instanceFollowRedirects = true
         setRequestProperty("User-Agent", DOWNLOAD_USER_AGENT)
         setRequestProperty("Accept", "*/*")
+        // Allow chunked streaming for large files
+        setRequestProperty("Accept-Encoding", "identity")
     }
 
 private const val DOWNLOAD_USER_AGENT =

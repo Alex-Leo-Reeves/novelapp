@@ -1,6 +1,7 @@
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -9,11 +10,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.foundation.clickable
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,6 +34,17 @@ private sealed class UpdateState {
     data class Available(val manifest: AppUpdateManifest) : UpdateState()
     data class Failed(val message: String) : UpdateState()
 }
+
+private data class VctkVoice(val id: Int, val label: String, val isFemale: Boolean)
+
+private val VCTK_VOICES = listOf(
+    VctkVoice(0, "Female 1 (Clear)", true),
+    VctkVoice(5, "Female 2", true),
+    VctkVoice(6, "Female 3", true),
+    VctkVoice(17, "Male 1 (Clear)", false),
+    VctkVoice(18, "Male 2", false),
+    VctkVoice(14, "Male 3", false)
+)
 
 @Composable
 fun YouScreen(
@@ -122,7 +132,6 @@ fun YouScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
                     .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -153,13 +162,13 @@ fun YouScreen(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = NeonMagenta.copy(alpha = 0.18f),
+                            color = NeonBlue.copy(alpha = 0.18f),
                             modifier = Modifier.size(56.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     account.username.take(1).uppercase(),
-                                    color = NeonMagenta,
+                                    color = NeonBlue,
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.Black
                                 )
@@ -222,7 +231,7 @@ fun YouScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.History, null, tint = NeonMagenta, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.History, null, tint = NeonBlue, modifier = Modifier.size(22.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("History", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             Text(
@@ -249,7 +258,7 @@ fun YouScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.Download, null, tint = NeonMagenta, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.Download, null, tint = NeonBlue, modifier = Modifier.size(22.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Offline library", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             Text(
@@ -293,7 +302,7 @@ fun YouScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(
                     "Developed by ${DeveloperContact.NAME}",
-                    color = NeonMagenta.copy(alpha = 0.7f),
+                    color = NeonBlue.copy(alpha = 0.7f),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -341,10 +350,10 @@ private fun SubscriptionCard(
                         fontSize = 11.sp
                     )
                 }
-                Surface(color = NeonMagenta.copy(alpha = 0.14f), shape = RoundedCornerShape(999.dp)) {
+                Surface(color = NeonBlue.copy(alpha = 0.14f), shape = RoundedCornerShape(999.dp)) {
                     Text(
                         maxDevices?.let { "$it devices" } ?: "Unlimited",
-                        color = NeonMagenta,
+                        color = NeonBlue,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
@@ -359,7 +368,7 @@ private fun SubscriptionCard(
             )
 
             if (message.isNotBlank()) {
-                Text(message, color = NeonMagenta, fontSize = 11.sp)
+                Text(message, color = NeonBlue, fontSize = 11.sp)
             }
 
             plans.forEach { paidPlan ->
@@ -373,7 +382,7 @@ private fun SubscriptionCard(
                 } else {
                     Button(
                         onClick = { onSubscribePlan(paidPlan.id) },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonMagenta),
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
                         modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
                     ) { Text(label, color = Color.White, fontWeight = FontWeight.Bold) }
                 }
@@ -399,7 +408,7 @@ private fun ContactCard(title: String, subtitle: String, enabled: Boolean, onCli
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(Icons.Default.Link, null, tint = if (enabled) NeonMagenta else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(20.dp))
+            Icon(Icons.Default.Link, null, tint = if (enabled) NeonBlue else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(20.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text(subtitle, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -421,8 +430,8 @@ private fun UpdateCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 when (state) {
-                    UpdateState.Checking -> CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = NeonMagenta)
-                    is UpdateState.Available -> Icon(Icons.Default.Download, null, tint = NeonMagenta)
+                    UpdateState.Checking -> CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = NeonBlue)
+                    is UpdateState.Available -> Icon(Icons.Default.Download, null, tint = NeonBlue)
                     UpdateState.Current -> Icon(Icons.Default.Check, null, tint = Color(0xFF4CAF50))
                     else -> Icon(Icons.Default.Info, null, tint = Color.White.copy(alpha = 0.4f))
                 }
@@ -459,7 +468,7 @@ private fun UpdateCard(
                 if (state is UpdateState.Available) {
                     Button(
                         onClick = { onDownload(state.manifest.apkUrl) },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonMagenta),
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
                         modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
                     ) { Text("Download", color = Color.White, fontWeight = FontWeight.Bold) }
                 }
@@ -468,14 +477,9 @@ private fun UpdateCard(
     }
 }
 
-private val VCTK_VOICES = listOf(
-    Pair(0, "Female 1 (Clear)"),
-    Pair(5, "Female 2"),
-    Pair(6, "Female 3"),
-    Pair(17, "Male 1 (Clear)"),
-    Pair(18, "Male 2"),
-    Pair(14, "Male 3")
-)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Voice Settings — now with popup dialog for voice selection + test hearing
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun VoiceSettingsCard(ttsController: SherpaNarrationController) {
@@ -483,6 +487,7 @@ private fun VoiceSettingsCard(ttsController: SherpaNarrationController) {
 
     GlassCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Narrator voice
             VoiceSelectorRow(
                 label = "Narrator Voice",
                 selectedVoiceId = narrationSettings.narratorVoiceId,
@@ -490,11 +495,19 @@ private fun VoiceSettingsCard(ttsController: SherpaNarrationController) {
                 onTestPlay = { ttsController.testVoice(narrationSettings.narratorVoiceId) }
             )
             HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+            // Character voice
             VoiceSelectorRow(
-                label = "Overlay Voice",
+                label = "Dialogue Voice",
                 selectedVoiceId = narrationSettings.characterVoiceId,
                 onVoiceSelected = { newId -> ttsController.updateSettings { it.copy(characterVoiceId = newId) } },
                 onTestPlay = { ttsController.testVoice(narrationSettings.characterVoiceId) }
+            )
+            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+            // Volume slider
+            VolumeSliderRow(
+                label = "Narration Volume",
+                currentVolume = narrationSettings.narratorVolume,
+                onVolumeChange = { newVol -> ttsController.updateSettings { it.copy(narratorVolume = newVol) } }
             )
         }
     }
@@ -507,18 +520,147 @@ private fun VoiceSelectorRow(
     onVoiceSelected: (Int) -> Unit,
     onTestPlay: () -> Unit
 ) {
+    var showDialog by remember { mutableStateOf(false) }
+
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showDialog = true },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            val voiceName = VCTK_VOICES.find { it.first == selectedVoiceId }?.second ?: "Voice $selectedVoiceId"
+            val voiceName = VCTK_VOICES.find { it.id == selectedVoiceId }?.label ?: "Voice $selectedVoiceId"
             Text(voiceName, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
         }
         IconButton(onClick = onTestPlay, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Default.PlayArrow, "Test", tint = NeonMagenta, modifier = Modifier.size(20.dp))
+            Icon(Icons.Default.PlayArrow, "Test", tint = NeonBlue, modifier = Modifier.size(20.dp))
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = {
+                Text("Select $label", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    VCTK_VOICES.forEach { voice ->
+                        val isSelected = voice.id == selectedVoiceId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onVoiceSelected(voice.id)
+                                    showDialog = false
+                                }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Female/male icon
+                            Icon(
+                                if (voice.isFemale) Icons.Default.Face else Icons.Default.Person,
+                                null,
+                                tint = if (isSelected) NeonBlue else Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    voice.label,
+                                    color = if (isSelected) NeonBlue else Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                                Text(
+                                    if (voice.isFemale) "Female voice" else "Male voice",
+                                    color = Color.White.copy(alpha = 0.4f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            // Test play button
+                            IconButton(
+                                onClick = { ttsController.testVoice(voice.id) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    "Test voice",
+                                    tint = NeonBlue,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            // Selected checkmark
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    null,
+                                    tint = NeonBlue,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("Done", color = NeonBlue)
+                }
+            },
+            containerColor = Color(0xFF1A1A2E),
+            titleContentColor = Color.White,
+            iconContentColor = Color.White
+        )
+    }
+}
+
+@Composable
+private fun VolumeSliderRow(
+    label: String,
+    currentVolume: Float,
+    onVolumeChange: (Float) -> Unit
+) {
+    Column {
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Default.VolumeDown,
+                null,
+                tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(18.dp)
+            )
+            Slider(
+                value = currentVolume,
+                onValueChange = onVolumeChange,
+                valueRange = 0f..2f,
+                steps = 19, // 20 steps of 0.1 each
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(
+                    thumbColor = NeonBlue,
+                    activeTrackColor = NeonBlue,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                )
+            )
+            Icon(
+                Icons.Default.VolumeUp,
+                null,
+                tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                "${(currentVolume * 100).toInt()}%",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                modifier = Modifier.width(40.dp)
+            )
         }
     }
 }

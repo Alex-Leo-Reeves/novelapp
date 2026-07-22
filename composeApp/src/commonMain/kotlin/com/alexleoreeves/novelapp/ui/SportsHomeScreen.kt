@@ -49,7 +49,7 @@ fun SportsHomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(GlassOverlayColor)
-                .statusBarsPadding()
+                
         ) {
             // ── Header ───────────────────────────────────────────────────
             Box(

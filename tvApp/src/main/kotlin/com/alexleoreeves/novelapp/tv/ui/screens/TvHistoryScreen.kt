@@ -24,7 +24,7 @@ fun TvHistoryScreen(
             .padding(24.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Default.History, null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(32.dp))
+            Icon(Icons.Default.History, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(32.dp))
             Text("History", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White)
         }
 

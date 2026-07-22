@@ -52,7 +52,8 @@ fun MovieDetailScreen(
         "MultiEmbed",
         "VidSrc.me",
         "VidSrc.in",
-        "VidLink"
+        "VidLink",
+        "VidLink (ExoPlayer)"
     )
 
     LaunchedEffect(tmdbId) {
@@ -74,6 +75,7 @@ fun MovieDetailScreen(
             5 -> if (type == "movie") "https://vidsrcme.ru/embed/movie?tmdb=$id" else "https://vidsrcme.ru/embed/tv?tmdb=$id&season=$season&episode=$episode"
             6 -> if (type == "movie") "https://vidsrc.in/embed/movie/$id" else "https://vidsrc.in/embed/tv/$id/$season/$episode"
             7 -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
+            8 -> if (type == "movie") "https://vidlink.pro/movie/$id" else "https://vidlink.pro/tv/$id/$season/$episode"
             else -> if (type == "movie") "https://vidsrc.to/embed/movie/$id" else "https://vidsrc.to/embed/tv/$id/$season/$episode"
         }
     }

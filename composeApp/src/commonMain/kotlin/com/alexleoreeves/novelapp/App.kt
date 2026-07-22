@@ -73,12 +73,13 @@ fun App(
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
     val footballStreamUrl = remember { mutableStateOf<String?>(null) }
     val footballStreamTitle = remember { mutableStateOf("") }
+    val footballDirectStreamUrl = remember { mutableStateOf<String?>(null) }
+    val footballDirectStreamTitle = remember { mutableStateOf("") }
     val selectedWweEvent = remember { mutableStateOf<WweEvent?>(null) }
     val wweStreamUrl = remember { mutableStateOf<String?>(null) }
     val wweStreamTitle = remember { mutableStateOf("") }
-
-    val youtubeVideoId = remember { mutableStateOf<String?>(null) }
-    val youtubeVideoTitle = remember { mutableStateOf("") }
+    val wweDirectStreamUrl = remember { mutableStateOf<String?>(null) }
+    val wweDirectStreamTitle = remember { mutableStateOf("") }
 
     val repository = remember {
         NovelSearchRepository(
@@ -194,18 +195,20 @@ fun App(
     }
 
     val canNavigateBack = listOf(
-        youtubeVideoId.value, animeStreamUrl.value, maServerEmbedUrl.value, footballStreamUrl.value,
-        selectedFootballMatch.value, wweStreamUrl.value, selectedWweEvent.value, selectedChapterUrl.value,
+        animeStreamUrl.value, maServerEmbedUrl.value,
+        footballStreamUrl.value, footballDirectStreamUrl.value,
+        selectedFootballMatch.value, wweStreamUrl.value, wweDirectStreamUrl.value, selectedWweEvent.value, selectedChapterUrl.value,
         selectedAnime.value, selectedMedia.value, selectedNovel.value
     ).any { it != null } || currentTab.value != BottomTab.DISCOVER
 
     PlatformBackHandler(enabled = canNavigateBack) {
         when {
-            youtubeVideoId.value != null -> { youtubeVideoId.value = null; youtubeVideoTitle.value = "" }
             maServerEmbedUrl.value != null -> { maServerEmbedUrl.value = null; maServerEmbedTitle.value = "" }
             animeStreamUrl.value != null -> { animeStreamUrl.value = null; animePreviewLimitMs.value = null }
+            footballDirectStreamUrl.value != null -> { footballDirectStreamUrl.value = null; footballDirectStreamTitle.value = "" }
             footballStreamUrl.value != null -> { footballStreamUrl.value = null; footballStreamTitle.value = "" }
             selectedFootballMatch.value != null -> selectedFootballMatch.value = null
+            wweDirectStreamUrl.value != null -> { wweDirectStreamUrl.value = null; wweDirectStreamTitle.value = "" }
             wweStreamUrl.value != null -> { wweStreamUrl.value = null; wweStreamTitle.value = "" }
             selectedWweEvent.value != null -> selectedWweEvent.value = null
             selectedChapterUrl.value != null -> selectedChapterUrl.value = null
@@ -254,10 +257,34 @@ fun App(
             GlassBackground()
 
             when {
+                footballDirectStreamUrl.value != null -> AnimePlayerScreen(
+                    footballDirectStreamUrl.value!!, footballDirectStreamTitle.value, appTheme.value,
+                    onBack = { footballDirectStreamUrl.value = null; footballDirectStreamTitle.value = "" }
+                )
                 footballStreamUrl.value != null -> MaServerPlayerScreen(footballStreamUrl.value!!, footballStreamTitle.value, appTheme.value) { footballStreamUrl.value = null; footballStreamTitle.value = "" }
-                selectedFootballMatch.value != null -> FootballMatchScreen(selectedFootballMatch.value!!, appTheme.value, { u, t -> footballStreamUrl.value = u; footballStreamTitle.value = t }) { selectedFootballMatch.value = null }
+                selectedFootballMatch.value != null -> FootballMatchScreen(selectedFootballMatch.value!!, appTheme.value, { result, title ->
+                    when (result) {
+                        is StreamResult.Direct -> {
+                            footballDirectStreamUrl.value = result.url
+                            footballDirectStreamTitle.value = title
+                        }
+                        is StreamResult.Embed -> {
+                            footballStreamUrl.value = result.url
+                            footballStreamTitle.value = title
+                        }
+                    }
+                }) { selectedFootballMatch.value = null }
+                wweDirectStreamUrl.value != null -> AnimePlayerScreen(
+                    wweDirectStreamUrl.value!!, wweDirectStreamTitle.value, appTheme.value,
+                    onBack = { wweDirectStreamUrl.value = null; wweDirectStreamTitle.value = "" }
+                )
                 wweStreamUrl.value != null -> MaServerPlayerScreen(wweStreamUrl.value!!, wweStreamTitle.value, appTheme.value) { wweStreamUrl.value = null; wweStreamTitle.value = "" }
-                selectedWweEvent.value != null -> WweMatchScreen(selectedWweEvent.value!!, appTheme.value, { u, t -> wweStreamUrl.value = u; wweStreamTitle.value = t }) { selectedWweEvent.value = null }
+                selectedWweEvent.value != null -> WweMatchScreen(
+                    selectedWweEvent.value!!, appTheme.value,
+                    onPlayEmbed = { u, t -> wweStreamUrl.value = u; wweStreamTitle.value = t },
+                    onPlayDirect = { u, t -> wweDirectStreamUrl.value = u; wweDirectStreamTitle.value = t },
+                    onBack = { selectedWweEvent.value = null }
+                )
 
                 animeStreamUrl.value != null -> AnimePlayerScreen(
                     animeStreamUrl.value!!, animeEpisodeTitle.value, appTheme.value,
@@ -320,8 +347,6 @@ fun App(
                     onBack = { selectedNovel.value = null }, requireAuth, ttsController
                 )
 
-                youtubeVideoId.value != null -> YouTubePlayerScreen(youtubeVideoId.value!!, youtubeVideoTitle.value, appTheme.value) { youtubeVideoId.value = null; youtubeVideoTitle.value = "" }
-
                 else -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Box(modifier = Modifier.weight(1f)) {
@@ -330,8 +355,32 @@ fun App(
                                     currentTheme = appTheme.value, downloadRepo = downloadRepo,
                                     onNovelSelected = { i ->
                                         if (i.isVideo && i.mediaKind == VideoCategory.NIGERIAN.name) {
+                                            // YouTube Nollywood: resolve via Piped and play directly in ExoPlayer
                                             val vid = i.id.removePrefix("youtube_nollywood_").takeIf { it != i.id && it.isNotBlank() }
-                                            if (vid != null) { youtubeVideoId.value = vid; youtubeVideoTitle.value = i.title }
+                                            if (vid != null) {
+                                                scope.launch {
+                                                    val client = platformHttpClient {
+                                                        install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                                                    }
+                                                    val streamUrl = resolveYouTubePipedStream(client, vid)
+                                                    client.close()
+                                                    if (streamUrl != null) {
+                                                        animeStreamUrl.value = streamUrl
+                                                        animeEpisodeTitle.value = i.title
+                                                        animeContentKind.value = "nollywood"
+                                                    } else {
+                                                        // Fallback: try the server YouTube API endpoint for stream info
+                                                        animeStreamUrl.value = "https://www.youtube.com/watch?v=$vid"
+                                                        animeEpisodeTitle.value = i.title
+                                                        animeContentKind.value = "nollywood"
+                                                    }
+                                                    animeEpisodeNumber.value = 0
+                                                    animePreviewLimitMs.value = null
+                                                }
+                                            } else {
+                                                // TMDB Nollywood movie → MediaDetailScreen
+                                                selectedMedia.value = i
+                                            }
                                         } else if (i.isAnime && i.animeResult != null) selectedAnime.value = i.animeResult
                                         else if (i.isVideo) selectedMedia.value = i
                                         else selectedNovel.value = i

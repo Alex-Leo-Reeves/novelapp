@@ -80,7 +80,7 @@ fun UniversalReadScreen(
             Box(modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 16.dp)
-                .statusBarsPadding()
+                
             ) {
                 Column {
                     Text("Universal Read", style = MaterialTheme.typography.headlineLarge,
@@ -255,7 +255,7 @@ private fun AiNovelCreatorTab(
         val novel = activeReadingNovel!!
         Box(modifier = Modifier.fillMaxSize().background(currentTheme.backgroundColor())) {
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp).statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { activeReadingNovel = null }) { Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor()) }
                     Spacer(Modifier.width(8.dp))
                     Text(novel.title, style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)

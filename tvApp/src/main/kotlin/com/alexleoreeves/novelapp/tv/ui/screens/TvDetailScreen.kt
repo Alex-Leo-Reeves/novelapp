@@ -245,16 +245,16 @@ fun TvDetailScreen(
                 if (!item.isPremium && account?.isPremium != true) {
                     Spacer(Modifier.height(16.dp))
                     Surface(
-                        color = Color(0xFFFF2A85).copy(0.1f),
+                        color = Color(0xFF00BFFF).copy(0.1f),
                         shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Color(0xFFFF2A85).copy(0.3f))
+                        border = BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.3f))
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.Lock, null, tint = Color(0xFFFF2A85), modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Lock, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(18.dp))
                             Text("Some content may require premium", color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                         }
                     }

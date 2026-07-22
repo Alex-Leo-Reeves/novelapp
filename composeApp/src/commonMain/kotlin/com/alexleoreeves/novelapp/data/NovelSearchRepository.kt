@@ -81,11 +81,9 @@ class NovelSearchRepository(
         WeebCentralScraper(httpClient)
     )
 
-    /** Comic sources — Western comics from NewComic.info, ComicBookPlus, ViewComic */
+    /** Comic sources — Western comics from NewComic.info (only scrapable source) */
     private val comicSources: List<ComicSource> = listOf(
-        NewComicScraper(httpClient),
-        ComicBookPlusScraper(httpClient),
-        ViewComicNoscriptScraper(httpClient)
+        NewComicScraper(httpClient)
     )
 
     /** Anime sources */
@@ -1111,7 +1109,7 @@ class NovelSearchRepository(
                 }
             }.orEmpty()
 
-            // Also search across all 3 scrapers with popular seed queries
+            // Also search across available comic sources with popular seed queries
             val seeds = listOf("batman", "superman", "spider-man", "x-men", "avengers", "justice")
             val seed = seeds.getOrElse((page - 1).mod(seeds.size)) { "batman" }
             val searchResults = comicSources.map { source ->

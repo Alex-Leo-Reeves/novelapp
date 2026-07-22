@@ -72,7 +72,7 @@ fun QrPaymentScreen(
         verticalArrangement = Arrangement.Center
     ) {
         if (isLoading) {
-            CircularProgressIndicator(color = Color(0xFF8B5CF6), modifier = Modifier.size(48.dp))
+            CircularProgressIndicator(color = Color(0xFF00BFFF), modifier = Modifier.size(48.dp))
             Spacer(Modifier.height(16.dp))
             Text("Creating payment link...", color = Color.White.copy(0.7f))
         } else if (errorMessage != null) {
@@ -90,7 +90,7 @@ fun QrPaymentScreen(
             // App icon header
             Icon(
                 Icons.Default.AutoStories, null,
-                tint = Color(0xFFFF2A85),
+                tint = Color(0xFF00BFFF),
                 modifier = Modifier.size(48.dp)
             )
 
@@ -116,7 +116,7 @@ fun QrPaymentScreen(
                     Text(
                         planLabel,
                         style = MaterialTheme.typography.titleLarge,
-                        color = Color(0xFF8B5CF6),
+                        color = Color(0xFF00BFFF),
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))

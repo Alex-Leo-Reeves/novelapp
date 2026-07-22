@@ -258,7 +258,7 @@ private fun TvSidebar(
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         // App logo
-        Icon(Icons.Default.AutoStories, null, tint = Color(0xFFFF2A85), modifier = Modifier.size(36.dp).padding(bottom = 8.dp))
+        Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(36.dp).padding(bottom = 8.dp))
 
         // Sections
         val scrollState = rememberScrollState()
@@ -277,12 +277,12 @@ private fun TvSidebar(
                     onClick = { onSectionSelected(section) },
                     shape = RoundedCornerShape(10.dp),
                     color = when {
-                        isSelected -> Color(0xFFFF2A85).copy(0.2f)
+                        isSelected -> Color(0xFF00BFFF).copy(0.2f)
                         isFocused -> Color(0xFF1C1C2E)
                         else -> Color.Transparent
                     },
                     border = when {
-                        isSelected -> BorderStroke(2.dp, Color(0xFFFF2A85))
+                        isSelected -> BorderStroke(2.dp, Color(0xFF00BFFF))
                         isFocused -> BorderStroke(2.dp, Purple500)
                         else -> null
                     },
@@ -298,7 +298,7 @@ private fun TvSidebar(
                         Icon(
                             icon,
                             section.label,
-                            tint = if (isSelected) Color(0xFFFF2A85) else Color.White.copy(0.5f),
+                            tint = if (isSelected) Color(0xFF00BFFF) else Color.White.copy(0.5f),
                             modifier = Modifier.size(22.dp)
                         )
                     }
