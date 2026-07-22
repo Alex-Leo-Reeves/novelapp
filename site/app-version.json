@@ -1,7 +1,7 @@
 {
     "versionCode": 38,
     "versionName": "1.38",
-    "apkUrl": "https://novelapp1.onrender.com/downloads/novelapp-android.apk",
+    "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.38/novelapp-android.apk",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
         "Fixed build errors in SportsHomeScreen, UniversalReadScreen, and YouScreen",
