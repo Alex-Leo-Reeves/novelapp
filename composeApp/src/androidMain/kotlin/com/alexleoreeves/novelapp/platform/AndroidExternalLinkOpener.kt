@@ -174,8 +174,12 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         connection.disconnect()
 
         if (expectedBytes > 0L && downloadedBytes != expectedBytes) {
-            tmpFile.delete()
-            error("download was incomplete")
+            if (expectedSha256 == null) {
+                // No SHA-256 to verify against — byte-count mismatch is a real error
+                tmpFile.delete()
+                error("download was incomplete (expected $expectedBytes bytes, got $downloadedBytes)")
+            }
+            // SHA-256 will be checked below; byte-count drift alone is not fatal
         }
         if (tmpFile.length() <= 0L) {
             tmpFile.delete()

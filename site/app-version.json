@@ -10,6 +10,6 @@
         "Fixed BillingPlan argument order and testVoice type mismatch in YouScreen"
     ],
     "forceUpdate": false,
-    "apkBytes": 192937984,
+    "apkBytes": 192545673,
     "apkSha256": "6407ecd36b837ec8678e28f2cb114d68c9b31e8b24ca65b6abb1835c622ded4a"
 }
