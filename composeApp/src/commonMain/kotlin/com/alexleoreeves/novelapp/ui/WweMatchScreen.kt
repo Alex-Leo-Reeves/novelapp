@@ -242,6 +242,7 @@ fun WweMatchScreen(
                     Text("Watch Event", style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
 
                     // Status messages
+                    val currentResult = resolvedResult
                     when {
                         isResolving -> {
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -251,8 +252,8 @@ fun WweMatchScreen(
                                 }
                             }
                         }
-                        resolvedResult != null -> {
-                            val typeLabel = when (resolvedResult) {
+                        currentResult != null -> {
+                            val typeLabel = when (currentResult) {
                                 is WweStreamResult.Direct -> "Direct HLS Stream"
                                 is WweStreamResult.Embed -> "Embed Player"
                             }
@@ -271,7 +272,8 @@ fun WweMatchScreen(
                     // Main watch button
                     Button(
                         onClick = {
-                            if (resolvedResult != null) launchStream(resolvedResult!!)
+                            val rr = resolvedResult
+                            if (rr != null) launchStream(rr)
                             else resolveStream()
                         },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -281,37 +283,40 @@ fun WweMatchScreen(
                     ) {
                         Icon(if (isResolving) Icons.Default.HourglassEmpty else Icons.Default.PlayArrow, null, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            when {
-                                isResolving -> "Finding Stream..."
-                                resolvedResult != null -> {
-                                    when (resolvedResult) {
-                                        is WweStreamResult.Direct -> "Launch Direct Stream"
-                                        is WweStreamResult.Embed -> "Launch Player"
-                                    }
+                        val buttonLabel = when {
+                            isResolving -> "Finding Stream..."
+                            currentResult != null -> {
+                                when (currentResult) {
+                                    is WweStreamResult.Direct -> "Launch Direct Stream"
+                                    is WweStreamResult.Embed -> "Launch Player"
                                 }
-                                event.status == "LIVE" -> "Find Live Stream"
-                                event.status == "COMPLETED" -> "Watch Replay"
-                                else -> "Check Stream"
-                            },
+                            }
+                            event.status == "LIVE" -> "Find Live Stream"
+                            event.status == "COMPLETED" -> "Watch Replay"
+                            else -> "Check Stream"
+                        }
+                        Text(
+                            buttonLabel,
                             fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge
                         )
                     }
 
                     // Second attempt button — try the other method
-                    if (resolvedResult != null) {
-                        val altMethodLabel = when (resolvedResult) {
+                    if (currentResult != null) {
+                        val altMethodLabel = when (currentResult) {
                             is WweStreamResult.Direct -> "Try Embed Player Instead"
                             is WweStreamResult.Embed -> "Try Direct Stream Instead"
                         }
                         OutlinedButton(
                             onClick = {
                                 // Force resolve the other type
+                                val rr = resolvedResult
+                                if (rr == null) return@OutlinedButton
                                 scope.launch {
                                     isResolving = true
                                     streamError = null
                                     // Determine which method to try
-                                    val altResults = when (resolvedResult) {
+                                    val altResults = when (rr) {
                                         is WweStreamResult.Direct -> {
                                             // Already tried Direct, now try Embed
                                             val embeds = wweSource.resolveEmbedUrls(event.eventId, event.title)
@@ -345,7 +350,7 @@ fun WweMatchScreen(
                     }
 
                     // Error state: retry
-                    if (streamError != null && resolvedResult == null) {
+                    if (streamError != null && currentResult == null) {
                         OutlinedButton(
                             onClick = { resolveStream() },
                             modifier = Modifier.fillMaxWidth(),

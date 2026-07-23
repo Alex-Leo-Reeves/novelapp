@@ -4,10 +4,10 @@
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed update failing after 100% download — corrected apkBytes in manifest and made SHA-256 the primary integrity check",
-        "Bumped to v1.39"
+        "Fixed build errors in WweMatchScreen (non-exhaustive when expressions) and YouScreen (missing ttsController reference)",
+        "Updated app manifest with correct APK size and SHA-256 hash for v1.39"
     ],
     "forceUpdate": false,
-    "apkBytes": 192545673,
-    "apkSha256": "6407ecd36b837ec8678e28f2cb114d68c9b31e8b24ca65b6abb1835c622ded4a"
+    "apkBytes": 192497865,
+    "apkSha256": "016dd8237727e8756c9f7a8b9b0823db909b20e71571068190792fde0af5e316"
 }

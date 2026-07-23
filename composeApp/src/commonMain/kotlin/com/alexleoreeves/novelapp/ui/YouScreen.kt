@@ -492,7 +492,8 @@ private fun VoiceSettingsCard(ttsController: SherpaNarrationController) {
                 label = "Narrator Voice",
                 selectedVoiceId = narrationSettings.narratorVoiceId,
                 onVoiceSelected = { newId -> ttsController.updateSettings { it.copy(narratorVoiceId = newId) } },
-                onTestPlay = { ttsController.testVoice(narrationSettings.narratorVoiceId) }
+                onTestPlay = { ttsController.testVoice(narrationSettings.narratorVoiceId) },
+                ttsController = ttsController
             )
             HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
             // Character voice
@@ -500,7 +501,8 @@ private fun VoiceSettingsCard(ttsController: SherpaNarrationController) {
                 label = "Dialogue Voice",
                 selectedVoiceId = narrationSettings.characterVoiceId,
                 onVoiceSelected = { newId -> ttsController.updateSettings { it.copy(characterVoiceId = newId) } },
-                onTestPlay = { ttsController.testVoice(narrationSettings.characterVoiceId) }
+                onTestPlay = { ttsController.testVoice(narrationSettings.characterVoiceId) },
+                ttsController = ttsController
             )
             HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
             // Volume slider
@@ -518,7 +520,8 @@ private fun VoiceSelectorRow(
     label: String,
     selectedVoiceId: Int,
     onVoiceSelected: (Int) -> Unit,
-    onTestPlay: () -> Unit
+    onTestPlay: () -> Unit,
+    ttsController: SherpaNarrationController
 ) {
     var showDialog by remember { mutableStateOf(false) }
 
