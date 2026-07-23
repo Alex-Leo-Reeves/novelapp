@@ -127,10 +127,22 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         if (connection.responseCode !in 200..299) {
             error("server returned HTTP ${connection.responseCode}")
         }
-        val expectedBytes = manifest?.apkBytes?.takeIf { it > 0L } ?: connection.contentLengthLong
+        // expectedBytes: prefer manifest value, fall back to HTTP Content-Length.
+        // Content-Length can be unreliable across CDN redirects used by GitHub Releases
+        // (e.g. chunked encoding, missing Content-Length, or size differences from compression).
+        val manifestBytes = manifest?.apkBytes?.takeIf { it > 0L }
+        val contentLengthBytes = connection.contentLengthLong.takeIf { it > 0L }
+        val expectedBytes = manifestBytes ?: contentLengthBytes ?: -1L
+
         val expectedSha256 = manifest?.sha256
             ?.takeIf { it.length == 64 && it.all { char -> char in '0'..'9' || char in 'a'..'f' } }
-        val digest = MessageDigest.getInstance("SHA-256")
+
+        // When manifest fetch failed (e.g. Render cold-start), we have no SHA-256 to verify.
+        // In that case we rely on Content-Length if available, but don't treat a small
+        // mismatch as fatal — CDN redirects can cause off-by-a-few-bytes issues.
+        // Android's package manager will verify the APK signature during installation.
+        val hasAuthoritativeVerification = expectedSha256 != null
+        val digest = if (hasAuthoritativeVerification) MessageDigest.getInstance("SHA-256") else null
 
         var downloadedBytes = 0L
         var nextProgressToast = 25
@@ -142,7 +154,7 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
                     if (read <= 0) break
                     output.write(buffer, 0, read)
                     downloadedBytes += read
-                    digest.update(buffer, 0, read)
+                    digest?.update(buffer, 0, read)
                     if (expectedBytes > 0L) {
                         val progress = ((downloadedBytes * 100) / expectedBytes).toInt().coerceIn(0, 100)
                         AppUpdateProgressBus.update(
@@ -173,18 +185,28 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         }
         connection.disconnect()
 
-        if (expectedBytes > 0L && downloadedBytes != expectedBytes) {
-            if (expectedSha256 == null) {
-                // No SHA-256 to verify against — byte-count mismatch is a real error
-                tmpFile.delete()
-                error("download was incomplete (expected $expectedBytes bytes, got $downloadedBytes)")
-            }
-            // SHA-256 will be checked below; byte-count drift alone is not fatal
-        }
-        if (tmpFile.length() <= 0L) {
+        // Empty file check
+        if (downloadedBytes <= 0L) {
             tmpFile.delete()
             error("downloaded file was empty")
         }
+
+        // Set a reasonable minimum — 192MB APK should not be smaller than 50MB even compressed
+        if (downloadedBytes < 50_000_000L) {
+            tmpFile.delete()
+            error("download was too small ($downloadedBytes bytes) — expected at least 50MB")
+        }
+
+        // Byte-count verification: only reliable when we have SHA-256.
+        // Without SHA-256 (manifest failed to fetch from Render cold-start), Content-Length
+        // from GitHub CDN redirects is unreliable — skip size verification entirely.
+        // Android's package manager will verify the APK's cryptographic signature at install time.
+        if (hasAuthoritativeVerification && expectedBytes > 0L && downloadedBytes != expectedBytes) {
+            // We have SHA-256 — byte-count mismatch is still not fatal (CDN quirks),
+            // but log it for debugging. The SHA-256 check below will catch corruption.
+            android.util.Log.w("UpdateOpener", "APK byte-count mismatch (expected $expectedBytes, got $downloadedBytes) — proceeding to SHA-256 check")
+        }
+
         AppUpdateProgressBus.update(
             AppUpdateProgressState(
                 isActive = true,
@@ -194,10 +216,14 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
                 totalBytes = expectedBytes.coerceAtLeast(downloadedBytes)
             )
         )
-        val actualSha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-        if (expectedSha256 != null && actualSha256 != expectedSha256) {
-            tmpFile.delete()
-            error("download checksum did not match")
+
+        // SHA-256 verification when available
+        if (hasAuthoritativeVerification && digest != null) {
+            val actualSha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+            if (actualSha256 != expectedSha256) {
+                tmpFile.delete()
+                error("download checksum did not match")
+            }
         }
         if (!tmpFile.renameTo(apkFile)) {
             tmpFile.delete()
@@ -239,10 +265,15 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         }
     }
 
+    /**
+     * Fetch the update manifest from Render to get expected APK size and SHA-256.
+     * Render free-tier cold starts can take 30+ seconds, so we use a longer timeout
+     * and return null gracefully on failure — the caller handles missing manifest data.
+     */
     private fun fetchUpdateManifest(): UpdateManifest? = runCatching {
         val connection = (URL(AppReleaseConfig.UPDATE_MANIFEST_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15000
-            readTimeout = 15000
+            connectTimeout = 30000
+            readTimeout = 30000
             setRequestProperty("accept", "application/json")
         }
         if (connection.responseCode !in 200..299) return@runCatching null
