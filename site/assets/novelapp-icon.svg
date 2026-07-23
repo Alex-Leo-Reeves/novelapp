@@ -1,11 +1,179 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-labelledby="title desc">
   <title id="title">NovelApp icon</title>
-  <desc id="desc">An open book with a play mark for novels, manga, and anime.</desc>
-  <rect width="108" height="108" rx="24" fill="#0b0d10"/>
-  <circle cx="54" cy="54" r="48" fill="#151922"/>
-  <path fill="#e84d8a" d="M18 25c0-6 5-11 11-11h18c7 0 12 5 12 12v65c-4-4-9-6-16-6H29c-6 0-11-5-11-11V25z"/>
-  <path fill="#42d6b5" d="M90 25c0-6-5-11-11-11H61c-7 0-12 5-12 12v65c4-4 9-6 16-6h14c6 0 11-5 11-11V25z"/>
-  <path fill="#f4f1ec" fill-opacity=".9" d="M29 31h18v4H29zm0 11h15v4H29zm0 11h18v4H29zm0 11h13v4H29zm34-33h16v4H63zm0 11h13v4H63zm0 22h16v4H63z"/>
-  <path fill="#f2c766" d="m47 38 24 16-24 16V38z"/>
-  <path fill="#fff" fill-opacity=".24" d="M54 18c3 2 5 5 5 9v58c-2 1-4 3-5 5-1-2-3-4-5-5V27c0-4 2-7 5-9z"/>
+  <desc id="desc">A 3D open book with glowing neon accents</desc>
+  
+  <defs>
+    <!-- 3D Rounded base gradient: top-left light, bottom-right deep -->
+    <radialGradient id="baseBg" cx="30%" cy="25%" r="80%" fx="25%" fy="20%">
+      <stop offset="0%" stop-color="#1a2040"/>
+      <stop offset="50%" stop-color="#0d1122"/>
+      <stop offset="100%" stop-color="#060810"/>
+    </radialGradient>
+
+    <!-- Inner bevel highlight -->
+    <radialGradient id="innerGlow" cx="50%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#ff1493" stop-opacity="0.12"/>
+      <stop offset="60%" stop-color="#00ffff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 3D Left book cover gradient -->
+    <linearGradient id="leftCover" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff6eb4"/>
+      <stop offset="40%" stop-color="#ff1493"/>
+      <stop offset="100%" stop-color="#b30068"/>
+    </linearGradient>
+
+    <!-- 3D Right book cover gradient -->
+    <linearGradient id="rightCover" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#66ffff"/>
+      <stop offset="40%" stop-color="#00ffff"/>
+      <stop offset="100%" stop-color="#0099cc"/>
+    </linearGradient>
+
+    <!-- Left page gradient -->
+    <linearGradient id="leftPage" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ffe0f0" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <!-- Right page gradient -->
+    <linearGradient id="rightPage" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#e0ffff" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <!-- Book spine shadow -->
+    <linearGradient id="spineShadow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="40%" stop-color="#000" stop-opacity="0.3"/>
+      <stop offset="60%" stop-color="#000" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Drop shadow for the book -->
+    <filter id="bookShadow" x="-20%" y="-10%" width="140%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#ff1493" flood-opacity="0.3"/>
+      <feDropShadow dx="2" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+
+    <!-- Play button gradient 3D -->
+    <linearGradient id="playGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe44d"/>
+      <stop offset="50%" stop-color="#ffd700"/>
+      <stop offset="100%" stop-color="#cc9900"/>
+    </linearGradient>
+
+    <!-- Play button shadow -->
+    <filter id="playShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+
+    <!-- Glossy highlight overlay -->
+    <linearGradient id="glossHighlight" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <!-- Outer glow filter -->
+    <filter id="outerGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feComposite in="blur" in2="SourceGraphic" operator="out" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Page shadow under play button -->
+    <filter id="pageInsetShadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Outer rounded square base -->
+  <rect width="108" height="108" rx="24" fill="url(#baseBg)"/>
+  
+  <!-- Bevel highlight top edge -->
+  <rect x="1" y="1" width="106" height="106" rx="23" fill="none" stroke="#fff" stroke-opacity="0.08" stroke-width="2"/>
+  
+  <!-- Inner glow pool -->
+  <circle cx="54" cy="50" r="44" fill="url(#innerGlow)"/>
+
+  <!-- 3D Book group with drop shadow -->
+  <g filter="url(#bookShadow)">
+    
+    <!-- BOOK SPINE (center vertical area) -->
+    <rect x="32" y="22" width="44" height="64" rx="4" fill="#1a1a2e" opacity="0.4"/>
+    
+    <!-- LEFT BOOK PAGE (3D perspective - slightly tilted) -->
+    <path d="M20 26 C20 20 26 16 32 16 L48 16 L48 74 L32 74 C26 74 20 68 20 62 L20 26 Z" 
+          fill="url(#leftPage)" filter="url(#pageInsetShadow)"/>
+    
+    <!-- RIGHT BOOK PAGE -->
+    <path d="M88 26 C88 20 82 16 76 16 L60 16 L60 74 L76 74 C82 74 88 68 88 62 L88 26 Z" 
+          fill="url(#rightPage)" filter="url(#pageInsetShadow)"/>
+
+    <!-- LEFT BOOK COVER (with 3D thickness - wider border) -->
+    <path d="M20 26 C20 20 26 16 32 16 L48 16 L48 78 L32 78 C26 78 20 72 20 66 L20 26 Z" 
+          fill="none" stroke="url(#leftCover)" stroke-width="5" stroke-linejoin="round"/>
+    
+    <!-- RIGHT BOOK COVER -->
+    <path d="M88 26 C88 20 82 16 76 16 L60 16 L60 78 L76 78 C82 78 88 72 88 66 L88 26 Z" 
+          fill="none" stroke="url(#rightCover)" stroke-width="5" stroke-linejoin="round"/>
+
+    <!-- Book spine shadow between pages -->
+    <rect x="46" y="16" width="16" height="62" fill="url(#spineShadow)"/>
+
+    <!-- Text lines on left page -->
+    <g fill="#333" opacity="0.25">
+      <rect x="28" y="30" width="14" height="2" rx="1"/>
+      <rect x="28" y="36" width="11" height="2" rx="1"/>
+      <rect x="28" y="42" width="15" height="2" rx="1"/>
+      <rect x="28" y="48" width="10" height="2" rx="1"/>
+      <rect x="28" y="54" width="13" height="2" rx="1"/>
+      <rect x="28" y="60" width="8" height="2" rx="1"/>
+    </g>
+
+    <!-- Text lines on right page -->
+    <g fill="#333" opacity="0.25">
+      <rect x="62" y="30" width="14" height="2" rx="1"/>
+      <rect x="62" y="36" width="11" height="2" rx="1"/>
+      <rect x="62" y="42" width="15" height="2" rx="1"/>
+      <rect x="62" y="48" width="10" height="2" rx="1"/>
+      <rect x="62" y="54" width="13" height="2" rx="1"/>
+      <rect x="62" y="60" width="8" height="2" rx="1"/>
+    </g>
+  </g>
+
+  <!-- 3D PLAY BUTTON overlapping the spine -->
+  <g filter="url(#playShadow)">
+    <!-- Play button outer circle (beveled) -->
+    <circle cx="54" cy="48" r="15" fill="url(#playGrad)"/>
+    <!-- Play button highlight -->
+    <circle cx="54" cy="48" r="15" fill="#fff" opacity="0.1"/>
+    <!-- Play button inner highlight arc -->
+    <path d="M43 40 A12 12 0 0 1 65 40" fill="none" stroke="#fff" stroke-opacity="0.3" stroke-width="2"/>
+    <!-- Play triangle -->
+    <path d="M47 39 L47 57 L60 48 Z" fill="#fff" opacity="0.92"/>
+    <path d="M47 39 L47 57 L60 48 Z" fill="#ffeeaa" opacity="0.3"/>
+  </g>
+
+  <!-- Glossy overlay across the whole icon -->
+  <rect x="0" y="0" width="108" height="108" rx="24" fill="url(#glossHighlight)"/>
+
+  <!-- Outer rim glow stroke -->
+  <rect x="0" y="0" width="108" height="108" rx="24" fill="none" stroke="#ff1493" stroke-opacity="0.15" stroke-width="1.5"/>
+  
+  <!-- Corner sparkles -->
+  <g fill="#fff" opacity="0.6">
+    <circle cx="86" cy="22" r="3"/>
+    <circle cx="92" cy="18" r="1.5" opacity="0.4"/>
+    <circle cx="82" cy="17" r="1.2" opacity="0.3"/>
+  </g>
+  <g fill="#00ffff" opacity="0.35">
+    <circle cx="20" cy="86" r="2.5"/>
+    <circle cx="16" cy="90" r="1" opacity="0.5"/>
+  </g>
 </svg>
