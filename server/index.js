@@ -228,7 +228,11 @@ function cleanBaseUrl(value) {
     return String(value || "").trim().replace(/\/+$/, "");
 }
 
-const APK_EXTERNAL_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.38/novelapp-android.apk";
+// ═════════════════════════════════════════════════════════════════════════════
+//  APP VERSION MANIFEST
+//  The apkUrl is sourced from site/app-version.json — the single source of truth.
+//  Never hardcode a version-specific GitHub Release URL here.
+// ═════════════════════════════════════════════════════════════════════════════
 
 function buildAppVersionPayload() {
     const appVersionPath = path.join(SITE_DIR, "app-version.json");
@@ -253,15 +257,15 @@ function buildAppVersionPayload() {
         }
     }
 
-    // If APK is not on disk (no LFS on Render), use the external GitHub Release URL
+    // If the APK is physically present on disk (git LFS), compute live checksums.
+    // Otherwise, trust the apkUrl, apkBytes, and apkSha256 from site/app-version.json.
     if (fs.existsSync(apkPath) && fs.statSync(apkPath).isFile()) {
         const stat = fs.statSync(apkPath);
         const buffer = fs.readFileSync(apkPath);
         payload.apkBytes = stat.size;
         payload.apkSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-    } else {
-        payload.apkUrl = APK_EXTERNAL_URL;
     }
+    // NOTE: Never overwrite payload.apkUrl here — the JSON manifest always wins.
 
     return payload;
 }
@@ -795,18 +799,18 @@ async function fetchOpenSubtitlesTrack(context, language) {
     if (context.episode) url.searchParams.set("episode_number", String(context.episode));
 
     const payload = await fetchJson(url.toString(), { headers });
-    const results = Array.isArray(payload?.data) ? payload.data : [];
+    const results = Array.isArray(payload ? .data) ? payload.data : [];
     for (const item of results) {
-        const attributes = item ?.attributes || item || {};
+        const attributes = item ? .attributes || item || {};
         const files = Array.isArray(attributes.files) ? attributes.files : [];
         for (const file of files) {
-            const fileId = Number(file ?.file_id || 0);
+            const fileId = Number(file ? .file_id || 0);
             if (!fileId) continue;
             const fileName = String(file.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
             if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
         }
-        const fileId = Number(attributes.file_id || item ?.file_id || 0);
+        const fileId = Number(attributes.file_id || item ? .file_id || 0);
         if (fileId) {
             const fileName = String(attributes.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
@@ -835,7 +839,7 @@ async function openSubtitlesHeaders() {
                 password: OPENSUBTITLES_PASSWORD
             })
         }).catch(() => null);
-        if (login ?.token) headers.Authorization = `Bearer ${login.token}`;
+        if (login ? .token) headers.Authorization = `Bearer ${login.token}`;
     }
     return headers;
 }
@@ -849,7 +853,7 @@ async function downloadOpenSubtitlesTrack(fileId, fileName, language, headers) {
         },
         body: JSON.stringify({ file_id: fileId })
     });
-    const link = payload ?.link || payload ?.download_link || payload ?.url;
+    const link = payload ? .link || payload ? .download_link || payload ? .url;
     if (!link) return null;
     const bytes = await fetchBuffer(link, {
         "Accept": "*/*",
@@ -881,7 +885,7 @@ async function fetchSubdlTrack(context, language) {
             "User-Agent": "NovelApp Render"
         }
     });
-    if (payload ?.status === false) {
+    if (payload ? .status === false) {
         return { tracksJson: null, message: String(payload.error || payload.message || "SubDL subtitle search failed.") };
     }
 
@@ -902,14 +906,14 @@ async function fetchSubdlTrack(context, language) {
 }
 
 function collectSubdlCandidates(payload, context) {
-    const subtitles = Array.isArray(payload ?.subtitles) ? payload.subtitles : [];
+    const subtitles = Array.isArray(payload ? .subtitles) ? payload.subtitles : [];
     const exact = [];
     const fallback = [];
 
     for (const subtitle of subtitles) {
         const target = subdlMatchesEpisode(subtitle, context) ? exact : fallback;
         for (const key of["unpack_files", "unpacked_files", "files"]) {
-            const files = Array.isArray(subtitle ?.[key]) ? subtitle[key] : [];
+            const files = Array.isArray(subtitle ? .[key]) ? subtitle[key] : [];
             for (const file of files) {
                 if (!subdlMatchesEpisode(file, context)) continue;
                 const url = firstString(file, ["url", "download_url", "download", "subtitle_url", "path"]);
@@ -925,7 +929,7 @@ function collectSubdlCandidates(payload, context) {
 
 function firstString(source, keys) {
     for (const key of keys) {
-        const value = source ?.[key];
+        const value = source ? .[key];
         if (typeof value === "string" && value.trim()) return value.trim();
     }
     return "";
@@ -934,9 +938,9 @@ function firstString(source, keys) {
 function subdlMatchesEpisode(value, context) {
     const wanted = Number(context.episode || 0);
     if (!wanted) return true;
-    const episode = Number(value ?.episode || 0);
-    const from = Number(value ?.episode_from || 0);
-    const end = Number(value ?.episode_end || 0);
+    const episode = Number(value ? .episode || 0);
+    const from = Number(value ? .episode_from || 0);
+    const end = Number(value ? .episode_end || 0);
     if (episode) return episode === wanted;
     if (from && end) return wanted >= from && wanted <= end;
     return true;
@@ -1501,8 +1505,6 @@ const CHAPTER_SCENES = [
   (n, t) => `Chapter ${n} — Council of Shadows\n\nThe chamber beneath the mountain was older than any kingdom that had claimed this land. Seven figures sat around the obsidian table, their faces hidden beneath hoods the colour of deep water.\n\n"The boundary has shifted again," said the eldest, her voice carrying the weight of centuries. "We have perhaps sixty days before the seal breaks entirely."\n\nA heavy silence fell. Outside, far above, the world continued its ordinary business, ignorant of what was being decided in this room.\n\n${t ? `In the tale of ${t}, ` : ""}it was always the hidden councils that changed history — not armies, not kings. Just seven old voices in the dark, choosing who would carry the burden next.\n\n"Send the letter," said the one called Veth. "Tell them it is time."`,
 
   // 4 — Blade and Blood
-  (n, t) => `Chapter ${n} — Blade and Blood\n\nThe duel began at sunrise, as all true duels must.\n\nShe had trained for this for eleven years. Every scar on her hands told a chapter of that preparation. And yet, standing across from him now — this man who had once been her teacher — she felt the old doubt resurface like a stone through ice.\n\nHe moved first. Of course he did. He always moved first.\n\nSteel rang against steel. She pivoted, using his momentum against him, and drove her elbow into the space where his guard opened for a single heartbeat. He absorbed it, rolled, came up with a slash that she barely turned aside. For ten minutes they were nothing but motion and decision.\n\nWhen it ended, neither had won. Both stood breathing hard in the red morning light, and something that had been broken between them felt, fractionally, less broken.\n\n"Tomorrow we try again," he said. It was the closest he could come to an apology.`,
-
   // 5 — The Village at the Edge
   (n, t) => `Chapter ${n} — The Village at the Edge\n\nThere were places the maps did not show. This was one of them.\n\nThe village sat at the boundary between the forest and the flatlands, too small to have a name worth keeping, the kind of place people passed through and immediately forgot. But ${t || "the traveller"} had not come here to pass through.\n\nAn old man sat mending nets by the well, his hands moving with the automatic patience of someone who had done this ten thousand times. He did not look up when the visitor approached.\n\n"You're the third this season," he said at last. "Looking for the same thing, I expect. The others didn't find it."\n\n"What happened to them?"\n\nThe old man finally looked up. His eyes were the grey of deep water. "They stopped looking." He said it the way you say something obvious, and somehow that made it worse.`,
 
@@ -4020,7 +4022,7 @@ function serveStatic(request, response, pathname) {
   if (pathname === "/downloads/novelapp-android.apk") {
     const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
     if (!fs.existsSync(apkPath)) {
-      const redirectUrl = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.38/novelapp-android.apk";
+      const redirectUrl = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk";
       response.writeHead(302, { location: redirectUrl });
       response.end();
       return;
