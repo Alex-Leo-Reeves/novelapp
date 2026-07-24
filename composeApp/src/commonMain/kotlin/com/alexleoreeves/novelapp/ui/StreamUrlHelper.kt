@@ -139,9 +139,13 @@ private fun buildCineProSubtitlesJson(tracks: List<CineProSubtitleTrack>): Strin
 }
 
 /**
- * Resolve a direct HLS stream URL from CinePro API.
+ * Resolve a direct HLS/MP4 stream URL from CinePro API.
  * DEPRECATED: Use resolveAllCineProSources instead, which goes through the main server.
  * Kept for backward compatibility with MovieDetailScreen.
+ *
+ * CinePro Core returns proxy URLs (http://localhost:10000/v1/proxy?data=...) that serve
+ * the actual media content. We rewrite localhost to the actual CinePro Core instance
+ * and return the proxy URL directly — ExoPlayer can stream from it.
  */
 suspend fun resolveCineProStream(
     client: HttpClient,
@@ -168,24 +172,16 @@ suspend fun resolveCineProStream(
         val obj = source.jsonObject
         val sourceUrl = obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (sourceUrl.isNotBlank()) {
-            // Rewrite localhost proxy URLs to the actual CinePro Core instance
-            val resolved = if (sourceUrl.startsWith("http://localhost:10000") && sourceUrl.contains("/v1/proxy?data=")) {
+            // CinePro returns proxy URLs. Rewrite localhost:10000 → actual CinePro Core.
+            // The proxy serves the media content directly, so just return the rewritten URL.
+            if (sourceUrl.startsWith("http://localhost:10000") && sourceUrl.contains("/v1/proxy?data=")) {
                 val rewritten = sourceUrl.replace("http://localhost:10000", cineproBase)
-                // Resolve the proxy to get the actual .m3u8
-                try {
-                    val proxyResponse = client.get(rewritten).bodyAsText()
-                    val proxyData = streamJson.parseToJsonElement(proxyResponse).jsonObject
-                    proxyData["url"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { rewritten }
-                } catch (_: Exception) { rewritten }
+                return@runCatching rewritten
             } else if (sourceUrl.startsWith("http")) {
-                sourceUrl
+                return@runCatching sourceUrl
             } else if (sourceUrl.startsWith("/v1/proxy")) {
-                val proxyUrl = "$cineproBase$sourceUrl"
-                val proxyResponse = client.get(proxyUrl).bodyAsText()
-                val proxyData = streamJson.parseToJsonElement(proxyResponse).jsonObject
-                proxyData["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            } else null
-            if (!resolved.isNullOrBlank()) return@runCatching resolved
+                return@runCatching "$cineproBase$sourceUrl"
+            }
         }
     }
     null
@@ -264,14 +260,20 @@ fun buildEmbedSuUrl(
  * Check if a URL is a directly playable stream (HLS, MP4, DASH, etc.)
  */
 fun String.isDirectPlayableStreamUrl(): Boolean {
-    val clean = substringBefore("?").substringBefore("#").lowercase()
-    return clean.endsWith(".m3u8") ||
-        clean.endsWith(".mp4") ||
-        clean.endsWith(".mpd") ||
-        clean.endsWith(".webm") ||
-        clean.endsWith(".mkv") ||
-        clean.endsWith(".mov") ||
-        clean.endsWith(".ts") ||
+    val clean = substringBefore("#").lowercase()
+    // CinePro returns proxy URLs like /v1/proxy?data={...} that proxy to real MP4/HLS.
+    // These are not direct .mp4/.m3u8 URLs but the proxy serves media content directly.
+    if (contains("/v1/proxy?") || contains("/proxy?data=")) {
+        return true
+    }
+    val stripped = clean.substringBefore("?").substringBefore("#")
+    return stripped.endsWith(".m3u8") ||
+        stripped.endsWith(".mp4") ||
+        stripped.endsWith(".mpd") ||
+        stripped.endsWith(".webm") ||
+        stripped.endsWith(".mkv") ||
+        stripped.endsWith(".mov") ||
+        stripped.endsWith(".ts") ||
         startsWith("file:", ignoreCase = true)
 }
 
