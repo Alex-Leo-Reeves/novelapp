@@ -799,7 +799,7 @@ async function fetchOpenSubtitlesTrack(context, language) {
     if (context.episode) url.searchParams.set("episode_number", String(context.episode));
 
     const payload = await fetchJson(url.toString(), { headers });
-    const results = Array.isArray(payload ? .data) ? payload.data : [];
+    const results = Array.isArray(payload?.data) ? payload.data : [];
     for (const item of results) {
         const attributes = item ? .attributes || item || {};
         const files = Array.isArray(attributes.files) ? attributes.files : [];
