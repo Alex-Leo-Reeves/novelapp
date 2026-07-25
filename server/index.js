@@ -2077,10 +2077,12 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
       // Also check nested fields
       collectSources(source, 1);
     }
-    // Deduplicate by URL
+    // Deduplicate by URL — use full URL (including query params) for proxy URLs,
+    // since each /v1/proxy?data={...} encodes a different actual stream.
     const seen = new Set();
     const deduped = results.filter(s => {
-      const key = s.url.split("?")[0];
+      const url = s.url || "";
+      const key = url.includes("/v1/proxy?data=") ? url : url.split("?")[0];
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
