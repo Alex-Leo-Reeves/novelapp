@@ -1045,12 +1045,12 @@ function stripBom(value) {
     return String(value || "").replace(/^\uFEFF/, "");
 }
 
-async function fetchJson(url, options = {}, timeoutMillis = 20000) {
+async function fetchJson(url, options = {}, timeoutMillis = 30000) {
     const text = await fetchText(url, options, timeoutMillis);
     return JSON.parse(text);
 }
 
-async function fetchText(url, options = {}, timeoutMillis = 20000) {
+async function fetchText(url, options = {}, timeoutMillis = 30000) {
     const response = await fetchWithAbort(url, options, timeoutMillis);
     const text = await response.text();
     if (!response.ok) throw new Error(text.slice(0, 180) || `HTTP ${response.status}`);
@@ -1064,7 +1064,7 @@ async function fetchBuffer(url, headers = {}, timeoutMillis = 25000) {
     return bytes;
 }
 
-async function fetchWithAbort(url, options = {}, timeoutMillis = 20000) {
+async function fetchWithAbort(url, options = {}, timeoutMillis = 30000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMillis);
     try {
@@ -1975,7 +1975,7 @@ async function cineProviderRoute(mediaType, id, season = "1", episode = "1") {
   console.warn("[cineProviderRoute] Fetching:", endpoint);
   const payload = await fetchWithTimeout(endpoint, {
     headers: { accept: "application/json" }
-  }, 20000).catch((err) => {
+  }, 90000).catch((err) => {  // 90s for CinePro cold start
     console.warn("[cineProviderRoute] Failed:", err.message || err);
     return null;
   });
@@ -2012,7 +2012,7 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
   try {
     const payload = await fetchWithTimeout(endpoint, {
       headers: { accept: "application/json" }
-    }, 20000);
+    }, 90000); // 90s for CinePro cold start
     console.warn("[cineproAllSources] Response keys:", Object.keys(payload || {}), "sources:", Array.isArray(payload?.sources) ? payload.sources.length : 0);
     const sources = Array.isArray(payload?.sources) ? payload.sources : [];
     const subtitles = Array.isArray(payload?.subtitles) ? payload.subtitles : [];
@@ -4182,7 +4182,7 @@ ensurePremiumSeedUser()
       // don't hit cold-start delays when streaming.
       const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
       const KEEPALIVE_TARGETS = [
-        { url: CINEPRO_BASE_URL + "/health", label: "CinePro Health" },
+        { url: CINEPRO_BASE_URL + "/v1/movies/550?platform=web", label: "CinePro Movies" },
         { url: CINEPRO_BASE_URL + "/v1/movies/550?platform=web", label: "CinePro Movies" }
       ].filter(t => t.url.startsWith("http"));
 
