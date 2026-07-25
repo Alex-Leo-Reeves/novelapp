@@ -1,4 +1,3 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://novelapp1.onrender.com/sitemap.xml
