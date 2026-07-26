@@ -6,10 +6,8 @@
     "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Production hardening: session restore 8s timeout, download force-saves with save dialog, USB disk space parsing fix (wmic CSV column ordering), window placement persistence with min 800x600",
-        "New: one-time promo code mike123123 for 1-month free access in subscription screen",
-        "EPIPE/ECONNRESET filtered from crash logs, flush-on-write after every user/approve/delete operation",
-        "Folder upload sends paths as JSON array fixing multer field overwrite"
+
+        "improved mediaing"
     ],
     "forceUpdate": false,
     "apkBytes": 193123325,
