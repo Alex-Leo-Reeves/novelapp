@@ -42,7 +42,10 @@ enum class StreamServer(
     CINEPRO(
         "Server 4 (Auto-Link)",
         4,
-        { _, _, _, _ -> "" }
+        { id, type, s, e ->
+            if (type == "movie") "https://vidlink.pro/movie/$id"
+            else "https://vidlink.pro/tv/$id/$s/$e"
+        }
     ),
     VIDLINK_EXO(
         "Server 5 (ExoPlayer)",
@@ -51,14 +54,38 @@ enum class StreamServer(
             if (type == "movie") "https://vidlink.pro/movie/$id"
             else "https://vidlink.pro/tv/$id/$s/$e"
         }
+    ),
+    MULTI_EMBED(
+        "Server 6 (MultiEmbed)",
+        6,
+        { id, type, s, e ->
+            if (type == "movie") "https://multiembed.mov/?video_id=$id&tmdb=1"
+            else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e"
+        }
+    ),
+    AUTOEMBED(
+        "Server 7 (AutoEmbed)",
+        7,
+        { id, type, s, e ->
+            if (type == "movie") "https://player.autoembed.cc/embed/movie/$id"
+            else "https://player.autoembed.cc/embed/tv/$id/$s/$e"
+        }
+    ),
+    EMBEDSU(
+        "Server 8 (EmbedSu)",
+        8,
+        { id, type, s, e ->
+            if (type == "movie") "https://embed.su/embed/movie/$id"
+            else "https://embed.su/embed/tv/$id/$s/$e"
+        }
     );
 
     companion object {
         /** All servers in display order */
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
-        /** WebView servers that load the embed directly (Servers 1-4) */
-        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC, NONTONGO, CINEPRO)
+        /** WebView servers that load the embed directly (Servers 1-4, 6, 7, 8) */
+        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC, NONTONGO, CINEPRO, MULTI_EMBED, AUTOEMBED, EMBEDSU)
 
         /** ExoPlayer servers that scrape the embed for a direct stream (Server 5) */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)
@@ -75,11 +102,9 @@ enum class DonghuaServer(
     val providerName: String,
     val serverOrder: Int
 ) {
-    DONGHUA_STREAM("Server 1", "DonghuaStream", 1),
-    LUCIFER_DONGHUA("Server 2", "Lucifer Donghua", 2),
-    TWOEMBED("Server 3", "2embed (Exo)", 3),
-    CINEPRO("Server 4", "CinePro", 4),
-    LUCIFER_EXO("Server 5", "Lucifer Exo", 5);
+    NONTONGO("Server 1", "Nontongo", 1),
+    AUTOEMBED("Server 2", "AutoEmbed (Donghua & TMDB)", 2),
+    DONGHUA_STREAM("Server 3", "DonghuaStream", 3);
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }

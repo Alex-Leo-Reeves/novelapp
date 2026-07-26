@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,48 +29,48 @@ import com.alexleoreeves.novelapp.BottomTab
 //  Theme: Neon Black & Blue
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Ultra-vibrant background gradient (Neon Blue → Deep Black)
+// Modern Studio background gradient (Deep Obsidian Navy → Studio Black)
 val GlassBackgroundBrush = Brush.verticalGradient(
     colors = listOf(
-        Color(0xFF0A1628), // Deep navy
-        Color(0xFF000000)  // Pure black
+        Color(0xFF0F111A), // Studio Navy
+        Color(0xFF08090D)  // Studio Black
     )
 )
 
 // Dark translucent overlay
-val GlassOverlayColor = Color(0xFF0D0D0D).copy(alpha = 0.6f)
+val GlassOverlayColor = Color(0xFF090A0E).copy(alpha = 0.82f)
 
-// Card glass fill — vertical gradient: top bright, bottom dim
+// Card glass fill — modern elevated dark card gradient
 fun glassCardBrush(): Brush = Brush.verticalGradient(
     colors = listOf(
-        Color.White.copy(alpha = 0.08f),
-        Color.White.copy(alpha = 0.02f)
+        Color(0xFF1C1F2B).copy(alpha = 0.55f),
+        Color(0xFF11131B).copy(alpha = 0.45f)
     )
 )
 
-// Card edge stroke — diagonal: top-left bright, bottom-right transparent
+// Card edge stroke — sleek subtle border
 fun glassBorderBrush(width: Float, height: Float): Brush = Brush.linearGradient(
     start = Offset(0f, 0f),
     end = Offset(width, height),
     colors = listOf(
-        Color.White.copy(alpha = 0.25f),
+        Color.White.copy(alpha = 0.18f),
         Color.Transparent
     )
 )
 
 // Shimmer placeholder color
-val GlassShimmerColor = Color.White.copy(alpha = 0.04f)
+val GlassShimmerColor = Color.White.copy(alpha = 0.05f)
 
-// Bottom bar background
-val GlassBottomBarColor = Color.White.copy(alpha = 0.06f)
+// Bottom bar background — sleek studio dark surface
+val GlassBottomBarColor = Color(0xFF10121A).copy(alpha = 0.94f)
 
 // Card corner radius
-val GlassCardShape = RoundedCornerShape(28.dp)
-val GlassImageShape = RoundedCornerShape(16.dp)
+val GlassCardShape = RoundedCornerShape(20.dp)
+val GlassImageShape = RoundedCornerShape(14.dp)
 val GlassChipShape = RoundedCornerShape(20.dp)
 val GlassPillShape = RoundedCornerShape(50)
 
-// Neon glow accent — Blue instead of Magenta
+// Modern vibrant accents (Neon Cyan & Electric Azure)
 val NeonBlue = Color(0xFF00BFFF)
 val NeonCyan = Color(0xFF00E5FF)
 val NeonDeepBlue = Color(0xFF1565C0)
@@ -363,35 +364,35 @@ fun GlassBottomBar(
             GlassBottomNavItem(
                 tab = BottomTab.DISCOVER,
                 label = "Discover",
-                icon = Icons.Filled.PlayCircle,
+                icon = Icons.Rounded.PlayCircle,
                 isSelected = currentTab == BottomTab.DISCOVER,
                 onClick = { onTabSelected(BottomTab.DISCOVER) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.NMC,
                 label = "NMC",
-                icon = Icons.Filled.Book,
+                icon = Icons.Rounded.AutoStories,
                 isSelected = currentTab == BottomTab.NMC,
                 onClick = { onTabSelected(BottomTab.NMC) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.SPORTS,
                 label = "Sports",
-                icon = Icons.Filled.EmojiEvents,
+                icon = Icons.Rounded.EmojiEvents,
                 isSelected = currentTab == BottomTab.SPORTS,
                 onClick = { onTabSelected(BottomTab.SPORTS) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.READ,
                 label = "Read",
-                icon = Icons.Filled.MenuBook,
+                icon = Icons.Rounded.MenuBook,
                 isSelected = currentTab == BottomTab.READ,
                 onClick = { onTabSelected(BottomTab.READ) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.YOU,
                 label = "You",
-                icon = Icons.Filled.Person,
+                icon = Icons.Rounded.Person,
                 isSelected = currentTab == BottomTab.YOU,
                 onClick = { onTabSelected(BottomTab.YOU) }
             )

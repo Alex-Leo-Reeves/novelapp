@@ -5,6 +5,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 @Serializable
 data class AppUpdateManifest(
@@ -18,11 +20,11 @@ data class AppUpdateManifest(
 ) {
     val isAvailable: Boolean
         get() = versionCode > AppReleaseConfig.CURRENT_VERSION_CODE
-                && versionCode > 0
-                && versionName != AppReleaseConfig.CURRENT_VERSION_NAME
 }
 
 suspend fun fetchAppUpdateManifest(client: HttpClient): AppUpdateManifest? =
     runCatching {
-        client.get(AppReleaseConfig.UPDATE_MANIFEST_URL).body<AppUpdateManifest>()
+        val response = client.get(AppReleaseConfig.UPDATE_MANIFEST_URL).body<String>()
+        Json { ignoreUnknownKeys = true; isLenient = true }
+            .decodeFromString<AppUpdateManifest>(response)
     }.getOrNull()

@@ -16,6 +16,9 @@
 #  NOTE: AppReleaseConfig.kt is NOT updated manually anymore — it now
 #  derives CURRENT_VERSION_CODE / CURRENT_VERSION_NAME from PlatformAppVersion
 #  at runtime, so those values are always the actual compiled version.
+#  The GitHub Release URLs in AppReleaseConfig.kt and site/app-version.json are
+#  permanent channel URLs. Upload replacement binaries to those release assets;
+#  do not rewrite the URLs for routine version bumps.
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -107,5 +110,6 @@ echo ""
 echo "Next steps:"
 echo "  1. Verify with:    git diff --stat"
 echo "  2. Edit release notes in  site/app-version.json"
+echo "     Keep apkUrl/tvApkUrl/desktopUrl fixed; update bytes/hash after upload"
 echo "  3. Build:          cd composeApp && ./gradlew assembleRelease"
 echo "  4. Commit:         git add -A && git commit -m \"Bump to v$VN\""

@@ -64,8 +64,17 @@ private val TvPagePadding = PaddingValues(start = 32.dp, top = 28.dp, end = 32.d
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun TvApp() {
+    val context = LocalContext.current
+    val searchRepo = remember { 
+        com.alexleoreeves.novelapp.data.NovelSearchRepository(
+            rapidApiKey = "test",
+            rapidApiHost = "test"
+        )
+    }
+    
     var showSplash by remember { mutableStateOf(true) }
     var selectedMedia by remember { mutableStateOf<TvMediaItem?>(null) }
+    var selectedSearchResult by remember { mutableStateOf<com.alexleoreeves.novelapp.data.UnifiedSearchResult?>(null) }
     var animeStreamUrl by remember { mutableStateOf<String?>(null) }
     var animeTitle by remember { mutableStateOf("") }
     
@@ -137,6 +146,39 @@ fun TvApp() {
                         activeViewerTitle = title
                     },
                     onBack = { selectedMedia = null }
+                )
+                selectedSearchResult != null -> {
+                    // Quick map UnifiedSearchResult to TvMediaItem for details view
+                    val res = selectedSearchResult!!
+                    val mapped = TvMediaItem(
+                        id = res.id,
+                        title = res.title,
+                        coverUrl = res.coverUrl,
+                        description = res.description,
+                        genres = listOf(res.mediaKind),
+                        format = if (res.mediaKind.equals("ANIME", ignoreCase=true) || res.mediaKind.equals("DONGHUA", ignoreCase=true)) "ANIME" else if (res.mediaKind.equals("MANGA", ignoreCase=true)) "MANGA" else "NOVEL"
+                    )
+                    TvDetailScreen(
+                        media = mapped,
+                        onPlayEpisode = { url, title -> 
+                            animeStreamUrl = url
+                            animeTitle = title 
+                        },
+                        onReadNovel = { text, title ->
+                            activeChapterText = text
+                            activeViewerTitle = title
+                        },
+                        onReadManga = { pages, title ->
+                            activeMangaPages = pages
+                            activeViewerTitle = title
+                        },
+                        onBack = { selectedSearchResult = null }
+                    )
+                }
+                currentSection == TvSection.SEARCH -> com.alexleoreeves.novelapp.tv.ui.TvSearchScreen(
+                    searchRepo = searchRepo,
+                    onMediaSelected = { selectedSearchResult = it },
+                    onBack = { currentSection = TvSection.ANIME }
                 )
                 currentSection == TvSection.ANIME -> TvMediaHomeScreen(
                     format = "ANIME",
@@ -315,6 +357,7 @@ enum class TvSection(val label: String, val icon: ImageVector, val group: String
     MOVIES("Movies", Icons.Default.Movie, "Watch"),
     NOLLYWOOD("Nollywood", Icons.Default.Flag, "Watch"),
     SPORTS("Sports", Icons.Default.SportsEsports, "Watch"),
+    SEARCH("Search", Icons.Default.Search, "Discover"),
     MANGA("Manga", Icons.Default.Collections, "Read"),
     NOVELS("Novels", Icons.Default.AutoStories, "Read"),
     DOWNLOADS("Downloads", Icons.Default.Download, "Library")

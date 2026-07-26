@@ -37,6 +37,16 @@ fun App(
     val scope = rememberCoroutineScope()
 
     var account by remember { mutableStateOf<SavedUserAccount?>(null) }
+    
+    // Profiles
+    val activeProfiles = remember(account) {
+        val baseName = account?.username.orEmpty().ifBlank { "Main User" }
+        mutableStateListOf(
+            UserProfile(id = "main", name = baseName, isKids = false, avatarColorIndex = 1),
+            UserProfile(id = "kids", name = "Kids", isKids = true, avatarColorIndex = 3)
+        )
+    }
+    var selectedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isAuthChecked by remember { mutableStateOf(false) }
     var isGuestSession by remember { mutableStateOf(false) }
     var isAuthSubmitting by remember { mutableStateOf(false) }
@@ -253,6 +263,19 @@ fun App(
             return@NovelAppTheme
         }
 
+        // Profile Selection Screen
+        if (selectedProfile == null) {
+            ProfileSelectionScreen(
+                currentTheme = appTheme.value,
+                profiles = activeProfiles,
+                onSelectProfile = { selectedProfile = it },
+                onCreateProfile = { name, isKids, colorIdx ->
+                    activeProfiles.add(UserProfile(id = "p_${activeProfiles.size + 1}", name = name, isKids = isKids, avatarColorIndex = colorIdx))
+                }
+            )
+            return@NovelAppTheme
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             GlassBackground()
 
@@ -353,6 +376,7 @@ fun App(
                             when (currentTab.value) {
                                 BottomTab.DISCOVER -> DiscoverHomeScreen(
                                     currentTheme = appTheme.value, downloadRepo = downloadRepo,
+                                    isKidsMode = selectedProfile?.isKids == true,
                                     onNovelSelected = { i ->
                                         if (i.isVideo && i.mediaKind == VideoCategory.NIGERIAN.name) {
                                             // YouTube Nollywood: resolve via Piped and play directly in ExoPlayer
@@ -425,6 +449,7 @@ fun App(
                                             if (fav != null) favorites.remove(fav) else favorites.add(f)
                                             queueCloudSync()
                                         },
+                                        onSwitchProfile = { selectedProfile = null },
                                         onSubscribePlan = { planId -> beginPremiumCheckout(planId) },
                                         onSignOut = {
                                             scope.launch {

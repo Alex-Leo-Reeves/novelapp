@@ -5,20 +5,20 @@ Place release builds here before deploying the site:
 ```text
 site/downloads/novelapp-android.apk
 site/downloads/novelapp-ios.ipa
-site/downloads/novelapp-tv.apk
-site/downloads/novelapp-windows.msi
+site/downloads/novelapp-androidtv.apk
+site/downloads/novelapp-android.exe
 ```
 
 The Android website download button and in-app update checker point to:
 
 ```text
-https://novelapp1.onrender.com/downloads/novelapp-android.apk
+https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk
 ```
 
 The TV website download button points to:
 
 ```text
-https://novelapp1.onrender.com/downloads/novelapp-tv.apk
+https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk
 ```
 
 The iPhone website download button points to the current unsigned IPA artifact:
@@ -27,8 +27,8 @@ The iPhone website download button points to the current unsigned IPA artifact:
 https://novelapp1.onrender.com/downloads/novelapp-ios.ipa
 ```
 
-The Windows website download button points to:
+The Windows/software website download button points to:
 
 ```text
-https://novelapp1.onrender.com/downloads/novelapp-windows.msi
+https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe
 ```

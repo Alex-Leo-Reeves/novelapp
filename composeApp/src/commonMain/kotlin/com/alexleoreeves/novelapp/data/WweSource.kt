@@ -397,9 +397,33 @@ class WweSource(private val httpClient: HttpClient) {
         val embedUrls = resolveEmbedUrls(eventId, eventTitle)
         if (embedUrls.isNotEmpty()) return WweStreamResult.Embed(embedUrls.first())
 
-        // Last resort: return the watchwrestling page itself as an embed
+        // Last resort: scrape watchwrestling page to extract the actual iframe player
         val pageUrl = eventId.replace("_", "/").let { "https://$it" }.takeIf { it.startsWith("https://") }
-        return if (pageUrl != null) WweStreamResult.Embed(pageUrl) else null
+        if (pageUrl != null) {
+            val html = runCatching { httpClient.get(pageUrl).bodyAsText() }.getOrDefault("")
+            if (html.isNotBlank()) {
+                val doc = Ksoup.parse(html)
+                // Look for iframes (doodstream, vidmoly, streamtape, etc.)
+                val iframeSrc = doc.select("iframe").map { it.attr("src") }.firstOrNull { src ->
+                    src.contains("dood") || src.contains("vidmoly") || src.contains("streamtape") || 
+                    src.contains("netu") || src.contains("dailymotion") || src.contains("embed")
+                }
+                if (!iframeSrc.isNullOrBlank()) {
+                    val finalSrc = if (iframeSrc.startsWith("//")) "https:$iframeSrc" else iframeSrc
+                    return WweStreamResult.Embed(finalSrc)
+                }
+                
+                // Sometimes links are in buttons
+                val buttonLink = doc.select("a.external-link, a.watch-link").map { it.attr("href") }.firstOrNull { src ->
+                    src.contains("dood") || src.contains("vidmoly") || src.contains("streamtape")
+                }
+                if (!buttonLink.isNullOrBlank()) {
+                    return WweStreamResult.Embed(buttonLink)
+                }
+            }
+        }
+        
+        return null
     }
 
     suspend fun resolveStreamUrl(eventId: String): String? {

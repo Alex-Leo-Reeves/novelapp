@@ -18,22 +18,29 @@ actual class MangaOcrReader actual constructor() {
 
     private val httpClient = HttpClient()
 
-    private val recognizers = listOf(
-        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS),
-        TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build()),
-        TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-    )
+    private val recognizers by lazy {
+        listOf(
+            TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS),
+            TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build()),
+            TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+        )
+    }
 
     actual suspend fun recognizeTextFromUrl(imageUrl: String): List<OcrTextPanel> = withContext(Dispatchers.IO) {
         try {
-            val response = httpClient.get(imageUrl) {
-                header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Mobile Safari/537.36"
-                )
-                header("Referer", imageUrl.substringBeforeLast("/", missingDelimiterValue = imageUrl))
-            }.readBytes()
-            val bitmap = BitmapFactory.decodeByteArray(response, 0, response.size) ?: return@withContext emptyList()
+            val bitmap = if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+                val response = httpClient.get(imageUrl) {
+                    header(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Mobile Safari/537.36"
+                    )
+                    header("Referer", imageUrl.substringBeforeLast("/", missingDelimiterValue = imageUrl))
+                }.readBytes()
+                BitmapFactory.decodeByteArray(response, 0, response.size)
+            } else {
+                val path = imageUrl.removePrefix("file://")
+                BitmapFactory.decodeFile(path)
+            } ?: return@withContext emptyList()
 
             val inputImage = InputImage.fromBitmap(bitmap, 0)
             val panels = recognizers.flatMap { recognizer ->

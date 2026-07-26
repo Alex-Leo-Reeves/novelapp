@@ -13,36 +13,36 @@ import com.alexleoreeves.novelapp.data.AppTheme
 // ─────────────────────────────────────────────────────────────────────────────
 object NovelColors {
     // Neon Black — pure dark with blue accents (default)
-    val darkBackground     = Color(0xFF000000)
-    val darkSurface        = Color(0xFF050505)
-    val darkCard           = Color(0xFF0F1923)
+    val darkBackground     = Color(0xFF0A0C10) // Premium Studio Black
+    val darkSurface        = Color(0xFF13151A)
+    val darkCard           = Color(0xFF1C1E26)
     val darkAccent         = Color(0xFF00BFFF)
     val darkAccentGlow     = Color(0xFF00E5FF)
     val darkText           = Color(0xFFF3F3F3)
     val darkSubText        = Color(0xFF8A9BB5)
 
     // Cyber Black — same base, cyan-blue accents
-    val pinkBackground     = Color(0xFF000000)
-    val pinkSurface        = Color(0xFF050A0F)
-    val pinkCard           = Color(0xFF0F1A26)
+    val pinkBackground     = Color(0xFF08090C)
+    val pinkSurface        = Color(0xFF101217)
+    val pinkCard           = Color(0xFF181A22)
     val pinkAccent         = Color(0xFF00BFFF)
     val pinkAccentGlow     = Color(0xFF00E5FF)
     val pinkText           = Color(0xFFF0F6FF)
     val pinkSubText        = Color(0xFF8A9BB5)
 
     // Deep Blue — darker with deeper blue accents
-    val lavenderBackground = Color(0xFF000000)
-    val lavenderSurface    = Color(0xFF05080F)
-    val lavenderCard       = Color(0xFF0A1428)
+    val lavenderBackground = Color(0xFF05080F)
+    val lavenderSurface    = Color(0xFF0C121E)
+    val lavenderCard       = Color(0xFF141C2B)
     val lavenderAccent     = Color(0xFF2196F3)
     val lavenderMint       = Color(0xFF03DAC6)
     val lavenderText       = Color(0xFFEDF2FF)
     val lavenderSubText    = Color(0xFF7A9BFF)
 
     // Electric Black — slightly different blue accent
-    val greenBackground    = Color(0xFF000000)
-    val greenSurface       = Color(0xFF050808)
-    val greenCard          = Color(0xFF0C1A1A)
+    val greenBackground    = Color(0xFF070909)
+    val greenSurface       = Color(0xFF0E1313)
+    val greenCard          = Color(0xFF151D1D)
     val greenAccent        = Color(0xFF00BCD4)
     val greenText          = Color(0xFFECFDF5)
     val greenSubText       = Color(0xFF6EE7B7)

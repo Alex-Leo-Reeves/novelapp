@@ -8,5 +8,12 @@ import io.ktor.client.engine.okhttp.OkHttp
 actual fun platformHttpClient(
     block: HttpClientConfig<out HttpClientEngineConfig>.() -> Unit
 ): HttpClient = HttpClient(OkHttp) {
+    engine {
+        config {
+            connectTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
     block()
 }

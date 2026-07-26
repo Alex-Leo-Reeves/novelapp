@@ -1,11 +1,13 @@
 {
-    "versionCode": 39,
-    "versionName": "1.39",
+    "versionCode": 40,
+    "versionName": "1.40",
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
+    "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
+    "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "Fixed in-app update download failure (Render cold-start timeout + CDN byte-count mismatch)",
-        "In-app update will now skip SHA-256 check when manifest fetch times out and rely on Android package manager verification"
+        "Bumped the Android app to version 1.40",
+        "Locked Android, Android TV, and software downloads to permanent GitHub Release channel links"
     ],
     "forceUpdate": false,
     "apkBytes": 192497865,

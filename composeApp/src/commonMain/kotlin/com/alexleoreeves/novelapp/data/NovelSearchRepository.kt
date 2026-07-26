@@ -313,7 +313,7 @@ class NovelSearchRepository(
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
                 .rankedNovelResults("")
-                .take(48)
+                .take(100)
         }
     }
 
@@ -335,7 +335,7 @@ class NovelSearchRepository(
                 .flatten()
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
-                .take(48)
+                .take(100)
         }
     }
 
@@ -386,7 +386,7 @@ class NovelSearchRepository(
                     println("[Video Feed] NIGERIAN: Using curated seeds (${seeds.size})")
                     results.addAll(seeds)
                 }
-                return@cachedFeed results.distinctBy { it.id }.take(48)
+                return@cachedFeed results.distinctBy { it.id }.take(100)
             }
 
             // Source 1: Client-side TMDB (always has fallback API key)
@@ -451,7 +451,7 @@ class NovelSearchRepository(
             }
 
             results.distinctBy { it.id }
-                .take(48)
+                .take(100)
         }
 
     suspend fun searchVideo(category: VideoCategory, query: String, page: Int = 1): List<UnifiedSearchResult> =
@@ -464,7 +464,7 @@ class NovelSearchRepository(
                 val youtubeNollywood = youtubeNollywoodScraper.search(query, page)
                 println("[Video Search] NIGERIAN: YouTube Nollywood returned ${youtubeNollywood.size} items for '$query'")
                 results.addAll(youtubeNollywood.map { it.toYouTubeNollywoodVideo() })
-                return@cachedFeed results.distinctBy { it.id }.take(48)
+                return@cachedFeed results.distinctBy { it.id }.take(100)
             }
 
             // ── Source 1: Client-side TMDB search (type-specific), search pages 1-3 ──
@@ -558,7 +558,7 @@ class NovelSearchRepository(
             }
 
             results.distinctBy { it.id }
-                .take(48)
+                .take(100)
         }
 
     /**
@@ -1128,7 +1128,7 @@ class NovelSearchRepository(
             (categoryResults + searchResults)
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
-                .take(48)
+                .take(100)
         }
     }
 

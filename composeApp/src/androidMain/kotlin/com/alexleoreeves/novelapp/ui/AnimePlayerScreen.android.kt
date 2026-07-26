@@ -223,6 +223,8 @@ actual fun AnimePlayerScreen(
             val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent(PLAYER_USER_AGENT)
                 .setDefaultRequestProperties(requestHeaders)
+                .setConnectTimeoutMs(30_000)
+                .setReadTimeoutMs(30_000)
             val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
             val loadControl = DefaultLoadControl.Builder()
                 .setBufferDurationsMs(32_000, 64_000, 1_000, 1_500)
@@ -825,6 +827,8 @@ private fun formatMs(ms: Long): String {
 
 private fun String.isDirectPlayableMediaUrl(): Boolean {
     val fullLower = lowercase()
+    if (fullLower.contains("/v1/proxy?data=")) return true
+
     val clean = substringBefore("?").substringBefore("#").lowercase()
 
     // Standard extension-based check (strict — path only, no query params)

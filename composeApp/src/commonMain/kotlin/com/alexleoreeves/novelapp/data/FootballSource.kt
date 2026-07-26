@@ -131,26 +131,37 @@ class FootballApiSource(private val httpClient: HttpClient) {
         // Build a direct embed URL using the fixture ID when available.
         val embedUrls = mutableListOf<String>()
 
-        // Server 1: ScoreBat with team search — shows match-specific highlights
-        val searchQuery = buildString {
-            if (homeTeam.isNotBlank()) append(homeTeam.take(20).replace(" ", "+"))
-            if (awayTeam.isNotBlank()) {
-                if (isNotEmpty()) append("+vs+")
-                append(awayTeam.take(20).replace(" ", "+"))
+        // Server 1: Scorebat Direct Match API (Exact Match)
+        val scorebatUrl = runCatching {
+            val feed = httpClient.get("https://www.scorebat.com/video-api/v3/feed/").bodyAsText()
+            val root = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.parseToJsonElement(feed).jsonObject
+            val matches = root["response"]?.jsonArray
+            val exactMatch = matches?.firstOrNull { el ->
+                val title = el.jsonObject["title"]?.jsonPrimitive?.content ?: ""
+                homeTeam.isNotBlank() && title.contains(homeTeam, ignoreCase = true) && 
+                awayTeam.isNotBlank() && title.contains(awayTeam, ignoreCase = true)
+            }
+            exactMatch?.jsonObject?.get("matchviewUrl")?.jsonPrimitive?.content
+        }.getOrNull()
+        
+        if (!scorebatUrl.isNullOrBlank()) {
+            embedUrls.add(scorebatUrl)
+        } else {
+            // Server 2: ScoreBat Widget with search fallback
+            val searchQuery = buildString {
+                if (homeTeam.isNotBlank()) append(homeTeam.take(20).replace(" ", "+"))
+                if (awayTeam.isNotBlank()) {
+                    if (isNotEmpty()) append("+vs+")
+                    append(awayTeam.take(20).replace(" ", "+"))
+                }
+            }
+            if (searchQuery.isNotBlank()) {
+                embedUrls.add("https://www.scorebat.com/embed/livescore/?search=$searchQuery")
             }
         }
-        if (searchQuery.isNotBlank()) {
-            embedUrls.add("https://www.scorebat.com/embed/livescore/?search=$searchQuery")
-        }
 
-        // Server 2: Generic ScoreBat embed (fallback — shows whatever is featured)
+        // Server 3: Generic ScoreBat embed (fallback — shows whatever is featured)
         embedUrls.add("https://www.scorebat.com/embed/")
-
-        // Server 3: Footybite direct match search
-        embedUrls.add("https://footybite.to/?s=$searchQuery".takeIf { searchQuery.isNotBlank() } ?: "https://footybite.to/")
-
-        // Server 4: SportSurge
-        embedUrls.add("https://v2.sportsurge.net/search?query=$searchQuery".takeIf { searchQuery.isNotBlank() } ?: "https://v2.sportsurge.net/")
 
         return embedUrls.distinct()
     }
@@ -296,8 +307,9 @@ class FootballApiSource(private val httpClient: HttpClient) {
                 val leagueLogo = leagueObj?.get("logos")?.jsonArray?.firstOrNull()?.jsonObject?.get("href")?.jsonPrimitive?.content ?: ""
 
                 val matchTimeStr = runCatching {
-                    dateIso.substringAfter("T").substringBefore("Z").take(5)
-                }.getOrDefault("00:00")
+                    val rawTime = dateIso.substringAfter("T").substringBefore("Z").take(5)
+                    "$rawTime UTC"
+                }.getOrDefault("00:00 UTC")
 
                 FootballMatch(
                     fixtureId = id,

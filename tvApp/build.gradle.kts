@@ -32,8 +32,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp.tv"
         minSdk = 21    // Android TV minimum
         targetSdk = 35
-        versionCode = 38
-        versionName = "1.38"
+        versionCode = 40
+        versionName = "1.40"
     }
 
     buildTypes {
@@ -79,6 +79,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":composeApp"))
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui:1.7.5")
     implementation("androidx.compose.material3:material3:1.3.1")

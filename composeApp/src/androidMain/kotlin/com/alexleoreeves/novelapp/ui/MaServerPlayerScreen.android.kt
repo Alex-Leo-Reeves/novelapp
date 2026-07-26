@@ -11,6 +11,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
+import android.webkit.CookieManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -141,10 +142,10 @@ actual fun MaServerPlayerScreen(
     // ── Stabilization timer: enforce minimum 8s in STABILIZING ────────
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.STABILIZING) {
-            phaseMessage = "Stabilizing player... (8s)"
-            // Wait the full 8 seconds minimum
-            delay(8_000L)
-            // After 8s, check current state and advance to READY
+            phaseMessage = "Stabilizing player... (3s)"
+            // Wait the full 3 seconds minimum
+            delay(3_000L)
+            // After 3s, check current state and advance to READY
             // (unless we already got pushed to STUCK)
             if (playerPhase == PlayerPhase.STABILIZING) {
                 playerPhase = PlayerPhase.READY
@@ -220,6 +221,9 @@ actual fun MaServerPlayerScreen(
                         }
                     }
                     setBackgroundColor(android.graphics.Color.BLACK)
+                    
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
@@ -228,6 +232,36 @@ actual fun MaServerPlayerScreen(
                         ): Boolean {
                             val url = request?.url?.toString() ?: return false
                             val lowerUrl = url.lowercase()
+
+                            // Block third-party main-frame navigations (e.g., popunders that try to hijack the WebView)
+                            if (request.isForMainFrame) {
+                                val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") || 
+                                                    embedUrl.contains("footybite") || embedUrl.contains("sportsurge") || 
+                                                    embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
+                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su")
+                                
+                                // ALWAYS allow Cloudflare challenge pages to proceed
+                                val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
+                                if (isCloudflare) return false
+                                
+                                // If the page has already loaded (STABILIZING or READY), block ALL top-level navigations
+                                // EXCEPT if we are on a wrapper/router site or the URL contains "embed"
+                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !request.url.toString().contains("embed")) {
+                                    return true // Block click-triggered navigations completely
+                                }
+
+                                val reqHost = request.url?.host?.lowercase() ?: ""
+                                val embedHost = android.net.Uri.parse(embedUrl).host?.lowercase() ?: ""
+                                if (reqHost.isNotEmpty() && embedHost.isNotEmpty()) {
+                                    val isSameDomain = reqHost == embedHost || 
+                                                       reqHost.endsWith(".$embedHost") || 
+                                                       embedHost.endsWith(".$reqHost")
+                                    // If we are on a wrapper site or Router Embed (which routes to other providers), allow cross-domain
+                                    if (!isSameDomain && !isWrapperSite && !isRouterEmbed) {
+                                        return true // Block navigation
+                                    }
+                                }
+                            }
 
                             // Allow all HTTPS URLs — only block known ad/tracker domains
                             val blockedDomains = listOf(
@@ -244,7 +278,7 @@ actual fun MaServerPlayerScreen(
                                 "securepubads.g.doubleclick.net", "adservice.google.com",
                                 "ad.doubleclick.net", "cm.g.doubleclick.net",
                                 "popup", "/pop.js", "/popunder", "/ad.js",
-                                "analytics.", "track.",
+                                "/analytics.", "/track.",
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
                                 "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
                             )
@@ -271,25 +305,34 @@ actual fun MaServerPlayerScreen(
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // Transition from LOADING → STABILIZING
-                            if (playerPhase == PlayerPhase.LOADING || playerPhase == PlayerPhase.READY) {
-                                playerPhase = PlayerPhase.STABILIZING
-                                phaseMessage = "Stabilizing player... (8s)"
-                            }
-
                             webViewRef = view
+                            // Transition from LOADING → STABILIZING or READY
+                            if (playerPhase == PlayerPhase.LOADING || playerPhase == PlayerPhase.READY) {
+                                val currentUrl = url?.lowercase() ?: ""
+                                
+                                // If this is a Cloudflare challenge page, skip ALL overlays so user can interact with captcha
+                                if (currentUrl.contains("challenges.cloudflare.com") || currentUrl.contains("/cdn-cgi/")) {
+                                    playerPhase = PlayerPhase.READY
+                                    phaseMessage = ""
+                                    return
+                                }
+                                
+                                if (currentUrl.contains("multiembed") || currentUrl.contains("nontongo") || currentUrl.contains("autoembed") || currentUrl.contains("embed.su")) {
+                                    // Skip heavy stabilization for MultiEmbed, AutoEmbed, EmbedSu, and Nontongo
+                                    playerPhase = PlayerPhase.READY
+                                    phaseMessage = ""
+                                    view?.evaluateJavascript(INLINE_VIDEO_JS, null)
+                                } else {
+                                    playerPhase = PlayerPhase.STABILIZING
+                                    phaseMessage = "Stabilizing player... (3s)"
 
-                            // ── Inject stabilization JavaScript ────────
-                            // This JS:
-                            // 1. Forces all current and future videos to muted + playsinline
-                            // 2. Suppresses rapid play/pause calls (3-second debounce)
-                            // 3. Suppresses rapid mute/unmute calls
-                            // 4. Blocks autoplay attempts
-                            // 5. Polls for video elements with valid src
-                            view?.evaluateJavascript(STABILIZATION_START_JS, null)
-
-                            // Also inject the inline-forcing JS that was already present
-                            view?.evaluateJavascript(INLINE_VIDEO_JS, null)
+                                    // ── Inject stabilization JavaScript ────────
+                                    view?.evaluateJavascript(STABILIZATION_START_JS, null)
+                                    view?.evaluateJavascript(INLINE_VIDEO_JS, null)
+                                    view?.evaluateJavascript(IFRAME_EXTRACTION_JS, null)
+                                    view?.evaluateJavascript(FULLSCREEN_CSS_JS, null)
+                                }
+                            }
                         }
 
                         override fun shouldInterceptRequest(
@@ -300,6 +343,11 @@ actual fun MaServerPlayerScreen(
                             val lowerUrl = url.lowercase()
 
                             // ── AD BLOCKING ────────────────────────────────
+                            // Whitelist Cloudflare challenge domains and router embeds
+                            if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") || lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") || lowerUrl.contains("turnstile")) {
+                                return null
+                            }
+                            
                             val adDomains = listOf(
                                 "doubleclick.net", "googlesyndication.com", "googleadservices.com",
                                 "googletagmanager.com", "googletagservices.com", "google-analytics.com",
@@ -322,7 +370,7 @@ actual fun MaServerPlayerScreen(
                                 "pubads.g.doubleclick.net", "adclick.g.doubleclick.net",
                                 "popup", "/pop.js", "/popunder", "/ad.js",
                                 "/banner", "/ads/", "/advert",
-                                "analytics.", "track.",
+                                "/analytics.", "/track.",
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
                                 "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
                             )
@@ -351,9 +399,22 @@ actual fun MaServerPlayerScreen(
                             error: android.webkit.WebResourceError?
                         ) {
                             super.onReceivedError(view, request, error)
+                            val desc = error?.description?.toString()?.lowercase() ?: ""
+                            val reqUrl = request?.url?.toString() ?: ""
+                            
+                            // Ignore aborted errors or adblocker blocks
+                            if (desc.contains("err_aborted") || desc.contains("err_blocked") || desc.contains("err_name_not_resolved") || desc.contains("err_connection_refused")) {
+                                return
+                            }
+                            
                             if (request?.isForMainFrame == true) {
-                                hasError = true
-                                phaseMessage = "Failed to load player"
+                                // Only trigger error if the URL that failed is the actual embed URL or Cloudflare
+                                // If an ad popup fails on main frame, we don't care
+                                val isRequestedHost = reqUrl == embedUrl || reqUrl.contains("cloudflare", ignoreCase = true)
+                                if (isRequestedHost) {
+                                    hasError = true
+                                    phaseMessage = "Failed to load player: $desc"
+                                }
                             }
                         }
                     }
@@ -542,13 +603,21 @@ actual fun MaServerPlayerScreen(
     // Immersive mode
     DisposableEffect(Unit) {
         activity?.window?.let { window ->
+            // Allow drawing into the notch/cutout
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
             WindowCompat.setDecorFitsSystemWindows(window, false)
             val ctrl = WindowInsetsControllerCompat(window, window.decorView)
             ctrl.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             ctrl.hide(WindowInsetsCompat.Type.systemBars())
         }
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         onDispose {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.let { window ->
                 WindowCompat.setDecorFitsSystemWindows(window, true)
                 WindowInsetsControllerCompat(window, window.decorView)
@@ -583,10 +652,10 @@ private const val MA_SERVER_USER_AGENT =
  */
 private const val STABILIZATION_START_JS = """
 (function() {
-    // Flag: are we in stabilization mode?
     window.__STABILIZING = true;
     
-    // ── 1. Force all videos muted + playsinline ────────────────────
+    // Simply ensure videos are inline and muted during stabilization.
+    // Avoid redefining properties or aggressive debouncing as that crashes bot-protected embeds like VidLink.
     function muteAllVideos() {
         document.querySelectorAll('video').forEach(v => {
             v.muted = true;
@@ -597,80 +666,23 @@ private const val STABILIZATION_START_JS = """
     }
     muteAllVideos();
     
-    // ── 2. Rapid-toggle guard for play() ──────────────────────────
-    // Debounce play() calls: no more than once per 3 seconds.
-    var _lastPlayTime = 0;
-    var _origPlay = HTMLVideoElement.prototype.play;
-    HTMLVideoElement.prototype.play = function() {
-        var now = Date.now();
-        if (now - _lastPlayTime < 3000) {
-            // Suppress rapid play calls
-            return Promise.resolve();
-        }
-        _lastPlayTime = now;
-        return _origPlay.apply(this, arguments);
-    };
-    
-    // ── 3. Rapid-toggle guard for muted setter ────────────────────
-    // Once muted is set to true by us, prevent the embed from
-    // toggling it back to false during stabilization.
-    var _origMutedDescriptor = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'muted');
-    if (_origMutedDescriptor && _origMutedDescriptor.configurable) {
-        Object.defineProperty(HTMLVideoElement.prototype, 'muted', {
-            get: function() { return _origMutedDescriptor.get.call(this); },
-            set: function(val) {
-                // If stabilization is active and we're trying to unmute,
-                // suppress it. Only the end-stabilization JS can unmute.
-                if (window.__STABILIZING && val === false) {
-                    return; // suppress unmute during stabilization
-                }
-                _origMutedDescriptor.set.call(this, val);
-            },
-            configurable: true
-        });
-    }
-    
-    // ── 4. Prevent autoplay attempts during stabilization ─────────
-    // Intercept calls to autoplay attribute setter
-    var _origAutoplayDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'autoplay');
-    if (_origAutoplayDescriptor && _origAutoplayDescriptor.configurable) {
-        Object.defineProperty(HTMLMediaElement.prototype, 'autoplay', {
-            get: function() { return _origAutoplayDescriptor.get.call(this); },
-            set: function(val) {
-                if (window.__STABILIZING && val === true) {
-                    return; // suppress autoplay during stabilization
-                }
-                _origAutoplayDescriptor.set.call(this, val);
-            },
-            configurable: true
-        });
-    }
-    
-    // ── 5. Poll for video elements ────────────────────────────────
     function pollForVideo() {
         var videos = document.querySelectorAll('video');
         for (var i = 0; i < videos.length; i++) {
             var v = videos[i];
             var src = v.src || v.currentSrc;
             if (src && src.length > 10 && (src.includes('.m3u8') || src.includes('.mp4') || src.includes('blob:') || v.readyState >= 2)) {
-                console.log('MA_PLAYER_STABLE_VIDEO_DETECTED');
                 return true;
             }
         }
         return false;
     }
     
-    // Poll every second and log when a stable video is found
     var _checkInterval = setInterval(function() {
-        if (pollForVideo()) {
-            clearInterval(_checkInterval);
-        }
+        if (pollForVideo()) clearInterval(_checkInterval);
     }, 1000);
-    
-    // Clear interval after 20s regardless
     setTimeout(function() { clearInterval(_checkInterval); }, 20000);
     
-    // ── 6. Click play buttons to ensure the embed initializes ─────
     function clickPlayButtons() {
         var selectors = [
             '.play-button', '.jw-icon-display', '.vjs-big-play-button',
@@ -684,13 +696,6 @@ private const val STABILIZATION_START_JS = """
                 if (el && el.tagName !== 'VIDEO') el.click();
             } catch(e) {}
         });
-        // Click center to dismiss overlays
-        setTimeout(function() {
-            try {
-                var centerEl = document.elementFromPoint(window.innerWidth/2, window.innerHeight/2);
-                if (centerEl) centerEl.click();
-            } catch(e) {}
-        }, 500);
     }
     clickPlayButtons();
 })();
@@ -698,34 +703,33 @@ private const val STABILIZATION_START_JS = """
 
 /**
  * JS injected when transitioning from STABILIZING → READY.
- *
- * What it does:
- * 1. Disables stabilization mode (window.__STABILIZING = false).
- * 2. Unmutes all video elements.
- * 3. Calls play() on all video elements cleanly (once).
- * 4. Removes the muted-setter guard by restoring original behavior.
  */
 private const val STABILIZATION_END_JS = """
 (function() {
-    // Disable stabilization mode
     window.__STABILIZING = false;
     
-    // Unmute and play all videos cleanly
-    document.querySelectorAll('video').forEach(function(v) {
-        // Restore muted property normally
-        try {
+    function forcePlay() {
+        var selectors = [
+            '.play-button', '.jw-icon-display', '.vjs-big-play-button',
+            '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
+            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]'
+        ];
+        selectors.forEach(function(sel) {
+            try {
+                var el = document.querySelector(sel);
+                if (el && el.tagName !== 'VIDEO') el.click();
+            } catch(e) {}
+        });
+
+        document.querySelectorAll('video').forEach(function(v) {
             v.muted = false;
-        } catch(e) {}
-        // Play cleanly
-        try {
-            v.play();
-        } catch(e) {}
-    });
-    
-    // Remove our custom muted setter override if possible
-    // by restoring the original (we can't fully undo it but
-    // setting __STABILIZING=false is enough since the setter
-    // checks that flag)
+            var p = v.play();
+            if (p) p.catch(function() {});
+        });
+    }
+
+    forcePlay();
+    setTimeout(forcePlay, 500);
 })();
 """
 
@@ -742,13 +746,100 @@ private const val INLINE_VIDEO_JS = """
             v.setAttribute('playsinline', '');
             v.setAttribute('webkit-playsinline', '');
             v.setAttribute('x-webkit-airplay', 'allow');
-            v.muted = true;
-            v.play().catch(() => {});
-            setTimeout(() => { v.muted = false; }, 200);
         });
     }
     forceInline();
     const observer = new MutationObserver(() => forceInline());
     observer.observe(document.body, { childList: true, subtree: true });
+})();
+"""
+
+/**
+ * JS injected to extract the iframe player from wrapper sites (Lucifer, DonghuaStream).
+ */
+private const val IFRAME_EXTRACTION_JS = """
+(function() {
+    var host = window.location.hostname;
+    if (host.includes('luciferdonghua') || host.includes('donghuastream')) {
+        if (window.__iframeExtracted) return;
+        
+        var attempts = 0;
+        var interval = setInterval(function() {
+            attempts++;
+            if (window.__iframeExtracted || attempts > 20) {
+                clearInterval(interval);
+                return;
+            }
+            var iframes = document.querySelectorAll('iframe');
+            for (var i = 0; i < iframes.length; i++) {
+                var src = iframes[i].src || iframes[i].dataset.src;
+                if (src && !src.includes('google') && !src.includes('facebook') && !src.includes('disqus') && !src.includes('agenteimmobiliare')) {
+                    var frame = iframes[i];
+                    window.__iframeExtracted = true;
+                    clearInterval(interval);
+                    
+                    // Instead of redirecting (which breaks referer validation),
+                    // clear the page and make the iframe fullscreen.
+                    document.body.innerHTML = '';
+                    document.body.appendChild(frame);
+                    
+                    document.body.style.margin = '0';
+                    document.body.style.padding = '0';
+                    document.body.style.overflow = 'hidden';
+                    document.body.style.backgroundColor = '#000';
+                    
+                    frame.style.position = 'fixed';
+                    frame.style.top = '0';
+                    frame.style.left = '0';
+                    frame.style.width = '100vw';
+                    frame.style.height = '100vh';
+                    frame.style.border = 'none';
+                    frame.style.zIndex = '999999';
+                    
+                    if (frame.dataset.src) {
+                        frame.src = frame.dataset.src;
+                    }
+                    
+                    return;
+                }
+            }
+        }, 500);
+    }
+})();
+"""
+
+/**
+ * CSS injected to turn full webpages (like Lucifer Donghua / DonghuaStream)
+ * into fullscreen video players by hiding headers/footers and forcing the player container to fill the screen.
+ */
+private const val FULLSCREEN_CSS_JS = """
+(function() {
+    var host = window.location.hostname;
+    // Don't apply to known embed providers like multiembed, vidsrc, etc.
+    if (!host.includes('luciferdonghua') && !host.includes('donghuastream')) {
+        return;
+    }
+    
+    var style = document.createElement('style');
+    style.innerHTML = `
+        header, footer, .sidebar, #sidebar, .site-header, .site-footer, .widget-area, .comments-area {
+            display: none !important;
+        }
+        .player-area, .video-content, #player, .video-player, #playervideo, .video-info, .epcontent {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 999999 !important;
+            background: black !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        body {
+            background: black !important;
+        }
+    `;
+    document.head.appendChild(style);
 })();
 """

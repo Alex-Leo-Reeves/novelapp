@@ -63,6 +63,9 @@ const OPENSUBTITLES_USERNAME = String(process.env.OPENSUBTITLES_USERNAME || proc
 const OPENSUBTITLES_PASSWORD = String(process.env.OPENSUBTITLES_PASSWORD || process.env.opensubtitles_password || "").trim();
 const SUBDL_API_KEY = String(process.env.SUBDL_API_KEY || process.env.subdl_api_key || "").trim();
 const PUBLIC_APP_URL = cleanBaseUrl(process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || "https://novelapp1.onrender.com");
+const ANDROID_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk";
+const ANDROID_TV_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk";
+const DESKTOP_INSTALLER_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe";
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
@@ -150,6 +153,7 @@ const MIME_TYPES = {
     ".onnx": "application/octet-stream",
     ".svg": "image/svg+xml",
     ".apk": "application/vnd.android.package-archive",
+    ".exe": "application/octet-stream",
     ".ipa": "application/octet-stream",
     ".msi": "application/octet-stream",
     ".txt": "text/plain; charset=utf-8"
@@ -240,7 +244,9 @@ function buildAppVersionPayload() {
     let payload = {
         versionCode: 25,
         versionName: "1.24",
-        apkUrl: `${PUBLIC_APP_URL}/downloads/novelapp-android.apk`,
+        apkUrl: ANDROID_APK_URL,
+        tvApkUrl: ANDROID_TV_APK_URL,
+        desktopUrl: DESKTOP_INSTALLER_URL,
         ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
         releaseNotes: [],
         forceUpdate: false
@@ -2073,15 +2079,11 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
       const isCineproProxy = url.includes("/v1/proxy?data=");
       if (url && isCineproProxy) {
         const rewrittenUrl = url.replace("http://localhost:10000", CINEPRO_BASE_URL);
-        results.push({
-          url: rewrittenUrl,
-          provider: String(provider),
-          quality: source?.quality || source?.resolution || "",
-          headers: source?.headers || null
-        });
-        // Also extract the inner .m3u8 URL from the proxy data so old APK clients
-        // (which don't have the /v1/proxy? check in isDirectPlayableStreamUrl) can match it.
+        
+        // Extract the inner .m3u8 URL from the proxy data
         const innerUrl = extractInnerUrlFromProxy(url);
+        
+        // Push inner URL if it's a direct stream
         if (innerUrl && innerUrl !== url && isDirectStreamUrl(innerUrl)) {
           results.push({
             url: innerUrl,
@@ -2090,6 +2092,14 @@ async function cineproAllSources(mediaType, id, season = "1", episode = "1") {
             headers: source?.headers || null
           });
         }
+        
+        // Push proxy url as fallback
+        results.push({
+          url: rewrittenUrl,
+          provider: String(provider),
+          quality: source?.quality || source?.resolution || "",
+          headers: source?.headers || null
+        });
       } else if (url && isDirectStreamUrl(url)) {
         results.push({
           url,
@@ -4045,11 +4055,33 @@ async function handleApi(request, response, pathname) {
 
 function serveStatic(request, response, pathname) {
   // If the APK is not present on disk (Render deploy without LFS), redirect to GitHub Release
-  if (pathname === "/downloads/novelapp-android.apk") {
-    const apkPath = path.join(SITE_DIR, "downloads", "novelapp-android.apk");
-    if (!fs.existsSync(apkPath)) {
-      const redirectUrl = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk";
-      response.writeHead(302, { location: redirectUrl });
+  const downloadRedirects = {
+    "/downloads/novelapp-android.apk": {
+      localFile: "novelapp-android.apk",
+      url: ANDROID_APK_URL
+    },
+    "/downloads/novelapp-tv.apk": {
+      localFile: "novelapp-tv.apk",
+      url: ANDROID_TV_APK_URL
+    },
+    "/downloads/novelapp-androidtv.apk": {
+      localFile: "novelapp-androidtv.apk",
+      url: ANDROID_TV_APK_URL
+    },
+    "/downloads/novelapp-windows.msi": {
+      localFile: "novelapp-windows.msi",
+      url: DESKTOP_INSTALLER_URL
+    },
+    "/downloads/novelapp-android.exe": {
+      localFile: "novelapp-android.exe",
+      url: DESKTOP_INSTALLER_URL
+    }
+  };
+  const downloadRedirect = downloadRedirects[pathname];
+  if (downloadRedirect) {
+    const localPath = path.join(SITE_DIR, "downloads", downloadRedirect.localFile);
+    if (!fs.existsSync(localPath)) {
+      response.writeHead(302, { location: downloadRedirect.url });
       response.end();
       return;
     }

@@ -29,6 +29,7 @@ import kotlin.math.roundToInt
 // ─────────────────────────────────────────────────────────────────────────────
 enum class DownloadSection(val type: String, val label: String, val icon: ImageVector) {
     ANIME(ContentType.ANIME, "Anime", Icons.Default.PlayCircle),
+    DONGHUA(ContentType.DONGHUA, "Donghua", Icons.Default.Animation),
     MOVIE(ContentType.MOVIE, "Movies", Icons.Default.Movie),
     K_DRAMA(ContentType.K_DRAMA, "K-Drama", Icons.Default.LiveTv),
     CARTOON(ContentType.CARTOON, "Cartoons", Icons.Default.Animation),
@@ -45,6 +46,7 @@ enum class DownloadSection(val type: String, val label: String, val icon: ImageV
 
 private fun sectionAccentColor(section: DownloadSection, currentTheme: AppTheme): Color = when (section) {
     DownloadSection.ANIME -> Color(0xFFFF5722)
+    DownloadSection.DONGHUA -> Color(0xFFF44336)
     DownloadSection.MOVIE -> Color(0xFF7C4DFF)
     DownloadSection.K_DRAMA -> Color(0xFFE53935)
     DownloadSection.CARTOON -> Color(0xFF00A8A8)
@@ -81,7 +83,7 @@ fun DownloadsScreen(
             // Episode / Chapter list for a specific title
             item != null -> {
                 when (item.type.uppercase()) {
-                    ContentType.ANIME, ContentType.MOVIE, ContentType.CARTOON,
+                    ContentType.ANIME, ContentType.DONGHUA, ContentType.MOVIE, ContentType.CARTOON,
                     ContentType.K_DRAMA, ContentType.CLASSIC, ContentType.NIGERIAN -> {
                         DownloadedEpisodesScreen(
                             item = item,
@@ -221,7 +223,7 @@ private fun DownloadsRootScreen(
                                 icon = section.icon,
                                 title = section.label,
                                 subtitle = when (section) {
-                                    DownloadSection.ANIME, DownloadSection.MOVIE,
+                                    DownloadSection.ANIME, DownloadSection.DONGHUA, DownloadSection.MOVIE,
                                     DownloadSection.K_DRAMA, DownloadSection.CARTOON,
                                     DownloadSection.CLASSIC, DownloadSection.NIGERIAN ->
                                         "$count series downloaded"
@@ -509,7 +511,7 @@ private fun DownloadedItemsListScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    "${item.totalItems} ${if (section in listOf(DownloadSection.ANIME, DownloadSection.MOVIE, DownloadSection.K_DRAMA, DownloadSection.CARTOON, DownloadSection.CLASSIC, DownloadSection.NIGERIAN)) "episodes" else "chapters"}",
+                                    "${item.totalItems} ${if (section in listOf(DownloadSection.ANIME, DownloadSection.DONGHUA, DownloadSection.MOVIE, DownloadSection.K_DRAMA, DownloadSection.CARTOON, DownloadSection.CLASSIC, DownloadSection.NIGERIAN)) "episodes" else "chapters"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = currentTheme.subTextColor()
                                 )
@@ -619,6 +621,15 @@ private fun DownloadedEpisodesScreen(
                                 tint = accent,
                                 modifier = Modifier.size(32.dp)
                             )
+                            IconButton(onClick = {
+                                downloadRepo.deleteEpisode(item.id, ep.episodeNumber)
+                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                    downloadRepo.deleteItem(item.id)
+                                    onBack()
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, null, tint = currentTheme.subTextColor())
+                            }
                         }
                     }
                 }

@@ -7,12 +7,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -26,21 +27,16 @@ import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Discover Home Screen — Unified video feed with glass cards.
-//  Shows Anime, Movies, Nollywood, K-Drama, Cartoon, Classic, Nigerian, Donghua
-//  — all in one scrollable feed with labeled sections. No sub-tabs.
-//  Search fans out to TMDB + YouTube in parallel.
-// ─────────────────────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverHomeScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
+    isKidsMode: Boolean = false,
     onNovelSelected: (UnifiedSearchResult) -> Unit,
     onSearchHistorySaved: (String, String) -> Unit
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
 
     // Section data — loaded lazily per category
@@ -51,6 +47,11 @@ fun DiscoverHomeScreen(
     var cartoonItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var classicItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var donghuaItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    
+    // Mixed media additions
+    var popularNovelItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    var popularMangaItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    var popularComicItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
 
     // TMDB search merged results
     var searchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
@@ -63,6 +64,9 @@ fun DiscoverHomeScreen(
     var isLoadingCartoon by remember { mutableStateOf(false) }
     var isLoadingClassic by remember { mutableStateOf(false) }
     var isLoadingDonghua by remember { mutableStateOf(false) }
+    var isLoadingNovels by remember { mutableStateOf(false) }
+    var isLoadingManga by remember { mutableStateOf(false) }
+    var isLoadingComics by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -89,6 +93,29 @@ fun DiscoverHomeScreen(
         if (cartoonItems.isEmpty()) loadSection(VideoCategory.CARTOON, { cartoonItems = it }, { isLoadingCartoon = it })
         if (classicItems.isEmpty()) loadSection(VideoCategory.CLASSIC, { classicItems = it }, { isLoadingClassic = it })
         if (donghuaItems.isEmpty()) loadSection(VideoCategory.DONGHUA, { donghuaItems = it }, { isLoadingDonghua = it })
+        
+        // Load mixed media
+        scope.launch {
+            val repo = com.alexleoreeves.novelapp.data.NovelSearchRepository(
+                rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
+                rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
+            )
+            if (popularNovelItems.isEmpty()) {
+                isLoadingNovels = true
+                try { popularNovelItems = repo.fetchPopularNovels() } catch(_: Exception) {}
+                isLoadingNovels = false
+            }
+            if (popularMangaItems.isEmpty()) {
+                isLoadingManga = true
+                try { popularMangaItems = repo.fetchPopularManga() } catch(_: Exception) {}
+                isLoadingManga = false
+            }
+            if (popularComicItems.isEmpty()) {
+                isLoadingComics = true
+                try { popularComicItems = repo.fetchPopularComics() } catch(_: Exception) {}
+                isLoadingComics = false
+            }
+        }
     }
 
     // ── Debounced multi-source search ─────────────────────────────────────
@@ -107,7 +134,6 @@ fun DiscoverHomeScreen(
             rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
         )
         // Fan out: search TMDB movies + Nollywood YouTube in parallel
-        val merged = mutableListOf<UnifiedSearchResult>()
         try { searchResults = repo.searchVideo(VideoCategory.MOVIES, q) } catch (_: Exception) { searchResults = emptyList() }
         try { nollywoodSearchResults = repo.searchVideo(VideoCategory.NIGERIAN, q) } catch (_: Exception) { nollywoodSearchResults = emptyList() }
         isSearching = false
@@ -119,8 +145,22 @@ fun DiscoverHomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(GlassOverlayColor)
-            
     ) {
+        if (isKidsMode) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFFF9100))
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.ChildCare, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("KIDS MODE ACTIVE — Family Content Only", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
         // ── Search bar ──────────────────────────────────────────────────────
         Box(
             modifier = Modifier
@@ -136,11 +176,11 @@ fun DiscoverHomeScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
-                        color = NeonBlue
+                        color = MaterialTheme.colorScheme.primary
                     )
                 } else {
                     Icon(
-                        Icons.Default.Search,
+                        Icons.Rounded.Search,
                         "Search",
                         tint = Color.White.copy(alpha = 0.4f),
                         modifier = Modifier.size(20.dp)
@@ -172,7 +212,7 @@ fun DiscoverHomeScreen(
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = { searchQuery = "" }) {
                         Icon(
-                            Icons.Default.Close,
+                            Icons.Rounded.Close,
                             "Clear",
                             tint = Color.White.copy(alpha = 0.4f),
                             modifier = Modifier.size(18.dp)
@@ -185,15 +225,17 @@ fun DiscoverHomeScreen(
         // ── Content feed ──────────────────────────────────────────────────
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(bottom = 100.dp), // Removed horizontal padding for edge-to-edge scroll
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             if (isSearchActive) {
                 // Search results — TMDB
                 if (searchResults.isNotEmpty()) {
-                    item { GlassSectionLabel("Movies & Shows — ${searchResults.size} results") }
+                    item { GlassSectionLabel("Movies & Shows — ${searchResults.size} results", modifier = Modifier.padding(horizontal = 16.dp)) }
                     items(searchResults) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                        }
                     }
                 }
                 // Search results — Nollywood/YouTube
@@ -201,11 +243,13 @@ fun DiscoverHomeScreen(
                     item {
                         GlassSectionLabel(
                             "Nollywood — ${nollywoodSearchResults.size} results",
-                            modifier = if (searchResults.isEmpty()) Modifier else Modifier.padding(top = 8.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(top = if (searchResults.isEmpty()) 0.dp else 8.dp)
                         )
                     }
                     items(nollywoodSearchResults) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                        }
                     }
                 }
                 if (searchResults.isEmpty() && nollywoodSearchResults.isEmpty()) {
@@ -223,67 +267,164 @@ fun DiscoverHomeScreen(
                     }
                 }
             } else {
-                // Browse feed — labeled sections
-                item { GlassSectionLabel("Anime") }
+                // Browse feed — labeled sections as horizontal rows
+                item { GlassSectionLabel("Anime", modifier = Modifier.padding(horizontal = 16.dp)) }
                 if (isLoadingAnime) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(animeItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(animeItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
 
-                item { GlassSectionLabel("Movies") }
+                item { GlassSectionLabel("Trending Novels", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
+                if (isLoadingNovels) {
+                    item { SectionShimmerHorizontal() }
+                } else {
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(popularNovelItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
+                    }
+                }
+
+                item { GlassSectionLabel("Movies", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingMovies) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(movieItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(movieItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
 
-                item { GlassSectionLabel("Nollywood") }
+                item { GlassSectionLabel("Nollywood", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingNollywood) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(nollywoodItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(nollywoodItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
 
-                item { GlassSectionLabel("K-Drama") }
+                item { GlassSectionLabel("Popular Manga", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
+                if (isLoadingManga) {
+                    item { SectionShimmerHorizontal() }
+                } else {
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(popularMangaItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
+                    }
+                }
+
+                item { GlassSectionLabel("K-Drama", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingKDrama) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(kdramaItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(kdramaItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
 
-                item { GlassSectionLabel("Cartoon") }
+                item { GlassSectionLabel("Cartoon", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingCartoon) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(cartoonItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(cartoonItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
 
-                item { GlassSectionLabel("Classic") }
+                item { GlassSectionLabel("Popular Comics", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
+                if (isLoadingComics) {
+                    item { SectionShimmerHorizontal() }
+                } else {
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(popularComicItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
+                    }
+                }
+
+                item { GlassSectionLabel("Classic", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingClassic) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(classicItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(classicItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
 
-                item { GlassSectionLabel("Donghua") }
+                item { GlassSectionLabel("Donghua", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingDonghua) {
-                    item { SectionShimmer() }
+                    item { SectionShimmerHorizontal() }
                 } else {
-                    items(donghuaItems.take(5)) { item ->
-                        VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(donghuaItems) { item ->
+                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                            }
+                        }
                     }
                 }
             }
@@ -292,7 +433,79 @@ fun DiscoverHomeScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Video Card Item — glass card with Coil 3 cover image
+//  Video Poster Item — vertical card for horizontal scrolling (Netflix style)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun VideoPosterItem(
+    item: UnifiedSearchResult,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(130.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(GlassShimmerColor)
+        ) {
+            if (item.coverUrl.isNotBlank()) {
+                AsyncImage(
+                    model = item.coverUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                GlassImagePlaceholder(
+                    modifier = Modifier.fillMaxSize(),
+                    aspectRatio = 2f / 3f
+                )
+            }
+            
+            // Optional: Genre chip overlay
+            val overlayTag = when {
+                item.mediaKind.isNotBlank() -> item.mediaKind
+                item.isAnime -> "Anime"
+                else -> null
+            }
+            if (overlayTag != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = overlayTag,
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Video Card Item — horizontal wide card (used in search results)
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun VideoCardItem(
@@ -398,13 +611,19 @@ private fun VideoCardItem(
 }
 
 @Composable
-private fun SectionShimmer() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(140.dp)
-            .padding(vertical = 8.dp)
-            .clip(GlassCardShape)
-            .background(GlassShimmerColor)
-    )
+private fun SectionShimmerHorizontal() {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(4) {
+            Box(
+                modifier = Modifier
+                    .width(130.dp)
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(GlassShimmerColor)
+            )
+        }
+    }
 }

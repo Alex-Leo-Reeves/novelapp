@@ -12,6 +12,8 @@ import android.webkit.WebViewClient
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val STREAM_PATTERNS = listOf(
     ".m3u8", ".mp4", ".mpd", ".webm", ".mkv", ".mov", ".ts"
@@ -38,38 +40,36 @@ private val SCRAPER_USER_AGENTS = listOf(
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+
 @SuppressLint("SetJavaScriptEnabled")
 suspend fun extractStreamFromEmbed(
     context: Context,
     embedUrl: String,
     timeoutMs: Long = 45_000L,
     userAgentIndex: Int = 0
-): ScrapedStream? = withTimeoutOrNull(timeoutMs) {
-    suspendCancellableCoroutine { cont ->
-        val mainHandler = Handler(Looper.getMainLooper())
-        var webView: WebView? = null
-        var settled = false
-        // Track the latest detected URL for multiple detection passes
-        var latestDetectedUrl: String? = null
+): ScrapedStream? = withContext(Dispatchers.Main) {
+    withTimeoutOrNull(timeoutMs) {
+        suspendCancellableCoroutine { cont ->
+            val mainHandler = Handler(Looper.getMainLooper())
+            var webView: WebView? = null
+            var settled = false
+            var latestDetectedUrl: String? = null
 
-        fun deliver(url: String?) {
-            if (settled) return
-            // If we have a URL, prefer it; otherwise keep waiting briefly
-            if (url == null && latestDetectedUrl != null && !settled) {
-                // Give a small grace period for the page to stabilize
-                return
+            fun deliver(url: String?) {
+                if (settled) return
+                if (url == null && latestDetectedUrl != null && !settled) {
+                    return
+                }
+                settled = true
+                if (cont.isActive) {
+                    val resultUrl = url ?: latestDetectedUrl
+                    if (resultUrl != null) cont.resume(ScrapedStream(resultUrl))
+                    else cont.resume(null)
+                }
+                try { webView?.destroy() } catch (_: Exception) {}
+                webView = null
             }
-            settled = true
-            if (cont.isActive) {
-                val resultUrl = url ?: latestDetectedUrl
-                if (resultUrl != null) cont.resume(ScrapedStream(resultUrl))
-                else cont.resume(null)
-            }
-            try { webView?.destroy() } catch (_: Exception) {}
-            webView = null
-        }
 
-        mainHandler.post {
             try {
                 val userAgentToUse = SCRAPER_USER_AGENTS.getOrElse(userAgentIndex) { SCRAPER_USER_AGENTS.first() }
 
@@ -88,6 +88,7 @@ suspend fun extractStreamFromEmbed(
                         cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                     }
                     setBackgroundColor(android.graphics.Color.BLACK)
+                    setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
@@ -99,50 +100,32 @@ suspend fun extractStreamFromEmbed(
                             super.onPageFinished(view, url)
                             if (view == null) return
 
-                            // Inject comprehensive JS scraper
                             view.evaluateJavascript(SCRAPE_JS_TEMPLATE, null)
 
-                            // Also do a series of delayed scrapes to catch late-loading players
                             val delays = longArrayOf(1000L, 3000L, 6000L, 10000L, 15000L)
                             for (delayMs in delays) {
                                 mainHandler.postDelayed({
-                                    if (!settled && view != null) {
-                                        // Try extraction from page sources as well
-                                        view.evaluateJavascript(GET_SOURCES_JS, null)
+                                    if (!settled && webView != null) {
+                                        webView?.evaluateJavascript(GET_SOURCES_JS, null)
                                     }
                                 }, delayMs)
                             }
 
-                            // Also attempt extraction from all <source> elements and video src attributes
                             mainHandler.postDelayed({
-                                if (!settled && view != null) {
-                                    view.evaluateJavascript("""
+                                if (!settled && webView != null) {
+                                    webView?.evaluateJavascript("""
                                         (function() {
-                                            // Direct extraction: find all media sources on the page
                                             var sources = [];
-                                            
-                                            // 1. Check <video> src
                                             document.querySelectorAll('video').forEach(function(v) {
-                                                if (v.src && v.src.startsWith('http') && !v.src.startsWith('blob:')) {
-                                                    sources.push(v.src);
-                                                }
-                                                if (v.currentSrc && v.currentSrc.startsWith('http') && !v.currentSrc.startsWith('blob:')) {
-                                                    sources.push(v.currentSrc);
-                                                }
-                                                // Check <source> children
+                                                if (v.src && v.src.startsWith('http') && !v.src.startsWith('blob:')) sources.push(v.src);
+                                                if (v.currentSrc && v.currentSrc.startsWith('http') && !v.currentSrc.startsWith('blob:')) sources.push(v.currentSrc);
                                                 v.querySelectorAll('source').forEach(function(s) {
-                                                    if (s.src && s.src.startsWith('http') && !s.src.startsWith('blob:')) {
-                                                        sources.push(s.src);
-                                                    }
+                                                    if (s.src && s.src.startsWith('http') && !s.src.startsWith('blob:')) sources.push(s.src);
                                                 });
                                             });
-                                            
-                                            // 2. Check <source> outside <video>
                                             document.querySelectorAll('source').forEach(function(s) {
                                                 if (s.src && s.src.startsWith('http')) sources.push(s.src);
                                             });
-                                            
-                                            // 3. Check data attributes common in embed players
                                             document.querySelectorAll('[data-src]').forEach(function(el) {
                                                 var val = el.getAttribute('data-src');
                                                 if (val && val.startsWith('http')) sources.push(val);
@@ -155,13 +138,9 @@ suspend fun extractStreamFromEmbed(
                                                 var val = el.getAttribute('data-video');
                                                 if (val && val.startsWith('http')) sources.push(val);
                                             });
-                                            
-                                            // Deduplicate and report
                                             sources.filter(function(s, i) { return sources.indexOf(s) === i; }).forEach(function(src) {
                                                 console.log('MAGIC_VIDEO_SRC=' + src);
                                             });
-                                            
-                                            // Also report current page URL (might be a stream redirect)
                                             if (window.location.href.includes('.m3u8') || window.location.href.includes('.mp4')) {
                                                 console.log('MAGIC_VIDEO_SRC=' + window.location.href);
                                             }
@@ -177,7 +156,6 @@ suspend fun extractStreamFromEmbed(
                             if (isPlayableStreamUrl(resourceUrl) &&
                                 STREAM_PATTERNS.any { resourceUrl.contains(it, ignoreCase = true) }) {
                                 latestDetectedUrl = resourceUrl
-                                // Only deliver immediately if it's been more than 3 seconds (gives page time to stabilize)
                                 if (System.currentTimeMillis() > 3000L) {
                                     deliver(resourceUrl)
                                 }
@@ -215,13 +193,11 @@ suspend fun extractStreamFromEmbed(
                 webView = wv
 
                 cont.invokeOnCancellation {
-                    mainHandler.post {
-                        try { wv.destroy() } catch (_: Exception) {}
-                        webView = null
-                    }
+                    try { wv.destroy() } catch (_: Exception) {}
+                    webView = null
                 }
 
-                wv.loadUrl(embedUrl, buildEmbedHeaders(embedUrl, SCRAPER_USER_AGENTS.getOrElse(userAgentIndex) { SCRAPER_USER_AGENTS.first() }))
+                wv.loadUrl(embedUrl, buildEmbedHeaders(embedUrl, userAgentToUse))
             } catch (e: Exception) {
                 deliver(null)
             }

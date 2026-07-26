@@ -8,6 +8,29 @@ import kotlinx.serialization.json.*
 private val streamJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 /**
+ * Extract the inner stream URL from a CinePro proxy URL.
+ *
+ * CinePro Core wraps real stream URLs in a proxy:
+ *   http://localhost:10000/v1/proxy?data={"url":"https://cdn.example.com/master.m3u8","headers":{...}}
+ *
+ * This function extracts the "url" field from the JSON data parameter,
+ * giving us the actual .m3u8 / .mp4 URL that ExoPlayer can stream directly
+ * (bypassing the slow Render free-tier proxy).
+ */
+private fun extractInnerUrlFromProxy(proxyUrl: String): String? {
+    return try {
+        val dataParam = proxyUrl.substringAfter("data=", "")
+        if (dataParam.isBlank()) return null
+        val decoded = java.net.URLDecoder.decode(dataParam.substringBefore("&"), "UTF-8")
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+        val element = json.parseToJsonElement(decoded)
+        element.jsonObject["url"]?.jsonPrimitive?.contentOrNull
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/**
  * Data class for a single CinePro stream source.
  */
 data class CineProSource(
@@ -96,14 +119,39 @@ suspend fun resolveAllCineProSources(
     val response = json.decodeFromString<CineProSourcesResponse>(raw)
     if (response.ok != true) return@runCatching CineProSourcesResult(emptyList())
 
-    val sources = response.data?.sources?.map { src ->
-        CineProSource(
-            url = src.url,
-            provider = src.provider,
-            quality = src.quality,
-            headers = src.headers
-        )
-    }?.filter { it.url.isNotBlank() } ?: emptyList()
+    val cineproBase = "https://cinepro-core-esmh.onrender.com"
+    val sources = response.data?.sources?.flatMap { src ->
+        val results = mutableListOf<CineProSource>()
+        val rawUrl = src.url
+
+        // For CinePro proxy URLs, rewrite to point to the actual server
+        if (rawUrl.contains("/v1/proxy?data=")) {
+            val rewritten = if (rawUrl.startsWith("http://localhost:10000")) {
+                rawUrl.replace("http://localhost:10000", cineproBase)
+            } else if (rawUrl.startsWith("/v1/proxy")) {
+                "$cineproBase$rawUrl"
+            } else {
+                rawUrl
+            }
+            results.add(CineProSource(
+                url = rewritten,
+                provider = src.provider.ifBlank { "" },
+                quality = src.quality,
+                headers = src.headers
+            ))
+        } else if (rawUrl.isNotBlank()) {
+            results.add(CineProSource(
+                url = rawUrl,
+                provider = src.provider,
+                quality = src.quality,
+                headers = src.headers
+            ))
+        }
+        results
+    }?.filter { it.url.isNotBlank() }?.distinctBy {
+        // Deduplicate: for proxy URLs use full URL; for direct URLs strip query params
+        if (it.url.contains("/v1/proxy?data=")) it.url else it.url.substringBefore("?")
+    } ?: emptyList()
 
     // Convert CinePro subtitles to the format ExoPlayer expects: [{"file":"data:...","label":"...","srclang":"en","kind":"captions"}]
     val subtitlesJson = buildCineProSubtitlesJson(response.data?.subtitles ?: emptyList())
@@ -172,15 +220,19 @@ suspend fun resolveCineProStream(
         val obj = source.jsonObject
         val sourceUrl = obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (sourceUrl.isNotBlank()) {
-            // CinePro returns proxy URLs. Rewrite localhost:10000 → actual CinePro Core.
+            // CinePro returns proxy URLs. Rewrite to the actual CinePro Core server.
             // The proxy serves the media content directly, so just return the rewritten URL.
-            if (sourceUrl.startsWith("http://localhost:10000") && sourceUrl.contains("/v1/proxy?data=")) {
-                val rewritten = sourceUrl.replace("http://localhost:10000", cineproBase)
+            if (sourceUrl.contains("/v1/proxy?data=")) {
+                val rewritten = if (sourceUrl.startsWith("http://localhost:10000")) {
+                    sourceUrl.replace("http://localhost:10000", cineproBase)
+                } else if (sourceUrl.startsWith("/v1/proxy")) {
+                    "$cineproBase$sourceUrl"
+                } else {
+                    sourceUrl
+                }
                 return@runCatching rewritten
             } else if (sourceUrl.startsWith("http")) {
                 return@runCatching sourceUrl
-            } else if (sourceUrl.startsWith("/v1/proxy")) {
-                return@runCatching "$cineproBase$sourceUrl"
             }
         }
     }
@@ -188,11 +240,11 @@ suspend fun resolveCineProStream(
 }.getOrNull()
 
 /**
- * Build a SuperEmbed (multiembed.mov) direct embed URL.
- * This URL embeds a video player that directly plays HLS streams.
+ * Build a SuperEmbed (VidLink) direct embed URL fallback.
+ * (Replaced multiembed.mov and vidsrc.in for better reliability)
  *
- * Movie: https://multiembed.mov/?video_id={tmdbId}&tmdb=1
- * TV:    https://multiembed.mov/?video_id={tmdbId}&tmdb=1&s={s}&e={e}
+ * Movie: https://vidlink.pro/movie/{tmdbId}
+ * TV:    https://vidlink.pro/tv/{tmdbId}/{s}/{e}
  */
 fun buildSuperEmbedUrl(
     tmdbId: String,
@@ -201,9 +253,9 @@ fun buildSuperEmbedUrl(
     episode: String = "1"
 ): String {
     return if (type == "movie") {
-        "https://multiembed.mov/?video_id=$tmdbId&tmdb=1"
+        "https://vidlink.pro/movie/$tmdbId"
     } else {
-        "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
+        "https://vidlink.pro/tv/$tmdbId/$season/$episode"
     }
 }
 

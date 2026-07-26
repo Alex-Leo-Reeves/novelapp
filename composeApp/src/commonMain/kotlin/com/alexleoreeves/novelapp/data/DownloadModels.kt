@@ -19,6 +19,7 @@ object ContentType {
     const val COMIC = "COMIC"
     const val CLASSIC = "CLASSIC"
     const val NIGERIAN = "NIGERIAN"
+    const val DONGHUA = "DONGHUA"
 
     /** Human-readable label for a given type key */
     fun label(type: String): String = when (type.uppercase()) {
@@ -31,6 +32,7 @@ object ContentType {
         COMIC -> "Comics"
         CLASSIC -> "Classic"
         NIGERIAN -> "Nollywood"
+        DONGHUA -> "Donghua"
         else -> type
     }
 
@@ -45,11 +47,12 @@ object ContentType {
         COMIC -> "comic"
         CLASSIC -> "classic"
         NIGERIAN -> "nigerian"
+        DONGHUA -> "donghua"
         else -> "default"
     }
 
     /** All downloadable content types in display order */
-    val ALL_TYPES = listOf(ANIME, MANGA, NOVEL, MOVIE, CARTOON, K_DRAMA, COMIC, CLASSIC, NIGERIAN)
+    val ALL_TYPES = listOf(ANIME, MANGA, NOVEL, MOVIE, CARTOON, K_DRAMA, COMIC, CLASSIC, NIGERIAN, DONGHUA)
 }
 
 @Serializable

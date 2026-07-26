@@ -61,7 +61,8 @@ fun YouScreen(
     onSignOut: () -> Unit,
     ttsController: SherpaNarrationController,
     favorites: List<FavoriteNovel> = emptyList(),
-    onToggleFavorite: ((FavoriteNovel) -> Unit)? = null
+    onToggleFavorite: ((FavoriteNovel) -> Unit)? = null,
+    onSwitchProfile: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val client = remember {
@@ -186,6 +187,9 @@ fun YouScreen(
                                 color = Color.White.copy(alpha = 0.5f),
                                 fontSize = 13.sp
                             )
+                        }
+                        IconButton(onClick = onSwitchProfile) {
+                            Icon(Icons.Default.People, "Switch Profile", tint = NeonBlue, modifier = Modifier.size(24.dp))
                         }
                     }
                 }

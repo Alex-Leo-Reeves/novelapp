@@ -187,19 +187,21 @@ The app checks this update manifest:
 https://novelapp1.onrender.com/app-version.json
 ```
 
-The website and app expect the latest APK at:
+The Android in-app updater gets metadata from Render, then downloads the APK from this permanent GitHub Release asset:
 
 ```text
-https://novelapp1.onrender.com/downloads/novelapp-android.apk
+https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk
 ```
 
-Before deploying a real public release, build and sign the APK, then place it here:
+The public website uses these permanent channels for device builds:
 
 ```text
-site/downloads/novelapp-android.apk
+Android:    https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk
+Android TV: https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk
+Software:   https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe
 ```
 
-Then update `site/app-version.json` with a higher `versionCode`, the visible `versionName`, release notes, and the final APK URL.
+Before deploying a real public Android release, build and sign the APK, replace the `novelapp-android.apk` asset on the permanent `v1.39` GitHub Release, then update `site/app-version.json` with a higher `versionCode`, the visible `versionName`, release notes, and the uploaded APK's byte count/SHA-256. Keep the release-channel URLs unchanged.
 
 Deploy on Render by connecting this Git repository and using the root `render.yaml` Blueprint. The service is a Node web service because real login requires backend routes and persistent account storage. It serves the existing website from `./site`.
 

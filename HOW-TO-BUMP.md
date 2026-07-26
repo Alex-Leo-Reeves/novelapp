@@ -20,7 +20,9 @@ compose.desktop.application {
 {
   "versionCode": 30,         // ← must match build.gradle.kts
   "versionName": "1.29",     // ← must match build.gradle.kts
-  "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.29/novelapp-android.apk",
+  "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
+  "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
+  "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
   "apkBytes": 123456789,     // ← update after building
   "apkSha256": "...",        // ← update after building
   "releaseNotes": [ "..." ],
@@ -43,9 +45,15 @@ actual object PlatformAppVersion {
 
 ## IMPORTANT: apkBytes must match the actual download
 
-When you change the APK download URL (e.g. from Render to GitHub Releases), the manifest's
-`apkBytes` must match the *actual* file that will be downloaded at that URL. The download
-code does a strict byte-count check (unless a SHA-256 hash is also provided).
+The Android in-app update URL is permanent:
+
+```text
+https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk
+```
+
+For new Android releases, replace the binary attached to that GitHub Release asset and keep
+`apkUrl` unchanged. The manifest's `apkBytes` and `apkSha256` must match the actual file that
+will be downloaded at that permanent URL.
 
 **How to get the correct values after building:**
 
@@ -54,8 +62,8 @@ code does a strict byte-count check (unless a SHA-256 hash is also provided).
 ls -l novelapp-android.apk
 sha256sum novelapp-android.apk
 
-# Then upload it as a GitHub Release and confirm the download at the URL works:
-curl -sL "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/vX.Y/novelapp-android.apk" | tee /tmp/check.apk | sha256sum
+# Then upload it to the permanent GitHub Release asset and confirm the download works:
+curl -sL "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk" | tee /tmp/check.apk | sha256sum
 stat --format=%s /tmp/check.apk
 ```
 
@@ -75,10 +83,15 @@ Update both `apkBytes` and `apkSha256` in `site/app-version.json` with these val
 ## After building
 
 Update these fields in `site/app-version.json`:
-- `apkUrl` — update the version tag in the URL
-- `apkBytes` — file size of the built APK
-- `apkSha256` — run `sha256sum` on the built APK
+- `versionCode` and `versionName` — the new Android app version
+- `apkBytes` — file size of the uploaded Android APK
+- `apkSha256` — run `sha256sum` on the uploaded Android APK
 - `releaseNotes` — what changed
+
+Do not change these permanent release-channel URLs during routine bumps:
+- Android in-app update: `https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk`
+- Android TV app: `https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk`
+- Windows/software app: `https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe`
 
 ## How the update check works
 
@@ -93,8 +106,8 @@ Update these fields in `site/app-version.json`:
 - [ ] Bump `versionName` in build.gradle.kts
 - [ ] Bump `packageVersion` for Desktop
 - [ ] Update `PlatformAppVersion.desktop.kt`
-- [ ] Update `site/app-version.json` (versionCode, versionName, apkUrl, release notes)
+- [ ] Update `site/app-version.json` (versionCode, versionName, release notes)
 - [ ] Build the APK
-- [ ] Upload APK as GitHub Release
+- [ ] Upload APK to the permanent GitHub Release asset
 - [ ] Update `apkBytes` + `apkSha256` in site/app-version.json (match the *actual* download)
 - [ ] Deploy site/app-version.json to Render

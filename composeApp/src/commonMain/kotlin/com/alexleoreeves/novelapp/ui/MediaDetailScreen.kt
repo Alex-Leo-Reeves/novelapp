@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
@@ -63,7 +64,22 @@ fun MediaDetailScreen(
     var isMovieContent by remember(mediaType) { mutableStateOf(mediaType == "movie") }
     val isYouTubeNollywood = item.id.startsWith("youtube_nollywood_")
 
-    val isDonghuaItem = item.mediaKind.equals(VideoCategory.DONGHUA.name, ignoreCase = true)
+    val isDonghuaItem = item.mediaKind.equals(VideoCategory.DONGHUA.name, ignoreCase = true) ||
+        item.genre.contains("Donghua", ignoreCase = true) ||
+        item.sourceName.contains("Donghua", ignoreCase = true) ||
+        item.id.contains("donghua", ignoreCase = true) ||
+        item.title.contains("Renegade Immortal", ignoreCase = true) ||
+        item.title.contains("Swallowed Star", ignoreCase = true) ||
+        item.title.contains("Soul Land", ignoreCase = true) ||
+        item.title.contains("Perfect World", ignoreCase = true) ||
+        item.title.contains("Battle Through The Heavens", ignoreCase = true) ||
+        item.title.contains("Shrouding the Heavens", ignoreCase = true) ||
+        item.title.contains("Demon Hunter", ignoreCase = true) ||
+        item.title.contains("Throne of Seal", ignoreCase = true) ||
+        item.title.contains("A Will Eternal", ignoreCase = true) ||
+        item.title.contains("Xian Ni", ignoreCase = true) ||
+        item.title.contains("Stellar Transformation", ignoreCase = true) ||
+        item.title.contains("Martial Universe", ignoreCase = true)
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
@@ -86,51 +102,55 @@ fun MediaDetailScreen(
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
         when (selectedDonghuaServer) {
+            DonghuaServer.NONTONGO -> donghuaStreamScraper // Not used for Nontongo, but required for exhaustiveness
+            DonghuaServer.AUTOEMBED -> donghuaStreamScraper
             DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
-            DonghuaServer.LUCIFER_DONGHUA, DonghuaServer.LUCIFER_EXO -> luciferDonghuaScraper
-            DonghuaServer.TWOEMBED -> donghuaStreamScraper
-            DonghuaServer.CINEPRO -> donghuaStreamScraper
         }
 
-    fun buildDonghuaVidSrcUrl(ep: MediaEpisode): String? {
+    fun buildDonghuaAutoEmbedUrl(ep: MediaEpisode): String? {
         val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
         val detailType = detailParts.getOrNull(0).orEmpty()
         val detailTmdbId = detailParts.getOrNull(1).orEmpty()
         if (!item.detailPageUrl.startsWith("tmdb://") || detailTmdbId.isBlank()) return null
 
+        val urlParts = ep.url.split(":")
+        val season = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+        val episode = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() }
+            ?: ep.episodeNumber.coerceAtLeast(1).toString()
+
         return if (detailType == "movie") {
-            StreamServer.VIDSRC.buildEmbedUrl(detailTmdbId, "movie", "1", "1")
+            "https://player.autoembed.cc/embed/movie/$detailTmdbId"
         } else {
-            val urlParts = ep.url.split(":")
-            val season = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
-            val episode = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() }
-                ?: ep.episodeNumber.coerceAtLeast(1).toString()
-            StreamServer.VIDSRC.buildEmbedUrl(detailTmdbId, "tv", season, episode)
+            "https://player.autoembed.cc/embed/tv/$detailTmdbId/$season/$episode"
         }
     }
 
-    suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? =
-        when (selectedDonghuaServer) {
-            DonghuaServer.TWOEMBED -> {
-                buildDonghuaVidSrcUrl(ep)
-            }
-            DonghuaServer.CINEPRO -> {
-                // CinePro needs TMDB ID; build from ep.url parts
+    suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? {
+        return when (selectedDonghuaServer) {
+            DonghuaServer.NONTONGO -> {
+                val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+                val detailType = detailParts.getOrNull(0).orEmpty()
+                val detailTmdbId = detailParts.getOrNull(1).orEmpty()
+                if (!item.detailPageUrl.startsWith("tmdb://") || detailTmdbId.isBlank()) return null
+
                 val urlParts = ep.url.split(":")
-                val tvId = urlParts.getOrNull(1).orEmpty()
-                val s = urlParts.getOrNull(2) ?: "1"
-                val e = urlParts.getOrNull(3) ?: ep.episodeNumber.coerceAtLeast(1).toString()
-                if (tvId.isNotBlank()) {
-                    val serverBase = AppReleaseConfig.SERVER_BASE_URL
-                    val result = resolveAllCineProSources(httpClient, serverBase, "tv", tvId, s, e)
-                    result.sources.firstOrNull { it.url.isDirectPlayableStreamUrl() }?.url
-                } else null
+                val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+                val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: ep.episodeNumber.coerceAtLeast(1).toString()
+                
+                if (detailType == "movie") {
+                    "https://nontongo.win/embed/movie/$detailTmdbId"
+                } else {
+                    "https://nontongo.win/embed/tv/$detailTmdbId/$s/$e"
+                }
             }
-            else -> {
-                selectedDonghuaScraper().resolveEpisodePlayerUrl(ep.url)
-                    ?: ep.url.takeIf { it.isNotBlank() }
+            DonghuaServer.AUTOEMBED -> {
+                buildDonghuaAutoEmbedUrl(ep) ?: ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.DONGHUA_STREAM -> {
+                ep.url.takeIf { it.isNotBlank() }
             }
         }
+    }
 
     /**
      * Resolve a downloadable stream URL for offline saving.
@@ -140,11 +160,11 @@ fun MediaDetailScreen(
      * 2. Direct playable stream URL (extension check)
      * 3. Hidden WebView embed scraping (fallback)
      */
-    suspend fun resolveDownloadableStreamUrl(
+    suspend fun resolveDownloadableQualities(
         sourceUrl: String,
         tmdbContext: Triple<String, String, String>? = null,  // (tmdbId, type, seasonEpisode)
         onStatus: ((String) -> Unit)? = null
-    ): String? {
+    ): List<CineProSource> {
         // ── Phase 1: Try CinePro Core for any TMDB-based content ──────────
         if (tmdbContext != null) {
             val (tmdbIdCtx, mediaTypeCtx, seasonEpisode) = tmdbContext
@@ -153,24 +173,26 @@ fun MediaDetailScreen(
             val episode = parts.getOrNull(1) ?: "1"
             onStatus?.invoke("CinePro: searching 10+ providers for download...")
             val result = resolveAllCineProSources(httpClient, AppReleaseConfig.SERVER_BASE_URL, mediaTypeCtx, tmdbIdCtx, season, episode)
-            val directUrl = result.sources.firstOrNull { it.url.isDirectPlayableStreamUrl() }?.url
-            if (directUrl != null) {
+            val directSources = result.sources.filter { it.url.isDirectPlayableStreamUrl() }
+            if (directSources.isNotEmpty()) {
                 onStatus?.invoke("CinePro: found direct stream.")
-                return directUrl
+                return directSources
             }
             onStatus?.invoke("CinePro: no sources. Trying embed fallback...")
         }
 
         // ── Phase 2: Check if the source itself is a direct stream URL ────
         val trimmed = sourceUrl.trim()
-        if (trimmed.isBlank()) return null
-        if (trimmed.isDirectPlayableStreamUrl()) return trimmed
+        if (trimmed.isNotBlank() && trimmed.isDirectPlayableStreamUrl()) {
+            return listOf(CineProSource(url = trimmed, quality = "Direct"))
+        }
 
         // ── Phase 3: Hidden WebView scraping ─────────────────────────────
-        // User agent rotation is handled internally by extractStreamFromEmbed
         onStatus?.invoke("Embed: scraping stream (up to 45s)...")
-        return extractStreamFromEmbed(trimmed, timeoutMs = 45_000L)
+        val scrapedUrl = extractStreamFromEmbed(trimmed, timeoutMs = 45_000L)
             ?.takeIf { it.isDirectPlayableStreamUrl() }
+        
+        return if (scrapedUrl != null) listOf(CineProSource(url = scrapedUrl, quality = "Auto")) else emptyList()
     }
 
     val freeEpisodeCount = remember(episodesList, isPremium) {
@@ -180,6 +202,10 @@ fun MediaDetailScreen(
 
     var downloadingEpisodes by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var refreshTrigger by remember { mutableStateOf(0) }
+    
+    var downloadQualityOptions by remember { mutableStateOf<List<CineProSource>?>(null) }
+    var pendingDownloadAction by remember { mutableStateOf<((String) -> Unit)?>(null) }
+
 
     fun contentTypeForItem(): String = when (item.mediaKind.uppercase()) {
         "MOVIE" -> ContentType.MOVIE
@@ -280,43 +306,59 @@ fun MediaDetailScreen(
                             else -> null
                         }
 
-                        val downloadUrl = sourceUrl?.let {
-                            resolveDownloadableStreamUrl(it, tmdbContext = downloadTmdbContext, onStatus = { msg -> statusText = msg })
-                        }
-                        if (downloadUrl != null) {
-                            statusText = "Downloading Episode ${ep.episodeNumber}..."
-                            val saved = saveDownloadedVideo(
-                                parentId = item.id,
-                                episodeNumber = ep.episodeNumber,
-                                sourceUrl = downloadUrl
-                            )
-                                if (saved.success) {
-                                    downloadRepo.addEpisode(
-                                        DownloadedEpisode(
-                                            parentId = item.id,
-                                            episodeNumber = ep.episodeNumber,
-                                            episodeTitle = ep.title,
-                                            localFilePath = saved.localPath,
-                                            fileSizeBytes = saved.fileSizeBytes
-                                        )
+                        val downloadQualities = sourceUrl?.let {
+                            resolveDownloadableQualities(it, tmdbContext = downloadTmdbContext, onStatus = { msg -> statusText = msg })
+                        } ?: emptyList()
+
+                        if (downloadQualities.isNotEmpty()) {
+                            val processDownload = { finalUrl: String ->
+                                scope.launch {
+                                    statusText = "Downloading Episode ${ep.episodeNumber}..."
+                                    val saved = saveDownloadedVideo(
+                                        parentId = item.id,
+                                        episodeNumber = ep.episodeNumber,
+                                        sourceUrl = finalUrl
                                     )
-                                    downloadRepo.recordMediaDownload(ct)
-                                    statusText = "Episode ${ep.episodeNumber} saved offline."
-                                } else {
-                                    statusText = saved.error.ifBlank { "Download failed." }
-                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
-                                    downloadRepo.deleteItem(item.id)
+                                    if (saved.success) {
+                                        downloadRepo.addEpisode(
+                                            DownloadedEpisode(
+                                                parentId = item.id,
+                                                episodeNumber = ep.episodeNumber,
+                                                episodeTitle = ep.title,
+                                                localFilePath = saved.localPath,
+                                                fileSizeBytes = saved.fileSizeBytes
+                                            )
+                                        )
+                                        downloadRepo.recordMediaDownload(ct)
+                                        statusText = "Episode ${ep.episodeNumber} saved offline."
+                                    } else {
+                                        statusText = saved.error.ifBlank { "Download failed." }
+                                        if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
+                                            downloadRepo.deleteItem(item.id)
+                                        }
+                                    }
+                                    downloadingEpisodes = downloadingEpisodes - ep.episodeNumber
+                                    refreshTrigger++
                                 }
+                                Unit
+                            }
+
+                            if (downloadQualities.size == 1) {
+                                processDownload(downloadQualities.first().url)
+                            } else {
+                                downloadQualityOptions = downloadQualities
+                                pendingDownloadAction = processDownload
                             }
                         } else {
                             statusText = "Stream unavailable for download."
                             if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
-                                    downloadRepo.deleteItem(item.id)
+                                downloadRepo.deleteItem(item.id)
                             }
+                            downloadingEpisodes = downloadingEpisodes - ep.episodeNumber
+                            refreshTrigger++
                         }
                     } catch (e: Exception) {
                         statusText = "Download failed: ${e.message}"
-                    } finally {
                         downloadingEpisodes = downloadingEpisodes - ep.episodeNumber
                         refreshTrigger++
                     }
@@ -435,20 +477,21 @@ fun MediaDetailScreen(
                 val result = resolveAllCineProSources(httpClient, serverBase, "tv", tvId, s, e)
                 val sources = result.sources
                 val subtitlesJson = result.subtitlesJson
-                if (sources.isEmpty()) {
-                    statusText = "CinePro returned no streams. Try another server."
-                    return@launch
-                }
-                // Try each source — first working one wins
-                for ((idx, source) in sources.withIndex()) {
-                    statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
-                    if (source.url.isDirectPlayableStreamUrl()) {
-                        statusText = ""
-                        onPlayStream(source.url, "${item.title} - ${ep.title}", null, subtitlesJson)
-                        return@launch
+                if (sources.isNotEmpty()) {
+                    for ((idx, source) in sources.withIndex()) {
+                        statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
+                        if (source.url.isDirectPlayableStreamUrl()) {
+                            statusText = ""
+                            onPlayStream(source.url, "${item.title} - ${ep.title}", null, subtitlesJson)
+                            return@launch
+                        }
                     }
                 }
-                statusText = "CinePro sources found but none are playable. Try another server."
+                // Fallback to webview player if direct scrapers return no playable links.
+                // Try vidsrc.to first (widest anime/TV coverage), then nontongo, then vidlink.
+                statusText = "CinePro direct stream unavailable. Loading embed..."
+                val fallbackEmbed = "https://vidsrc.to/embed/tv/$tvId/$s/$e"
+                onPlayMaEmbed(fallbackEmbed, "${item.title} - ${ep.title}")
                 return@launch
             }
 
@@ -524,10 +567,8 @@ fun MediaDetailScreen(
 
             // Route to player based on selected server
             if (isDonghuaItem) {
-                when (selectedDonghuaServer) {
-                    DonghuaServer.LUCIFER_DONGHUA -> onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
-                    else -> onPlayStream(embedUrl, "${item.title} - ${ep.title}", null, null)
-                }
+                // All Donghua servers (Nontongo embed, Lucifer Donghua site wrapper, DonghuaStream site wrapper) use WebView
+                onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
             } else {
                 onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
             }
@@ -746,19 +787,20 @@ fun MediaDetailScreen(
                                 val result = resolveAllCineProSources(httpClient, serverBase, "movie", resolvedTmdbId)
                                 val sources = result.sources
                                 val subtitlesJson = result.subtitlesJson
-                                if (sources.isEmpty()) {
-                                    statusText = "CinePro returned no streams. Try another server."
-                                    return@launch
-                                }
-                                for ((idx, source) in sources.withIndex()) {
-                                    statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
-                                    if (source.url.isDirectPlayableStreamUrl()) {
-                                        statusText = ""
-                                        onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson)
-                                        return@launch
+                                if (sources.isNotEmpty()) {
+                                    for ((idx, source) in sources.withIndex()) {
+                                        statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
+                                        if (source.url.isDirectPlayableStreamUrl()) {
+                                            statusText = ""
+                                            onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson)
+                                            return@launch
+                                        }
                                     }
                                 }
-                                statusText = "CinePro sources found but none are playable. Try another server."
+                                // Fallback to vidsrc.to embed — wider movie coverage than vidlink.pro alone
+                                statusText = "CinePro direct stream unavailable. Loading embed..."
+                                val fallbackEmbed = "https://vidsrc.to/embed/movie/$resolvedTmdbId"
+                                onPlayMaEmbed(fallbackEmbed, item.title)
                                 return@launch
                             }
                             // ── Server 5 (ExoPlayer): Pass VidLink embed to AnimePlayerScreen ─
@@ -790,6 +832,15 @@ fun MediaDetailScreen(
                                     if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id)
                                     refreshTrigger++
                                 } else {
+                                    val ct = contentTypeForItem()
+                                    if (!downloadRepo.canDownloadMedia(ct, isPremium)) {
+                                        val remaining = downloadRepo.remainingMediaDownloadsToday(isPremium)
+                                        statusText = if (remaining <= 0)
+                                            "Daily download limit (5) reached. Upgrade to premium for unlimited downloads."
+                                        else
+                                            "Download limit reached. Premium users get unlimited downloads."
+                                        return@requireAuth
+                                    }
                                     downloadingMovie = true
                                     statusText = "Resolving download link..."
                                     scope.launch {
@@ -799,17 +850,42 @@ fun MediaDetailScreen(
                                             val sourceUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
                                             // CinePro context for movie download
                                             val movieTmdbContext = if (resolvedTmdbId.isNotBlank()) Triple(resolvedTmdbId, "movie", "1:1") else null
-                                            val downloadUrl = resolveDownloadableStreamUrl(sourceUrl, tmdbContext = movieTmdbContext, onStatus = { msg -> statusText = msg })
-                                            if (downloadUrl != null) {
-                                                statusText = "Downloading movie..."
-                                                val saved = saveDownloadedVideo(item.id, 1, downloadUrl)
-                                                if (saved.success) {
-                                                    downloadRepo.addEpisode(DownloadedEpisode(item.id, 1, item.title, saved.localPath, saved.fileSizeBytes))
-                                                    statusText = "Movie saved offline."
-                                                } else { statusText = saved.error.ifBlank { "Download failed." }; if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id) }
-                                            } else { statusText = "Movie stream unavailable for download."; if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id) }
-                                        } catch (e: Exception) { statusText = "Download failed: ${e.message}" }
-                                        finally { downloadingMovie = false; refreshTrigger++ }
+                                            val downloadQualities = resolveDownloadableQualities(sourceUrl, tmdbContext = movieTmdbContext, onStatus = { msg -> statusText = msg })
+                                            if (downloadQualities.isNotEmpty()) {
+                                                val processDownload = { finalUrl: String ->
+                                                    scope.launch {
+                                                        statusText = "Downloading movie..."
+                                                        val saved = saveDownloadedVideo(item.id, 1, finalUrl)
+                                                        if (saved.success) {
+                                                            downloadRepo.addEpisode(DownloadedEpisode(item.id, 1, item.title, saved.localPath, saved.fileSizeBytes))
+                                                            statusText = "Movie saved offline."
+                                                        } else { 
+                                                            statusText = saved.error.ifBlank { "Download failed." }
+                                                            if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id) 
+                                                        }
+                                                        downloadingMovie = false
+                                                        refreshTrigger++
+                                                    }
+                                                    Unit
+                                                }
+                                                
+                                                if (downloadQualities.size == 1) {
+                                                    processDownload(downloadQualities.first().url)
+                                                } else {
+                                                    downloadQualityOptions = downloadQualities
+                                                    pendingDownloadAction = processDownload
+                                                }
+                                            } else { 
+                                                statusText = "Movie stream unavailable for download."
+                                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id) 
+                                                downloadingMovie = false
+                                                refreshTrigger++
+                                            }
+                                        } catch (e: Exception) { 
+                                            statusText = "Download failed: ${e.message}" 
+                                            downloadingMovie = false
+                                            refreshTrigger++
+                                        }
                                     }
                                 }
                             }
@@ -915,6 +991,44 @@ fun MediaDetailScreen(
                 }
             }
         }
+    }
+
+    if (downloadQualityOptions != null) {
+        AlertDialog(
+            onDismissRequest = { 
+                downloadQualityOptions = null
+                pendingDownloadAction = null
+            },
+            title = { Text("Select Download Quality") },
+            text = {
+                Column {
+                    downloadQualityOptions!!.forEach { option ->
+                        TextButton(
+                            onClick = {
+                                val action = pendingDownloadAction
+                                downloadQualityOptions = null
+                                pendingDownloadAction = null
+                                action?.invoke(option.url)
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Text("${option.quality} ${if (option.provider.isNotBlank()) "(${option.provider})" else ""}".trim(), fontSize = 16.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { 
+                    downloadQualityOptions = null 
+                    pendingDownloadAction = null
+                }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = currentTheme.cardColor(),
+            titleContentColor = currentTheme.textColor(),
+            textContentColor = currentTheme.textColor()
+        )
     }
 }
 

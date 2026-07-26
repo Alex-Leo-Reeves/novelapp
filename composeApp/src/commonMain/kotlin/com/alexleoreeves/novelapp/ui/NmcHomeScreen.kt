@@ -7,8 +7,10 @@ import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +46,7 @@ fun NmcHomeScreen(
     onToggleFavorite: (FavoriteNovel) -> Unit,
     onSearchHistorySaved: (String, String) -> Unit
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
 
     // Popular content — all three sources
@@ -375,7 +377,7 @@ private fun NmcCardItem(
                     modifier = Modifier
                         .width(100.dp)
                         .height(140.dp)
-                        .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp, bottomEnd = 16.dp, topEnd = 16.dp))
+                        .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp, bottomEnd = 8.dp, topEnd = 8.dp))
                         .background(GlassShimmerColor)
                 ) {
                     if (item.coverUrl.isNotBlank()) {
@@ -391,6 +393,17 @@ private fun NmcCardItem(
                             aspectRatio = 100f / 140f
                         )
                     }
+                    // Inner gradient overlay for richer texture
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)),
+                                    startY = 50f
+                                )
+                            )
+                    )
                 }
 
                 // Right: text content
@@ -449,10 +462,10 @@ private fun NmcCardItem(
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
-                                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                 contentDescription = "Favorite",
                                 tint = if (isFavorite) NeonBlue else Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }

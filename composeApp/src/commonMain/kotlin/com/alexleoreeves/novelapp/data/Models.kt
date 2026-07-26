@@ -39,6 +39,14 @@ enum class MangaScrollMode(val displayName: String) {
     LTR("Left-to-Right")
 }
 
+@Serializable
+data class UserProfile(
+    val id: String = "",
+    val name: String,
+    val isKids: Boolean = false,
+    val avatarColorIndex: Int = 0
+)
+
 enum class VideoCategory(val label: String) {
     ANIME("Anime"),
     DONGHUA("Donghua"),
