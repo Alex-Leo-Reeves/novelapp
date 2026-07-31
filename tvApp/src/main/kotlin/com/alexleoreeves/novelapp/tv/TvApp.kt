@@ -41,6 +41,9 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import java.io.File
+import com.alexleoreeves.novelapp.tv.ui.screens.TvNollywoodScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvDonghuaScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvSportsScreen
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Unified Media Item for TV (resolves Anime, Manga, and Novels)
@@ -65,16 +68,11 @@ private val TvPagePadding = PaddingValues(start = 32.dp, top = 28.dp, end = 32.d
 @Composable
 fun TvApp() {
     val context = LocalContext.current
-    val searchRepo = remember { 
-        com.alexleoreeves.novelapp.data.NovelSearchRepository(
-            rapidApiKey = "test",
-            rapidApiHost = "test"
-        )
-    }
+    // TV app uses its own API client from tv.data.ApiClient
     
     var showSplash by remember { mutableStateOf(true) }
     var selectedMedia by remember { mutableStateOf<TvMediaItem?>(null) }
-    var selectedSearchResult by remember { mutableStateOf<com.alexleoreeves.novelapp.data.UnifiedSearchResult?>(null) }
+    var selectedSearchResult by remember { mutableStateOf<com.alexleoreeves.novelapp.tv.data.UnifiedSearchResult?>(null) }
     var animeStreamUrl by remember { mutableStateOf<String?>(null) }
     var animeTitle by remember { mutableStateOf("") }
     
@@ -154,7 +152,7 @@ fun TvApp() {
                         id = res.id,
                         title = res.title,
                         coverUrl = res.coverUrl,
-                        description = res.description,
+                        description = res.synopsis,
                         genres = listOf(res.mediaKind),
                         format = if (res.mediaKind.equals("ANIME", ignoreCase=true) || res.mediaKind.equals("DONGHUA", ignoreCase=true)) "ANIME" else if (res.mediaKind.equals("MANGA", ignoreCase=true)) "MANGA" else "NOVEL"
                     )
@@ -175,10 +173,10 @@ fun TvApp() {
                         onBack = { selectedSearchResult = null }
                     )
                 }
-                currentSection == TvSection.SEARCH -> com.alexleoreeves.novelapp.tv.ui.TvSearchScreen(
-                    searchRepo = searchRepo,
-                    onMediaSelected = { selectedSearchResult = it },
-                    onBack = { currentSection = TvSection.ANIME }
+                currentSection == TvSection.SEARCH -> com.alexleoreeves.novelapp.tv.ui.screens.TvSearchScreen(
+                    initialQuery = "",
+                    onSearch = { query -> println("TV Search: $query") },
+                    onClose = { currentSection = TvSection.ANIME }
                 )
                 currentSection == TvSection.ANIME -> TvMediaHomeScreen(
                     format = "ANIME",
@@ -234,12 +232,12 @@ fun TvApp() {
                     }
                 )
                 currentSection == TvSection.NOLLYWOOD -> TvNollywoodScreen(
-                    onPlayStream = { url, title -> animeStreamUrl = url; animeTitle = title },
-                    onPlayYouTube = { videoId, title -> animeStreamUrl = "https://www.youtube.com/embed/$videoId?autoplay=1"; animeTitle = title },
+                    onPlayStream = { url: String, title: String -> animeStreamUrl = url; animeTitle = title },
+                    onPlayYouTube = { videoId: String, title: String -> animeStreamUrl = "https://www.youtube.com/embed/$videoId?autoplay=1"; animeTitle = title },
                     onBack = { currentSection = TvSection.ANIME }
                 )
                 currentSection == TvSection.DONGHUA -> TvDonghuaScreen(
-                    onPlayStream = { url, title -> animeStreamUrl = url; animeTitle = title },
+                    onPlayStream = { url: String, title: String -> animeStreamUrl = url; animeTitle = title },
                     onBack = { currentSection = TvSection.ANIME }
                 )
                 currentSection == TvSection.SPORTS -> TvSportsScreen(

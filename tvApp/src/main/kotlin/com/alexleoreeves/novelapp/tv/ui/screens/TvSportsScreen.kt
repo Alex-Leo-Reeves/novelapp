@@ -21,6 +21,7 @@ import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.*
 import kotlinx.coroutines.launch
@@ -64,34 +65,52 @@ fun TvSportsScreen(
         isLoading = true
         try {
             // ESPN Football — free API, no key
-            val raw: String = client.get("https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard").body()
-            val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(raw).jsonObject
-            val events = root["events"]?.jsonArray ?: JsonArray(emptyList())
-            matches = events.mapNotNull { evt ->
-                val obj = evt.jsonObject
-                val comps = obj["competitions"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@mapNotNull null
-                val competitors = comps["competitors"]?.jsonArray ?: return@mapNotNull null
-                var home = "", away = "", homeS = "-", awayS = "-"
-                var status = "Scheduled"
-                competitors.forEach { c ->
-                    val co = c.jsonObject
-                    val team = co["team"]?.jsonObject
-                    val name = team?.get("displayName")?.jsonPrimitive?.contentOrNull ?: ""
-                    val score = co["score"]?.jsonPrimitive?.contentOrNull ?: "-"
-                    if (co["homeAway"]?.jsonPrimitive?.content == "home") { home = name; homeS = score }
-                    else { away = name; awayS = score }
+            val raw = client.request("https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard").bodyAsText()
+            val root = Json.parseToJsonElement(raw).jsonObject
+            val matchList = mutableListOf<EspnMatch>()
+            val events = root["events"]?.jsonArray
+            if (events != null) {
+                for (evt in events) {
+                    val obj = evt.jsonObject
+                    val comps = obj["competitions"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                    val competitors = comps["competitors"]?.jsonArray ?: continue
+                    var home = ""
+                    var away = ""
+                    var homeS = "-"
+                    var awayS = "-"
+                    var sts = "Scheduled"
+                    for (c in competitors) {
+                        val co = c.jsonObject
+                        val team = co["team"]?.jsonObject
+                        val name = team?.let { it["displayName"] }?.jsonPrimitive?.contentOrNull ?: ""
+                        val score = co["score"]?.jsonPrimitive?.contentOrNull ?: "-"
+                        if (co["homeAway"]?.jsonPrimitive?.content == "home") {
+                            home = name; homeS = score
+                        } else {
+                            away = name; awayS = score
+                        }
+                    }
+                    val st = comps["status"]?.jsonObject?.let { it["type"] }?.jsonObject
+                    val state = st?.let { it["state"] }?.jsonPrimitive?.contentOrNull ?: "pre"
+                    sts = when (state) { "in" -> "LIVE"; "post" -> "FT"; else -> "Scheduled" }
+                    val league = obj["league"]?.jsonObject?.let { it["name"] }?.jsonPrimitive?.contentOrNull ?: ""
+                    matchList.add(EspnMatch(
+                        id = evt["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                        homeTeam = home,
+                        awayTeam = away,
+                        homeScore = homeS,
+                        awayScore = awayS,
+                        status = sts,
+                        leagueName = league
+                    ))
                 }
-                val st = comps["status"]?.jsonObject?.get("type")?.jsonObject
-                val state = st?.get("state")?.jsonPrimitive?.contentOrNull ?: "pre"
-                status = when (state) { "in" -> "LIVE"; "post" -> "FT"; else -> "Scheduled" }
-                val league = obj["league"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: ""
-                EspnMatch(evt["id"]?.jsonPrimitive?.contentOrNull ?: "", home, away, homeS, awayS, status, league)
             }
+            matches = matchList
             // WWE — scrape wwe.com
             try {
-                val html: String = client.get("https://www.wwe.com/events") {
+                val html = client.request("https://www.wwe.com/events") {
                     header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                }.body()
+                }.bodyAsText()
                 val titleRegex = Regex("""<h3[^>]*>([\s\S]*?)<\/h3>""", RegexOption.IGNORE_CASE)
                 val dateRegex = Regex("""<time[^>]*datetime="([^"]+)"""", RegexOption.IGNORE_CASE)
                 val allTitles = titleRegex.findAll(html).toList()

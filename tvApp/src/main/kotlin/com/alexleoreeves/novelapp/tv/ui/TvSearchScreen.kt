@@ -3,26 +3,27 @@ package com.alexleoreeves.novelapp.tv.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.*
 import coil3.compose.AsyncImage
-import com.alexleoreeves.novelapp.data.NovelSearchRepository
-import com.alexleoreeves.novelapp.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.tv.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.tv.ui.components.TvSearchKeyboard
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalTvMaterial3Api::class, FlowPreview::class)
 @Composable
 fun TvSearchScreen(
-    searchRepo: NovelSearchRepository,
     onMediaSelected: (UnifiedSearchResult) -> Unit,
     onBack: () -> Unit
 ) {
@@ -38,7 +39,7 @@ fun TvSearchScreen(
             .collectLatest { q ->
                 if (q.isNotBlank()) {
                     isSearching = true
-                    val res = searchRepo.searchAllSources(q, "ANY")
+                    val res = com.alexleoreeves.novelapp.tv.data.searchContent("anime", q)
                     results = res
                     isSearching = false
                 } else {
@@ -97,11 +98,15 @@ fun TvSearchScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(results) { item ->
-                        TvCard(
+                        Card(
                             onClick = { onMediaSelected(item) },
-                            modifier = Modifier.aspectRatio(0.72f).fillMaxWidth()
+                            modifier = Modifier.aspectRatio(0.72f).fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF14141E)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Box {
+                            Box(modifier = Modifier.fillMaxSize()) {
                                 AsyncImage(
                                     model = item.coverUrl,
                                     contentDescription = item.title,

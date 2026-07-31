@@ -30,7 +30,7 @@ android {
 
     defaultConfig {
         applicationId = "com.alexleoreeves.novelapp.tv"
-        minSdk = 21    // Android TV minimum
+        minSdk = 23
         targetSdk = 35
         versionCode = 40
         versionName = "1.40"
@@ -66,6 +66,20 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
+    sourceSets {
+        getByName("main") {
+            java.srcDirs(
+                "src/main/kotlin",
+                "../composeApp/src/commonMain/kotlin",
+                "../composeApp/src/androidMain/kotlin"
+            )
+            res.srcDirs(
+                "src/main/res",
+                "../composeApp/src/androidMain/res"
+            )
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -75,11 +89,12 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_11)
+        freeCompilerArgs.add("-Xexpect-actual-classes")
     }
 }
 
 dependencies {
-    implementation(project(":composeApp"))
+    // TV UI
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui:1.7.5")
     implementation("androidx.compose.material3:material3:1.3.1")
@@ -89,16 +104,17 @@ dependencies {
     implementation("androidx.tv:tv-material:1.0.0-rc01")
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-ktor3:3.0.4")
-    // ExoPlayer for TV
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
-    // Ktor for HTTP
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation(libs.jsoup)
+    implementation(libs.ksoup)
+    implementation("com.google.zxing:core:3.5.3")
 }
 
 secrets {

@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+val Purple500 = Color(0xFF7C3AED)
 val NeonBlue = Color(0xFF00BFFF)
 val NeonCyan = Color(0xFF00E5FF)
 val TvBlack = Color(0xFF06060A)

@@ -27,7 +27,17 @@ import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
 import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
-import com.alexleoreeves.novelapp.tv.ui.screens.*
+import com.alexleoreeves.novelapp.tv.ui.screens.TvAuthScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvSplashScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvAuthScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvDetailScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvHomeScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvPlayerScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvNovelReaderScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvMangaViewerScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvSportsScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvDownloadsScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvYouScreen
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.launch
 

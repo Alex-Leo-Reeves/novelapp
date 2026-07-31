@@ -134,7 +134,7 @@ class FootballApiSource(private val httpClient: HttpClient) {
         // Server 1: Scorebat Direct Match API (Exact Match)
         val scorebatUrl = runCatching {
             val feed = httpClient.get("https://www.scorebat.com/video-api/v3/feed/").bodyAsText()
-            val root = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.parseToJsonElement(feed).jsonObject
+            val root = footballJson.parseToJsonElement(feed).jsonObject
             val matches = root["response"]?.jsonArray
             val exactMatch = matches?.firstOrNull { el ->
                 val title = el.jsonObject["title"]?.jsonPrimitive?.content ?: ""

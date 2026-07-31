@@ -21,8 +21,7 @@
 
     <!-- Left page text lines -->
     <path
-        android:fillColor="#F4F1EC"
-        android:fillAlpha="0.85"
+        android:fillColor="#D9F4F1EC"
         android:pathData="M110,120 L167,120 L167,130 L110,130 Z
                           M110,145 L160,145 L160,155 L110,155 Z
                           M110,170 L167,170 L167,180 L110,180 Z
@@ -31,8 +30,7 @@
 
     <!-- Book spine glow -->
     <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.18"
+        android:fillColor="#2EFFFFFF"
         android:pathData="M179,95 C183,99 185,104 185,110 L185,275 C183,277 181,279 179,281 C177,279 175,277 173,275 L173,110 C173,104 175,99 179,95 Z" />
 
     <!-- Large teal play button -->

@@ -212,7 +212,7 @@ fun TvPlayerScreen(
                     Button(
                         onClick = onBack,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF)),
-                        modifier = Modifier.onFocusChanged { backFocused = it }
+                        modifier = Modifier.onFocusChanged { backFocused= it.isFocused }
                     ) {
                         Text("Go Back", fontWeight = FontWeight.Bold)
                     }
@@ -254,7 +254,7 @@ fun TvPlayerScreen(
                         border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(44.dp)
-                            .onFocusChanged { backFocused = it }
+                            .onFocusChanged { backFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -289,7 +289,7 @@ fun TvPlayerScreen(
                         border = if (rwFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(56.dp)
-                            .onFocusChanged { rwFocused = it }
+                            .onFocusChanged { rwFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.Replay10, null, tint = Color.White, modifier = Modifier.size(28.dp))
@@ -311,7 +311,7 @@ fun TvPlayerScreen(
                         border = if (ppFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(72.dp)
-                            .onFocusChanged { ppFocused = it }
+                            .onFocusChanged { ppFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(
@@ -334,7 +334,7 @@ fun TvPlayerScreen(
                         border = if (ffFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(56.dp)
-                            .onFocusChanged { ffFocused = it }
+                            .onFocusChanged { ffFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.Forward30, null, tint = Color.White, modifier = Modifier.size(28.dp))

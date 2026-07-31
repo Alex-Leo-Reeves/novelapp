@@ -85,7 +85,7 @@ fun TvYouScreen(
                     onClick = onBack,
                     shape = RoundedCornerShape(10.dp),
                     color = if (backFocused) Color(0xFF1C1C2E) else Color.Transparent,
-                    border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
+                    border = if (backFocused) BorderStroke(2.dp, NeonBlue) else null,
                     modifier = Modifier.onFocusChanged { backFocused = it.isFocused }
                 ) {
                     Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -96,9 +96,9 @@ fun TvYouScreen(
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                     // Avatar
-                    Surface(shape = CircleShape, color = Purple500.copy(0.2f), modifier = Modifier.size(72.dp)) {
+                    Surface(shape = CircleShape, color = NeonBlue.copy(0.2f), modifier = Modifier.size(72.dp)) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(account.username.take(1).uppercase(), color = Purple500, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineLarge)
+                            Text(account.username.take(1).uppercase(), color = NeonBlue, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineLarge)
                         }
                     }
                     Column {
@@ -142,9 +142,9 @@ fun TvYouScreen(
                         }
                     },
                     shape = RoundedCornerShape(14.dp),
-                    color = if (isActive) Purple500.copy(0.15f) else if (planFocused) Color(0xFF1C1C2E) else Color(0xFF0C0C14),
-                    border = if (isActive) BorderStroke(2.dp, Purple500)
-                        else if (planFocused) BorderStroke(2.dp, Purple500)
+                    color = if (isActive) NeonBlue.copy(0.15f) else if (planFocused) Color(0xFF1C1C2E) else Color(0xFF0C0C14),
+                    border = if (isActive) BorderStroke(2.dp, NeonBlue)
+                        else if (planFocused) BorderStroke(2.dp, NeonBlue)
                         else BorderStroke(1.dp, Color.White.copy(0.05f)),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -162,19 +162,19 @@ fun TvYouScreen(
                             ) {
                                 Text(info.first, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                 if (isActive) {
-                                    Surface(color = Purple500, shape = RoundedCornerShape(4.dp)) {
-                                        Text("ACTIVE", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                Surface(color = NeonBlue, shape = RoundedCornerShape(4.dp)) {
+                                    Text("ACTIVE", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                                     }
                                 }
                             }
                             Text(desc, color = Color.White.copy(0.5f), style = MaterialTheme.typography.bodySmall)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("₦${info.second}", color = if (isActive) Purple500 else Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineMedium)
+                            Text("₦${info.second}", color = if (isActive) NeonBlue else Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineMedium)
                             Text("/month", color = Color.White.copy(0.4f), style = MaterialTheme.typography.labelSmall)
                         }
                         if (!isActive && planFocused) {
-                            Icon(Icons.Default.ArrowForward, null, tint = Purple500, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Default.ArrowForward, null, tint = NeonBlue, modifier = Modifier.size(32.dp))
                         }
                     }
                 }

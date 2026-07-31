@@ -21,8 +21,7 @@
 
     <!-- Left page lines -->
     <path
-        android:fillColor="#F4F1EC"
-        android:fillAlpha="0.85"
+        android:fillColor="#D9F4F1EC"
         android:pathData="M36,50 L82,50 L82,58 L36,58 Z
                           M36,70 L78,70 L78,78 L36,78 Z
                           M36,90 L82,90 L82,98 L36,98 Z
@@ -30,8 +29,7 @@
 
     <!-- Spine glow -->
     <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.18"
+        android:fillColor="#2EFFFFFF"
         android:pathData="M91,24 C94,27 96,31 96,36 L96,149 C94,151 92,153 91,154 C90,153 88,151 86,149 L86,36 C86,31 88,27 91,24 Z" />
 
     <!-- Teal play arrow -->
@@ -46,8 +44,7 @@
 
     <!-- White TV bars (broadcast signal) -->
     <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.70"
+        android:fillColor="#B3FFFFFF"
         android:pathData="M252,52 L268,52 L268,128 L252,128 Z
                           M276,52 L292,52 L292,128 L276,128 Z" />
 

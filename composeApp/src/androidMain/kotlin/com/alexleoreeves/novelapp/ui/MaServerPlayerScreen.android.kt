@@ -420,6 +420,16 @@ actual fun MaServerPlayerScreen(
                     }
 
                     webChromeClient = object : WebChromeClient() {
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: android.os.Message?
+                        ): Boolean {
+                            // Block popups and window.open redirects completely
+                            return false
+                        }
+
                         override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                             callback?.onCustomViewHidden()
                         }
@@ -429,7 +439,20 @@ actual fun MaServerPlayerScreen(
                         }
                     }
 
-                    loadUrl(embedUrl)
+                    val extraHeaders = mutableMapOf<String, String>()
+                    if (embedUrl.contains("embed.su")) {
+                        extraHeaders["Referer"] = "https://embed.su/"
+                        extraHeaders["Origin"] = "https://embed.su"
+                    } else if (embedUrl.contains("autoembed")) {
+                        extraHeaders["Referer"] = "https://player.autoembed.cc/"
+                        extraHeaders["Origin"] = "https://player.autoembed.cc"
+                    }
+
+                    if (extraHeaders.isNotEmpty()) {
+                        loadUrl(embedUrl, extraHeaders)
+                    } else {
+                        loadUrl(embedUrl)
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize()
@@ -559,7 +582,7 @@ actual fun MaServerPlayerScreen(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
@@ -740,6 +763,8 @@ private const val STABILIZATION_END_JS = """
  */
 private const val INLINE_VIDEO_JS = """
 (function() {
+    window.open = function() { return null; };
+    window.onbeforeunload = null;
     function forceInline() {
         const videos = document.querySelectorAll('video');
         videos.forEach(v => {

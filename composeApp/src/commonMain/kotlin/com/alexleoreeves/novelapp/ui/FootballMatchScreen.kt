@@ -127,7 +127,7 @@ fun FootballMatchScreen(
                     .align(Alignment.TopStart)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
             ) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
             Column(
                 modifier = Modifier

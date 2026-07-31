@@ -143,7 +143,7 @@ actual fun YouTubePlayerScreen(
                         onBack()
                     }) {
                         Icon(
-                            Icons.Default.ArrowBack, null,
+                            Icons.AutoMirrored.Filled.ArrowBack, null,
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )

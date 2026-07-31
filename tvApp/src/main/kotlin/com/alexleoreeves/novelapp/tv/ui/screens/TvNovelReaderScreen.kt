@@ -87,7 +87,7 @@ fun TvNovelReaderScreen(
                     shape = RoundedCornerShape(10.dp),
                     color = if (backFocused) Color(0xFF1C1C2E) else Color.Transparent,
                     border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
-                    modifier = Modifier.onFocusChanged { backFocused = it }
+                    modifier = Modifier.onFocusChanged { backFocused= it.isFocused }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -120,7 +120,7 @@ fun TvNovelReaderScreen(
                     shape = RoundedCornerShape(10.dp),
                     color = if (settingsFocused) Color(0xFF1C1C2E) else Color(0xFF14141E),
                     border = if (settingsFocused) BorderStroke(2.dp, Purple500) else null,
-                    modifier = Modifier.onFocusChanged { settingsFocused = it }
+                    modifier = Modifier.onFocusChanged { settingsFocused= it.isFocused }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -252,7 +252,7 @@ private fun TtsControlStrip(
             border = if (playFocused) BorderStroke(2.dp, Purple500) else null,
             modifier = Modifier
                 .size(44.dp)
-                .onFocusChanged { playFocused = it }
+                .onFocusChanged { playFocused= it.isFocused }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
@@ -273,7 +273,7 @@ private fun TtsControlStrip(
             border = if (stopFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
             modifier = Modifier
                 .size(44.dp)
-                .onFocusChanged { stopFocused = it }
+                .onFocusChanged { stopFocused= it.isFocused }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Stop, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -292,7 +292,7 @@ private fun TtsControlStrip(
             border = if (rereadFocused) BorderStroke(2.dp, Purple500) else null,
             modifier = Modifier
                 .size(44.dp)
-                .onFocusChanged { rereadFocused = it }
+                .onFocusChanged { rereadFocused= it.isFocused }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Replay, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -340,7 +340,7 @@ private fun TtsSettingsPanel(
                         border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { decFocused = it }
+                            .onFocusChanged { decFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -367,7 +367,7 @@ private fun TtsSettingsPanel(
                         border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { incFocused = it }
+                            .onFocusChanged { incFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -394,7 +394,7 @@ private fun TtsSettingsPanel(
                         border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { decFocused = it }
+                            .onFocusChanged { decFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -421,7 +421,7 @@ private fun TtsSettingsPanel(
                         border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { incFocused = it }
+                            .onFocusChanged { incFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -448,7 +448,7 @@ private fun TtsSettingsPanel(
                         border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { decFocused = it }
+                            .onFocusChanged { decFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.TextDecrease, null, tint = Color.White, modifier = Modifier.size(18.dp))
@@ -475,7 +475,7 @@ private fun TtsSettingsPanel(
                         border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { incFocused = it }
+                            .onFocusChanged { incFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.TextIncrease, null, tint = Color.White, modifier = Modifier.size(18.dp))

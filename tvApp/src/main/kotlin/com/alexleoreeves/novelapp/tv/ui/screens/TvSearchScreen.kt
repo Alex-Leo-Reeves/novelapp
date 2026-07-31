@@ -37,7 +37,7 @@ fun TvSearchScreen(
             border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
             modifier = Modifier
                 .padding(start = 16.dp, top = 16.dp, bottom = 8.dp)
-                .onFocusChanged { backFocused = it }
+                .onFocusChanged { backFocused= it.isFocused }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

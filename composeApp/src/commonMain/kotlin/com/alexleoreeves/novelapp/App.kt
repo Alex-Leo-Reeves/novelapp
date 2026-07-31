@@ -540,6 +540,6 @@ enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.PlayCircle),
     NMC("NMC", Icons.Default.Book),
     SPORTS("Sports", Icons.Default.EmojiEvents),
-    READ("Read", Icons.Default.MenuBook),
+    READ("Read", Icons.AutoMirrored.Filled.MenuBook),
     YOU("You", Icons.Default.Person)
 }

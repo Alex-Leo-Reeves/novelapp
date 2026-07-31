@@ -463,7 +463,7 @@ actual fun AnimePlayerScreen(
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))) {
                         Row(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+                            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
                             Spacer(Modifier.width(8.dp))
                             Text(episodeTitle, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
                         }
@@ -501,7 +501,7 @@ actual fun AnimePlayerScreen(
                                         OutlinedButton(onClick = { showAudioPicker = !showAudioPicker },
                                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                                             border = BorderStroke(1.dp, Color.White.copy(0.5f)), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
-                                            Icon(Icons.Default.VolumeUp, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+                                            Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
                                             Text(audioLabel, style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
@@ -869,7 +869,7 @@ private fun PlayerLoadingOverlay(
                 Text(message, color = Color.White.copy(alpha = 0.82f), style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(onClick = onBack, border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
-                        Icon(Icons.Default.ArrowBack, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Back")
                     }
                     Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))) {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Retry")

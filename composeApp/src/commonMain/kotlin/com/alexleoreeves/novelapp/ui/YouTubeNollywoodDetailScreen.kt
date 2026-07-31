@@ -59,7 +59,7 @@ fun YouTubeNollywoodDetailScreen(
                     .padding(top = 40.dp, start = 8.dp)
                     .align(Alignment.TopStart)
             ) {
-                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
             }
             // Play button overlay
             Column(
@@ -105,7 +105,7 @@ fun YouTubeNollywoodDetailScreen(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Divider(color = currentTheme.accentColor().copy(0.2f))
+            HorizontalDivider(color = currentTheme.accentColor().copy(0.2f))
         }
 
         // Play buttons

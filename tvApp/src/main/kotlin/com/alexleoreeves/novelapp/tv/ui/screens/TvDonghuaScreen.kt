@@ -49,21 +49,21 @@ fun TvDonghuaScreen(
     }
 
     if (selectedItem != null) {
-        TvDetailScreen(
-            media = com.alexleoreeves.novelapp.tv.TvMediaItem(
-                id = selectedItem!!.id,
-                title = selectedItem!!.title,
-                coverUrl = selectedItem!!.coverUrl,
-                description = selectedItem!!.synopsis,
-                genres = selectedItem!!.genre.split(",").map { it.trim() }.filter { it.isNotEmpty() },
-                format = "ANIME",
-                detailPageUrl = selectedItem!!.detailPageUrl
-            ),
-            onPlayEpisode = { url, title -> onPlayStream(url, title) },
-            onReadNovel = { _, _ -> },
-            onReadManga = { _, _ -> },
-            onBack = { selectedItem = null }
-        )
+    TvDetailScreen(
+        item = UnifiedSearchResult(
+            id = selectedItem!!.id,
+            title = selectedItem!!.title,
+            coverUrl = selectedItem!!.coverUrl,
+            synopsis = selectedItem!!.synopsis,
+            isAnime = true,
+            mediaKind = "anime"
+        ),
+        account = null,
+        onPlayEpisode = { url, title -> onPlayStream(url, title) },
+        onReadNovel = { _, _ -> },
+        onReadManga = { _, _ -> },
+        onBack = { selectedItem = null }
+    )
         return
     }
 

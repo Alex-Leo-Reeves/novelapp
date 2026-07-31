@@ -125,7 +125,7 @@ fun NovelDetailScreen(
                             .align(Alignment.TopStart)
                     ) {
                         Icon(
-                            Icons.Default.ArrowBack, "Back",
+                            Icons.AutoMirrored.Filled.ArrowBack, "Back",
                             tint = Color.White,
                             modifier = Modifier.size(28.dp)
                         )
@@ -211,7 +211,7 @@ fun NovelDetailScreen(
                             color = currentTheme.subTextColor()
                         )
                     }
-                    Divider(color = currentTheme.accentColor().copy(0.2f))
+                    HorizontalDivider(color = currentTheme.accentColor().copy(0.2f))
                 }
             }
 
@@ -574,7 +574,7 @@ fun ChapterListItem(
                 tint = currentTheme.subTextColor()
             )
         }
-        Divider(
+        HorizontalDivider(
             color = currentTheme.cardColor(),
             modifier = Modifier.padding(horizontal = 16.dp)
         )

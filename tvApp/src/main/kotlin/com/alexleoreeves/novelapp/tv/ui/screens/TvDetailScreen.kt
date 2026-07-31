@@ -89,7 +89,7 @@ fun TvDetailScreen(
                     shape = RoundedCornerShape(10.dp),
                     color = if (backFocused) Color(0xFF1C1C2E) else Color.Transparent,
                     border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
-                    modifier = Modifier.align(Alignment.Start).onFocusChanged { backFocused = it }
+                    modifier = Modifier.align(Alignment.Start).onFocusChanged { backFocused= it.isFocused }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -226,7 +226,7 @@ fun TvDetailScreen(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (chFocused) Purple500.copy(0.3f) else Color(0xFF14141E),
                                 border = if (chFocused) BorderStroke(2.dp, Purple500) else null,
-                                modifier = Modifier.fillMaxWidth().height(48.dp).onFocusChanged { chFocused = it }
+                                modifier = Modifier.fillMaxWidth().height(48.dp).onFocusChanged { chFocused= it.isFocused }
                             ) {
                                 Box(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                                     Text(

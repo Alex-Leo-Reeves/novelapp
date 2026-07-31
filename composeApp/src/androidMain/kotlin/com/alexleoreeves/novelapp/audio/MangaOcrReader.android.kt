@@ -35,7 +35,7 @@ actual class MangaOcrReader actual constructor() {
                         "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Mobile Safari/537.36"
                     )
                     header("Referer", imageUrl.substringBeforeLast("/", missingDelimiterValue = imageUrl))
-                }.readBytes()
+                }.readRawBytes()
                 BitmapFactory.decodeByteArray(response, 0, response.size)
             } else {
                 val path = imageUrl.removePrefix("file://")

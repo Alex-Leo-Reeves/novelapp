@@ -56,7 +56,7 @@ actual suspend fun cacheMangaChapterPages(
         }
         
         // After ensuring the file is downloaded, check its dimensions
-        if (cached.exists() && cached.length() > 0L) {
+        if (cached.length() > 0L) {
             val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(cached.absolutePath, options)
             

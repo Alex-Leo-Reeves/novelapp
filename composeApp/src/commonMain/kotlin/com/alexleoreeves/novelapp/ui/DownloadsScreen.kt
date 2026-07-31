@@ -169,7 +169,7 @@ private fun DownloadsRootScreen(
         ) {
             if (onBack != null) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, null, tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
                 }
             }
             Icon(
@@ -387,7 +387,7 @@ private fun DownloadedItemsListScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
             }
             Spacer(Modifier.width(4.dp))
             Text(
@@ -552,7 +552,7 @@ private fun DownloadedEpisodesScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -570,7 +570,7 @@ private fun DownloadedEpisodesScreen(
                 )
             }
         }
-        Divider(color = currentTheme.subTextColor().copy(0.1f))
+        HorizontalDivider(color = currentTheme.subTextColor().copy(0.1f))
 
         if (episodes.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -664,7 +664,7 @@ private fun DownloadedChaptersScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(item.title, style = MaterialTheme.typography.titleLarge,
@@ -674,7 +674,7 @@ private fun DownloadedChaptersScreen(
                     color = currentTheme.subTextColor())
             }
         }
-        Divider(color = currentTheme.subTextColor().copy(0.1f))
+        HorizontalDivider(color = currentTheme.subTextColor().copy(0.1f))
 
         LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(chapters) { ch ->
@@ -698,7 +698,7 @@ private fun DownloadedChaptersScreen(
                             Text("${ch.pageCount} pages · Offline", style = MaterialTheme.typography.labelSmall,
                                 color = currentTheme.subTextColor())
                         }
-                        Icon(Icons.Default.MenuBook, null, tint = accent, modifier = Modifier.size(28.dp))
+                        Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = accent, modifier = Modifier.size(28.dp))
                     }
                 }
             }
@@ -731,7 +731,7 @@ private fun DownloadedNovelChaptersScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(item.title, style = MaterialTheme.typography.titleLarge,
@@ -741,7 +741,7 @@ private fun DownloadedNovelChaptersScreen(
                     color = currentTheme.subTextColor())
             }
         }
-        Divider(color = currentTheme.subTextColor().copy(0.1f))
+        HorizontalDivider(color = currentTheme.subTextColor().copy(0.1f))
 
         LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(chapters) { ch ->

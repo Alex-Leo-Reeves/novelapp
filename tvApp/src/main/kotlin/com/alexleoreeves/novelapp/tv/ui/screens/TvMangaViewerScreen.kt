@@ -145,7 +145,7 @@ fun TvMangaViewerScreen(
                         border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier
                             .size(44.dp)
-                            .onFocusChanged { backFocused = it }
+                            .onFocusChanged { backFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -177,7 +177,7 @@ fun TvMangaViewerScreen(
                         border = if (zoomOutFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(40.dp)
-                            .onFocusChanged { zoomOutFocused = it }
+                            .onFocusChanged { zoomOutFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ZoomOut, null, tint = Color.White, modifier = Modifier.size(20.dp))
@@ -205,7 +205,7 @@ fun TvMangaViewerScreen(
                         border = if (zoomInFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(40.dp)
-                            .onFocusChanged { zoomInFocused = it }
+                            .onFocusChanged { zoomInFocused= it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ZoomIn, null, tint = Color.White, modifier = Modifier.size(20.dp))

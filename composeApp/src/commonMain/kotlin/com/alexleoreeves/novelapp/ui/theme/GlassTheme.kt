@@ -385,7 +385,7 @@ fun GlassBottomBar(
             GlassBottomNavItem(
                 tab = BottomTab.READ,
                 label = "Read",
-                icon = Icons.Rounded.MenuBook,
+                icon = Icons.AutoMirrored.Rounded.MenuBook,
                 isSelected = currentTab == BottomTab.READ,
                 onClick = { onTabSelected(BottomTab.READ) }
             )

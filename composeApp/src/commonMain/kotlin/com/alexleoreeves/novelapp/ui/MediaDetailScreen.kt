@@ -105,6 +105,7 @@ fun MediaDetailScreen(
             DonghuaServer.NONTONGO -> donghuaStreamScraper // Not used for Nontongo, but required for exhaustiveness
             DonghuaServer.AUTOEMBED -> donghuaStreamScraper
             DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
+            DonghuaServer.EMBEDSU -> donghuaStreamScraper
         }
 
     fun buildDonghuaAutoEmbedUrl(ep: MediaEpisode): String? {
@@ -122,6 +123,24 @@ fun MediaDetailScreen(
             "https://player.autoembed.cc/embed/movie/$detailTmdbId"
         } else {
             "https://player.autoembed.cc/embed/tv/$detailTmdbId/$season/$episode"
+        }
+    }
+
+    fun buildDonghuaEmbedSuUrl(ep: MediaEpisode): String? {
+        val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+        val detailType = detailParts.getOrNull(0).orEmpty()
+        val detailTmdbId = detailParts.getOrNull(1).orEmpty()
+        if (!item.detailPageUrl.startsWith("tmdb://") || detailTmdbId.isBlank()) return null
+
+        val urlParts = ep.url.split(":")
+        val season = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+        val episode = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() }
+            ?: ep.episodeNumber.coerceAtLeast(1).toString()
+
+        return if (detailType == "movie") {
+            "https://embed.su/embed/movie/$detailTmdbId"
+        } else {
+            "https://embed.su/embed/tv/$detailTmdbId/$season/$episode"
         }
     }
 
@@ -148,6 +167,9 @@ fun MediaDetailScreen(
             }
             DonghuaServer.DONGHUA_STREAM -> {
                 ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.EMBEDSU -> {
+                buildDonghuaEmbedSuUrl(ep) ?: ep.url.takeIf { it.isNotBlank() }
             }
         }
     }
@@ -611,7 +633,7 @@ fun MediaDetailScreen(
                     .align(Alignment.TopStart)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
             ) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
             Column(
                 modifier = Modifier

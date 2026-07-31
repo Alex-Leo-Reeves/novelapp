@@ -107,7 +107,7 @@ fun HistoryScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
                 }
                 Spacer(Modifier.width(4.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -309,7 +309,7 @@ private fun HistoryContent(
 
         // ── Separator ──────────────────────────────────────────────────────
         if (hasWatch && hasRead) {
-            item { Divider(color = currentTheme.subTextColor().copy(0.1f), modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
+            item { HorizontalDivider(color = currentTheme.subTextColor().copy(0.1f), modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
         }
 
         // ── Read History ──────────────────────────────────────────────────
@@ -466,7 +466,7 @@ private fun HistoryReadCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (item.isManga) Icons.Default.MenuBook else Icons.Default.AutoStories,
+                        if (item.isManga) Icons.AutoMirrored.Filled.MenuBook else Icons.Default.AutoStories,
                         null, tint = accent, modifier = Modifier.size(28.dp)
                     )
                 }
@@ -540,7 +540,7 @@ private fun HistorySearchScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose) {
-                Icon(Icons.Default.ArrowBack, null, tint = currentTheme.textColor())
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
             }
             OutlinedTextField(
                 value = searchQuery,
@@ -580,7 +580,7 @@ private fun HistorySearchScreen(
                     }
                 }
                 if (readResults.isNotEmpty()) {
-                    item { Divider(color = currentTheme.subTextColor().copy(0.1f), modifier = Modifier.padding(horizontal = 16.dp)) }
+                    item { HorizontalDivider(color = currentTheme.subTextColor().copy(0.1f), modifier = Modifier.padding(horizontal = 16.dp)) }
                     item { Text("Read history", style = MaterialTheme.typography.titleSmall, color = currentTheme.textColor(), fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
                     items(readResults, key = { "r_${it.chapterUrl}" }) { item ->
                         HistoryReadCard(item = item, currentTheme = currentTheme, accent = currentTheme.accentColor(), onClick = { onResumeRead(item) })

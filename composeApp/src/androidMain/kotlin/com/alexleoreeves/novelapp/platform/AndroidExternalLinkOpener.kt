@@ -354,6 +354,7 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
     private fun apkUri(apk: File): Uri =
         FileProvider.getUriForFile(appContext, "${appContext.packageName}.fileprovider", apk)
 
+    @Suppress("DEPRECATION")
     private fun installerIntent(apkUri: Uri): Intent =
         Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             setDataAndType(apkUri, "application/vnd.android.package-archive")

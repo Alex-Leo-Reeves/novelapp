@@ -152,7 +152,7 @@ private fun TvTextField(
             focusedLabelColor = Color(0xFF00BFFF),
             unfocusedLabelColor = Color.White.copy(0.5f)
         ),
-        modifier = Modifier.fillMaxWidth().onFocusChanged { isFocused = it },
+        modifier = Modifier.fillMaxWidth().onFocusChanged { isFocused= it.isFocused },
         shape = RoundedCornerShape(8.dp)
     )
 }
