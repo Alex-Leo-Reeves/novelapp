@@ -95,7 +95,7 @@ const OPENSUBTITLES_PASSWORD = String(process.env.OPENSUBTITLES_PASSWORD || proc
 const SUBDL_API_KEY = String(process.env.SUBDL_API_KEY || process.env.subdl_api_key || "").trim();
 const PUBLIC_APP_URL = cleanBaseUrl(process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || "https://novelapp1.onrender.com");
 const ANDROID_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk";
-const ANDROID_TV_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk";
+const ANDROID_TV_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.4/novelapp-androidtv.apk";
 const DESKTOP_INSTALLER_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe";
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
@@ -1500,16 +1500,79 @@ async function contentSearch(type, query, page = 1) {
     return live.length ? live : fixtureItems("novels", query);
 }
 
+// Real episodes from TMDB for any video title (movies, TV shows, anime,
+// donghua, K-drama, cartoons, classic TV, Nigerian).
+//  - tmdb://tv/{id}   → real season/episode chapters
+//  - tmdb://movie/{id} → one "Full Movie" chapter
+// Never fabricates content.
+async function tmdbEpisodes(detailUrl) {
+    const match = /^tmdb:\/\/(movie|tv)\/(\d+)/.exec(String(detailUrl || ""));
+    if (!match) return [];
+    const mediaType = match[1];
+    const id = match[2];
+    const token = process.env.TMDB_READ_ACCESS_TOKEN || "";
+    const key = process.env.TMDB_API_KEY || "15d2ea6d0dc1d247f33e5405d4b507cc";
+    if (!token && !key) return [];
+    const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
+    const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
+
+    if (mediaType === "movie") {
+        return [{
+            title: "Full Movie",
+            url: `tmdb-movie://${id}`,
+            chapterNumber: 1
+        }];
+    }
+
+    // TV: pull the season list, then episodes for each aired season.
+    const showPayload = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${id}?language=en-US${apiSuffix}`, { headers }).catch(() => null);
+    const seasons = Array.isArray(showPayload ?.seasons) ?
+        showPayload.seasons.filter((s) => Number(s.season_number) > 0).slice(0, 20) : [];
+    const episodes = [];
+    for (const season of seasons) {
+        const seasonNumber = Number(season.season_number || 0);
+        if (!seasonNumber) continue;
+        const seasonPayload = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${id}/season/${seasonNumber}?language=en-US${apiSuffix}`, { headers }).catch(() => null);
+        const eps = Array.isArray(seasonPayload ?.episodes) ? seasonPayload.episodes : [];
+        for (const ep of eps) {
+            const epNumber = Number(ep.episode_number || 0);
+            if (!epNumber) continue;
+            episodes.push({
+                        title: `S${seasonNumber}E${epNumber}${ep.name ? ` - ${ep.name}` : ""}`,
+                url: `tmdb-episode://${id}/${seasonNumber}/${epNumber}`,
+                chapterNumber: episodes.length + 1
+            });
+        }
+    }
+    return episodes;
+}
+
 async function contentChapters(kind, detailUrl, title, sourceName) {
-    if (normalizeContentType(kind) === "novels" || normalizeContentType(kind) === "novel") {
+    const normalizedKind = normalizeContentType(kind);
+    if (normalizedKind === "novels" || normalizedKind === "novel") {
         const live = await swiftNovelScrapers.novelChapters({ detailUrl, sourceName }).catch(() => []);
         return live;
     }
-    if (normalizeContentType(kind) === "manga") {
+    if (normalizedKind === "manga") {
         const live = await mangadexChapters(detailUrl).catch(() => []);
         return live;
     }
-    return syntheticChapters(kind, detailUrl, title);
+    // Video content (movies/kdrama/cartoon/classic/nigerian/donghua/anime):
+    // return REAL TMDB episodes. Never fabricated chapters.
+    // If the detail URL is not already a tmdb:// marker (e.g. anilist:...),
+    // resolve it to a TMDB id first so anime/donghua get real TMDB episodes.
+    let resolvedVideoUrl = String(detailUrl || "");
+    if (!/^tmdb:\/\//.test(resolvedVideoUrl)) {
+        const tmdbType = normalizedKind === "movies" ? "movies" : normalizedKind;
+        const match = await tmdbBestMatch(tmdbType, title).catch(() => null)
+            || await wikidataTmdbMatch(tmdbType, title).catch(() => null);
+        if (match?.detailUrl) resolvedVideoUrl = match.detailUrl;
+    }
+    const real = await tmdbEpisodes(resolvedVideoUrl).catch(() => []);
+    if (real.length > 0) return real;
+    // No TMDB match → return empty list so the UI shows the real server list,
+    // not fake "chapters" that lead nowhere.
+    return [];
 }
 
 async function contentChapterText(chapterUrl, title, sourceName) {
@@ -1621,34 +1684,75 @@ function syntheticMangaPages(chapterUrl) {
   });
 }
 
+/**
+ * TMDB streaming servers, identical to the Android app's StreamServer enum
+ * (MaServerSource.kt). Server 1-8 in the same display order:
+ *   1 VidLink, 2 VidSrc, 3 Nontongo, 4 CinePro (Auto-Link), 5 VidLink (ExoPlayer),
+ *   6 MultiEmbed, 7 AutoEmbed, 8 EmbedSu.
+ * Used for movies, TV, K-Dramas, cartoons, classics, Nollywood, AND anime —
+ * the Android app uses the same list for all of them.
+ */
 function embedProviders(mediaType, id, season = "1", episode = "1") {
   const movie = mediaType === "movie";
     return [
       {
-        provider: "VidSrc.to",
+        provider: "Server 1 (VidLink)",
+        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "Server 2 (VidSrc)",
         url: movie ? `https://vidsrc.to/embed/movie/${id}` : `https://vidsrc.to/embed/tv/${id}/${season}/${episode}`
       },
       {
-        provider: "Nontongo",
+        provider: "Server 3 (Nontongo)",
         url: movie ? `https://nontongo.win/embed/movie/${id}` : `https://nontongo.win/embed/tv/${id}/${season}/${episode}`
       },
       {
-        provider: "MultiEmbed",
+        provider: "Server 4 (Auto-Link)",
+        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "Server 5 (ExoPlayer)",
+        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "Server 6 (MultiEmbed)",
         url: movie ? `https://multiembed.mov/?video_id=${id}&tmdb=1` : `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${season}&e=${episode}`
       },
       {
-        provider: "VidSrc.me",
-        url: movie
-          ? `https://vidsrcme.ru/embed/movie?tmdb=${id}`
-          : `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+        provider: "Server 7 (AutoEmbed)",
+        url: movie ? `https://player.autoembed.cc/embed/movie/${id}` : `https://player.autoembed.cc/embed/tv/${id}/${season}/${episode}`
       },
       {
-        provider: "VidSrc.in",
-        url: movie ? `https://vidsrc.in/embed/movie/${id}` : `https://vidsrc.in/embed/tv/${id}/${season}/${episode}`
+        provider: "Server 8 (EmbedSu)",
+        url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
+      }
+    ];
+}
+
+/**
+ * Donghua-only servers, identical to the Android app's DonghuaServer enum
+ * (MaServerSource.kt): Server 1 Nontongo, Server 2 AutoEmbed,
+ * Server 3 DonghuaStream, Server 4 EmbedSu.
+ */
+function donghuaEmbedProviders(mediaType, id, season = "1", episode = "1") {
+  const movie = mediaType === "movie";
+    return [
+      {
+        provider: "Donghua Server 1 (Nontongo)",
+        url: movie ? `https://nontongo.win/embed/movie/${id}` : `https://nontongo.win/embed/tv/${id}/${season}/${episode}`
       },
       {
-        provider: "VidLink",
-        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
+        provider: "Donghua Server 2 (AutoEmbed)",
+        url: movie ? `https://player.autoembed.cc/embed/movie/${id}` : `https://player.autoembed.cc/embed/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "Donghua Server 3 (DonghuaStream)",
+        url: movie ? `https://donghuastream.org/embed/movie/${id}` : `https://donghuastream.org/embed/tv/${id}/${season}/${episode}`
+      },
+      {
+        provider: "Donghua Server 4 (EmbedSu)",
+        url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
       }
     ];
 }
@@ -2261,11 +2365,52 @@ async function watchRoute(kind, title, detailUrl) {
   };
 }
 
-async function watchRoutes(kind, title, detailUrl) {
+async function watchRoutes(kind, title, detailUrl, season = "1", episode = "1", episodeMarker = "") {
   const normalizedKind = normalizeContentType(kind);
+  const isAnimeKind = normalizedKind === "anime";
+  const isDonghuaKind = normalizedKind === "donghua";
   let resolvedDetailUrl = String(detailUrl || "");
+  const marker = String(episodeMarker || "").trim();
+  // Chapter URLs carry the exact season/episode: tmdb-episode://{id}/{s}/{e}
+  // and tmdb-movie://{id}. Let them override the generic 1/1 default so the
+  // returned routes point at the EXACT episode the user selected.
+  const chapterMatch = /^tmdb-(?:episode|movie):\/\/(\d+)(?:\/(\d+)\/(\d+))?/.exec(resolvedDetailUrl);
+  if (chapterMatch) {
+    resolvedDetailUrl = `tmdb://${normalizedKind === "movies" ? "movie" : "tv"}/${chapterMatch[1]}`;
+    if (chapterMatch[2] && chapterMatch[3]) {
+      season = chapterMatch[2];
+      episode = chapterMatch[3];
+    }
+  }
+  // The episode marker may arrive in the dedicated field (TMDB markers when it
+  // was picked from a TMDB chapter grid, or a consumet://{provider}/{id}
+  // marker when the app already resolved an anime episode id).
+  const markerMatch = /^tmdb-(?:episode|movie):\/\/(\d+)(?:\/(\d+)\/(\d+))?/.exec(marker)
+    || /^consumet:\/\/([^/]+)\/([^?]+)(?:\?ep=(\d+))?/.exec(marker);
+  if (markerMatch && markerMatch[1]) {
+    const markerType = /^tmdb-/.test(marker) ? "tmdb" : "consumet";
+    if (["1", "2"].includes(markerMatch[1])) {
+      // consumet://{provider}/{id} — the provider is the first group.
+    }
+    const tmdbId = markerType === "tmdb" ? markerMatch[1] : markerMatch[1];
+    if (markerType === "tmdb") {
+      resolvedDetailUrl = `tmdb://${normalizedKind === "movies" ? "movie" : "tv"}/${tmdbId}`;
+      if (markerMatch[2] && markerMatch[3]) {
+        season = markerMatch[2];
+        episode = markerMatch[3];
+      }
+    }
+  }
+
+  const consumetMarkerMatch = /^consumet:\/\/([^/]+)\/([^?]+)(?:\?ep=(\d+))?/.exec(marker);
+  const consumetProvider = consumetMarkerMatch ? consumetMarkerMatch[1] : "";
+  const consumetEpisodeId = consumetMarkerMatch ? decodeURIComponent(consumetMarkerMatch[2]) : "";
+  const markerEpisodeNumber = consumetMarkerMatch && consumetMarkerMatch[3]
+    ? Number.parseInt(consumetMarkerMatch[3], 10)
+    : (chapterMatch && chapterMatch[3] ? Number.parseInt(chapterMatch[3], 10) : 0);
+
   if (/^anilist:/i.test(resolvedDetailUrl) || !resolvedDetailUrl) {
-    const tmdbType = normalizedKind === "movies" ? "movies" : normalizedKind;
+    const tmdbType = normalizedKind === "movies" ? "movies" : (isAnimeKind ? "anime" : normalizedKind);
     const match = await tmdbBestMatch(tmdbType, title)
       || await wikidataTmdbMatch(tmdbType, title);
     if (match?.detailUrl) resolvedDetailUrl = match.detailUrl;
@@ -2276,9 +2421,23 @@ async function watchRoutes(kind, title, detailUrl) {
     const mediaType = tmdbMatch[1] === "movie" || normalizedKind === "movies" ? "movie" : "tv";
     const id = tmdbMatch[2];
     const routes = [];
-    const omss = await omssRoute(mediaType, id, "1", "1", title);
+
+    if (isDonghuaKind) {
+      // Donghua gets the Android DonghuaServer list (Server 1-4) — no movie
+      // servers, no OMSS, no Consumet merge.
+      const donghuaEmbeds = donghuaEmbedProviders(mediaType, id, season, episode);
+      routes.push(...donghuaEmbeds.map((provider) => ({
+        route: "embed",
+        url: provider.url,
+        provider: provider.provider,
+        title: title || "Watch"
+      })));
+      return routes;
+    }
+
+    const omss = await omssRoute(mediaType, id, season, episode, title);
     if (omss) routes.push(omss);
-    routes.push(...embedProviders(mediaType, id).map((provider) => ({
+    routes.push(...embedProviders(mediaType, id, season, episode).map((provider) => ({
       route: "embed",
       url: provider.url,
       provider: provider.provider,
@@ -4088,6 +4247,28 @@ async function handleApi(request, response, pathname) {
       return await handleAddChapter(request, response);
     }
 
+    // ── TV server-driven frontend config (hot-update layer) ─────────────
+    // The TV app polls this endpoint on launch and every `refreshSeconds`
+    // from tv-config.json. Edit site/tv-config.json, push, and every
+    // running TV gets the new sidebar/rows/feature-flags without an APK.
+    if (request.method === "GET" && pathname === "/api/tv/config") {
+      try {
+        const configPath = path.join(SITE_DIR, "tv-config.json");
+        if (fs.existsSync(configPath)) {
+          response.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+            "access-control-allow-origin": "*"
+          });
+          response.end(fs.readFileSync(configPath, "utf8"));
+          return;
+        }
+        return sendError(response, 404, "tv-config.json not found.");
+      } catch (error) {
+        return sendError(response, 500, error.message || "Could not read TV config.");
+      }
+    }
+
     return sendError(response, 404, "API route not found.");
   } catch (error) {
     console.error("[API] Error:", error.stack || error.message || error);
@@ -4310,3 +4491,4 @@ ensurePremiumSeedUser()
       }
     });
   });
+
