@@ -8,7 +8,38 @@ const swiftNovelScrapers = require("./swift-novel-scrapers");
 const wweHandlers = require("./wwe-handlers");
 const youtubeHandlers = require("./youtube-handlers");
 const supabaseAuthHandlers = require("./supabase-auth-handlers");
+const tvPairHandlers = require("./tv-pair-handlers");
 let _supabaseOtpHandlers = null;
+let _tvPairHandler = null;
+
+function getTvPairHandlers() {
+    if (!_tvPairHandler) {
+        _tvPairHandler = tvPairHandlers.createTvPairHandlers({
+            sendJson,
+            sendError,
+            readBody,
+            PUBLIC_APP_URL,
+            supabaseEnabled,
+            findSupabaseUserById,
+            createSupabaseSession,
+            createSession,
+            readData,
+            writeData,
+            assertCanCreateSession,
+            publicUser,
+            getBearerToken,
+            getSessionUser: (tokenOrData, maybeToken) => {
+                if (supabaseEnabled()) return findSupabaseSessionUser(tokenOrData);
+                return findSessionUser(tokenOrData, maybeToken);
+            },
+            seedPremiumUserInFile,
+            findSupabaseUserByEmail,
+            passwordMatches,
+            normalizeEmail
+        });
+    }
+    return _tvPairHandler;
+}
 
 function getSupabaseOtpHandlers() {
     if (!_supabaseOtpHandlers) {
@@ -3963,6 +3994,17 @@ async function handleApi(request, response, pathname) {
     }
     if (request.method === "POST" && pathname === "/api/auth/reset-password") {
       return await handleResetPassword(request, response);
+    }
+
+    // ── TV ↔ Phone pairing routes (QR login) ────────────────────────────
+    if (request.method === "POST" && pathname === "/api/tv-pair/start") {
+      return await getTvPairHandlers().handleTvPairStart(request, response);
+    }
+    if (request.method === "GET" && pathname === "/api/tv-pair/status") {
+      return await getTvPairHandlers().handleTvPairStatus(request, response, requestUrl);
+    }
+    if (request.method === "POST" && pathname === "/api/tv-pair/approve") {
+      return await getTvPairHandlers().handleTvPairApprove(request, response);
     }
 
     // ── OTP Auth routes (Supabase Auth proxy) ─────────────────────────────

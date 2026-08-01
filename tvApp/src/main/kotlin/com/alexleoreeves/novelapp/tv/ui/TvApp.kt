@@ -29,7 +29,7 @@ import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
 import com.alexleoreeves.novelapp.tv.ui.screens.TvAuthScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvSplashScreen
-import com.alexleoreeves.novelapp.tv.ui.screens.TvAuthScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvPhonePairScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvDetailScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvHomeScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvPlayerScreen
@@ -42,7 +42,7 @@ import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.launch
 
 enum class TvScreen {
-    SPLASH, AUTH, HOME, DETAIL, PLAYER, READER, MANGA_VIEWER
+    SPLASH, AUTH, PAIR, HOME, DETAIL, PLAYER, READER, MANGA_VIEWER
 }
 
 data class NavigationState(
@@ -91,6 +91,7 @@ fun TvApp(
             TvScreen.PLAYER -> nav.copy(screen = TvScreen.DETAIL, playUrl = "", playTitle = "")
             TvScreen.READER -> nav.copy(screen = TvScreen.DETAIL, readerText = "", readerTitle = "")
             TvScreen.MANGA_VIEWER -> nav.copy(screen = TvScreen.DETAIL, mangaPages = emptyList(), mangaTitle = "")
+            TvScreen.PAIR -> nav.copy(screen = TvScreen.AUTH)
             TvScreen.AUTH -> nav.copy(screen = TvScreen.HOME)
             TvScreen.SPLASH -> nav.copy(screen = TvScreen.HOME)
             else -> nav
@@ -136,7 +137,18 @@ fun TvApp(
                             } catch (e: Exception) { /* error handled inside TvAuthScreen */ }
                         }
                     },
+                    onPhonePair = { nav = nav.copy(screen = TvScreen.PAIR) },
                     onDismiss = { nav = nav.copy(screen = TvScreen.HOME) }
+                )
+            }
+
+            nav.screen == TvScreen.PAIR -> {
+                TvPhonePairScreen(
+                    sessionStore = sessionStore,
+                    onApproved = { account ->
+                        nav = nav.copy(screen = TvScreen.HOME, account = account)
+                    },
+                    onBack = { goBack() }
                 )
             }
 

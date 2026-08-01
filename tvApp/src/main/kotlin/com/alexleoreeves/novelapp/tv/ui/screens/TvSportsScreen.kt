@@ -95,7 +95,7 @@ fun TvSportsScreen(
                     sts = when (state) { "in" -> "LIVE"; "post" -> "FT"; else -> "Scheduled" }
                     val league = obj["league"]?.jsonObject?.let { it["name"] }?.jsonPrimitive?.contentOrNull ?: ""
                     matchList.add(EspnMatch(
-                        id = evt["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                        id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
                         homeTeam = home,
                         awayTeam = away,
                         homeScore = homeS,

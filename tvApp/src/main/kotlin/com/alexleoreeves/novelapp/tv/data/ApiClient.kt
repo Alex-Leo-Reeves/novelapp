@@ -118,6 +118,69 @@ suspend fun authLogout(token: String) {
     finally { client.close() }
 }
 
+// ── TV ↔ Phone Pairing ──────────────────────────────────────────────────────
+data class TvPairStart(
+    val pairId: String = "",
+    val code: String = "",
+    val qrContent: String = "",
+    val expiresInSeconds: Int = 300
+)
+
+sealed class TvPairPollState {
+    data object Pending : TvPairPollState()
+    data class Approved(val account: SavedUserAccount) : TvPairPollState()
+    data object Expired : TvPairPollState()
+}
+
+suspend fun startTvPair(): TvPairStart {
+    val client = platformHttpClient()
+    return try {
+        val resp = client.post("${ApiConfig.API_BASE_URL}/tv-pair/start")
+        val body = resp.bodyAsText()
+        val json = apiJson.parseToJsonElement(body).jsonObject
+        TvPairStart(
+            pairId = json["pairId"]?.jsonPrimitive?.contentOrNull ?: "",
+            code = json["code"]?.jsonPrimitive?.contentOrNull ?: "",
+            qrContent = json["qrContent"]?.jsonPrimitive?.contentOrNull ?: "",
+            expiresInSeconds = json["expiresInSeconds"]?.jsonPrimitive?.intOrNull ?: 300
+        )
+    } finally { client.close() }
+}
+
+suspend fun pollTvPairStatus(pairId: String): TvPairPollState {
+    val client = platformHttpClient()
+    return try {
+        val resp = client.get("${ApiConfig.API_BASE_URL}/tv-pair/status") {
+            parameter("pair", pairId)
+        }
+        val body = resp.bodyAsText()
+        val json = apiJson.parseToJsonElement(body).jsonObject
+        when (json["status"]?.jsonPrimitive?.contentOrNull) {
+            "approved" -> {
+                val user = json["user"]?.jsonObject
+                val token = json["token"]?.jsonPrimitive?.contentOrNull ?: ""
+                TvPairPollState.Approved(
+                    SavedUserAccount(
+                        id = user?.get("id")?.jsonPrimitive?.contentOrNull ?: "",
+                        username = user?.get("username")?.jsonPrimitive?.contentOrNull ?: "",
+                        email = user?.get("email")?.jsonPrimitive?.contentOrNull ?: "",
+                        authToken = token,
+                        plan = user?.get("plan")?.jsonPrimitive?.contentOrNull ?: "free",
+                        billingStatus = user?.get("billingStatus")?.jsonPrimitive?.contentOrNull ?: "none",
+                        paidUntil = user?.get("paidUntil")?.jsonPrimitive?.contentOrNull,
+                        createdAt = user?.get("createdAt")?.jsonPrimitive?.contentOrNull ?: "",
+                        maxDevices = user?.get("maxDevices")?.jsonPrimitive?.intOrNull
+                    )
+                )
+            }
+            "expired" -> TvPairPollState.Expired
+            else -> TvPairPollState.Pending
+        }
+    } catch (_: Exception) {
+        TvPairPollState.Pending
+    } finally { client.close() }
+}
+
 // ── Content ─────────────────────────────────────────────────────────────────
 suspend fun fetchContentHome(type: String, page: Int = 1): List<UnifiedSearchResult> {
     val client = platformHttpClient()

@@ -66,20 +66,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    sourceSets {
-        getByName("main") {
-            java.srcDirs(
-                "src/main/kotlin",
-                "../composeApp/src/commonMain/kotlin",
-                "../composeApp/src/androidMain/kotlin"
-            )
-            res.srcDirs(
-                "src/main/res",
-                "../composeApp/src/androidMain/res"
-            )
-        }
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true

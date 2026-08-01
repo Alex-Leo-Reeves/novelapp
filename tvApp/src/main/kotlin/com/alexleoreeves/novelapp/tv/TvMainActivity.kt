@@ -6,6 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
+import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
+import com.alexleoreeves.novelapp.tv.ui.TvApp
+import com.alexleoreeves.novelapp.tv.ui.theme.NovaReadTVTheme
 
 class TvMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -18,6 +22,12 @@ class TvMainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        setContent { TvApp() }
+        val sessionStore = UserSessionStore(applicationContext)
+        val ttsEngine = TvTtsEngine(applicationContext)
+        setContent {
+            NovaReadTVTheme {
+                TvApp(sessionStore = sessionStore, ttsEngine = ttsEngine)
+            }
+        }
     }
 }

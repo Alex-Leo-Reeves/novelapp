@@ -57,6 +57,7 @@ fun TvAuthScreen(
     onSignIn: (String, String) -> Unit,
     onCreateAccount: (String, String, String, String) -> Unit,
     onDismiss: () -> Unit,
+    onPhonePair: () -> Unit = {},
     isSubmitting: Boolean = false,
     externalError: String? = null
 ) {
@@ -120,6 +121,20 @@ fun TvAuthScreen(
                     if (isLogin.value) "Don't have an account? Create one" else "Already have an account? Sign in",
                     color = Color(0xFF00BFFF)
                 )
+            }
+
+            HorizontalDivider(color = Color.White.copy(0.15f))
+
+            Button(
+                onClick = onPhonePair,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14141E)),
+                border = BorderStroke(1.dp, Color(0xFF06D6A0)),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(Icons.Default.QrCodeScanner, null, tint = Color(0xFF06D6A0), modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Log in with your phone", color = Color(0xFF06D6A0), fontWeight = FontWeight.Bold)
             }
 
             TextButton(onClick = onDismiss) {

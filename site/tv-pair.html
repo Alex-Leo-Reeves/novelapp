@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#06060A">
+<title>Sign in to your TV - NovaRead</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:radial-gradient(900px 500px at 50% -10%,#1b1033 0%,#06060A 60%);color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{width:100%;max-width:420px;background:#0C0C12;border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:32px 24px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.logo{display:flex;align-items:center;gap:10px;justify-content:center;font-weight:800;font-size:22px;margin-bottom:8px}
+.logo svg{width:28px;height:28px}
+.subtitle{text-align:center;color:#9CA3AF;font-size:14px;margin-bottom:20px}
+.code-box{background:#14141E;border:1px dashed rgba(0,191,255,.4);border-radius:12px;padding:18px;text-align:center;margin-bottom:20px}
+.code-box .label{font-size:13px;color:#9CA3AF;margin-bottom:8px}
+.code{font-size:34px;font-weight:900;letter-spacing:12px;color:#00BFFF;font-variant-numeric:tabular-nums;padding-left:12px}
+input{width:100%;background:#14141E;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:14px 16px;color:#fff;font-size:16px;outline:none;margin-bottom:10px}
+input:focus{border-color:#00BFFF}
+button{width:100%;margin-top:10px;background:#00BFFF;color:#fff;border:none;border-radius:10px;padding:15px;font-size:16px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.btn-app{background:#14141E;border:1px solid rgba(0,191,255,.5);margin-top:12px}
+.divider{text-align:center;color:#4B5563;font-size:12px;margin:18px 0 10px}
+.status{margin-top:14px;font-size:14px;text-align:center;min-height:20px}
+.status.ok{color:#06D6A0}
+.status.err{color:#F87171}
+.status.info{color:#60A5FA}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#00BFFF" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+    NovaRead
+  </div>
+  <div class="subtitle">Sign in to your TV</div>
+
+  <div class="code-box">
+    <div class="label">Enter this code on your TV if prompted</div>
+    <div class="code" id="codeDisplay">----</div>
+  </div>
+
+  <button class="btn-app" id="openAppBtn">Open NovelApp if installed</button>
+
+  <div class="divider">OR SIGN IN WITH EMAIL</div>
+
+  <form id="pairForm">
+    <input type="email" id="email" placeholder="Email" autocomplete="email" required>
+    <input type="password" id="password" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit" id="submitBtn">Sign in and approve TV</button>
+  </form>
+
+  <div class="status" id="statusBox"></div>
+</div>
+
+<script>
+(function () {
+  var api = "https://novelapp1.onrender.com/api";
+  var pair = new URLSearchParams(window.location.search).get("pair") || "";
+  var code = new URLSearchParams(window.location.search).get("code") || "";
+
+  (function showCode() {
+    var el = document.getElementById("codeDisplay");
+    if (code) { el.textContent = code.split("").join(" "); }
+  })();
+
+  function setStatus(msg, type) {
+    var el = document.getElementById("statusBox");
+    el.textContent = msg || "";
+    el.className = "status" + (type ? " " + type : "");
+  }
+
+  document.getElementById("openAppBtn").addEventListener("click", function () {
+    if (!pair || !code) { setStatus("Open this page from the QR code on your TV.", "err"); return; }
+    setStatus("Opening NovelApp...", "info");
+    window.location.href = "novelapp://pair?pair=" + encodeURIComponent(pair) + "&code=" + encodeURIComponent(code);
+  });
+
+  document.getElementById("pairForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!pair || !code) { setStatus("This link is missing pairing info. Scan the QR on your TV again.", "err"); return; }
+    var email = document.getElementById("email").value.trim();
+    var password = document.getElementById("password").value;
+    if (!email || !password) { setStatus("Enter your email and password.", "err"); return; }
+
+    var btn = document.getElementById("submitBtn");
+    btn.disabled = true;
+    btn.textContent = "Signing in...";
+    setStatus("Approving your TV...", "info");
+
+    fetch(api + "/tv-pair/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pair: pair, code: code, email: email, password: password })
+    }).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+    }).then(function (res) {
+      if (res.ok) {
+        setStatus("TV approved! It will refresh in a few seconds.", "ok");
+        document.getElementById("pairForm").classList.add("hidden");
+      } else {
+        setStatus(res.d.error || "Could not approve this TV.", "err");
+      }
+    }).catch(function () {
+      setStatus("Network error. Try again.", "err");
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = "Sign in and approve TV";
+    });
+  });
+})();
+</script>
+</body>
+</html>
