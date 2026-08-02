@@ -335,9 +335,7 @@ const freeWebNovel = {
   }
 };
 
-const sources = process.env.ENABLE_FREEWEBNOVEL === "1"
-  ? [wuxiaWorld, royalRoad, freeWebNovel]
-  : [wuxiaWorld, royalRoad];
+const sources = [wuxiaWorld, royalRoad, freeWebNovel];
 
 function sourceFor(nameOrUrl = "") {
   const value = String(nameOrUrl || "").toLowerCase();

@@ -1122,6 +1122,7 @@ function normalizeContentType(type) {
     if (["classic", "classictv", "classic-tv"].includes(raw)) return "classic";
     if (["nigerian", "nollywood", "naija"].includes(raw)) return "nigerian";
     if (["donghua", "chineseanime", "chineseanimation", "dongman", "donghua-anime", "chinesedrama"].includes(raw)) return "donghua";
+    if (["comic", "comics"].includes(raw)) return "comic";
     if (["anime", "manga"].includes(raw)) return raw;
     return "novels";
 }
@@ -1454,9 +1455,9 @@ async function mangadexPages(chapterUrl) {
 
 async function contentHome(type, page = 1) {
     const normalizedType = normalizeContentType(type);
-    if (normalizedType === "manga") {
+    if (normalizedType === "manga" || normalizedType === "comic") {
         const live = await mangadexItems("", page).catch(() => []);
-        return live.length ? live : fixtureItems("manga");
+        return live.length ? live : fixtureItems(normalizedType);
     }
     // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, and Movies all go through TMDB (same pipeline)
     if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
@@ -1492,9 +1493,9 @@ async function contentSearch(type, query, page = 1) {
         // If TMDB returned nothing, try fixture fallback
         return fixtureItems(normalizedType, query);
     }
-    if (normalizedType === "manga") {
+    if (normalizedType === "manga" || normalizedType === "comic") {
         const live = await mangadexItems(query, page).catch(() => []);
-        return live.length ? live : fixtureItems("manga", query);
+        return live.length ? live : fixtureItems(normalizedType, query);
     }
     const live = await swiftNovelScrapers.searchNovels(query, page).catch(() => []);
     return live.length ? live : fixtureItems("novels", query);
@@ -2548,7 +2549,16 @@ async function handleContentApi(request, response, pathname, url) {
     }
     if (request.method === "POST" && pathname === "/api/content/watch-routes") {
       const body = await readBody(request);
-      return sendApiData(response, 200, { routes: await watchRoutes(body.kind, body.title, body.detailUrl) });
+      return sendApiData(response, 200, {
+        routes: await watchRoutes(
+          body.kind,
+          body.title,
+          body.detailUrl,
+          body.season || "1",
+          body.episode || "1",
+          body.episodeMarker || body.episodeUrl || ""
+        )
+      });
     }
     return sendApiError(response, 404, "Content API route not found.");
   } catch (error) {
