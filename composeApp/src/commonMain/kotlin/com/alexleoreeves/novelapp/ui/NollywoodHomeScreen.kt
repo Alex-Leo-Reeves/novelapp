@@ -61,9 +61,7 @@ fun NollywoodHomeScreen(
     downloadRepo: LocalDownloadRepository
 ) {
     val scope = rememberCoroutineScope()
-    private val nollyJson = Json { ignoreUnknownKeys = true; isLenient = true }
-
-    private val nollyJson = Json { ignoreUnknownKeys = true; isLenient = true }
+    val nollyJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
     val httpClient = remember {
         platformHttpClient {
@@ -186,7 +184,7 @@ fun NollywoodHomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
+                        Icon(Icons.Filled.ArrowBack, null, tint = currentTheme.textColor())
                     }
                     Icon(
                         Icons.Default.Flag,

@@ -1,6 +1,8 @@
 package com.alexleoreeves.novelapp.tv.ui.screens
 
+import android.net.Uri
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,63 +24,104 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
+import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.util.VLCVideoLayout
 
+/** Hard cap copied from the backend so free users can NEVER finish a full title on TV. */
+const val TV_MOVIE_FREE_PREVIEW_MS = 20 * 60 * 1000L
+const val TV_EPISODIC_FREE_FRACTION = 0.2
+
+/**
+ * TV Player powered by LibVLC SDK for direct .m3u8/.mp4/.mpd streams.
+ * This is the TV equivalent of Android's AnimePlayerScreen (ExoPlayer).
+ *
+ * Embed URLs should be routed to [TvEmbedPlayerScreen] instead.
+ */
 @Composable
 fun TvPlayerScreen(
     streamUrl: String,
     title: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    account: SavedUserAccount? = null,
+    previewLimitMs: Long? = null,
+    isEpisodic: Boolean = false,
+    episodicFraction: Double = TV_EPISODIC_FREE_FRACTION,
+    onUpgrade: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var showControls by remember { mutableStateOf(true) }
     var isPlaying by remember { mutableStateOf(true) }
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
-    var isWebEmbed by remember {
-        mutableStateOf(
-            streamUrl.contains("vidsrc") || streamUrl.contains("embed") ||
-            streamUrl.contains("kisskh") || streamUrl.contains("dramacool") ||
-            streamUrl.contains("kimcartoon") || streamUrl.contains("flixhq")
-        )
-    }
+    var previewExpired by remember { mutableStateOf(false) }
+    var vlcMediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var libVlc by remember { mutableStateOf<LibVLC?>(null) }
 
-    val exoPlayer = remember {
-        if (!isWebEmbed) {
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(streamUrl))
-                prepare()
-                playWhenReady = true
-                addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_READY) {
-                            duration = this@apply.duration
+    val isPremium = account?.isPremium == true
+    val resolvedUrl = streamUrl.trim()
+
+    // LibVLC SDK Initialization
+    DisposableEffect(resolvedUrl) {
+        if (resolvedUrl.isNotBlank()) {
+            runCatching {
+                val args = arrayListOf(
+                    "--no-drop-late-frames",
+                    "--no-skip-frames",
+                    "--rtsp-tcp",
+                    "-vvv"
+                )
+                val vlc = LibVLC(context, args)
+                val mp = MediaPlayer(vlc)
+                libVlc = vlc
+                vlcMediaPlayer = mp
+
+                val media = Media(vlc, Uri.parse(resolvedUrl))
+                if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
+                    media.addOption(":http-referrer=https://www.febbox.com/")
+                }
+                mp.media = media
+                media.release()
+
+                mp.setEventListener { event ->
+                    when (event.type) {
+                        MediaPlayer.Event.TimeChanged -> {
+                            currentPosition = mp.time
+                            if (duration <= 0 && mp.length > 0) {
+                                duration = mp.length
+                            }
+                        }
+                        MediaPlayer.Event.LengthChanged -> {
+                            duration = mp.length
+                        }
+                        MediaPlayer.Event.Playing -> {
+                            isPlaying = true
+                        }
+                        MediaPlayer.Event.Paused -> {
+                            isPlaying = false
+                        }
+                        MediaPlayer.Event.EncounteredError -> {
+                            errorMsg = "LibVLC playback error encountered"
                         }
                     }
-                    override fun onIsPlayingChanged(playing: Boolean) {
-                        isPlaying = playing
-                    }
-                    override fun onPlayerError(error: PlaybackException) {
-                        errorMsg = error.localizedMessage ?: "Playback error"
-                    }
-                })
+                }
+                mp.play()
+            }.onFailure { e ->
+                errorMsg = e.localizedMessage ?: "VLC Init Failed"
             }
-        } else null
-    }
-
-    DisposableEffect(Unit) {
+        }
         onDispose {
-            exoPlayer?.stop()
-            exoPlayer?.release()
+            runCatching {
+                vlcMediaPlayer?.stop()
+                vlcMediaPlayer?.release()
+                libVlc?.release()
+            }
+            vlcMediaPlayer = null
+            libVlc = null
         }
     }
 
@@ -90,13 +133,36 @@ fun TvPlayerScreen(
         }
     }
 
-    // Update position periodically when controls visible
-    LaunchedEffect(showControls) {
-        while (showControls && exoPlayer != null) {
-            currentPosition = exoPlayer.currentPosition
+    // Preview cap for direct LibVLC stream
+    LaunchedEffect(vlcMediaPlayer, isPremium) {
+        val mp = vlcMediaPlayer
+        while (mp != null && !previewExpired) {
+            currentPosition = mp.time
+            val currentDuration = mp.length.takeIf { it > 0 } ?: duration
+            if (!isPremium && currentDuration > 0) {
+                val limit = if (isEpisodic) {
+                    (currentDuration * episodicFraction).toLong().coerceAtLeast(1)
+                } else {
+                    (previewLimitMs ?: TV_MOVIE_FREE_PREVIEW_MS).coerceAtMost(TV_MOVIE_FREE_PREVIEW_MS)
+                }
+                if (currentPosition >= limit) {
+                    previewExpired = true
+                    runCatching { mp.pause() }
+                }
+            }
             delay(500)
         }
     }
+
+    fun playerSeekTo(positionMs: Long) {
+        vlcMediaPlayer?.let { it.time = positionMs.coerceIn(0L, duration) }
+    }
+
+    fun playerTogglePlay() {
+        vlcMediaPlayer?.let { if (it.isPlaying) it.pause() else it.play() }
+    }
+
+    BackHandler { onBack() }
 
     Box(
         modifier = Modifier
@@ -104,89 +170,36 @@ fun TvPlayerScreen(
             .background(Color.Black)
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyUp) {
-                    showControls = true
-                    when (event.key) {
-                        Key.DirectionLeft -> {
-                            exoPlayer?.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0))
-                            true
+                    if (previewExpired) {
+                        when (event.key) {
+                            Key.Back -> { onBack(); true }
+                            else -> true
                         }
-                        Key.DirectionRight -> {
-                            exoPlayer?.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration))
-                            true
+                    } else {
+                        showControls = true
+                        when (event.key) {
+                            Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
+                            Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
+                            Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
+                            Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
+                            Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
+                            Key.Back -> { onBack(); true }
+                            else -> false
                         }
-                        Key.DirectionCenter, Key.Enter -> {
-                            exoPlayer?.let {
-                                if (it.isPlaying) it.pause() else it.play()
-                            }
-                            true
-                        }
-                        Key.MediaPlayPause -> {
-                            exoPlayer?.let {
-                                if (it.isPlaying) it.pause() else it.play()
-                            }
-                            true
-                        }
-                        Key.MediaFastForward -> {
-                            exoPlayer?.seekTo((exoPlayer.currentPosition + 30000).coerceAtMost(exoPlayer.duration))
-                            true
-                        }
-                        Key.MediaRewind -> {
-                            exoPlayer?.seekTo((exoPlayer.currentPosition - 15000).coerceAtLeast(0))
-                            true
-                        }
-                        Key.Back -> {
-                            onBack()
-                            true
-                        }
-                        else -> false
                     }
                 } else false
             }
     ) {
-        if (isWebEmbed) {
+        // LibVLC Surface View
+        if (errorMsg == null) {
             AndroidView(
                 factory = { ctx ->
-                    android.webkit.WebView(ctx).apply {
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            mediaPlaybackRequiresUserGesture = false
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
-                            setSupportMultipleWindows(false)
-                            allowFileAccess = false
-                            allowContentAccess = false
-                        }
-                        webViewClient = object : android.webkit.WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: android.webkit.WebView?,
-                                request: android.webkit.WebResourceRequest?
-                            ): Boolean {
-                                val url = request?.url?.toString() ?: ""
-                                return !url.contains("vidsrc") && !url.contains("kisskh") &&
-                                       !url.contains("dramacool") && !url.contains("kimcartoon") &&
-                                       !url.contains("flixhq") && !url.contains("themoviedb") &&
-                                       !url.contains("tmdb")
-                            }
-                        }
-                        loadUrl(streamUrl)
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else if (exoPlayer != null) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = false
-                        setShowNextButton(false)
-                        setShowPreviousButton(false)
+                    VLCVideoLayout(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        vlcMediaPlayer?.attachViews(this, null, false, false)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -196,9 +209,7 @@ fun TvPlayerScreen(
         // Error overlay
         if (errorMsg != null) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(0.8f)),
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.8f)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -208,13 +219,29 @@ fun TvPlayerScreen(
                     Icon(Icons.Default.ErrorOutline, null, tint = Color(0xFFEF4444), modifier = Modifier.size(64.dp))
                     Text("Playback Error", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(errorMsg!!, color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodyMedium)
-                    var backFocused by remember { mutableStateOf(false) }
-                    Button(
-                        onClick = onBack,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF)),
-                        modifier = Modifier.onFocusChanged { backFocused= it.isFocused }
-                    ) {
+                    Button(onClick = onBack, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))) {
                         Text("Go Back", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Free preview ended gate
+        if (previewExpired) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color(0xFF05050A).copy(0.96f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(Icons.Default.Lock, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(80.dp))
+                    Text("Free Preview Ended", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White)
+                    Text("Go premium to watch the full title.", color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodyLarge)
+                    Button(onClick = onUpgrade, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))) {
+                        Text("Go Premium", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -222,184 +249,56 @@ fun TvPlayerScreen(
 
         // Controls overlay
         AnimatedVisibility(
-            visible = showControls && errorMsg == null,
+            visible = showControls && errorMsg == null && !previewExpired,
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(300))
         ) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Black.copy(0.7f),
-                                Color.Transparent,
-                                Color.Black.copy(0.7f)
-                            )
-                        )
-                    )
+                modifier = Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(listOf(Color.Black.copy(0.7f), Color.Transparent, Color.Black.copy(0.7f)))
+                )
             ) {
-                // Top bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     var backFocused by remember { mutableStateOf(false) }
                     Surface(
-                        onClick = onBack,
-                        shape = CircleShape,
+                        onClick = onBack, shape = CircleShape,
                         color = if (backFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                         border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .onFocusChanged { backFocused= it.isFocused }
+                        modifier = Modifier.size(44.dp).onFocusChanged { backFocused = it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ArrowBack, null, tint = Color.White, modifier = Modifier.size(24.dp))
                         }
                     }
                     Spacer(Modifier.width(16.dp))
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 }
 
-                // Center controls
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.Center),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Rewind 15s
-                    var rwFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { exoPlayer?.seekTo((exoPlayer.currentPosition - 15000).coerceAtLeast(0)) },
-                        shape = CircleShape,
-                        color = if (rwFocused) Color(0xFF00BFFF).copy(0.5f) else Color.Black.copy(0.5f),
-                        border = if (rwFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .onFocusChanged { rwFocused= it.isFocused }
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Replay10, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                        }
-                    }
-
-                    Spacer(Modifier.width(24.dp))
-
-                    // Play/Pause
+                Row(modifier = Modifier.fillMaxWidth().align(Alignment.Center), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     var ppFocused by remember { mutableStateOf(false) }
                     Surface(
-                        onClick = {
-                            exoPlayer?.let {
-                                if (it.isPlaying) it.pause() else it.play()
-                            }
-                        },
-                        shape = CircleShape,
+                        onClick = { playerTogglePlay() }, shape = CircleShape,
                         color = if (ppFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                         border = if (ppFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else null,
-                        modifier = Modifier
-                            .size(72.dp)
-                            .onFocusChanged { ppFocused= it.isFocused }
+                        modifier = Modifier.size(72.dp).onFocusChanged { ppFocused = it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(
-                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                null,
-                                tint = Color.White,
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.width(24.dp))
-
-                    // Forward 30s
-                    var ffFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { exoPlayer?.seekTo((exoPlayer.currentPosition + 30000).coerceAtMost(exoPlayer.duration)) },
-                        shape = CircleShape,
-                        color = if (ffFocused) Color(0xFF00BFFF).copy(0.5f) else Color.Black.copy(0.5f),
-                        border = if (ffFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .onFocusChanged { ffFocused= it.isFocused }
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Forward30, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(36.dp))
                         }
                     }
                 }
 
-                // Bottom bar with progress
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
+                Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
                     val progress = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp),
-                        color = Color(0xFF00BFFF),
-                        trackColor = Color.White.copy(0.15f)
-                    )
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(4.dp), color = Color(0xFF00BFFF), trackColor = Color.White.copy(0.15f))
                     Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime(currentPosition), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                         Text(formatTime(duration), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                     }
                 }
-
-                // D-pad hint
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 60.dp)
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    ) {
-                        HintBadge("\u2190 10s")
-                        HintBadge("\u2192 10s")
-                        HintBadge("\u23F8 Play/Pause")
-                    }
-                }
             }
         }
-    }
-}
-
-@Composable
-private fun HintBadge(text: String) {
-    Surface(
-        color = Color.White.copy(0.08f),
-        shape = RoundedCornerShape(6.dp)
-    ) {
-        Text(
-            text,
-            color = Color.White.copy(0.5f),
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
     }
 }
 

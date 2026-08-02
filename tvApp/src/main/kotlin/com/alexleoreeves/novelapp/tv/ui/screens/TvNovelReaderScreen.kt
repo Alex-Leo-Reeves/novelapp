@@ -39,6 +39,10 @@ fun TvNovelReaderScreen(
     var showSettings by remember { mutableStateOf(false) }
     var currentChapter by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
+    val isBlocked = text.contains("blocked", ignoreCase = true) ||
+            text.contains("cloudflare", ignoreCase = true) ||
+            text.contains("403", ignoreCase = true) ||
+            text.contains("Access denied", ignoreCase = true)
 
     // Initialize TTS
     LaunchedEffect(Unit) {
@@ -58,11 +62,15 @@ fun TvNovelReaderScreen(
                     when (event.key) {
                         Key.DirectionUp -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value - 200).coerceAtLeast(0)) }; true }
                         Key.DirectionDown -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value + 200).coerceAtMost(scrollState.maxValue)) }; true }
+                        Key.PageUp -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value - 600).coerceAtLeast(0)) }; true }
+                        Key.PageDown -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value + 600).coerceAtMost(scrollState.maxValue)) }; true }
                         Key.MediaPlayPause, Key.DirectionCenter -> {
                             if (ttsSettings.isPlaying) ttsEngine.stop()
                             else ttsEngine.speak(currentChapter)
                             true
                         }
+                        Key.VolumeUp -> { ttsEngine.updateVolume(ttsSettings.volume + 0.1f); true }
+                        Key.VolumeDown -> { ttsEngine.updateVolume(ttsSettings.volume - 0.1f); true }
                         Key.Back -> { ttsEngine.stop(); onBack(); true }
                         else -> false
                     }
@@ -72,6 +80,32 @@ fun TvNovelReaderScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
+            // Model extraction banner
+            if (ttsSettings.modelExtracting) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFF1A1A2A)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color(0xFF00BFFF),
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            "Bundling Neural Voice Resources (${ttsSettings.extractionProgress}%)... System voice active in the meantime.",
+                            color = Color(0xFF00BFFF),
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
             // Top bar
             Row(
                 modifier = Modifier
@@ -87,7 +121,7 @@ fun TvNovelReaderScreen(
                     shape = RoundedCornerShape(10.dp),
                     color = if (backFocused) Color(0xFF1C1C2E) else Color.Transparent,
                     border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
-                    modifier = Modifier.onFocusChanged { backFocused= it.isFocused }
+                    modifier = Modifier.onFocusChanged { backFocused = it.isFocused }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -110,6 +144,40 @@ fun TvNovelReaderScreen(
                     )
                 }
 
+                // Play/Pause button in top bar
+                var playBtnFocused by remember { mutableStateOf(false) }
+                Surface(
+                    onClick = {
+                        if (ttsSettings.isPlaying) ttsEngine.pause()
+                        else if (ttsSettings.currentText.isNotBlank()) ttsEngine.resume()
+                        else ttsEngine.speak(currentChapter)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = when {
+                        ttsSettings.isPlaying -> Color(0xFF00BFFF).copy(0.3f)
+                        playBtnFocused -> Color(0xFF1C1C2E)
+                        else -> Color(0xFF14141E)
+                    },
+                    border = if (playBtnFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                    modifier = Modifier.onFocusChanged { playBtnFocused = it.isFocused }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            if (ttsSettings.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            null, tint = Color(0xFF00BFFF), modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            if (ttsSettings.isPlaying) "Pause" else "Play",
+                            color = Color(0xFF00BFFF),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 // TTS controls row
                 TtsControlStrip(ttsEngine = ttsEngine, ttsSettings = ttsSettings)
 
@@ -120,7 +188,7 @@ fun TvNovelReaderScreen(
                     shape = RoundedCornerShape(10.dp),
                     color = if (settingsFocused) Color(0xFF1C1C2E) else Color(0xFF14141E),
                     border = if (settingsFocused) BorderStroke(2.dp, Purple500) else null,
-                    modifier = Modifier.onFocusChanged { settingsFocused= it.isFocused }
+                    modifier = Modifier.onFocusChanged { settingsFocused = it.isFocused }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -146,33 +214,81 @@ fun TvNovelReaderScreen(
             }
 
             // Reader content
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(horizontal = 48.dp, vertical = 24.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Chapter title
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
+            if (isBlocked) {
+                // Cloudflare / blocked error card
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF14141E),
+                        border = BorderStroke(1.dp, Color(0xFFFF6B6B).copy(0.4f)),
+                        modifier = Modifier.fillMaxWidth(0.6f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Icon(Icons.Default.CloudOff, null, tint = Color(0xFFFF6B6B), modifier = Modifier.size(64.dp))
+                            Text(
+                                "Content Temporarily Blocked",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                "The source site is currently blocking requests (Cloudflare protection). This is usually temporary.",
+                                color = Color.White.copy(0.6f),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            var retryFocused by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = onBack,
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (retryFocused) Color(0xFFFF6B6B) else Color(0xFFFF6B6B).copy(0.2f),
+                                border = if (retryFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFFFF6B6B)),
+                                modifier = Modifier.onFocusChanged { retryFocused = it.isFocused }
+                            ) {
+                                Text(
+                                    "Go Back & Try Again",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = 48.dp, vertical = 24.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Chapter title
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
 
-                    // Chapter text
-                    Text(
-                        currentChapter.ifBlank { "Loading chapter content..." },
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = fontSize.sp,
-                            lineHeight = (fontSize + lineSpacing).sp
-                        ),
-                        color = Color.White.copy(0.88f)
-                    )
+                        // Chapter text
+                        Text(
+                            currentChapter.ifBlank { "Loading chapter content..." },
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = fontSize.sp,
+                                lineHeight = (fontSize + lineSpacing).sp
+                            ),
+                            color = Color.White.copy(0.88f)
+                        )
 
-                    Spacer(Modifier.height(80.dp))
+                        Spacer(Modifier.height(80.dp))
+                    }
                 }
             }
 
@@ -197,7 +313,7 @@ fun TvNovelReaderScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "TTS Playing \u2014 Speed: ${"%.1f".format(ttsSettings.speed)}x | Pitch: ${"%.1f".format(ttsSettings.pitch)}x",
+                                "TTS Playing \u2014 Speed: ${"%.1f".format(ttsSettings.speed)}x | Vol: ${(ttsSettings.volume * 100).toInt()}% | Voice: ${ttsSettings.voiceSpeakerId}",
                                 color = Color.White.copy(0.6f),
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -240,30 +356,6 @@ private fun TtsControlStrip(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Play/Pause
-        var playFocused by remember { mutableStateOf(false) }
-        Surface(
-            onClick = {
-                if (ttsSettings.isPlaying) ttsEngine.pause()
-                else ttsEngine.resume()
-            },
-            shape = CircleShape,
-            color = if (playFocused) Purple500.copy(0.5f) else Color(0xFF1C1C2E),
-            border = if (playFocused) BorderStroke(2.dp, Purple500) else null,
-            modifier = Modifier
-                .size(44.dp)
-                .onFocusChanged { playFocused= it.isFocused }
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    if (ttsSettings.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-
         // Stop
         var stopFocused by remember { mutableStateOf(false) }
         Surface(
@@ -273,7 +365,7 @@ private fun TtsControlStrip(
             border = if (stopFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
             modifier = Modifier
                 .size(44.dp)
-                .onFocusChanged { stopFocused= it.isFocused }
+                .onFocusChanged { stopFocused = it.isFocused }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Stop, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -292,10 +384,42 @@ private fun TtsControlStrip(
             border = if (rereadFocused) BorderStroke(2.dp, Purple500) else null,
             modifier = Modifier
                 .size(44.dp)
-                .onFocusChanged { rereadFocused= it.isFocused }
+                .onFocusChanged { rereadFocused = it.isFocused }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Replay, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+        }
+
+        // Volume down
+        var volDownFocused by remember { mutableStateOf(false) }
+        Surface(
+            onClick = { ttsEngine.updateVolume(ttsSettings.volume - 0.1f) },
+            shape = CircleShape,
+            color = if (volDownFocused) Purple500.copy(0.4f) else Color(0xFF1C1C2E),
+            border = if (volDownFocused) BorderStroke(2.dp, Purple500) else null,
+            modifier = Modifier
+                .size(36.dp)
+                .onFocusChanged { volDownFocused = it.isFocused }
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.VolumeDown, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        // Volume up
+        var volUpFocused by remember { mutableStateOf(false) }
+        Surface(
+            onClick = { ttsEngine.updateVolume(ttsSettings.volume + 0.1f) },
+            shape = CircleShape,
+            color = if (volUpFocused) Purple500.copy(0.4f) else Color(0xFF1C1C2E),
+            border = if (volUpFocused) BorderStroke(2.dp, Purple500) else null,
+            modifier = Modifier
+                .size(36.dp)
+                .onFocusChanged { volUpFocused = it.isFocused }
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.VolumeUp, null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -318,119 +442,44 @@ private fun TtsSettingsPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 32.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(32.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Speed control
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("Speed", color = Color.White.copy(0.6f), style = MaterialTheme.typography.labelMedium)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    var decFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { ttsEngine.updateSpeed(ttsSettings.speed - 0.1f) },
-                        shape = CircleShape,
-                        color = if (decFocused) Purple500.copy(0.4f) else Color(0xFF1A1A2A),
-                        border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .onFocusChanged { decFocused= it.isFocused }
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    }
-
-                    Surface(
-                        color = Color(0xFF1A1A2A),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            "${"%.1f".format(ttsSettings.speed)}x",
-                            color = Color(0xFF00BFFF),
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                    }
-
-                    var incFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { ttsEngine.updateSpeed(ttsSettings.speed + 0.1f) },
-                        shape = CircleShape,
-                        color = if (incFocused) Purple500.copy(0.4f) else Color(0xFF1A1A2A),
-                        border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .onFocusChanged { incFocused= it.isFocused }
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    }
-                }
-            }
+            SettingControl(
+                label = "Speed",
+                value = "${"%.1f".format(ttsSettings.speed)}x",
+                onDecrease = { ttsEngine.updateSpeed(ttsSettings.speed - 0.1f) },
+                onIncrease = { ttsEngine.updateSpeed(ttsSettings.speed + 0.1f) }
+            )
 
             // Pitch control
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("Pitch", color = Color.White.copy(0.6f), style = MaterialTheme.typography.labelMedium)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    var decFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { ttsEngine.updatePitch(ttsSettings.pitch - 0.1f) },
-                        shape = CircleShape,
-                        color = if (decFocused) Purple500.copy(0.4f) else Color(0xFF1A1A2A),
-                        border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .onFocusChanged { decFocused= it.isFocused }
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    }
+            SettingControl(
+                label = "Pitch",
+                value = "${"%.1f".format(ttsSettings.pitch)}x",
+                onDecrease = { ttsEngine.updatePitch(ttsSettings.pitch - 0.1f) },
+                onIncrease = { ttsEngine.updatePitch(ttsSettings.pitch + 0.1f) }
+            )
 
-                    Surface(
-                        color = Color(0xFF1A1A2A),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            "${"%.1f".format(ttsSettings.pitch)}x",
-                            color = Color(0xFF00BFFF),
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                    }
+            // Volume control
+            SettingControl(
+                label = "Volume",
+                value = "${(ttsSettings.volume * 100).toInt()}%",
+                onDecrease = { ttsEngine.updateVolume(ttsSettings.volume - 0.1f) },
+                onIncrease = { ttsEngine.updateVolume(ttsSettings.volume + 0.1f) }
+            )
 
-                    var incFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { ttsEngine.updatePitch(ttsSettings.pitch + 0.1f) },
-                        shape = CircleShape,
-                        color = if (incFocused) Purple500.copy(0.4f) else Color(0xFF1A1A2A),
-                        border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .onFocusChanged { incFocused= it.isFocused }
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    }
-                }
-            }
+            // Voice Speaker ID (for Sherpa VITS, 0..108)
+            SettingControl(
+                label = "Voice",
+                value = "#${ttsSettings.voiceSpeakerId}",
+                onDecrease = { ttsEngine.updateVoiceSpeakerId(ttsSettings.voiceSpeakerId - 1) },
+                onIncrease = { ttsEngine.updateVoiceSpeakerId(ttsSettings.voiceSpeakerId + 1) }
+            )
 
-            // Font size (simplified to Int)
+            // Font size
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -448,7 +497,7 @@ private fun TtsSettingsPanel(
                         border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { decFocused= it.isFocused }
+                            .onFocusChanged { decFocused = it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.TextDecrease, null, tint = Color.White, modifier = Modifier.size(18.dp))
@@ -475,12 +524,74 @@ private fun TtsSettingsPanel(
                         border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
                         modifier = Modifier
                             .size(36.dp)
-                            .onFocusChanged { incFocused= it.isFocused }
+                            .onFocusChanged { incFocused = it.isFocused }
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.TextIncrease, null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/** Reusable +/- control for a single TTS setting. */
+@Composable
+private fun SettingControl(
+    label: String,
+    value: String,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(label, color = Color.White.copy(0.6f), style = MaterialTheme.typography.labelMedium)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            var decFocused by remember { mutableStateOf(false) }
+            Surface(
+                onClick = onDecrease,
+                shape = CircleShape,
+                color = if (decFocused) Purple500.copy(0.4f) else Color(0xFF1A1A2A),
+                border = if (decFocused) BorderStroke(2.dp, Purple500) else null,
+                modifier = Modifier
+                    .size(36.dp)
+                    .onFocusChanged { decFocused = it.isFocused }
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            }
+
+            Surface(
+                color = Color(0xFF1A1A2A),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    value,
+                    color = Color(0xFF00BFFF),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
+
+            var incFocused by remember { mutableStateOf(false) }
+            Surface(
+                onClick = onIncrease,
+                shape = CircleShape,
+                color = if (incFocused) Purple500.copy(0.4f) else Color(0xFF1A1A2A),
+                border = if (incFocused) BorderStroke(2.dp, Purple500) else null,
+                modifier = Modifier
+                    .size(36.dp)
+                    .onFocusChanged { incFocused = it.isFocused }
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             }
         }

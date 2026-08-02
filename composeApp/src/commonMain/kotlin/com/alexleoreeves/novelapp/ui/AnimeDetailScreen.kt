@@ -185,7 +185,7 @@ fun AnimeDetailScreen(
                             color = Color.Black.copy(0.5f)
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
+                                Icons.Filled.ArrowBack,
                                 contentDescription = "Back",
                                 tint = Color.White,
                                 modifier = Modifier.padding(8.dp)

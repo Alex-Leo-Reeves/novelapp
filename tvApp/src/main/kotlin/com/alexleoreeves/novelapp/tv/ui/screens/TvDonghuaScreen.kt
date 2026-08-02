@@ -26,7 +26,7 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
-import com.alexleoreeves.novelapp.tv.data.*
+import com.alexleoreeves.novelapp.data.*
 
 @Composable
 fun TvDonghuaScreen(
@@ -54,12 +54,16 @@ fun TvDonghuaScreen(
             id = selectedItem!!.id,
             title = selectedItem!!.title,
             coverUrl = selectedItem!!.coverUrl,
+            detailPageUrl = selectedItem!!.detailPageUrl,
+            sourceName = selectedItem!!.sourceName.ifBlank { "Donghua" },
             synopsis = selectedItem!!.synopsis,
-            isAnime = true,
-            mediaKind = "anime"
+            isVideo = true,
+            mediaKind = "donghua"
         ),
         account = null,
-        onPlayEpisode = { url, title -> onPlayStream(url, title) },
+        // Direct-stream route: the player's own position-based preview cap applies.
+        onPlayDirectStream = { url, title, _ -> onPlayStream(url, title) },
+        onPlayEmbed = { url, title, _ -> onPlayStream(url, title) },
         onReadNovel = { _, _ -> },
         onReadManga = { _, _ -> },
         onBack = { selectedItem = null }

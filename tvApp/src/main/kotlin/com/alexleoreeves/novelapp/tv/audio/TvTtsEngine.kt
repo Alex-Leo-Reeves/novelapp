@@ -1,42 +1,72 @@
 package com.alexleoreeves.novelapp.tv.audio
 
 import android.content.Context
-import android.media.MediaPlayer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.io.File
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.max
 
 data class TtsSettings(
     val speed: Float = 1.0f,
     val pitch: Float = 1.0f,
     val volume: Float = 1.0f,
+    val voiceSpeakerId: Int = 0,
     val isPlaying: Boolean = false,
     val currentText: String = "",
-    val currentProgress: Float = 0f
+    val currentProgress: Float = 0f,
+    val engineName: String = "Android",
+    val modelExtracting: Boolean = false,
+    val extractionProgress: Int = 0
 )
 
+/**
+ * TV narration engine — now Sherpa-ONNX first (same offline neural voice as the
+ * Android app), falling back to the system TextToSpeech until the VITS model is
+ * extracted on first run.
+ */
 class TvTtsEngine(private val context: Context) {
+
     private var tts: TextToSpeech? = null
-    private var initDeferred: CompletableDeferred<Boolean>? = null
-    private var mediaPlayer: MediaPlayer? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var isInitialized = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val modelManager = TvSherpaModelManager(context)
+    private val narrator = TvSherpaChapterNarrator(context, modelManager)
+
+    @Volatile
+    private var sherpaReady = false
 
     private val _settings = MutableStateFlow(TtsSettings())
     val settings: StateFlow<TtsSettings> = _settings
 
-    private var isInitialized = false
+    private var streamingJob: Job? = null
+    private var currentBlocks = listOf<String>()
+    private var playbackPaused = false
 
     suspend fun init(): Boolean {
         if (isInitialized) return true
-        val deferred = CompletableDeferred<Boolean>()
-        initDeferred = deferred
 
+        // Kick off Sherpa model extraction in the background (first run: 80MB zip).
+        // Until it's ready we use the system TTS.
+        scope.launch {
+            _settings.value = _settings.value.copy(modelExtracting = true, extractionProgress = 0)
+            val ok = modelManager.prepareModel { progress ->
+                _settings.value = _settings.value.copy(extractionProgress = progress)
+            }
+            sherpaReady = ok
+            _settings.value = _settings.value.copy(
+                modelExtracting = false,
+                extractionProgress = 100,
+                engineName = if (ok) "Sherpa" else "Android"
+            )
+        }
+
+        val deferred = CompletableDeferred<Boolean>()
         withContext(Dispatchers.Main.immediate) {
             tts = TextToSpeech(context.applicationContext) { status ->
                 if (status == TextToSpeech.SUCCESS) {
@@ -52,41 +82,78 @@ class TvTtsEngine(private val context: Context) {
     }
 
     fun speak(text: String) {
-        if (!isInitialized || text.isBlank()) return
+        if (text.isBlank()) return
+        stopInternal(clearText = false)
 
-        _settings.value = _settings.value.copy(
+        _settings.value = TtsSettings(
+            speed = _settings.value.speed,
+            pitch = _settings.value.pitch,
+            volume = _settings.value.volume,
             isPlaying = true,
             currentText = text,
-            currentProgress = 0f
+            currentProgress = 0f,
+            engineName = if (sherpaReady) "Sherpa" else "Android"
         )
 
+        if (sherpaReady) {
+            streamingJob = scope.launch {
+                val blocks = narrator.splitBlocks(text)
+                currentBlocks = blocks
+                val total = blocks.size.coerceAtLeast(1)
+                var blockIndex = 0
+                var playedMs = 0L
+                var totalMs = 0L
+
+                // Warm up synthesis once so voice loads before playback starts.
+                for (block in blocks) {
+                    if (!sherpaReady) break
+                    val audio = narrator.synthesizeToWav(
+                        text = block,
+                        voiceId = _settings.value.voiceSpeakerId,
+                        speed = _settings.value.speed / 1.15f,  // Sherpa's lengthScale is 1.15
+                        gain = _settings.value.volume.coerceIn(0.1f, 2.0f)
+                    ) ?: continue
+
+                    totalMs += audio.second
+                    if (blockIndex > 0 && playbackPaused) {
+                        // resume() moves playback forward; poll until unpaused
+                    }
+
+                    TvAudioTrackPlayer.playWavBytes(audio.first)
+                    playedMs += audio.second
+                    blockIndex++
+                    _settings.value = _settings.value.copy(
+                        currentProgress = (playedMs.toFloat() / totalMs.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+                    )
+                    if (!_settings.value.isPlaying) break
+                }
+                if (_settings.value.isPlaying) {
+                    _settings.value = _settings.value.copy(isPlaying = false, currentProgress = 1f)
+                }
+            }
+        } else {
+            speakWithSystemTts(text)
+        }
+    }
+
+    private fun speakWithSystemTts(text: String) {
+        if (!isInitialized) return
         val engine = tts ?: return
         val utteranceId = "novaread_${UUID.randomUUID()}"
 
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) = Unit
-
             override fun onDone(id: String?) {
                 if (id == utteranceId) {
-                    _settings.value = _settings.value.copy(
-                        isPlaying = false,
-                        currentProgress = 1f
-                    )
+                    _settings.value = _settings.value.copy(isPlaying = false, currentProgress = 1f)
                 }
             }
-
             override fun onError(id: String?) {
-                if (id == utteranceId) {
-                    _settings.value = _settings.value.copy(isPlaying = false)
-                }
+                if (id == utteranceId) _settings.value = _settings.value.copy(isPlaying = false)
             }
-
             override fun onError(id: String?, errorCode: Int) {
-                if (id == utteranceId) {
-                    _settings.value = _settings.value.copy(isPlaying = false)
-                }
+                if (id == utteranceId) _settings.value = _settings.value.copy(isPlaying = false)
             }
-
             override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
                 super.onRangeStart(utteranceId, start, end, frame)
                 if (utteranceId == utteranceId && text.length > 0) {
@@ -99,46 +166,76 @@ class TvTtsEngine(private val context: Context) {
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, _settings.value.volume.coerceIn(0f, 1f))
         }
-
         engine.language = Locale.US
         engine.setSpeechRate(_settings.value.speed.coerceIn(0.1f, 2.0f))
         engine.setPitch(_settings.value.pitch.coerceIn(0.1f, 2.0f))
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
-    fun stop() {
-        _settings.value = _settings.value.copy(isPlaying = false, currentProgress = 0f)
+    fun stop() = stopInternal(clearText = true)
+
+    private fun stopInternal(clearText: Boolean) {
+        streamingJob?.cancel()
+        streamingJob = null
+        playbackPaused = false
+        TvAudioTrackPlayer.stop()
         runCatching { tts?.stop() }
-        runCatching { mediaPlayer?.stop(); mediaPlayer?.release() }
-        mediaPlayer = null
+        _settings.value = _settings.value.copy(
+            isPlaying = false,
+            currentProgress = 0f,
+            currentText = if (clearText) "" else _settings.value.currentText
+        )
     }
 
     fun pause() {
-        runCatching { tts?.stop() }
-        _settings.value = _settings.value.copy(isPlaying = false)
+        if (_settings.value.engineName == "Sherpa") {
+            playbackPaused = true
+            TvAudioTrackPlayer.pause()
+            _settings.value = _settings.value.copy(isPlaying = false)
+        } else {
+            runCatching { tts?.stop() }
+            _settings.value = _settings.value.copy(isPlaying = false)
+        }
     }
 
     fun resume() {
-        val text = _settings.value.currentText
-        if (text.isNotBlank()) {
-            speak(text)
+        if (_settings.value.engineName == "Sherpa") {
+            if (streamingJob?.isActive == true) {
+                playbackPaused = false
+                TvAudioTrackPlayer.resume()
+                _settings.value = _settings.value.copy(isPlaying = true)
+            } else {
+                // Stream finished while paused — restart from the beginning.
+                val text = _settings.value.currentText
+                if (text.isNotBlank()) speak(text)
+            }
+        } else {
+            val text = _settings.value.currentText
+            if (text.isNotBlank()) speak(text)
         }
     }
 
     fun updateSpeed(speed: Float) {
-        _settings.value = _settings.value.copy(speed = speed.coerceIn(0.1f, 2.0f))
+        _settings.value = _settings.value.copy(speed = speed.coerceIn(0.5f, 2.0f))
     }
 
     fun updatePitch(pitch: Float) {
-        _settings.value = _settings.value.copy(pitch = pitch.coerceIn(0.1f, 2.0f))
+        _settings.value = _settings.value.copy(pitch = pitch.coerceIn(0.5f, 2.0f))
+    }
+
+    fun updateVolume(vol: Float) {
+        _settings.value = _settings.value.copy(volume = vol.coerceIn(0.0f, 2.0f))
+    }
+
+    fun updateVoiceSpeakerId(id: Int) {
+        _settings.value = _settings.value.copy(voiceSpeakerId = id.coerceIn(0, 108))
     }
 
     fun release() {
         scope.cancel()
+        TvAudioTrackPlayer.stop()
         runCatching { tts?.stop(); tts?.shutdown() }
-        runCatching { mediaPlayer?.stop(); mediaPlayer?.release() }
         tts = null
-        mediaPlayer = null
         isInitialized = false
     }
 }

@@ -25,6 +25,7 @@ import io.ktor.client.statement.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.*
 import kotlinx.coroutines.launch
+import com.alexleoreeves.novelapp.data.resolveFootballTvStream
 
 data class EspnMatch(
     val id: String,
@@ -46,14 +47,13 @@ data class WweEventItem(
 @Composable
 fun TvSportsScreen(
     account: Any? = null,
+    onPlay: (String, String) -> Unit = { _, _ -> },
     onBack: () -> Unit
 ) {
     var activeTab by remember { mutableStateOf(0) }
     var matches by remember { mutableStateOf<List<EspnMatch>>(emptyList()) }
     var wweItems by remember { mutableStateOf<List<WweEventItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var selectedUrl by remember { mutableStateOf<String?>(null) }
-    var selectedTitle by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val client = remember {
         HttpClient(OkHttp) {
@@ -132,11 +132,6 @@ fun TvSportsScreen(
         isLoading = false
     }
 
-    if (selectedUrl != null) {
-        TvPlayerScreen(streamUrl = selectedUrl!!, title = selectedTitle, onBack = { selectedUrl = null })
-        return
-    }
-
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF06060A)).padding(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 20.dp)) {
             val bi = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -182,8 +177,7 @@ fun TvSportsScreen(
                                 val isLive = m.status == "LIVE"
                                 Card(onClick = {
                                     val query = "${m.homeTeam.replace(" ", "+")}+vs+${m.awayTeam.replace(" ", "+")}"
-                                    selectedUrl = "https://v2.sportsurge.net/search?query=$query"
-                                    selectedTitle = "${m.homeTeam} vs ${m.awayTeam}"
+                                    onPlay("https://v2.sportsurge.net/search?query=$query", "${m.homeTeam} vs ${m.awayTeam}")
                                 }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (foc) Color(0xFF1E1E2E) else Color(0xFF0C0C12)),
                                     border = if (foc) BorderStroke(2.dp, if (isLive) Color(0xFF4CAF50) else Color(0xFF00BFFF)) else BorderStroke(1.dp, Color.White.copy(0.05f)),
                                     interactionSource = int, modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }) {
@@ -223,8 +217,7 @@ fun TvSportsScreen(
                                 val brandColor = when (ev.brand) { "RAW" -> Color(0xFFFF1744); "SmackDown" -> Color(0xFF2196F3); "NXT" -> Color(0xFF9C27B0); else -> Color(0xFFE91E63) }
                                 Card(onClick = {
                                     val q = ev.title.replace(" ", "+")
-                                    selectedUrl = "https://watchwrestling.ae/search?q=$q"
-                                    selectedTitle = ev.title
+                                    onPlay("https://watchwrestling.ae/search?q=$q", ev.title)
                                 }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (foc) Color(0xFF1E1E2E) else Color(0xFF0C0C12)),
                                     border = if (foc) BorderStroke(2.dp, brandColor) else BorderStroke(1.dp, Color.White.copy(0.05f)),
                                     interactionSource = int, modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }) {

@@ -76,6 +76,7 @@ class NovelSearchRepository(
             username = com.alexleoreeves.novelapp.BuildKonfig.MANGADEX_USERNAME,
             password = com.alexleoreeves.novelapp.BuildKonfig.MANGADEX_PASSWORD
         ),
+        ComickScraper(httpClient),
         MangaFireScraper(httpClient),
         WebtoonScraper(httpClient),
         WeebCentralScraper(httpClient)

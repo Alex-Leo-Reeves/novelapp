@@ -1,0 +1,41 @@
+{
+    "version": 1,
+    "refreshSeconds": 300,
+    "branding": {
+        "title": "NovaRead TV",
+        "tagline": "Anime · Novels · Manga · Movies"
+    },
+    "featureFlags": {
+        "showSports": true,
+        "showDownloads": true,
+        "showPhonePair": true,
+        "showComics": true,
+        "showDonghua": true,
+        "showKDrama": true,
+        "showCartoons": true,
+        "showClassic": true,
+        "showNollywood": true
+    },
+    "sidebar": [
+        { "key": "home", "label": "Home" },
+        { "key": "novels", "label": "Novels" },
+        { "key": "manga", "label": "Manga" },
+        { "key": "comics", "label": "Comics" },
+        { "key": "anime", "label": "Anime" },
+        { "key": "donghua", "label": "Donghua" },
+        { "key": "kdrama", "label": "K-Drama" },
+        { "key": "cartoon", "label": "Cartoon" },
+        { "key": "classic", "label": "Classic" },
+        { "key": "movies", "label": "Movies" },
+        { "key": "nollywood", "label": "Nollywood" },
+        { "key": "sports", "label": "Sports" },
+        { "key": "downloads", "label": "Downloads" },
+        { "key": "you", "label": "You" }
+    ],
+    "homeRows": [
+        { "key": "trendingAnime", "label": "🔥 Trending Anime", "type": "anime" },
+        { "key": "popularNovels", "label": "📚 Popular Novels", "type": "novel" },
+        { "key": "topManga", "label": "🎨 Top Manga", "type": "manga" },
+        { "key": "newMovies", "label": "🎬 New Movies", "type": "movie" }
+    ]
+}

@@ -341,7 +341,7 @@ fun ReaderScreen(
                                     onBack()
                                 }
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                                Icon(Icons.Filled.ArrowBack, "Back",
                                     tint = currentTheme.textColor())
                             }
                             Column(modifier = Modifier.weight(1f)) {
@@ -687,7 +687,7 @@ fun ReaderScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    Icons.AutoMirrored.Filled.VolumeUp,
+                                    Icons.Filled.VolumeUp,
                                     null,
                                     tint = currentTheme.subTextColor(),
                                     modifier = Modifier.size(16.dp)

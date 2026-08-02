@@ -30,7 +30,9 @@ import kotlinx.serialization.json.*
 fun TvYouScreen(
     account: SavedUserAccount?,
     onSignOut: () -> Unit,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    selectedProfile: com.alexleoreeves.novelapp.tv.ui.TvProfile? = null,
+    onSwitchProfile: () -> Unit = {}
 ) {
     if (account == null) {
         Box(
@@ -101,19 +103,43 @@ fun TvYouScreen(
                             Text(account.username.take(1).uppercase(), color = NeonBlue, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineLarge)
                         }
                     }
-                    Column {
-                        Text(account.username, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White)
-                        Text(account.email, color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodyLarge)
-                        Surface(color = if (account.isPremium) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E), shape = RoundedCornerShape(8.dp)) {
-                            Text(
-                                if (account.isPremium) "✦ PREMIUM" else "FREE",
-                                color = if (account.isPremium) Color(0xFF00BFFF) else Color.White.copy(0.5f),
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                            )
-                        }
+                Column {
+                    Text(account.username, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White)
+                    Text(
+                        "Profile: ${selectedProfile?.name ?: "Main"}",
+                        color = Color.White.copy(0.6f),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(account.email, color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodyLarge)
+                    Surface(color = if (account.isPremium) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E), shape = RoundedCornerShape(8.dp)) {
+                        Text(
+                            if (account.isPremium) "✦ PREMIUM" else "FREE",
+                            color = if (account.isPremium) Color(0xFF00BFFF) else Color.White.copy(0.5f),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
                     }
+                }
+
+                // Switch profile
+                var switchFocused by remember { mutableStateOf(false) }
+                Surface(
+                    onClick = { onSwitchProfile() },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (switchFocused) Color(0xFF00BFFF).copy(0.25f) else Color(0xFF14141E),
+                    border = if (switchFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else BorderStroke(1.dp, Color.White.copy(0.06f)),
+                    modifier = Modifier.onFocusChanged { switchFocused = it.isFocused }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.SwapHoriz, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(18.dp))
+                        Text("Switch Profile", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
                 }
             }
         }

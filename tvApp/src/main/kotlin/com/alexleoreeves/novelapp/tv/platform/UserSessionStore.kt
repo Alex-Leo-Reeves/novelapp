@@ -2,26 +2,11 @@ package com.alexleoreeves.novelapp.tv.platform
 
 import android.content.Context
 import android.content.SharedPreferences
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 
-@Serializable
-data class SavedUserAccount(
-    val id: String = "",
-    val username: String = "",
-    val email: String = "",
-    val authToken: String = "",
-    val plan: String = "free",
-    val billingStatus: String = "none",
-    val paidUntil: String? = null,
-    val createdAt: String = "",
-    val maxDevices: Int? = 2
-) {
-    val isPremium: Boolean
-        get() = plan == "premium" || plan == "premium_3_devices" || plan == "premium_unlimited" || billingStatus == "active"
-}
+typealias SavedUserAccount = com.alexleoreeves.novelapp.platform.SavedUserAccount
 
 class UserSessionStore(context: Context) {
     private val prefs: SharedPreferences =

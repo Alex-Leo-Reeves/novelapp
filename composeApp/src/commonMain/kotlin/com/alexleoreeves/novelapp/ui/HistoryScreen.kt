@@ -107,7 +107,7 @@ fun HistoryScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
+                    Icon(Icons.Filled.ArrowBack, null, tint = currentTheme.textColor())
                 }
                 Spacer(Modifier.width(4.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -466,7 +466,7 @@ private fun HistoryReadCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (item.isManga) Icons.AutoMirrored.Filled.MenuBook else Icons.Default.AutoStories,
+                        if (item.isManga) Icons.Filled.MenuBook else Icons.Default.AutoStories,
                         null, tint = accent, modifier = Modifier.size(28.dp)
                     )
                 }
@@ -540,7 +540,7 @@ private fun HistorySearchScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor())
+                Icon(Icons.Filled.ArrowBack, null, tint = currentTheme.textColor())
             }
             OutlinedTextField(
                 value = searchQuery,

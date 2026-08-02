@@ -44,11 +44,19 @@ fun TvSearchKeyboard(
     onBack: () -> Unit,
     suggestions: List<String> = emptyList(),
     onSuggestionClick: (String) -> Unit = {},
+    searchHistory: List<String> = emptyList(),
+    onClearHistory: () -> Unit = {},
+    selectedCategory: String = "all",
+    onCategorySelected: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var text by remember { mutableStateOf(value) }
     var mode by remember { mutableStateOf(KeyboardMode.LETTERS) }
     val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(value) {
+        text = value
+    }
 
     Column(
         modifier = modifier
@@ -90,23 +98,92 @@ fun TvSearchKeyboard(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // Suggestions row
-        if (suggestions.isNotEmpty()) {
+        // Category Filter Chips
+        val categories = listOf(
+            "all" to "All",
+            "novel" to "Novels",
+            "manga" to "Manga",
+            "anime" to "Anime",
+            "donghua" to "Donghua",
+            "movie" to "Movies"
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            categories.forEach { (catKey, catLabel) ->
+                val isSelected = selectedCategory == catKey
+                var isFocused by remember { mutableStateOf(false) }
+                Surface(
+                    onClick = { onCategorySelected(catKey) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = when {
+                        isSelected -> KeyBlue
+                        isFocused -> KeyBlue.copy(0.4f)
+                        else -> Color(0xFF1A1A2A)
+                    },
+                    border = if (isFocused) BorderStroke(2.dp, Color.White) else null,
+                    modifier = Modifier.onFocusChanged { isFocused = it.isFocused }
+                ) {
+                    Text(
+                        catLabel,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Search History / Suggestions Row
+        val displayItems = if (text.isBlank() && searchHistory.isNotEmpty()) searchHistory else suggestions
+        if (displayItems.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    if (text.isBlank() && searchHistory.isNotEmpty()) "Recent Searches" else "Suggestions",
+                    color = Color.White.copy(0.6f),
+                    style = MaterialTheme.typography.labelSmall
+                )
+                if (text.isBlank() && searchHistory.isNotEmpty()) {
+                    var clearFocused by remember { mutableStateOf(false) }
+                    Surface(
+                        onClick = onClearHistory,
+                        color = Color.Transparent,
+                        modifier = Modifier.onFocusChanged { clearFocused = it.isFocused }
+                    ) {
+                        Text(
+                            "Clear History",
+                            color = if (clearFocused) KeyBlue else Color.White.copy(0.4f),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                suggestions.forEach { sug ->
+                displayItems.forEach { item ->
                     var isFocused by remember { mutableStateOf(false) }
                     Surface(
                         onClick = {
-                            text = sug
-                            onValueChange(sug)
-                            onSearch()
+                            text = item
+                            onValueChange(item)
+                            onSuggestionClick(item)
                         },
                         shape = RoundedCornerShape(20.dp),
                         color = if (isFocused) KeyBlue.copy(0.3f) else Color(0xFF1A1A2E),
@@ -114,11 +191,11 @@ fun TvSearchKeyboard(
                         modifier = Modifier.onFocusChanged { isFocused = it.isFocused }
                     ) {
                         Text(
-                            sug,
+                            item,
                             color = Color.White,
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                         )
                     }
                 }

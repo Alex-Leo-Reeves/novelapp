@@ -30,7 +30,7 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
-import com.alexleoreeves.novelapp.tv.data.*
+import com.alexleoreeves.novelapp.data.*
 
 data class NollywoodYtItem(
     val videoId: String,

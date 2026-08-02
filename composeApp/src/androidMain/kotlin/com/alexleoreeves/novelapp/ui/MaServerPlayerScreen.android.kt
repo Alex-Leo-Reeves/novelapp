@@ -98,6 +98,7 @@ actual fun MaServerPlayerScreen(
     embedUrl: String,
     episodeTitle: String,
     currentTheme: AppTheme,
+    previewLimitMs: Long?,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -112,6 +113,14 @@ actual fun MaServerPlayerScreen(
         }
 
     val scope = rememberCoroutineScope()
+
+    // ── Free-preview enforcement state ────────────────────────────────
+    // WebView embeds don't expose a reliable position API from the native side,
+    // so we use a wall-clock timer. When previewLimitMs is set (free users),
+    // playback is hard-capped and a "Free preview ended" gate is shown.
+    var previewExpired by remember { mutableStateOf(false) }
+    var previewStartedAt by remember { mutableStateOf(0L) }
+    var previewRemainingLabel by remember { mutableStateOf("") }
 
     // ── Phase tracking ────────────────────────────────────────────────
     var playerPhase by remember { mutableStateOf(PlayerPhase.LOADING) }
@@ -129,6 +138,35 @@ actual fun MaServerPlayerScreen(
         playerPhase = PlayerPhase.LOADING
         phaseMessage = "Loading player..."
         stabilizeAttempts = 0
+        previewExpired = false
+        previewStartedAt = 0L
+        previewRemainingLabel = ""
+    }
+
+    // Wall-clock preview cap for the WebView path (free users only).
+    // Starts counting once the player reaches READY and pauses the video
+    // via JS when the cap is hit, then shows the gate overlay.
+    LaunchedEffect(playerPhase, previewLimitMs) {
+        if (previewLimitMs == null || previewExpired) return@LaunchedEffect
+        if (playerPhase == PlayerPhase.READY) {
+            if (previewStartedAt == 0L) previewStartedAt = System.currentTimeMillis()
+            val limitMs = previewLimitMs.coerceAtLeast(1)
+            var remainingMs = limitMs
+            while (remainingMs > 0 && !previewExpired) {
+                remainingMs = limitMs - (System.currentTimeMillis() - previewStartedAt)
+                if (remainingMs > 0) {
+                    val totalSeconds = (remainingMs / 1000).toInt()
+                    val minutes = totalSeconds / 60
+                    val seconds = totalSeconds % 60
+                    previewRemainingLabel = "%d:%02d of free preview left".format(minutes, seconds)
+                }
+                delay(1000)
+            }
+            if (!previewExpired) {
+                previewExpired = true
+                webViewRef?.evaluateJavascript(MASERVER_PAUSE_JS, null)
+            }
+        }
     }
 
     // Extract the original embed domain so we can block redirects away from it
@@ -561,6 +599,71 @@ actual fun MaServerPlayerScreen(
             }
         }
 
+        // ── Free preview countdown chip (free users, before the cap) ──────
+        if (previewLimitMs != null && !previewExpired && previewRemainingLabel.isNotBlank() && playerPhase == PlayerPhase.READY) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF00BFFF).copy(alpha = 0.25f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00BFFF).copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+                    .statusBarsPadding()
+            ) {
+                Text(
+                    previewRemainingLabel,
+                    color = Color(0xFF00BFFF),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+
+        // ── Free preview ended → hard gate (free users) ───────────────────
+        if (previewExpired) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFA05050A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(Icons.Default.Lock, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(72.dp))
+                    Text(
+                        "Free Preview Ended",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        "You watched your free preview. Go premium to watch the full title.",
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = onBack,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Text("Back")
+                        }
+                        Button(
+                            onClick = onBack,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))
+                        ) {
+                            Text("Go Premium")
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Back button overlay (always visible) ──────────────────────────
         Box(
             modifier = Modifier
@@ -582,7 +685,7 @@ actual fun MaServerPlayerScreen(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
+                        Icons.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
@@ -653,6 +756,13 @@ actual fun MaServerPlayerScreen(
 private const val MA_SERVER_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+/**
+ * JS injected when a free user's preview cap is reached: pause + mute
+ * every <video> element so playback cannot continue behind the gate.
+ */
+private const val MASERVER_PAUSE_JS =
+    "(function(){document.querySelectorAll('video').forEach(function(v){v.pause();v.muted=true;});})()"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Stabilization JavaScript

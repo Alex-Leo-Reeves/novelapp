@@ -30,6 +30,9 @@ import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvMangaViewerScreen(
@@ -42,6 +45,7 @@ fun TvMangaViewerScreen(
     var currentPage by remember { mutableStateOf(0) }
     var zoomScale by remember { mutableStateOf(1f) }
     val scope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
 
     // Auto-hide controls
     LaunchedEffect(showControls) {
@@ -56,13 +60,20 @@ fun TvMangaViewerScreen(
         currentPage = pagerState.currentPage
     }
 
+    // Request focus so D-pad events are captured
+    LaunchedEffect(Unit) {
+        delay(200)
+        focusRequester.requestFocus()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyUp) {
-                    showControls = true
                     when (event.key) {
                         Key.DirectionLeft -> {
                             if (currentPage > 0) {
@@ -74,6 +85,28 @@ fun TvMangaViewerScreen(
                             if (currentPage < pages.size - 1) {
                                 scope.launch { pagerState.animateScrollToPage(currentPage + 1) }
                             }
+                            true
+                        }
+                        Key.DirectionUp -> {
+                            if (currentPage > 0) {
+                                scope.launch { pagerState.animateScrollToPage(currentPage - 1) }
+                            }
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (currentPage < pages.size - 1) {
+                                scope.launch { pagerState.animateScrollToPage(currentPage + 1) }
+                            }
+                            true
+                        }
+                        Key.PageUp -> {
+                            val jump = (currentPage - 5).coerceAtLeast(0)
+                            scope.launch { pagerState.animateScrollToPage(jump) }
+                            true
+                        }
+                        Key.PageDown -> {
+                            val jump = (currentPage + 5).coerceAtMost(pages.size - 1)
+                            scope.launch { pagerState.animateScrollToPage(jump) }
                             true
                         }
                         Key.DirectionCenter, Key.Enter -> {

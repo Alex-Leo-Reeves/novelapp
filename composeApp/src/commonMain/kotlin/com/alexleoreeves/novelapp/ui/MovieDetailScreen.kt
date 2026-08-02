@@ -122,7 +122,7 @@ fun MovieDetailScreen(
                         .padding(16.dp)
                         .background(Color.Black.copy(0.5f), RoundedCornerShape(50))
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             }
 

@@ -145,7 +145,7 @@ fun WweMatchScreen(
                     .align(Alignment.TopStart)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
             Column(
                 modifier = Modifier

@@ -1,5 +1,7 @@
 package com.alexleoreeves.novelapp.tv.ui
 
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -24,7 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
-import com.alexleoreeves.novelapp.tv.data.*
+import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
 import com.alexleoreeves.novelapp.tv.ui.screens.TvAuthScreen
@@ -33,17 +35,27 @@ import com.alexleoreeves.novelapp.tv.ui.screens.TvPhonePairScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvDetailScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvHomeScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvPlayerScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvEmbedPlayerScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvNovelReaderScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvMangaViewerScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvSportsScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvDownloadsScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvYouScreen
+import com.alexleoreeves.novelapp.tv.ui.screens.TvProfileScreen
 import com.alexleoreeves.novelapp.tv.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 enum class TvScreen {
-    SPLASH, AUTH, PAIR, HOME, DETAIL, PLAYER, READER, MANGA_VIEWER
+    SPLASH, AUTH, PAIR, PROFILE, HOME, DETAIL, PLAYER, EMBED_PLAYER, READER, MANGA_VIEWER
 }
+
+data class TvProfile(
+    val id: String,
+    val name: String,
+    val isKids: Boolean,
+    val avatarColorIndex: Int
+)
 
 data class NavigationState(
     val screen: TvScreen = TvScreen.SPLASH,
@@ -51,12 +63,15 @@ data class NavigationState(
     val selectedItem: UnifiedSearchResult? = null,
     val playUrl: String = "",
     val playTitle: String = "",
+    val playPreviewLimitMs: Long? = null,
+    val playerFromSection: TvSection? = null,
     val readerText: String = "",
     val readerTitle: String = "",
     val mangaPages: List<String> = emptyList(),
     val mangaTitle: String = "",
     val showSearch: Boolean = false,
-    val account: SavedUserAccount? = null
+    val account: SavedUserAccount? = null,
+    val selectedProfile: TvProfile? = null
 )
 
 @Composable
@@ -66,6 +81,7 @@ fun TvApp(
 ) {
     var nav by remember { mutableStateOf(NavigationState()) }
     var isLoading by remember { mutableStateOf(true) }
+    var remoteConfig by remember { mutableStateOf(TvRemoteConfigDefaults.default) }
     val scope = rememberCoroutineScope()
 
     // Load saved account
@@ -84,18 +100,53 @@ fun TvApp(
         isLoading = false
     }
 
-    // Handle back navigation
+    // Server-driven config: poll on launch, then every refreshSeconds.
+    // A config push (site/tv-config.json) updates every running TV live.
+    LaunchedEffect(remoteConfig.version) {
+        while (true) {
+            val fetched = fetchTvConfig()
+            if (fetched != null) remoteConfig = fetched
+            delay(remoteConfig.effectiveRefreshMillis)
+        }
+    }
+
+    // Handle back navigation: each press moves ONE step back in the flow.
+    // The app only exits when the user is already on HOME.
     fun goBack() {
         nav = when (nav.screen) {
             TvScreen.DETAIL -> nav.copy(screen = TvScreen.HOME, selectedItem = null)
-            TvScreen.PLAYER -> nav.copy(screen = TvScreen.DETAIL, playUrl = "", playTitle = "")
+            TvScreen.PLAYER, TvScreen.EMBED_PLAYER -> {
+                val fromSection = nav.playerFromSection
+                if (fromSection == null) {
+                    nav.copy(screen = TvScreen.DETAIL, playUrl = "", playTitle = "", playPreviewLimitMs = null, playerFromSection = null)
+                } else {
+                    nav.copy(screen = TvScreen.HOME, selectedSection = fromSection, playUrl = "", playTitle = "", playPreviewLimitMs = null, playerFromSection = null, selectedItem = null)
+                }
+            }
             TvScreen.READER -> nav.copy(screen = TvScreen.DETAIL, readerText = "", readerTitle = "")
             TvScreen.MANGA_VIEWER -> nav.copy(screen = TvScreen.DETAIL, mangaPages = emptyList(), mangaTitle = "")
             TvScreen.PAIR -> nav.copy(screen = TvScreen.AUTH)
-            TvScreen.AUTH -> nav.copy(screen = TvScreen.HOME)
-            TvScreen.SPLASH -> nav.copy(screen = TvScreen.HOME)
+            TvScreen.AUTH -> nav
+            TvScreen.PROFILE -> nav.copy(screen = TvScreen.AUTH, account = nav.account)
+            TvScreen.SPLASH -> nav.copy(screen = if (nav.account != null) TvScreen.PROFILE else TvScreen.AUTH)
             else -> nav
         }
+    }
+
+    // Hardware/system back: one step per press.
+    // HOME / AUTH are the exit points. PROFILE goes back to AUTH (login) via goBack().
+    val backPressedDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    DisposableEffect(backPressedDispatcher) {
+        val callback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when (nav.screen) {
+                    TvScreen.HOME, TvScreen.AUTH -> backPressedDispatcher?.onBackPressed()
+                    else -> goBack()
+                }
+            }
+        }
+        backPressedDispatcher?.addCallback(callback)
+        onDispose { callback.remove() }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF06060A))) {
@@ -110,9 +161,11 @@ fun TvApp(
                 TvSplashScreen(onFinished = {
                     val account = sessionStore.loadAccount()
                     nav = if (account != null) {
-                        nav.copy(screen = TvScreen.HOME, account = account)
+                        // Auth-first: returning user picks a profile before browsing.
+                        nav.copy(screen = TvScreen.PROFILE, account = account)
                     } else {
-                        nav.copy(screen = TvScreen.HOME)
+                        // Auth-first: new users must sign in before browsing. No guest bypass.
+                        nav.copy(screen = TvScreen.AUTH)
                     }
                 })
             }
@@ -124,7 +177,7 @@ fun TvApp(
                             try {
                                 val account = authLogin(email, password)
                                 sessionStore.saveAccount(account)
-                                nav = nav.copy(screen = TvScreen.HOME, account = account)
+                                nav = nav.copy(screen = TvScreen.PROFILE, account = account)
                             } catch (e: Exception) { /* error handled inside TvAuthScreen */ }
                         }
                     },
@@ -133,12 +186,11 @@ fun TvApp(
                             try {
                                 val account = authRegister(username, email, password, recoverySecret)
                                 sessionStore.saveAccount(account)
-                                nav = nav.copy(screen = TvScreen.HOME, account = account)
+                                nav = nav.copy(screen = TvScreen.PROFILE, account = account)
                             } catch (e: Exception) { /* error handled inside TvAuthScreen */ }
                         }
                     },
-                    onPhonePair = { nav = nav.copy(screen = TvScreen.PAIR) },
-                    onDismiss = { nav = nav.copy(screen = TvScreen.HOME) }
+                    onPhonePair = { nav = nav.copy(screen = TvScreen.PAIR) }
                 )
             }
 
@@ -146,19 +198,28 @@ fun TvApp(
                 TvPhonePairScreen(
                     sessionStore = sessionStore,
                     onApproved = { account ->
-                        nav = nav.copy(screen = TvScreen.HOME, account = account)
+                        nav = nav.copy(screen = TvScreen.PROFILE, account = account)
                     },
                     onBack = { goBack() }
+                )
+            }
+
+            nav.screen == TvScreen.PROFILE -> {
+                TvProfileScreen(
+                    account = nav.account,
+                    onSelectProfile = { profile ->
+                        nav = nav.copy(screen = TvScreen.HOME, selectedProfile = profile)
+                    }
                 )
             }
 
             else -> {
                 // Main layout with sidebar navigation
                 Row(modifier = Modifier.fillMaxSize()) {
-                    // Skip sidebar in non-home screens
+                    // Skip sidebar in non-home screens (player/reader/manga are full-screen)
                     if (nav.screen == TvScreen.HOME) {
-                        // Sidebar
                         TvSidebar(
+                            config = remoteConfig,
                             selectedSection = nav.selectedSection,
                             onSectionSelected = { section ->
                                 nav = nav.copy(selectedSection = section, showSearch = false)
@@ -170,7 +231,7 @@ fun TvApp(
                                     nav.account?.let { authLogout(it.authToken) }
                                 }
                                 sessionStore.clearAccount()
-                                nav = nav.copy(account = null, selectedSection = TvSection.HOME)
+                                nav = nav.copy(account = null, selectedSection = TvSection.HOME, screen = TvScreen.AUTH)
                             }
                         )
                     }
@@ -182,12 +243,34 @@ fun TvApp(
                                 TvHomeScreen(
                                     section = nav.selectedSection,
                                     account = nav.account,
+                                    config = remoteConfig,
+                                    selectedProfile = nav.selectedProfile,
+                                    onSwitchProfile = { nav = nav.copy(screen = TvScreen.PROFILE) },
                                     onMediaSelected = { item ->
                                         nav = nav.copy(screen = TvScreen.DETAIL, selectedItem = item)
                                     },
                                     onSearch = { query ->
-                                        // Search is handled via the keyboard in TvHomeScreen
-                                    }
+                                        // Search is handled by TvHomeScreen internally
+                                    },
+                                    onReadNovel = { text, title ->
+                                        nav = nav.copy(screen = TvScreen.READER, readerText = text, readerTitle = title)
+                                    },
+                                    onPlaySports = { url, title ->
+                                        nav = nav.copy(
+                                            screen = TvScreen.PLAYER,
+                                            playUrl = url,
+                                            playTitle = title,
+                                            playerFromSection = TvSection.SPORTS
+                                        )
+                                    },
+                                    onSignOut = {
+                                        scope.launch {
+                                            nav.account?.let { authLogout(it.authToken) }
+                                        }
+                                        sessionStore.clearAccount()
+                                        nav = nav.copy(account = null, selectedSection = TvSection.HOME, screen = TvScreen.AUTH)
+                                    },
+                                    onBackHome = { nav = nav.copy(selectedSection = TvSection.HOME) }
                                 )
                             }
 
@@ -197,8 +280,23 @@ fun TvApp(
                                     TvDetailScreen(
                                         item = item,
                                         account = nav.account,
-                                        onPlayEpisode = { url, title ->
-                                            nav = nav.copy(screen = TvScreen.PLAYER, playUrl = url, playTitle = title)
+                                        onPlayDirectStream = { url, title, previewLimitMs ->
+                                            nav = nav.copy(
+                                                screen = TvScreen.PLAYER,
+                                                playUrl = url,
+                                                playTitle = title,
+                                                playPreviewLimitMs = previewLimitMs,
+                                                playerFromSection = null
+                                            )
+                                        },
+                                        onPlayEmbed = { url, title, previewLimitMs ->
+                                            nav = nav.copy(
+                                                screen = TvScreen.EMBED_PLAYER,
+                                                playUrl = url,
+                                                playTitle = title,
+                                                playPreviewLimitMs = previewLimitMs,
+                                                playerFromSection = null
+                                            )
                                         },
                                         onReadNovel = { text, title ->
                                             nav = nav.copy(screen = TvScreen.READER, readerText = text, readerTitle = title)
@@ -215,6 +313,36 @@ fun TvApp(
                                 TvPlayerScreen(
                                     streamUrl = nav.playUrl,
                                     title = nav.playTitle,
+                                    account = nav.account,
+                                    previewLimitMs = nav.playPreviewLimitMs,
+                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || nav.selectedItem?.isAnime == true || nav.selectedItem?.mediaKind.equals("donghua", ignoreCase = true) == true,
+                                    onUpgrade = {
+                                        nav = nav.copy(
+                                            screen = TvScreen.HOME,
+                                            selectedSection = TvSection.YOU,
+                                            playUrl = "",
+                                            playTitle = ""
+                                        )
+                                    },
+                                    onBack = { goBack() }
+                                )
+                            }
+
+                            TvScreen.EMBED_PLAYER -> {
+                                TvEmbedPlayerScreen(
+                                    embedUrl = nav.playUrl,
+                                    title = nav.playTitle,
+                                    account = nav.account,
+                                    previewLimitMs = nav.playPreviewLimitMs,
+                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || nav.selectedItem?.isAnime == true || nav.selectedItem?.mediaKind.equals("donghua", ignoreCase = true) == true,
+                                    onUpgrade = {
+                                        nav = nav.copy(
+                                            screen = TvScreen.HOME,
+                                            selectedSection = TvSection.YOU,
+                                            playUrl = "",
+                                            playTitle = ""
+                                        )
+                                    },
                                     onBack = { goBack() }
                                 )
                             }
@@ -247,28 +375,20 @@ fun TvApp(
 
 @Composable
 private fun TvSidebar(
+    config: TvRemoteConfig,
     selectedSection: TvSection,
     onSectionSelected: (TvSection) -> Unit,
     account: SavedUserAccount?,
     onSignInClick: () -> Unit,
     onSignOut: () -> Unit
 ) {
-    val sections = listOf(
-        TvSection.HOME to Icons.Default.Home,
-        TvSection.NOVELS to Icons.Default.AutoStories,
-        TvSection.MANGA to Icons.Default.Collections,
-        TvSection.COMICS to Icons.Default.ImportContacts,
-        TvSection.ANIME to Icons.Default.PlayCircle,
-        TvSection.DONGHUA to Icons.Default.VideoLibrary,
-        TvSection.K_DRAMA to Icons.Default.LiveTv,
-        TvSection.CARTOON to Icons.Default.Animation,
-        TvSection.CLASSIC to Icons.Default.Theaters,
-        TvSection.MOVIES to Icons.Default.Movie,
-        TvSection.NOLLYWOOD to Icons.Default.Flag,
-        TvSection.SPORTS to Icons.Default.SportsSoccer,
-        TvSection.DOWNLOADS to Icons.Default.Download,
-        TvSection.YOU to Icons.Default.AccountCircle
-    )
+    // Server-driven section list (order + labels editable via site/tv-config.json)
+    val configuredSections = config.visibleSections()
+    val sections = configuredSections.mapNotNull { section ->
+        val tvSection = section.toSection()
+        val icon = iconForSection(tvSection)
+        if (icon != null) tvSection to (icon to section.label) else null
+    }
 
     Column(
         modifier = Modifier
@@ -291,7 +411,8 @@ private fun TvSidebar(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            sections.forEach { (section, icon) ->
+            sections.forEach { (section, iconInfo) ->
+                val (icon, label) = iconInfo
                 val isSelected = selectedSection == section
                 var isFocused by remember { mutableStateOf(false) }
 
@@ -319,7 +440,7 @@ private fun TvSidebar(
                     ) {
                         Icon(
                             icon,
-                            section.label,
+                            label,
                             tint = if (isSelected) Color(0xFF00BFFF) else Color.White.copy(0.5f),
                             modifier = Modifier.size(22.dp)
                         )
@@ -383,4 +504,22 @@ private fun TvSidebar(
             }
         }
     }
+}
+
+private fun iconForSection(section: TvSection): ImageVector? = when (section) {
+    TvSection.HOME -> Icons.Default.Home
+    TvSection.NOVELS -> Icons.Default.AutoStories
+    TvSection.CREATION -> Icons.Default.Create
+    TvSection.MANGA -> Icons.Default.Collections
+    TvSection.COMICS -> Icons.Default.ImportContacts
+    TvSection.ANIME -> Icons.Default.PlayCircle
+    TvSection.DONGHUA -> Icons.Default.VideoLibrary
+    TvSection.K_DRAMA -> Icons.Default.LiveTv
+    TvSection.CARTOON -> Icons.Default.Animation
+    TvSection.CLASSIC -> Icons.Default.Theaters
+    TvSection.MOVIES -> Icons.Default.Movie
+    TvSection.NOLLYWOOD -> Icons.Default.Flag
+    TvSection.SPORTS -> Icons.Default.SportsSoccer
+    TvSection.DOWNLOADS -> Icons.Default.Download
+    TvSection.YOU -> Icons.Default.AccountCircle
 }

@@ -14,7 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.alexleoreeves.novelapp.tv.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.data.UnifiedSearchResult
 import com.alexleoreeves.novelapp.tv.ui.components.TvSearchKeyboard
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +39,7 @@ fun TvSearchScreen(
             .collectLatest { q ->
                 if (q.isNotBlank()) {
                     isSearching = true
-                    val res = com.alexleoreeves.novelapp.tv.data.searchContent("anime", q)
+                    val res = com.alexleoreeves.novelapp.data.searchContent("anime", q)
                     results = res
                     isSearching = false
                 } else {

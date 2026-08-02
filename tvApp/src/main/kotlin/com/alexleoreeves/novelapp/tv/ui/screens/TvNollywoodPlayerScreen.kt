@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.input.key.*
 import kotlinx.coroutines.delay
 
 @Composable
@@ -38,6 +39,25 @@ fun TvNollywoodPlayerScreen(
             .background(Color.Black)
             .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
                 showControls = !showControls
+            }
+            .onKeyEvent { event ->
+                if (event.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) {
+                    when (event.key) {
+                        androidx.compose.ui.input.key.Key.DirectionCenter,
+                        androidx.compose.ui.input.key.Key.Enter,
+                        androidx.compose.ui.input.key.Key.MediaPlayPause,
+                        androidx.compose.ui.input.key.Key.MediaPlay,
+                        androidx.compose.ui.input.key.Key.MediaPause -> {
+                            webView?.evaluateJavascript(
+                                "(function(){var v=document.querySelector('video');if(v){if(v.paused)v.play();else v.pause();}})()",
+                                null
+                            )
+                            showControls = true
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
             }
     ) {
         AndroidView(

@@ -79,6 +79,7 @@ fun App(
 
     val maServerEmbedUrl = remember { mutableStateOf<String?>(null) }
     val maServerEmbedTitle = remember { mutableStateOf("") }
+    val maServerPreviewLimitMs = remember { mutableStateOf<Long?>(null) }
 
     val selectedFootballMatch = remember { mutableStateOf<FootballMatch?>(null) }
     val footballStreamUrl = remember { mutableStateOf<String?>(null) }
@@ -213,7 +214,7 @@ fun App(
 
     PlatformBackHandler(enabled = canNavigateBack) {
         when {
-            maServerEmbedUrl.value != null -> { maServerEmbedUrl.value = null; maServerEmbedTitle.value = "" }
+            maServerEmbedUrl.value != null -> { maServerEmbedUrl.value = null; maServerEmbedTitle.value = ""; maServerPreviewLimitMs.value = null }
             animeStreamUrl.value != null -> { animeStreamUrl.value = null; animePreviewLimitMs.value = null }
             footballDirectStreamUrl.value != null -> { footballDirectStreamUrl.value = null; footballDirectStreamTitle.value = "" }
             footballStreamUrl.value != null -> { footballStreamUrl.value = null; footballStreamTitle.value = "" }
@@ -344,7 +345,10 @@ fun App(
                     )
                 }
 
-                maServerEmbedUrl.value != null -> MaServerPlayerScreen(maServerEmbedUrl.value!!, maServerEmbedTitle.value, appTheme.value) { maServerEmbedUrl.value = null; maServerEmbedTitle.value = "" }
+                maServerEmbedUrl.value != null -> MaServerPlayerScreen(
+                    maServerEmbedUrl.value!!, maServerEmbedTitle.value, appTheme.value,
+                    previewLimitMs = maServerPreviewLimitMs.value
+                ) { maServerEmbedUrl.value = null; maServerEmbedTitle.value = ""; maServerPreviewLimitMs.value = null }
 
                 selectedMedia.value != null -> MediaDetailScreen(
                     selectedMedia.value!!, appTheme.value, isPremium = account?.isPremium == true, downloadRepo, requireAuth,
@@ -353,7 +357,8 @@ fun App(
                         animeStreamUrl.value = u; animeEpisodeTitle.value = t; animePreviewLimitMs.value = l; animeSubtitlesJson.value = sj
                         animeContentKind.value = selectedMedia.value?.let { i -> if (i.mediaKind.equals(VideoCategory.ANIME.name, true)) "anime" else if (i.mediaKind.equals(VideoCategory.DONGHUA.name, true)) "donghua" else "" } ?: ""
                     },
-                    onPlayMaEmbed = { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t },
+                    onPlayMaEmbed = { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = null },
+                    onPlayMaEmbedWithLimit = { u, t, l -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = l },
                     onBack = { selectedMedia.value = null }
                 )
 
@@ -540,6 +545,6 @@ enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.PlayCircle),
     NMC("NMC", Icons.Default.Book),
     SPORTS("Sports", Icons.Default.EmojiEvents),
-    READ("Read", Icons.AutoMirrored.Filled.MenuBook),
+    READ("Read", Icons.Filled.MenuBook),
     YOU("You", Icons.Default.Person)
 }

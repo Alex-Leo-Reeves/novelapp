@@ -56,7 +56,6 @@ fun TvSplashScreen(onFinished: () -> Unit) {
 fun TvAuthScreen(
     onSignIn: (String, String) -> Unit,
     onCreateAccount: (String, String, String, String) -> Unit,
-    onDismiss: () -> Unit,
     onPhonePair: () -> Unit = {},
     isSubmitting: Boolean = false,
     externalError: String? = null
@@ -135,10 +134,6 @@ fun TvAuthScreen(
                 Icon(Icons.Default.QrCodeScanner, null, tint = Color(0xFF06D6A0), modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Log in with your phone", color = Color(0xFF06D6A0), fontWeight = FontWeight.Bold)
-            }
-
-            TextButton(onClick = onDismiss) {
-                Text("Continue as Guest", color = Color.White.copy(0.6f))
             }
         }
     }

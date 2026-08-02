@@ -639,7 +639,7 @@ private fun VolumeSliderRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
-                Icons.AutoMirrored.Filled.VolumeDown,
+                Icons.Filled.VolumeDown,
                 null,
                 tint = Color.White.copy(alpha = 0.5f),
                 modifier = Modifier.size(18.dp)
@@ -657,7 +657,7 @@ private fun VolumeSliderRow(
                 )
             )
             Icon(
-                Icons.AutoMirrored.Filled.VolumeUp,
+                Icons.Filled.VolumeUp,
                 null,
                 tint = Color.White.copy(alpha = 0.5f),
                 modifier = Modifier.size(18.dp)

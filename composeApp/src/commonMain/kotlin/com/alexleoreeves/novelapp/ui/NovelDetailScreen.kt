@@ -125,7 +125,7 @@ fun NovelDetailScreen(
                             .align(Alignment.TopStart)
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                            Icons.Filled.ArrowBack, "Back",
                             tint = Color.White,
                             modifier = Modifier.size(28.dp)
                         )

@@ -256,11 +256,11 @@ private fun AiNovelCreatorTab(
         Box(modifier = Modifier.fillMaxSize().background(currentTheme.backgroundColor())) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { activeReadingNovel = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor()) }
+                    IconButton(onClick = { activeReadingNovel = null }) { Icon(Icons.Filled.ArrowBack, null, tint = currentTheme.textColor()) }
                     Spacer(Modifier.width(8.dp))
                     Text(novel.title, style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { ttsController.playText(novel.content, novel.title) }) { Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = currentTheme.accentColor()) }
+                    IconButton(onClick = { ttsController.playText(novel.content, novel.title) }) { Icon(Icons.Filled.VolumeUp, null, tint = currentTheme.accentColor()) }
                 }
                 Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
                     if (novel.cover_url.isNotBlank()) { Box(modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(12.dp)).background(currentTheme.cardColor())) { AsyncImage(model = novel.cover_url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }; Spacer(Modifier.height(12.dp)) }
@@ -326,7 +326,7 @@ private fun AiNovelCreatorTab(
                             modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) { Icon(Icons.Outlined.CloudUpload, null); Spacer(Modifier.width(4.dp)); Text("Publish") }
                     }
                     if (feedbackMessage.isNotBlank()) Text(feedbackMessage, color = currentTheme.accentColor(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    Button(onClick = { ttsController.playText(result.content, result.title) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.cardColor())) { Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = currentTheme.textColor()); Spacer(Modifier.width(6.dp)); Text("Listen with Kokoro", color = currentTheme.textColor()) }
+                    Button(onClick = { ttsController.playText(result.content, result.title) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = currentTheme.cardColor())) { Icon(Icons.Filled.VolumeUp, null, tint = currentTheme.textColor()); Spacer(Modifier.width(6.dp)); Text("Listen with Kokoro", color = currentTheme.textColor()) }
                     HorizontalDivider(color = currentTheme.textColor().copy(alpha = 0.1f))
                     Text(result.content, style = MaterialTheme.typography.bodyLarge, color = currentTheme.textColor())
                     Spacer(Modifier.height(24.dp))
@@ -549,7 +549,7 @@ private fun WriteNovelTab(
             val novel = editingNovel!!
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { editingNovel = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor()) }
+                    IconButton(onClick = { editingNovel = null }) { Icon(Icons.Filled.ArrowBack, null, tint = currentTheme.textColor()) }
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(novel.title, style = MaterialTheme.typography.titleMedium, color = currentTheme.textColor(), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -584,7 +584,7 @@ private fun WriteNovelTab(
                                         Text("${ch.content.split("\\s+".toRegex()).size} words", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
                                     }
                                     IconButton(onClick = { ttsController.playText(ch.content, "${novel.title} - ${ch.title}") }) {
-                                        Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = currentTheme.accentColor(), modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Filled.VolumeUp, null, tint = currentTheme.accentColor(), modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }
@@ -633,7 +633,7 @@ private fun WriteNovelTab(
             // ── Create Novel Form ──
             Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { showCreateForm = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = currentTheme.textColor()) }
+                    IconButton(onClick = { showCreateForm = false }) { Icon(Icons.Filled.ArrowBack, null, tint = currentTheme.textColor()) }
                     Spacer(Modifier.width(8.dp))
                     Text("Create New Novel", style = MaterialTheme.typography.titleLarge, color = currentTheme.textColor(), fontWeight = FontWeight.Bold)
                 }

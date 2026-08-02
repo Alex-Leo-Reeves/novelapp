@@ -39,6 +39,14 @@ fun MediaDetailScreen(
     onSubscribe: () -> Unit,
     onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?, subtitlesJson: String?) -> Unit,
     onPlayMaEmbed: (embedUrl: String, title: String) -> Unit = { _, _ -> },
+    // Fail closed: if a caller only supplies onPlayMaEmbed and a preview limit
+    // is set, refuse to play rather than drop the limit and bypass the gate.
+    // When the limit is null (premium / no cap) there is nothing to bypass,
+    // so delegate to onPlayMaEmbed as before.
+    onPlayMaEmbedWithLimit: (embedUrl: String, title: String, previewLimitMs: Long?) -> Unit = { u, t, l ->
+        if (l == null) onPlayMaEmbed(u, t)
+        else println("MediaDetailScreen: onPlayMaEmbedWithLimit invoked without a limit-aware callback (url=$u, title=$t, limit=$l); refusing to play to avoid a preview bypass")
+    },
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -513,7 +521,11 @@ fun MediaDetailScreen(
                 // Try vidsrc.to first (widest anime/TV coverage), then nontongo, then vidlink.
                 statusText = "CinePro direct stream unavailable. Loading embed..."
                 val fallbackEmbed = "https://vidsrc.to/embed/tv/$tvId/$s/$e"
-                onPlayMaEmbed(fallbackEmbed, "${item.title} - ${ep.title}")
+                onPlayMaEmbedWithLimit(
+                    fallbackEmbed,
+                    "${item.title} - ${ep.title}",
+                    if (isPremium) null else freeMoviePreviewMs
+                )
                 return@launch
             }
 
@@ -587,13 +599,15 @@ fun MediaDetailScreen(
                 else -> ep.url
             }
 
-            // Route to player based on selected server
-            if (isDonghuaItem) {
-                // All Donghua servers (Nontongo embed, Lucifer Donghua site wrapper, DonghuaStream site wrapper) use WebView
-                onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
-            } else {
-                onPlayMaEmbed(embedUrl, "${item.title} - ${ep.title}")
-            }
+            // Route to player based on selected server.
+            // All embed paths pass a 20-minute hard cap for free users — the
+            // WebView player can't read duration reliably, so a flat cap
+            // guarantees free users can never finish a full episode/movie.
+            onPlayMaEmbedWithLimit(
+                embedUrl,
+                "${item.title} - ${ep.title}",
+                if (isPremium) null else freeMoviePreviewMs
+            )
         }
     }
 
@@ -633,7 +647,7 @@ fun MediaDetailScreen(
                     .align(Alignment.TopStart)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
             Column(
                 modifier = Modifier
@@ -822,7 +836,11 @@ fun MediaDetailScreen(
                                 // Fallback to vidsrc.to embed — wider movie coverage than vidlink.pro alone
                                 statusText = "CinePro direct stream unavailable. Loading embed..."
                                 val fallbackEmbed = "https://vidsrc.to/embed/movie/$resolvedTmdbId"
-                                onPlayMaEmbed(fallbackEmbed, item.title)
+                                onPlayMaEmbedWithLimit(
+                                    fallbackEmbed,
+                                    item.title,
+                                    if (isPremium) null else freeMoviePreviewMs
+                                )
                                 return@launch
                             }
                             // ── Server 5 (ExoPlayer): Pass VidLink embed to AnimePlayerScreen ─
@@ -834,7 +852,11 @@ fun MediaDetailScreen(
                                 return@launch
                             }
                             val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                            onPlayMaEmbed(embedUrl, item.title)
+                            onPlayMaEmbedWithLimit(
+                                embedUrl,
+                                item.title,
+                                if (isPremium) null else freeMoviePreviewMs
+                            )
                         }
                     },
                         modifier = Modifier.weight(1f).height(50.dp),

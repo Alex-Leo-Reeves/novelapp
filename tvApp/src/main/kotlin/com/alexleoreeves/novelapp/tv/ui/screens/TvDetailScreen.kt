@@ -21,16 +21,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
-import com.alexleoreeves.novelapp.tv.data.*
+import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.activity.compose.BackHandler
 
 @Composable
 fun TvDetailScreen(
     item: UnifiedSearchResult,
     account: SavedUserAccount?,
-    onPlayEpisode: (url: String, title: String) -> Unit,
+    onPlayDirectStream: (url: String, title: String, previewLimitMs: Long?) -> Unit,
+    onPlayEmbed: (url: String, title: String, previewLimitMs: Long?) -> Unit,
     onReadNovel: (text: String, title: String) -> Unit,
     onReadManga: (pages: List<String>, title: String) -> Unit,
     onBack: () -> Unit
@@ -38,41 +44,117 @@ fun TvDetailScreen(
     val scope = rememberCoroutineScope()
     var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var selectedChapterIndex by remember { mutableStateOf(-1) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    
+    val initialFocusRequester = remember { FocusRequester() }
+    val firstEpisodeFocusRequester = remember { FocusRequester() }
+
+    val mediaRepo = remember { TvMediaRepository() }
+    val novelRepo = remember { TvNovelSearchRepository() }
+
+    val isVideoTitle = item.isAnime || item.isVideo
+    val kind = if (item.isAnime) "anime"
+        else if (item.isManga) "manga"
+        else if (item.isComic) "comic"
+        else if (item.isVideo) item.mediaKind.lowercase().ifBlank { "movie" }
+        else "novel"
+        
+    val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
+
+    var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
+    var statusText by remember { mutableStateOf("") }
 
     LaunchedEffect(item) {
         isLoading = true
+        errorMsg = null
+        statusText = ""
         try {
-            chapters = fetchChapters(
-                when {
-                    item.isAnime -> "anime"
-                    item.isManga -> "manga"
-                    item.isComic -> "comic"
-                    item.isVideo -> "movie"
-                    else -> "novel"
-                },
-                item.detailPageUrl.ifBlank { item.url },
-                item.title,
-                item.sourceName
-            )
+            val fetched = if (isVideoTitle) {
+                mediaRepo.fetchVideoEpisodes(item)
+            } else if (kind == "novel") {
+                novelRepo.fetchChapters(item.detailPageUrl.ifBlank { item.url }, item.sourceName)
+            } else {
+                fetchChapters(
+                    if (item.isAnime) "anime" else kind,
+                    item.detailPageUrl.ifBlank { item.url },
+                    item.title,
+                    item.sourceName
+                )
+            }
+            chapters = fetched
         } catch (e: Exception) {
             errorMsg = e.message
         }
-        if (chapters.isEmpty()) {
-            chapters = listOf(
-                Chapter("Chapter 1", "${item.detailPageUrl}/ch1", 1),
-                Chapter("Chapter 2", "${item.detailPageUrl}/ch2", 2),
-                Chapter("Chapter 3", "${item.detailPageUrl}/ch3", 3)
-            )
-        }
         isLoading = false
+        
+        delay(100)
+        try { 
+            if (chapters.isNotEmpty()) {
+                firstEpisodeFocusRequester.requestFocus() 
+            } else {
+                initialFocusRequester.requestFocus() 
+            }
+        } catch (e: Exception) {}
+    }
+
+    fun playMedia(chapter: Chapter? = null) {
+        scope.launch {
+            statusText = "Resolving stream..."
+            if (isVideoTitle) {
+                val url = mediaRepo.resolveStreamUrl(item, chapter, selectedServer, selectedDonghuaServer)
+                if (url != null) {
+                    statusText = ""
+                    val titleSuffix = chapter?.let { " - ${it.title}" } ?: ""
+                    val fullTitle = "${item.title}$titleSuffix"
+                    // Route decision: direct stream → VLC, embed → WebView
+                    // This mirrors Android's AnimePlayerScreen vs MaServerPlayerScreen routing
+                    val isDirectStream = isTvPlayableStreamUrl(url)
+                    if (isDirectStream) {
+                        onPlayDirectStream(url, fullTitle, null)
+                    } else {
+                        onPlayEmbed(url, fullTitle, null)
+                    }
+                } else {
+                    statusText = "Stream unavailable. Try another server."
+                }
+            } else if (item.isManga || item.isComic) {
+                val chUrl = chapter?.url ?: return@launch
+                val pages = fetchMangaPages(chUrl)
+                statusText = ""
+                onReadManga(
+                    pages.ifEmpty {
+                        listOf(
+                            "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800",
+                            "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800"
+                        )
+                    },
+                    "${item.title} - ${chapter.title}"
+                )
+            } else {
+                val chUrl = chapter?.url ?: return@launch
+                val novelText = if (kind == "novel") {
+                    novelRepo.fetchChapterText(chUrl, item.sourceName)
+                } else {
+                    fetchChapterText(chUrl, item.title, item.sourceName)
+                }
+                statusText = ""
+                onReadNovel(
+                    novelText.ifBlank { "Loading chapter ${chapter.chapterNumber}…" },
+                    "${item.title} - ${chapter.title}"
+                )
+            }
+        }
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF06060A))
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF06060A))
     ) {
-        Row(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxSize()
+        ) {
             // Left panel
             Column(
                 modifier = Modifier
@@ -89,7 +171,9 @@ fun TvDetailScreen(
                     shape = RoundedCornerShape(10.dp),
                     color = if (backFocused) Color(0xFF1C1C2E) else Color.Transparent,
                     border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
-                    modifier = Modifier.align(Alignment.Start).onFocusChanged { backFocused= it.isFocused }
+                    modifier = Modifier.align(Alignment.Start)
+                        .focusRequester(if (chapters.isEmpty()) initialFocusRequester else FocusRequester.Default)
+                        .onFocusChanged { backFocused = it.isFocused }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -151,6 +235,35 @@ fun TvDetailScreen(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
+
+                if (isVideoTitle) {
+                    var watchFocused by remember { mutableStateOf(false) }
+                    Surface(
+                        onClick = { playMedia(chapters.firstOrNull()) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (watchFocused) Color(0xFF00BFFF) else Color(0xFF00BFFF).copy(0.15f),
+                        border = if (watchFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.4f)),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                            .onFocusChanged { watchFocused = it.isFocused }
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (chapters.isNotEmpty()) "Watch Episode 1" else "Watch Now",
+                                color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                    }
+                }
+                
+                if (statusText.isNotBlank()) {
+                    Text(statusText, color = Color(0xFF00BFFF), style = MaterialTheme.typography.bodySmall)
+                }
             }
 
             // Divider
@@ -162,7 +275,8 @@ fun TvDetailScreen(
                     when {
                         item.isAnime -> "Episodes"
                         item.isManga || item.isComic -> "Chapters"
-                        item.isVideo -> "Episodes"
+                        item.isVideo && chapters.isNotEmpty() -> "Episodes"
+                        item.isVideo -> "Media"
                         else -> "Chapters"
                     },
                     style = MaterialTheme.typography.titleLarge,
@@ -171,9 +285,58 @@ fun TvDetailScreen(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
+                if (isVideoTitle && !item.id.startsWith("youtube_nollywood_")) {
+                    // Server Selection Row
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                    ) {
+                        if (isDonghua) {
+                            items(DonghuaServer.ALL_IN_ORDER) { server ->
+                                val isSelected = selectedDonghuaServer == server
+                                var sFocused by remember { mutableStateOf(false) }
+                                Surface(
+                                    onClick = { selectedDonghuaServer = server },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                    border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                    modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                        Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        } else {
+                            items(StreamServer.ALL_IN_ORDER) { server ->
+                                val isSelected = selectedServer == server
+                                var sFocused by remember { mutableStateOf(false) }
+                                Surface(
+                                    onClick = { selectedServer = server },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                    border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                    modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                        Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (isLoading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = Purple500, modifier = Modifier.size(48.dp))
+                    }
+                } else if (chapters.isEmpty() && isVideoTitle && !item.isAnime) {
+                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Movie, null, tint = Color.White.copy(0.3f), modifier = Modifier.size(48.dp))
+                            Text("Ready to watch", color = Color.White.copy(0.5f))
+                        }
                     }
                 } else if (chapters.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -190,43 +353,19 @@ fun TvDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(chapterList) { ch ->
-                            val idx = chapterList.indexOf(ch)
+                        items(chapterList.size) { index ->
+                            val ch = chapterList[index]
                             var chFocused by remember { mutableStateOf(false) }
                             Surface(
-                                onClick = {
-                                    scope.launch {
-                                        when {
-                                            item.isAnime || item.isVideo -> {
-                                                val route = fetchWatchRoute(
-                                                    if (item.isAnime) "anime" else "movie",
-                                                    item.title, ch.url
-                                                ) ?: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                                                onPlayEpisode(route, "${item.title} - ${ch.title}")
-                                            }
-                                            item.isManga || item.isComic -> {
-                                                val pages = fetchMangaPages(ch.url)
-                                                onReadManga(pages.ifEmpty {
-                                                    listOf(
-                                                        "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800",
-                                                        "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800"
-                                                    )
-                                                }, "${item.title} - ${ch.title}")
-                                            }
-                                            else -> {
-                                                val novelText = fetchChapterText(ch.url, item.title, item.sourceName)
-                                                onReadNovel(
-                                                    novelText.ifBlank { "Chapter ${ch.chapterNumber} content loading...\n\nThe story continues in this chapter..." },
-                                                    "${item.title} - ${ch.title}"
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
+                                onClick = { playMedia(ch) },
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (chFocused) Purple500.copy(0.3f) else Color(0xFF14141E),
                                 border = if (chFocused) BorderStroke(2.dp, Purple500) else null,
-                                modifier = Modifier.fillMaxWidth().height(48.dp).onFocusChanged { chFocused= it.isFocused }
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .then(if (index == 0) Modifier.focusRequester(firstEpisodeFocusRequester) else Modifier)
+                                    .onFocusChanged { chFocused = it.isFocused }
                             ) {
                                 Box(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                                     Text(
@@ -242,7 +381,7 @@ fun TvDetailScreen(
                     }
                 }
 
-                if (!item.isPremium && account?.isPremium != true) {
+                if (account?.isPremium != true) {
                     Spacer(Modifier.height(16.dp))
                     Surface(
                         color = Color(0xFF00BFFF).copy(0.1f),

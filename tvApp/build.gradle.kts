@@ -32,8 +32,13 @@ android {
         applicationId = "com.alexleoreeves.novelapp.tv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 40
-        versionName = "1.40"
+        versionCode = 41
+        versionName = "1.41"
+
+        // Exclude x86/x86_64 desktop binaries to cut APK size in half
+        ndk {
+            abiFilters.addAll(setOf("arm64-v8a", "armeabi-v7a"))
+        }
     }
 
     buildTypes {
@@ -70,12 +75,33 @@ android {
         compose = true
         buildConfig = true
     }
+
+    androidResources {
+        noCompress += listOf("onnx", "bin", "dict", "json", "wav", "zip")
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
 }
 
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_11)
         freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
+    sourceSets {
+        getByName("main") {
+            kotlin.srcDir("../composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data")
+            kotlin.exclude(
+                "LocalDownloadRepository.kt",
+                "LocalFileStorage.kt",
+                "MangaPageCache.kt"
+            )
+        }
     }
 }
 
@@ -90,17 +116,19 @@ dependencies {
     implementation("androidx.tv:tv-material:1.0.0-rc01")
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-ktor3:3.0.4")
-    implementation("androidx.media3:media3-exoplayer:1.3.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
-    implementation("androidx.media3:media3-ui:1.3.1")
+    // Media Player: LibVLC SDK for robust MKV/HEVC/HLS direct streaming
+    implementation("org.videolan.android:libvlc-all:3.6.0-eap5")
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.client.logging)
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation(libs.jsoup)
     implementation(libs.ksoup)
     implementation("com.google.zxing:core:3.5.3")
+    // Sherpa-ONNX offline neural TTS (same as the Android app)
+    implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 }
 
 secrets {

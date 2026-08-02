@@ -563,6 +563,152 @@ class WebtoonScraper(private val httpClient: HttpClient) : MangaScraper {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Comick.io API Scraper — large catalogue, reliable JSON API, no Cloudflare
+// ─────────────────────────────────────────────────────────────────────────────
+class ComickScraper(private val httpClient: HttpClient) : MangaScraper {
+
+    override val sourceName = "Comick"
+    private val apiBase = "https://api.comick.fun"
+    private val coverBase = "https://meo.comick.pictures"
+    private val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    override suspend fun searchManga(query: String): List<UnifiedSearchResult> {
+        return try {
+            val response = httpClient.get("$apiBase/v1.0/search") {
+                parameter("q", query)
+                parameter("limit", 20)
+                parameter("page", 1)
+                header("User-Agent", userAgent)
+            }.bodyAsText()
+
+            val results = Json.parseToJsonElement(response).jsonArray
+            results.mapNotNull { item ->
+                val obj = item.jsonObject
+                val slug = obj["slug"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val title = obj["title"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["slug"]?.jsonPrimitive?.contentOrNull
+                    ?: return@mapNotNull null
+                val hid = obj["hid"]?.jsonPrimitive?.contentOrNull ?: slug
+
+                // Cover image from md_covers array
+                val covers = obj["md_covers"]?.jsonArray
+                val coverFileName = covers?.firstOrNull()
+                    ?.jsonObject?.get("b2key")?.jsonPrimitive?.contentOrNull
+                val coverUrl = if (!coverFileName.isNullOrBlank()) {
+                    "$coverBase/$coverFileName"
+                } else ""
+
+                val genres = obj["genres"]?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    ?.take(3)
+                    ?.joinToString(", ")
+                    .orEmpty()
+                    .ifBlank {
+                        obj["md_titles"]?.jsonArray
+                            ?.mapNotNull { it.jsonObject["title"]?.jsonPrimitive?.contentOrNull }
+                            ?.take(2)
+                            ?.joinToString(", ")
+                            .orEmpty()
+                    }
+
+                UnifiedSearchResult(
+                    id = "comick_$hid",
+                    title = title,
+                    coverUrl = coverUrl,
+                    detailPageUrl = "comick://$slug",
+                    sourceName = sourceName,
+                    isManga = true,
+                    genre = genres.ifBlank { "Manga" }
+                )
+            }.take(30)
+        } catch (e: Exception) {
+            println("[Comick] Search failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    override suspend fun fetchMangaChapters(mangaUrl: String): List<MangaChapter> {
+        val slug = mangaUrl.removePrefix("comick://")
+        return try {
+            val chapters = mutableListOf<MangaChapter>()
+            var page = 1
+            var hasMore = true
+
+            while (hasMore && page <= 20) {
+                val response = httpClient.get("$apiBase/comic/$slug/chapters") {
+                    parameter("lang", "en")
+                    parameter("page", page)
+                    parameter("limit", 100)
+                    header("User-Agent", userAgent)
+                }.bodyAsText()
+
+                val json = Json.parseToJsonElement(response).jsonObject
+                val chapterArray = json["chapters"]?.jsonArray ?: break
+
+                if (chapterArray.isEmpty()) break
+
+                for (item in chapterArray) {
+                    val obj = item.jsonObject
+                    val chap = obj["chap"]?.jsonPrimitive?.contentOrNull ?: continue
+                    val hid = obj["hid"]?.jsonPrimitive?.contentOrNull ?: continue
+                    val chapterNum = chap.toDoubleOrNull()?.toInt() ?: continue
+                    val vol = obj["vol"]?.jsonPrimitive?.contentOrNull
+                    val chTitle = obj["title"]?.jsonPrimitive?.contentOrNull
+
+                    val displayTitle = buildString {
+                        if (!vol.isNullOrBlank()) append("Vol $vol ")
+                        append("Ch $chap")
+                        if (!chTitle.isNullOrBlank()) append(" - $chTitle")
+                    }
+
+                    chapters.add(
+                        MangaChapter(
+                            title = displayTitle,
+                            url = "comick-chapter://$hid",
+                            chapterNumber = chapterNum
+                        )
+                    )
+                }
+
+                hasMore = chapterArray.size == 100
+                page++
+            }
+
+            chapters.normalizedMangaChapterOrder()
+        } catch (e: Exception) {
+            println("[Comick] Chapter fetch failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    override suspend fun fetchMangaPages(chapterUrl: String): List<String> {
+        val hid = chapterUrl.removePrefix("comick-chapter://")
+        return try {
+            val response = httpClient.get("$apiBase/chapter/$hid") {
+                header("User-Agent", userAgent)
+            }.bodyAsText()
+
+            val json = Json.parseToJsonElement(response).jsonObject
+            val chapter = json["chapter"]?.jsonObject
+            val images = chapter?.get("md_images")?.jsonArray
+                ?: json["images"]?.jsonArray
+                ?: return emptyList()
+
+            images.mapNotNull { img ->
+                val obj = img.jsonObject
+                val b2key = obj["b2key"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["name"]?.jsonPrimitive?.contentOrNull
+                    ?: return@mapNotNull null
+                "$coverBase/$b2key"
+            }
+        } catch (e: Exception) {
+            println("[Comick] Pages fetch failed: ${e.message}")
+            emptyList()
+        }
+    }
+}
+
 private fun absoluteMangaUrl(baseUrl: String, href: String): String {
     if (href.isBlank()) return ""
     if (href.startsWith("http://") || href.startsWith("https://")) return href

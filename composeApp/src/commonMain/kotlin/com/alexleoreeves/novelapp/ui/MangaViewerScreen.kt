@@ -480,7 +480,7 @@ fun MangaViewerScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                            Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(

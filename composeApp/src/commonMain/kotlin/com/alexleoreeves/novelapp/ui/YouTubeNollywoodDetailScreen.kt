@@ -59,7 +59,7 @@ fun YouTubeNollywoodDetailScreen(
                     .padding(top = 40.dp, start = 8.dp)
                     .align(Alignment.TopStart)
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
+                Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
             }
             // Play button overlay
             Column(

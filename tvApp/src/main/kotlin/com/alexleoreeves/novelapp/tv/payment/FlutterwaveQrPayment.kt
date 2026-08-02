@@ -17,7 +17,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.alexleoreeves.novelapp.tv.data.*
+import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType

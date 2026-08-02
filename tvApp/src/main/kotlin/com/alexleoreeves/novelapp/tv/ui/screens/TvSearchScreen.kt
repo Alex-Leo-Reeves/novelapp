@@ -10,18 +10,35 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.alexleoreeves.novelapp.data.TvSearchHistoryManager
 import com.alexleoreeves.novelapp.tv.ui.components.TvSearchKeyboard
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 
 @Composable
 fun TvSearchScreen(
     initialQuery: String = "",
-    onSearch: (String) -> Unit,
+    selectedCategory: String = "all",
+    onCategoryChange: (String) -> Unit = {},
+    onSearch: (query: String, category: String) -> Unit,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
+    val historyManager = remember(context) { TvSearchHistoryManager(context) }
+    var history by remember { mutableStateOf(historyManager.getHistory()) }
     var query by remember { mutableStateOf(initialQuery) }
+    var category by remember { mutableStateOf(selectedCategory) }
+
+    fun executeSearch(searchQuery: String) {
+        val trimmed = searchQuery.trim()
+        if (trimmed.isNotBlank()) {
+            historyManager.addSearchQuery(trimmed)
+            history = historyManager.getHistory()
+            onSearch(trimmed, category)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -37,7 +54,7 @@ fun TvSearchScreen(
             border = if (backFocused) BorderStroke(2.dp, Purple500) else null,
             modifier = Modifier
                 .padding(start = 16.dp, top = 16.dp, bottom = 8.dp)
-                .onFocusChanged { backFocused= it.isFocused }
+                .onFocusChanged { backFocused = it.isFocused }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -62,19 +79,32 @@ fun TvSearchScreen(
         TvSearchKeyboard(
             value = query,
             onValueChange = { query = it },
-            onSearch = { onSearch(query.trim()) },
+            onSearch = { executeSearch(query) },
             onBack = onClose,
             suggestions = listOf(
+                "Lord of the Mysteries",
+                "Blue Lock",
+                "Solo Leveling",
                 "One Piece",
                 "Attack on Titan",
-                "Solo Leveling",
                 "Demon Slayer",
                 "Jujutsu Kaisen"
             ),
             onSuggestionClick = { sug ->
                 query = sug
-                onSearch(sug)
+                executeSearch(sug)
+            },
+            searchHistory = history,
+            onClearHistory = {
+                historyManager.clearHistory()
+                history = emptyList()
+            },
+            selectedCategory = category,
+            onCategorySelected = { cat ->
+                category = cat
+                onCategoryChange(cat)
             }
         )
     }
 }
+

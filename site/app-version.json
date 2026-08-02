@@ -1,13 +1,14 @@
 {
-    "versionCode": 40,
-    "versionName": "1.40",
+    "versionCode": 41,
+    "versionName": "1.41",
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
     "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
     "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-
-        "improved mediaing"
+        "TV: real episodes, server picker, fullscreen player, mandatory sign-in, profile selector",
+        "TV + Android: free-preview enforcement on WebView playback",
+        "Android: 20-minute preview cap for movie embeds"
     ],
     "forceUpdate": false,
     "apkBytes": 193123325,

@@ -17,11 +17,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
-import com.alexleoreeves.novelapp.tv.data.ApiConfig
-import com.alexleoreeves.novelapp.tv.data.TvPairStart
-import com.alexleoreeves.novelapp.tv.data.TvPairPollState
-import com.alexleoreeves.novelapp.tv.data.startTvPair
-import com.alexleoreeves.novelapp.tv.data.pollTvPairStatus
+import com.alexleoreeves.novelapp.data.ApiConfig
+import com.alexleoreeves.novelapp.data.TvPairStart
+import com.alexleoreeves.novelapp.data.TvPairPollState
+import com.alexleoreeves.novelapp.data.startTvPair
+import com.alexleoreeves.novelapp.data.pollTvPairStatus
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
 import com.google.zxing.BarcodeFormat
@@ -54,7 +54,7 @@ fun TvPhonePairScreen(
             val result = startTvPair()
             pair = result
             qrBitmap = generateQrCode(
-                result.qrContent.ifBlank { "${ApiConfig.API_BASE_URL}/tv-pair.html" },
+                result.qrContent.ifBlank { "${ApiConfig.SITE_BASE_URL}/tv-pair.html" },
                 512
             )
         } catch (e: Exception) {
