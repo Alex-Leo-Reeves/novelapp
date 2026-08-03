@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
@@ -41,6 +42,7 @@ fun TvDetailScreen(
     onReadManga: (pages: List<String>, title: String) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -104,15 +106,27 @@ fun TvDetailScreen(
             if (isVideoTitle) {
                 val url = mediaRepo.resolveStreamUrl(item, chapter, selectedServer, selectedDonghuaServer)
                 if (url != null) {
-                    statusText = ""
                     val titleSuffix = chapter?.let { " - ${it.title}" } ?: ""
                     val fullTitle = "${item.title}$titleSuffix"
-                    // Route decision: direct stream → VLC, embed → WebView
-                    // This mirrors Android's AnimePlayerScreen vs MaServerPlayerScreen routing
-                    val isDirectStream = isTvPlayableStreamUrl(url)
-                    if (isDirectStream) {
-                        onPlayDirectStream(url, fullTitle, null)
+
+                    if (!isDonghua && selectedServer == StreamServer.VIDLINK_EXO) {
+                        statusText = "Server 5: resolving VidLink Exo stream..."
+                        val directUrl = if (isTvPlayableStreamUrl(url)) {
+                            url
+                        } else {
+                            extractTvStreamFromEmbed(context, url)?.url
+                                ?.takeIf { isTvPlayableStreamUrl(it) }
+                        }
+
+                        if (directUrl != null) {
+                            statusText = ""
+                            onPlayDirectStream(directUrl, fullTitle, null)
+                        } else {
+                            statusText = "Server 5 direct stream unavailable. Opening web player..."
+                            onPlayEmbed(url, fullTitle, null)
+                        }
                     } else {
+                        statusText = ""
                         onPlayEmbed(url, fullTitle, null)
                     }
                 } else {

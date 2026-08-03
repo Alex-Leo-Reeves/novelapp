@@ -161,8 +161,16 @@ class TvMediaRepository {
 
         val targetServer = server ?: StreamServer.VIDLINK
 
+        // The Movies tab serves TMDB "tv" IDs (theatrical releases are catalogued
+        // by TMDB as tv) with kind="movie" and NO episodes. Treat any movie-kind
+        // item as a movie regardless of the tmdb:// type prefix, so "Watch Now"
+        // builds a movie embed URL instead of falling through to null, which
+        // surfaced as "Stream unavailable. Try another server."
+        val isMovieKind = kind == "movie" || kind == "movies" ||
+            (item.isVideo && !item.isAnime && !isDonghua)
+
         if (isTmdb) {
-            if (tmdbType == "movie") {
+            if (tmdbType == "movie" || isMovieKind) {
                 return targetServer.buildEmbedUrl(tmdbId, "movie", "1", "1")
             } else if (chapter != null) {
                 val urlParts = chapter.url.split(":")

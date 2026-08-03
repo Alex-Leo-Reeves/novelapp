@@ -65,9 +65,14 @@ fun TvPlayerScreen(
     val isPremium = account?.isPremium == true
     val resolvedUrl = streamUrl.trim()
 
-    // LibVLC SDK Initialization
-    DisposableEffect(resolvedUrl) {
-        if (resolvedUrl.isNotBlank()) {
+    // LibVLC SDK Initialization.
+    // The player must exist BEFORE the AndroidView factory runs (composition
+    // order), otherwise attachViews() is called on null and the video surface
+    // is never attached — a silent black screen. IMPORTANT: do NOT call play()
+    // here — LibVLC needs the surface attached first, so playback starts in the
+    // AndroidView factory (after attachViews) and in the LaunchedEffect below.
+    if (resolvedUrl.isNotBlank()) {
+        remember(resolvedUrl) {
             runCatching {
                 val args = arrayListOf(
                     "--no-drop-late-frames",
@@ -77,8 +82,6 @@ fun TvPlayerScreen(
                 )
                 val vlc = LibVLC(context, args)
                 val mp = MediaPlayer(vlc)
-                libVlc = vlc
-                vlcMediaPlayer = mp
 
                 val media = Media(vlc, Uri.parse(resolvedUrl))
                 if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
@@ -109,19 +112,33 @@ fun TvPlayerScreen(
                         }
                     }
                 }
-                mp.play()
+
+                vlcMediaPlayer = mp
+                libVlc = vlc
             }.onFailure { e ->
                 errorMsg = e.localizedMessage ?: "VLC Init Failed"
             }
         }
-        onDispose {
-            runCatching {
-                vlcMediaPlayer?.stop()
-                vlcMediaPlayer?.release()
-                libVlc?.release()
+
+        DisposableEffect(resolvedUrl) {
+            onDispose {
+                runCatching {
+                    vlcMediaPlayer?.stop()
+                    vlcMediaPlayer?.release()
+                    libVlc?.release()
+                }
+                vlcMediaPlayer = null
+                libVlc = null
             }
-            vlcMediaPlayer = null
-            libVlc = null
+        }
+
+        // Safety net: if the AndroidView factory ran before the player was
+        // assigned (unlikely now, but cheap insurance), start playback as soon
+        // as the player exists and the surface has had a frame to attach.
+        LaunchedEffect(vlcMediaPlayer) {
+            val mp = vlcMediaPlayer ?: return@LaunchedEffect
+            delay(500)
+            if (!mp.isPlaying) mp.play()
         }
     }
 
@@ -199,7 +216,10 @@ fun TvPlayerScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        vlcMediaPlayer?.attachViews(this, null, false, false)
+                        vlcMediaPlayer?.let { player ->
+                            player.attachViews(this, null, false, false)
+                            if (!player.isPlaying) player.play()
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxSize()

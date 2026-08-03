@@ -132,28 +132,6 @@ fun TvEmbedPlayer(
                             val url = request?.url?.toString() ?: return false
                             val lowerUrl = url.lowercase()
 
-                            if (request.isForMainFrame) {
-                                val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") || 
-                                                    embedUrl.contains("footybite") || embedUrl.contains("sportsurge") || 
-                                                    embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
-                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su")
-                                
-                                val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
-                                if (isCloudflare) return false
-                                
-                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !request.url.toString().contains("embed")) {
-                                    return true
-                                }
-                                val reqHost = request.url?.host?.lowercase() ?: ""
-                                val embedHost = android.net.Uri.parse(embedUrl).host?.lowercase() ?: ""
-                                if (reqHost.isNotEmpty() && embedHost.isNotEmpty()) {
-                                    val isSameDomain = reqHost == embedHost || reqHost.endsWith(".$embedHost") || embedHost.endsWith(".$reqHost")
-                                    if (!isSameDomain && !isWrapperSite && !isRouterEmbed) {
-                                        return true
-                                    }
-                                }
-                            }
-
                             val blockedDomains = listOf(
                                 "doubleclick.net", "googlesyndication.com", "googleadservices.com",
                                 "googletagmanager.com", "googletagservices.com", "google-analytics.com",
@@ -175,6 +153,16 @@ fun TvEmbedPlayer(
                             val isAd = blockedDomains.any { domain -> lowerUrl.contains(domain) }
                             if (isAd) return true
 
+                            // Block popunder/popup scripts that aren't from the embed origin itself
+                            if ((lowerUrl.contains("popup") || lowerUrl.contains("popunder") || lowerUrl.contains("/pop.js")) && !lowerUrl.startsWith(embedOrigin.lowercase())) {
+                                return true
+                            }
+
+                            // Allow the provider to navigate to its real player domain.
+                            // IMPORTANT: VidLink (Server 1) redirects cross-domain to
+                            // vidsrc.to/... — blocking main-frame navigation that isn't
+                            // same-domain or doesn't contain "embed" froze the player on
+                            // the landing page forever (infinite spinner, "refuses to play").
                             if (lowerUrl.startsWith("https://") || lowerUrl.startsWith("http://")) {
                                 return false
                             }

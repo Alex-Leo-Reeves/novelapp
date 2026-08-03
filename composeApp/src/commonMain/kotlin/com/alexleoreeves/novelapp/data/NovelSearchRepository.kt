@@ -76,7 +76,6 @@ class NovelSearchRepository(
             username = com.alexleoreeves.novelapp.BuildKonfig.MANGADEX_USERNAME,
             password = com.alexleoreeves.novelapp.BuildKonfig.MANGADEX_PASSWORD
         ),
-        ComickScraper(httpClient),
         MangaFireScraper(httpClient),
         WebtoonScraper(httpClient),
         WeebCentralScraper(httpClient)
@@ -149,7 +148,7 @@ class NovelSearchRepository(
 
         val allNovels = (novelTasks.awaitAll().flatten() + knownNovelFallbacks(query))
             .balancedNovelResults(query)
-        val allManga = mangaTasks.awaitAll().flatten()
+        val allManga = mangaTasks.awaitAll().flatten().balancedMangaResults(query)
         val allAnime = animeTask.await()
 
         (allNovels + allManga + allAnime)
@@ -176,7 +175,11 @@ class NovelSearchRepository(
             }
         }.awaitAll().flatten()
 
-        sourceResults
+        // Always merge the curated known-novel pool (ReadNovelFull, Wuxiaworld,
+        // LightNovelPub, FreeWebNovel, ...) into search results. Without it, when
+        // the live scrapers time out (which is common), RoyalRoad ends up the ONLY
+        // source with results and domindates the entire list — on both Android and TV.
+        (sourceResults + knownNovelFallbacks(query))
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
             .balancedNovelResults(query)
@@ -200,6 +203,7 @@ class NovelSearchRepository(
             .flatten()
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+            .balancedMangaResults(query)
             .take(72)
     }
 
@@ -248,7 +252,7 @@ class NovelSearchRepository(
             .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
             .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
             .rankedNovelResults("")
-        val mangas = mangaTasks.awaitAll().flatten()
+        val mangas = mangaTasks.awaitAll().flatten().balancedMangaResults("")
         val animes = animeTask.await()
 
         (novels + mangas + animes)
@@ -336,6 +340,7 @@ class NovelSearchRepository(
                 .flatten()
                 .filter { it.title.isNotBlank() && !it.title.isNavigationTitle() }
                 .distinctBy { "${it.sourceName}:${it.detailPageUrl.ifBlank { it.title }}".lowercase() }
+                .balancedMangaResults("")
                 .take(100)
         }
     }
@@ -1528,6 +1533,50 @@ private fun List<UnifiedSearchResult>.balancedNovelResults(query: String): List<
     return (nonRoyalRoad + royalRoad.take(royalRoadLimit))
         .rankedNovelResults(query)
         .take(40)
+}
+
+/**
+ * Mirrors the RoyalRoad fix for the Manga tab: MangaDex is the only reliable
+ * JSON API among the manga scrapers, so when the HTML scrapers time out it
+ * floods every manga search and feed. Cap MangaDex so MangaFire, Webtoon
+ * and WeebCentral stay visible on both Android and TV.
+ */
+private fun List<UnifiedSearchResult>.balancedMangaResults(query: String): List<UnifiedSearchResult> {
+    if (isEmpty()) return this
+    val nonDex = filter { it.sourceName != "MangaDex" }
+    val dex = filter { it.sourceName == "MangaDex" }
+    if (nonDex.isEmpty() || dex.isEmpty()) return this
+
+    val dexLimit = if (query.normalizeForNovelSearch().isNotBlank()) {
+        // Explicit searches: MangaDex may lead but must not swamp the list.
+        minOf(12, maxOf(3, (size / 3).coerceAtLeast(1)))
+    } else {
+        // Home feed: keep MangaDex popular titles but cap at roughly half.
+        minOf(50, maxOf(6, (size + 1) / 2))
+    }
+    return (nonDex + dex.take(dexLimit))
+        .sortedByDescending { it.mangaSearchScore(query) }
+        .take(60)
+}
+
+private fun UnifiedSearchResult.mangaSearchScore(query: String): Int {
+    val q = query.normalizeForNovelSearch()
+    val title = title.normalizeForNovelSearch()
+    val sourceBoost = when (sourceName.lowercase()) {
+        "mangafire" -> 220
+        "webtoon" -> 210
+        "weebcentral" -> 200
+        "mangadex" -> 100
+        else -> 150
+    }
+    val titleScore = when {
+        q.isBlank() -> 0
+        title == q -> 10_000
+        title.startsWith(q) -> 7_500
+        title.contains(q) -> 5_000
+        else -> 0
+    }
+    return titleScore + sourceBoost
 }
 
 private fun UnifiedSearchResult.novelSearchScore(query: String): Int {

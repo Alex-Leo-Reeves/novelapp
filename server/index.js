@@ -9,6 +9,10 @@ const wweHandlers = require("./wwe-handlers");
 const youtubeHandlers = require("./youtube-handlers");
 const supabaseAuthHandlers = require("./supabase-auth-handlers");
 const tvPairHandlers = require("./tv-pair-handlers");
+const { createMangaUnified } = require("./manga-unified");
+// Merges MangaDex + WeebCentral + Webtoon so no single provider dominates
+// the manga grid on Android/TV. contentItem/fetchWithAbort are hoisted.
+const mangaUnified = createMangaUnified({ contentItem, fetchWithAbort });
 let _supabaseOtpHandlers = null;
 let _tvPairHandler = null;
 
@@ -1456,7 +1460,7 @@ async function mangadexPages(chapterUrl) {
 async function contentHome(type, page = 1) {
     const normalizedType = normalizeContentType(type);
     if (normalizedType === "manga" || normalizedType === "comic") {
-        const live = await mangadexItems("", page).catch(() => []);
+        const live = await mangaUnified.mangaItems(mangadexItems, "", page).catch(() => []);
         return live.length ? live : fixtureItems(normalizedType);
     }
     // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, and Movies all go through TMDB (same pipeline)
@@ -1494,7 +1498,7 @@ async function contentSearch(type, query, page = 1) {
         return fixtureItems(normalizedType, query);
     }
     if (normalizedType === "manga" || normalizedType === "comic") {
-        const live = await mangadexItems(query, page).catch(() => []);
+        const live = await mangaUnified.mangaItems(mangadexItems, query, page).catch(() => []);
         return live.length ? live : fixtureItems(normalizedType, query);
     }
     const live = await swiftNovelScrapers.searchNovels(query, page).catch(() => []);
@@ -1555,6 +1559,8 @@ async function contentChapters(kind, detailUrl, title, sourceName) {
         return live;
     }
     if (normalizedKind === "manga") {
+        const unified = await mangaUnified.mangaChapters(detailUrl).catch(() => []);
+        if (unified.length) return unified;
         const live = await mangadexChapters(detailUrl).catch(() => []);
         return live;
     }
@@ -2540,7 +2546,8 @@ async function handleContentApi(request, response, pathname, url) {
     }
     if (request.method === "POST" && pathname === "/api/content/manga-pages") {
       const body = await readBody(request);
-      const live = await mangadexPages(body.chapterUrl).catch(() => []);
+      const pages = await mangaUnified.mangaPages(body.chapterUrl).catch(() => []);
+      const live = pages.length ? pages : await mangadexPages(body.chapterUrl).catch(() => []);
       return sendApiData(response, 200, { pages: live });
     }
     if (request.method === "POST" && pathname === "/api/content/watch-route") {
