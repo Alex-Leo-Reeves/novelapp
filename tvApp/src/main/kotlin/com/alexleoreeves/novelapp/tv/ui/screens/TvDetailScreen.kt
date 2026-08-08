@@ -20,11 +20,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
-import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.ui.theme.*
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.focus.FocusRequester
@@ -42,8 +42,8 @@ fun TvDetailScreen(
     onReadManga: (pages: List<String>, title: String) -> Unit,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var chapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -108,25 +108,26 @@ fun TvDetailScreen(
                 if (url != null) {
                     val titleSuffix = chapter?.let { " - ${it.title}" } ?: ""
                     val fullTitle = "${item.title}$titleSuffix"
+                    statusText = ""
 
-                    if (!isDonghua && selectedServer == StreamServer.VIDLINK_EXO) {
-                        statusText = "Server 5: resolving VidLink Exo stream..."
-                        val directUrl = if (isTvPlayableStreamUrl(url)) {
-                            url
-                        } else {
-                            extractTvStreamFromEmbed(context, url)?.url
-                                ?.takeIf { isTvPlayableStreamUrl(it) }
-                        }
-
-                        if (directUrl != null) {
-                            statusText = ""
-                            onPlayDirectStream(directUrl, fullTitle, null)
-                        } else {
-                            statusText = "Server 5 direct stream unavailable. Opening web player..."
-                            onPlayEmbed(url, fullTitle, null)
-                        }
-                    } else {
+                    if (selectedServer == StreamServer.VIDLINK_EXO) {
+                        // Server 5 (VidLink Exo): scrape the VidLink page to a direct
+                        // .m3u8/.mp4 via a hidden WebView, then play natively.
+                        statusText = "Resolving native stream..."
+                        val scraped = extractTvStreamFromEmbed(context, url)
                         statusText = ""
+                        if (scraped != null) {
+                            onPlayDirectStream(scraped.url, fullTitle, null)
+                        } else {
+                            statusText = "Server 5 could not resolve a native stream. Try another server."
+                        }
+                    } else if (!isDonghua && isTvPlayableStreamUrl(url)) {
+                        // Direct stream (.m3u8/.mp4 from anime/drama/cartoon scrapers)
+                        // can't run inside a WebView → native player.
+                        onPlayDirectStream(url, fullTitle, null)
+                    } else {
+                        // Embed page (Servers 1-4, 6, 7, 8 + all Donghua) → full
+                        // WebView browser/web player so the provider's own player shows.
                         onPlayEmbed(url, fullTitle, null)
                     }
                 } else {

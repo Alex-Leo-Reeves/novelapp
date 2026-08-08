@@ -11,6 +11,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -22,8 +24,7 @@ import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
 import com.alexleoreeves.novelapp.tv.audio.TtsSettings
 import com.alexleoreeves.novelapp.tv.ui.theme.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
@@ -39,6 +40,13 @@ fun TvNovelReaderScreen(
     var showSettings by remember { mutableStateOf(false) }
     var currentChapter by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
+    val scrollScope = rememberCoroutineScope()
+    val readerFocusRequester = remember { FocusRequester() }
+    // Single cancellable scroll job: rapid D-pad presses used to launch
+    // overlapping animateScrollTo() calls ("Scroll is already in progress"),
+    // which crashed the reader. Snap-scrolling and cancelling the previous
+    // job keeps every press safe.
+    var scrollJob by remember { mutableStateOf<Job?>(null) }
     val isBlocked = text.contains("blocked", ignoreCase = true) ||
             text.contains("cloudflare", ignoreCase = true) ||
             text.contains("403", ignoreCase = true) ||
@@ -51,19 +59,34 @@ fun TvNovelReaderScreen(
 
     LaunchedEffect(text) {
         currentChapter = text
+        scrollState.scrollTo(0)
+    }
+
+    LaunchedEffect(Unit) {
+        runCatching { readerFocusRequester.requestFocus() }
+    }
+
+    fun scrollReaderBy(delta: Int) {
+        scrollJob?.cancel()
+        scrollJob = scrollScope.launch {
+            val target = (scrollState.value + delta).coerceIn(0, scrollState.maxValue)
+            runCatching { scrollState.scrollTo(target) }
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF06060A))
+            .focusRequester(readerFocusRequester)
+            .focusable()
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyUp) {
                     when (event.key) {
-                        Key.DirectionUp -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value - 200).coerceAtLeast(0)) }; true }
-                        Key.DirectionDown -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value + 200).coerceAtMost(scrollState.maxValue)) }; true }
-                        Key.PageUp -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value - 600).coerceAtLeast(0)) }; true }
-                        Key.PageDown -> { CoroutineScope(Dispatchers.Main).launch { scrollState.animateScrollTo((scrollState.value + 600).coerceAtMost(scrollState.maxValue)) }; true }
+                        Key.DirectionUp -> { scrollReaderBy(-220); true }
+                        Key.DirectionDown -> { scrollReaderBy(220); true }
+                        Key.PageUp -> { scrollReaderBy(-720); true }
+                        Key.PageDown -> { scrollReaderBy(720); true }
                         Key.MediaPlayPause, Key.DirectionCenter -> {
                             if (ttsSettings.isPlaying) ttsEngine.stop()
                             else ttsEngine.speak(currentChapter)

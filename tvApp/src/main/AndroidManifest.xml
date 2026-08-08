@@ -12,6 +12,10 @@
         android:name="android.software.leanback"
         android:required="true" />
 
+    <!-- hardwareAccelerated is REQUIRED on Android TV: WebView HTML5 video
+         (VidLink/VidSrc/MultiEmbed/AutoEmbed/EmbedSu) renders a black surface
+         when the app runs software-rendered. The embed page loads and shows
+         player chrome, but the <video> surface never draws without GPU accel. -->
     <application
         android:allowBackup="true"
         android:banner="@drawable/tv_banner"
@@ -19,7 +23,8 @@
         android:roundIcon="@drawable/ic_tv_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.NovelAppTV"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:hardwareAccelerated="true">
 
         <activity
             android:name=".TvMainActivity"

@@ -840,18 +840,18 @@ async function fetchOpenSubtitlesTrack(context, language) {
     if (context.episode) url.searchParams.set("episode_number", String(context.episode));
 
     const payload = await fetchJson(url.toString(), { headers });
-    const results = Array.isArray(payload ?.data) ? payload.data : [];
+    const results = payload && Array.isArray(payload.data) ? payload.data : [];
     for (const item of results) {
-        const attributes = item ?.attributes || item || {};
+        const attributes = (item && item.attributes) || item || {};
         const files = Array.isArray(attributes.files) ? attributes.files : [];
         for (const file of files) {
-            const fileId = Number(file ?.file_id || 0);
+            const fileId = Number((file && file.file_id) || 0);
             if (!fileId) continue;
             const fileName = String(file.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
             if (tracksJson) return { tracksJson, message: "OpenSubtitles subtitles loaded." };
         }
-        const fileId = Number(attributes.file_id || item ?.file_id || 0);
+        const fileId = Number(attributes.file_id || (item && item.file_id) || 0);
         if (fileId) {
             const fileName = String(attributes.file_name || attributes.release || "OpenSubtitles");
             const tracksJson = await downloadOpenSubtitlesTrack(fileId, fileName, language, headers).catch(() => null);
@@ -880,7 +880,7 @@ async function openSubtitlesHeaders() {
                 password: OPENSUBTITLES_PASSWORD
             })
         }).catch(() => null);
-        if (login ?.token) headers.Authorization = `Bearer ${login.token}`;
+        if (login && login.token) headers.Authorization = `Bearer ${login.token}`;
     }
     return headers;
 }
@@ -894,7 +894,7 @@ async function downloadOpenSubtitlesTrack(fileId, fileName, language, headers) {
         },
         body: JSON.stringify({ file_id: fileId })
     });
-    const link = payload ?.link || payload ?.download_link || payload ?.url;
+    const link = (payload && payload.link) || (payload && payload.download_link) || (payload && payload.url);
     if (!link) return null;
     const bytes = await fetchBuffer(link, {
         "Accept": "*/*",
@@ -926,7 +926,7 @@ async function fetchSubdlTrack(context, language) {
             "User-Agent": "NovelApp Render"
         }
     });
-    if (payload ?.status === false) {
+    if (payload && payload.status === false) {
         return { tracksJson: null, message: String(payload.error || payload.message || "SubDL subtitle search failed.") };
     }
 
@@ -947,14 +947,14 @@ async function fetchSubdlTrack(context, language) {
 }
 
 function collectSubdlCandidates(payload, context) {
-    const subtitles = Array.isArray(payload ?.subtitles) ? payload.subtitles : [];
+    const subtitles = payload && Array.isArray(payload.subtitles) ? payload.subtitles : [];
     const exact = [];
     const fallback = [];
 
     for (const subtitle of subtitles) {
         const target = subdlMatchesEpisode(subtitle, context) ? exact : fallback;
         for (const key of["unpack_files", "unpacked_files", "files"]) {
-            const files = Array.isArray(subtitle ?.[key]) ? subtitle[key] : [];
+            const files = subtitle && Array.isArray(subtitle[key]) ? subtitle[key] : [];
             for (const file of files) {
                 if (!subdlMatchesEpisode(file, context)) continue;
                 const url = firstString(file, ["url", "download_url", "download", "subtitle_url", "path"]);
@@ -970,7 +970,7 @@ function collectSubdlCandidates(payload, context) {
 
 function firstString(source, keys) {
     for (const key of keys) {
-        const value = source ?.[key];
+        const value = source && source[key];
         if (typeof value === "string" && value.trim()) return value.trim();
     }
     return "";
@@ -979,9 +979,9 @@ function firstString(source, keys) {
 function subdlMatchesEpisode(value, context) {
     const wanted = Number(context.episode || 0);
     if (!wanted) return true;
-    const episode = Number(value ?.episode || 0);
-    const from = Number(value ?.episode_from || 0);
-    const end = Number(value ?.episode_end || 0);
+    const episode = Number((value && value.episode) || 0);
+    const from = Number((value && value.episode_from) || 0);
+    const end = Number((value && value.episode_end) || 0);
     if (episode) return episode === wanted;
     if (from && end) return wanted >= from && wanted <= end;
     return true;
@@ -1150,7 +1150,7 @@ const KNOWN_NOVELS = [
 ];
 
 const KNOWN_MANGA = [
-    ["solo-leveling", "Solo Leveling", "Chugong", "MangaDex", "The weakest hunter becomes the only player of a hidden leveling system.", "https://uploads.mangadex.org/covers/32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e/cover.jpg", "mangadex:32c98f54-7aa7-4b53-94a1-1d6b1e8b0f0e"],
+    ["solo-leveling", "Solo Leveling", "Chugong", "MangaDex", "The weakest hunter becomes the only player of a hidden leveling system.", "https://uploads.mangadex.org/covers/32d76d19-8a05-4db0-9fc2-e0b0648fe9d0/cover.jpg", "mangadex:32d76d19-8a05-4db0-9fc2-e0b0648fe9d0"],
     ["one-piece", "One Piece", "Eiichiro Oda", "MangaDex", "Luffy sails with his crew to find the One Piece.", ""],
     ["jujutsu-kaisen", "Jujutsu Kaisen", "Gege Akutami", "MangaDex", "Curses, sorcerers, and the dangerous vessel of Sukuna.", ""],
     ["chainsaw-man", "Chainsaw Man", "Tatsuki Fujimoto", "MangaDex", "Denji becomes Chainsaw Man and enters a brutal devil-hunting world.", ""]
@@ -1450,11 +1450,13 @@ async function mangadexPages(chapterUrl) {
     const baseUrl = payload.baseUrl;
     const chapter = payload.chapter || {};
     const hash = chapter.hash || "";
-    const pages = Array.isArray(chapter.dataSaver) && chapter.dataSaver.length ?
-        chapter.dataSaver :
-        chapter.data || [];
+    // MangaDex data-saver images live under /data-saver/, full-res under /data/.
+    // Picking the wrong folder for the actual payload returns 404 → black pages.
+    const useSaver = Array.isArray(chapter.dataSaver) && chapter.dataSaver.length > 0;
+    const pages = useSaver ? chapter.dataSaver : (Array.isArray(chapter.data) ? chapter.data : []);
     if (!baseUrl || !hash || !pages.length) return [];
-    return pages.map((page) => `${baseUrl}/data-saver/${hash}/${page}`);
+    const folder = useSaver ? "data-saver" : "data";
+    return pages.map((page) => `${baseUrl}/${folder}/${hash}/${page}`);
 }
 
 async function contentHome(type, page = 1) {
@@ -1531,14 +1533,14 @@ async function tmdbEpisodes(detailUrl) {
 
     // TV: pull the season list, then episodes for each aired season.
     const showPayload = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${id}?language=en-US${apiSuffix}`, { headers }).catch(() => null);
-    const seasons = Array.isArray(showPayload ?.seasons) ?
+    const seasons = showPayload && Array.isArray(showPayload.seasons) ?
         showPayload.seasons.filter((s) => Number(s.season_number) > 0).slice(0, 20) : [];
     const episodes = [];
     for (const season of seasons) {
         const seasonNumber = Number(season.season_number || 0);
         if (!seasonNumber) continue;
         const seasonPayload = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${id}/season/${seasonNumber}?language=en-US${apiSuffix}`, { headers }).catch(() => null);
-        const eps = Array.isArray(seasonPayload ?.episodes) ? seasonPayload.episodes : [];
+        const eps = seasonPayload && Array.isArray(seasonPayload.episodes) ? seasonPayload.episodes : [];
         for (const ep of eps) {
             const epNumber = Number(ep.episode_number || 0);
             if (!epNumber) continue;
@@ -2445,7 +2447,11 @@ async function watchRoutes(kind, title, detailUrl, season = "1", episode = "1", 
     const omss = await omssRoute(mediaType, id, season, episode, title);
     if (omss) routes.push(omss);
     routes.push(...embedProviders(mediaType, id, season, episode).map((provider) => ({
-      route: "embed",
+      // Server 5 (VidLink ExoPlayer) must be exposed as a NATIVE route: the
+      // TV app scrapes the VidLink page in a hidden WebView and plays the
+      // resulting .m3u8/.mp4 in LibVLC. All other servers open in the
+      // visible embedded web/browser player.
+      route: provider.provider.includes("ExoPlayer") ? "native" : "embed",
       url: provider.url,
       provider: provider.provider,
       title: title || "Watch"
@@ -4508,4 +4514,3 @@ ensurePremiumSeedUser()
       }
     });
   });
-

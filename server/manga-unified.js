@@ -29,9 +29,10 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
 
     function decodeEntities(value) {
         return String(value || "")
-            .replace(/&/g, "&")
-            .replace(/</g, "<")
-            .replace(/>/g, ">")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
             .replace(/"/g, '"')
             .replace(/'/g, "'")
             .replace(/&#x27;/g, "'")
@@ -44,7 +45,47 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
     }
 
     function normalizeTitle(value) {
-        return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        return String(value || "")
+            .toLowerCase()
+            .replace(/levelling/g, "leveling")
+            .replace(/leveling/g, "level")
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+    }
+
+    function resolveUrl(value, base) {
+        const url = decodeEntities(value);
+        if (!url) return "";
+        if (/^https?:\/\//i.test(url)) return url;
+        return `${base}${url.startsWith("/") ? url : `/${url}`}`;
+    }
+
+    function searchTokens(query) {
+        return normalizeTitle(query)
+            .split(/\s+/)
+            .map((token) => token.trim())
+            .filter((token) => token.length > 1 && !["the", "and", "manga", "manhwa", "novel"].includes(token));
+    }
+
+    function titleMatchesQuery(title, query) {
+        const tokens = searchTokens(query);
+        if (!tokens.length) return true;
+        const normalized = ` ${normalizeTitle(title)} `;
+        const matches = tokens.filter((token) => normalized.includes(` ${token} `)).length;
+        return tokens.length >= 2 ? matches === tokens.length : matches > 0;
+    }
+
+    // Rank a candidate title against the query: exact title match wins, then
+    // prefix matches, then titles containing more query words first.
+    function relevanceScore(title, query) {
+        const q = normalizeTitle(query);
+        const t = normalizeTitle(title);
+        if (!q || !t) return 0;
+        if (t === q) return 1000;
+        if (t.startsWith(q)) return 800;
+        const tokens = q.split(" ").filter(Boolean);
+        const hits = tokens.filter((token) => t.indexOf(token) !== -1).length;
+        return hits * 100 - Math.abs(t.length - q.length);
     }
 
     function uniqueUrls(regex, html) {
@@ -91,7 +132,7 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
             const titleMatch = stripTags(match[2]);
             if (!titleMatch || titleMatch.length < 2 || seen.has(href)) continue;
             seen.add(href);
-            if (href.startsWith("/")) href = `${WEBCENTRAL_BASE}${href}`;
+            href = resolveUrl(href, WEBCENTRAL_BASE);
             // The cover lives inside the anchor's own inner content — searching
             // a lookbehind region picks up the previous card's <img>.
             const inner = match[2];
@@ -102,7 +143,7 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
                 id: `weebcentral_${href}`,
                 title: titleMatch,
                 subtitle: "WeebCentral",
-                coverUrl: coverMatch ? coverMatch[1] : "",
+                coverUrl: coverMatch ? resolveUrl(coverMatch[1], WEBCENTRAL_BASE) : "",
                 detailUrl: href,
                 sourceName: "WeebCentral",
                 kind: "manga",
@@ -128,8 +169,7 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
         let chapterHtml = html;
         if (fullListPath) {
             try {
-                const path = fullListPath[1].replace(/&/g, "&");
-                const partial = await fetchText(`${WEBCENTRAL_BASE}${path.startsWith("/") ? path : `/${path}`}`, {
+                const partial = await fetchText(resolveUrl(fullListPath[1], WEBCENTRAL_BASE), {
                     headers: { "user-agent": UA, "referer": detailUrl, "hx-request": "true" }
                 }, 20000);
                 if (partial && partial.length > 100) chapterHtml = `${html}\n${partial}`;
@@ -147,11 +187,13 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
             const href = match[1];
             if (seen.has(href)) continue;
             seen.add(href);
-            const rawTitle = stripTags(match[2]) || `Chapter ${index + 1}`;
+            const rawTitle = (stripTags(match[2]) || `Chapter ${index + 1}`)
+                .replace(/\s*Last Read\s+\d{4}-\d{2}-\d{2}T.*$/i, "")
+                .trim();
             const numMatch = /(\d+(?:\.\d+)?)/.exec(rawTitle);
             results.push({
                 title: rawTitle,
-                url: `${WEBCENTRAL_BASE}${href}`,
+                url: resolveUrl(href, WEBCENTRAL_BASE),
                 chapterNumber: numMatch ? Number.parseInt(numMatch[1], 10) : (index + 1)
             });
             index += 1;
@@ -174,26 +216,32 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
         const imagePath = /hx-get=["']([^"']+\/images[^"']*)["']/i.exec(html);
         if (imagePath) {
             try {
-                const path = `${imagePath[1].replace(/&/g, "&")}&reading_style=long_strip`;
-                const partial = await fetchText(`${WEBCENTRAL_BASE}${path.startsWith("/") ? path : `/${path}`}`, {
+                const separator = imagePath[1].includes("?") ? "&" : "?";
+                const partial = await fetchText(resolveUrl(`${imagePath[1]}${separator}reading_style=long_strip`, WEBCENTRAL_BASE), {
                     headers: { "user-agent": UA, "referer": chapterUrl, "hx-request": "true" }
                 }, 20000);
                 const pages = uniqueUrls(
                     /<img[^>]*src="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi,
                     partial
                 );
-                const filtered = pages.filter((url) => !/broken_image|logo|avatar|icon/i.test(url));
+                const filtered = pages
+                    .map((url) => resolveUrl(url, WEBCENTRAL_BASE))
+                    .filter((url) => !/broken_image|logo|avatar|icon|brand|static\/images/i.test(url));
                 if (filtered.length) return filtered;
             } catch (e) {
                 // fall through
             }
         }
 
-        const direct = uniqueUrls(
-            /(?:data-src|src)="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi,
-            html
-        ).filter((url) => !/logo|avatar|icon|banner/i.test(url));
-        return direct;
+        const direct = [
+            ...uniqueUrls(/<link[^>]*rel=["']preload["'][^>]*href=["']([^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']/gi, html),
+            ...uniqueUrls(/(?:data-src|src|href)=["']([^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']/gi, html),
+            ...uniqueUrls(/(https?:\/\/(?:hot|img|temp|cdn)[^"'\s<>]+\.(?:jpg|jpeg|png|webp)[^"'\s<>]*)/gi, html)
+        ];
+        return direct
+            .map((url) => resolveUrl(url, WEBCENTRAL_BASE))
+            .filter((url, index, all) => all.indexOf(url) === index)
+            .filter((url) => !/logo|avatar|icon|banner|brand|static\/images|cover\/fallback/i.test(url));
     }
 
     // ── MangaPill ────────────────────────────────────────────────────────────
@@ -434,6 +482,12 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
         // with a rotating popular seed so every provider contributes to the tab.
         const seeds = ["solo leveling", "one piece", "tower of god", "berserk", "solo", "one"];
         const feedQuery = isSearch ? String(query).trim() : seeds[(pageNum - 1) % seeds.length];
+        
+        // Home feed: WeebCentral's listing endpoints are Cloudflare-protected
+        // (probe returned 400), but /search/simple works and returns real
+        // covers. Seed each home page with the rotating popular query so the
+        // Manga tab actually shows WeebCentral/manhwa titles with covers.
+        // (The seeds array above already drives this.)
 
         const [dex, weeb, webtoon, pill] = await Promise.all([
             mangadexItems(isSearch ? String(query).trim() : "", pageNum).catch(() => []),
@@ -457,9 +511,19 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
             : Math.max(6, Math.ceil(totalAvailable / 3));
         const dexIndex = Math.min(dexLimit, dex.length);
 
+        // Search: drop any title that does not contain every meaningful query
+        // word (normalized "levelling"→"leveling"), then rank by relevance so
+        // exact/prefix matches surface ahead of fuzzy Webtoon/engine results.
+        // This stops "Omniscient Reader" appearing for "solo levelling".
         const lists = sources.map((s) => {
-            const items = s.name === "MangaDex" ? s.items.slice(0, dexIndex) : s.items;
-            return items.filter((item) => item && item.title);
+            const rawItems = s.name === "MangaDex" ? s.items.slice(0, dexIndex) : s.items;
+            let items = rawItems.filter((item) => item && item.title);
+            if (isSearch) {
+                items = items
+                    .filter((item) => titleMatchesQuery(item.title, query))
+                    .sort((a, b) => relevanceScore(b.title, query) - relevanceScore(a.title, query));
+            }
+            return items;
         });
 
         const merged = [];
