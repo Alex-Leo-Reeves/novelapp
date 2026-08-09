@@ -100,6 +100,7 @@ fun TvAuthScreen(
     externalError: String? = null
 ) {
     val isLogin = remember { mutableStateOf(true) }
+    var useClassicSignup by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -165,21 +166,35 @@ fun TvAuthScreen(
                 }
             }
 
-            if (!isLogin.value) {
+            if (!isLogin.value && useClassicSignup) {
                 TvTextField(value = username, onValueChange = { username = it }, label = "Username")
             }
 
             TvTextField(value = email, onValueChange = { email = it }, label = "Email")
             TvTextField(value = password, onValueChange = { password = it }, label = "Password", isPassword = true)
 
-            if (!isLogin.value) {
+            if (!isLogin.value && useClassicSignup) {
                 TvTextField(value = recoverySecret, onValueChange = { recoverySecret = it }, label = "Recovery Secret (min 10 chars)")
+            }
+
+            if (!isLogin.value) {
+                TextButton(onClick = { useClassicSignup = !useClassicSignup; localError = null }) {
+                    Text(
+                        if (useClassicSignup) "Use Email OTP signup instead" else "Can't use OTP? Use recovery key",
+                        color = Color(0xFF00BFFF),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
 
             Button(
                 onClick = {
-                    if (isLogin.value) onSignIn(email, password)
-                    else onCreateAccount(username, email, password, recoverySecret)
+                    if (isLogin.value) {
+                        onSignIn(email, password)
+                    } else {
+                        val finalUsername = if (useClassicSignup) username else email.substringBefore("@")
+                        onCreateAccount(finalUsername, email, password, recoverySecret)
+                    }
                 },
                 enabled = !isSubmitting && email.isNotBlank() && password.length >= 6,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF)),

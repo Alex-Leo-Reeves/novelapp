@@ -574,7 +574,7 @@
                 </button>
             </form>
 
-            <!-- Create Account Step 1: Email, Password, Username -->
+            <!-- Create Account Step 1: Email & Password (OTP flow default) -->
             <form id="signupForm" class="hidden">
                 <div class="field">
                     <label for="regEmail">Email</label>
@@ -584,13 +584,44 @@
                     <label for="regPassword">Password</label>
                     <input type="password" id="regPassword" placeholder="••••••••" autocomplete="new-password" required>
                 </div>
-                <div class="field">
-                    <label for="regUsername">Choose Username</label>
-                    <input type="text" id="regUsername" placeholder="ReaderName" autocomplete="username" required>
-                </div>
                 <button type="submit" id="signupBtn">
                     Send OTP Code
                 </button>
+
+                <div style="text-align: center; margin-top: 14px;">
+                    <button type="button" id="btnToggleClassic" style="background: none; border: none; color: var(--pink-soft); font-weight: 700; font-size: 0.85rem; cursor: pointer; text-decoration: underline;">
+                        Can't use OTP? Use recovery key
+                    </button>
+                </div>
+            </form>
+
+            <!-- Create Account Classic Fallback: Username, Email, Password, Recovery Secret Key -->
+            <form id="classicRegForm" class="hidden">
+                <div class="field">
+                    <label for="classicUsername">Username</label>
+                    <input type="text" id="classicUsername" placeholder="ReaderName" autocomplete="username" required>
+                </div>
+                <div class="field">
+                    <label for="classicEmail">Email</label>
+                    <input type="email" id="classicEmail" placeholder="you@example.com" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="classicPassword">Password</label>
+                    <input type="password" id="classicPassword" placeholder="••••••••" autocomplete="new-password" required>
+                </div>
+                <div class="field">
+                    <label for="classicSecret">Recovery Secret Key (min 10 chars)</label>
+                    <input type="password" id="classicSecret" placeholder="my-secret-key-123" required>
+                </div>
+                <button type="submit" id="classicRegBtn">
+                    Create Account & Approve TV
+                </button>
+
+                <div style="text-align: center; margin-top: 14px;">
+                    <button type="button" id="btnToggleOtp" style="background: none; border: none; color: var(--teal); font-weight: 700; font-size: 0.85rem; cursor: pointer; text-decoration: underline;">
+                        Use Email OTP signup instead
+                    </button>
+                </div>
             </form>
 
             <!-- Create Account Step 2: OTP Verification -->
@@ -670,6 +701,7 @@
             var tabCreate = document.getElementById("tabCreate");
             var pairForm = document.getElementById("pairForm");
             var signupForm = document.getElementById("signupForm");
+            var classicRegForm = document.getElementById("classicRegForm");
             var otpForm = document.getElementById("otpForm");
 
             tabSignIn.addEventListener("click", function() {
@@ -679,6 +711,7 @@
                 tabCreate.style.color = "var(--muted)";
                 pairForm.classList.remove("hidden");
                 signupForm.classList.add("hidden");
+                classicRegForm.classList.add("hidden");
                 otpForm.classList.add("hidden");
                 setStatus("");
             });
@@ -690,8 +723,79 @@
                 tabSignIn.style.color = "var(--muted)";
                 signupForm.classList.remove("hidden");
                 pairForm.classList.add("hidden");
+                classicRegForm.classList.add("hidden");
                 otpForm.classList.add("hidden");
                 setStatus("");
+            });
+
+            document.getElementById("btnToggleClassic").addEventListener("click", function() {
+                signupForm.classList.add("hidden");
+                classicRegForm.classList.remove("hidden");
+                setStatus("");
+            });
+
+            document.getElementById("btnToggleOtp").addEventListener("click", function() {
+                classicRegForm.classList.add("hidden");
+                signupForm.classList.remove("hidden");
+                setStatus("");
+            });
+
+            // Classic Registration (with Recovery Secret) submit
+            classicRegForm.addEventListener("submit", function(e) {
+                e.preventDefault();
+                if (!pair || !code) {
+                    setStatus("This link is missing pairing info.", "err");
+                    return;
+                }
+                var username = document.getElementById("classicUsername").value.trim();
+                var email = document.getElementById("classicEmail").value.trim();
+                var password = document.getElementById("classicPassword").value;
+                var recoverySecret = document.getElementById("classicSecret").value.trim();
+
+                if (!username || !email || !password || recoverySecret.length < 10) {
+                    setStatus("Enter username, email, password, and a recovery secret key (min 10 chars).", "err");
+                    return;
+                }
+
+                var btn = document.getElementById("classicRegBtn");
+                btn.disabled = true;
+                btn.textContent = "Registering & Approving TV…";
+                setStatus("Creating account and approving TV…", "info");
+
+                fetch(api + "/auth/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username: username, email: email, password: password, recoverySecret: recoverySecret })
+                }).then(function(r) {
+                    return r.json().then(function(d) { return { ok: r.ok, d: d }; });
+                }).then(function(res) {
+                    if (res.ok && res.d.token) {
+                        return fetch(api + "/tv-pair/approve", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": "Bearer " + res.d.token
+                            },
+                            body: JSON.stringify({ pair: pair, code: code })
+                        }).then(function(r2) {
+                            return r2.json().then(function(d2) { return { ok: r2.ok, d: d2 }; });
+                        }).then(function(res2) {
+                            if (res2.ok) {
+                                setStatus("Account created & TV approved! It will refresh in a few seconds.", "ok");
+                                classicRegForm.classList.add("hidden");
+                            } else {
+                                setStatus(res2.d.error || "TV approval failed.", "err");
+                            }
+                        });
+                    } else {
+                        setStatus(res.d.error || "Registration failed.", "err");
+                    }
+                }).catch(function() {
+                    setStatus("Network error. Try again.", "err");
+                }).then(function() {
+                    btn.disabled = false;
+                    btn.textContent = "Create Account & Approve TV";
+                });
             });
 
             document.getElementById("openAppBtn").addEventListener("click", function() {

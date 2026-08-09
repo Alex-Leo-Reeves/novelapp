@@ -167,23 +167,18 @@ class TvMediaRepository {
 
         val targetServer = server ?: StreamServer.VIDLINK
 
-        // The Movies tab serves TMDB "tv" IDs (theatrical releases are catalogued
-        // by TMDB as tv) with kind="movie" and NO episodes. Treat any movie-kind
-        // item as a movie regardless of the tmdb:// type prefix, so "Watch Now"
-        // builds a movie embed URL instead of falling through to null, which
-        // surfaced as "Stream unavailable. Try another server."
-        val isMovieKind = kind == "movie" || kind == "movies" ||
-            (item.isVideo && !item.isAnime && !isDonghua)
+        val isMovieKind = tmdbType == "movie" || ((kind == "movie" || kind == "movies") && chapter == null)
 
-        if (isTmdb) {
-            if (tmdbType == "movie" || isMovieKind) {
-                return targetServer.buildEmbedUrl(tmdbId, "movie", "1", "1")
-            } else if (chapter != null) {
-                val urlParts = chapter.url.split(":")
-                val tvId = urlParts.getOrNull(1) ?: tmdbId
-                val s = urlParts.getOrNull(2) ?: "1"
-                val e = urlParts.getOrNull(3) ?: "1"
+        if (isTmdb || (chapter != null && chapter.url.startsWith("tmdb:"))) {
+            val isTvShow = tmdbType == "tv" || (chapter != null && chapter.url.startsWith("tmdb:"))
+            if (isTvShow) {
+                val urlParts = (chapter?.url ?: "").split(":")
+                val tvId = urlParts.getOrNull(1)?.ifBlank { null } ?: tmdbId
+                val s = urlParts.getOrNull(2)?.ifBlank { null } ?: "1"
+                val e = urlParts.getOrNull(3)?.ifBlank { null } ?: chapter?.chapterNumber?.coerceAtLeast(1)?.toString() ?: "1"
                 return targetServer.buildEmbedUrl(tvId, "tv", s, e)
+            } else {
+                return targetServer.buildEmbedUrl(tmdbId, "movie", "1", "1")
             }
         }
 

@@ -23,12 +23,12 @@ enum class StreamServer(
             else "https://vidlink.pro/tv/$id/$s/$e"
         }
     ),
-    VIDSRC(
+    VIDSRC_CC(
         "Server 2 (VidSrc)",
         2,
         { id, type, s, e ->
-            if (type == "movie") "https://vidsrc.to/embed/movie/$id"
-            else "https://vidsrc.to/embed/tv/$id/$s/$e"
+            if (type == "movie") "https://vidsrc.cc/v2/embed/movie/$id"
+            else "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
         }
     ),
     NONTONGO(
@@ -39,12 +39,12 @@ enum class StreamServer(
             else "https://nontongo.win/embed/tv/$id/$s/$e"
         }
     ),
-    CINEPRO(
-        "Server 4 (Auto-Link)",
+    TWO_EMBED(
+        "Server 4 (2Embed)",
         4,
         { id, type, s, e ->
-            if (type == "movie") "https://vidlink.pro/movie/$id"
-            else "https://vidlink.pro/tv/$id/$s/$e"
+            if (type == "movie") "https://www.2embed.cc/embed/$id"
+            else "https://www.2embed.cc/embedtv/$id&s=$s&e=$e"
         }
     ),
     VIDLINK_EXO(
@@ -78,14 +78,22 @@ enum class StreamServer(
             if (type == "movie") "https://embed.su/embed/movie/$id"
             else "https://embed.su/embed/tv/$id/$s/$e"
         }
+    ),
+    VIDSRC_VIP(
+        "Server 9 (VidSrc VIP)",
+        9,
+        { id, type, s, e ->
+            if (type == "movie") "https://vidsrc.vip/embed/movie/$id"
+            else "https://vidsrc.vip/embed/tv/$id/$s/$e"
+        }
     );
 
     companion object {
         /** All servers in display order */
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
-        /** WebView servers that load the embed directly (Servers 1-4, 6, 7, 8) */
-        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC, NONTONGO, CINEPRO, MULTI_EMBED, AUTOEMBED, EMBEDSU)
+        /** WebView servers that load the embed directly (Servers 1-4, 6-9) */
+        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_CC, NONTONGO, TWO_EMBED, MULTI_EMBED, AUTOEMBED, EMBEDSU, VIDSRC_VIP)
 
         /** ExoPlayer servers that scrape the embed for a direct stream (Server 5) */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)

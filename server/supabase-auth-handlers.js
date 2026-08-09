@@ -91,18 +91,24 @@ function createSupabaseAuthHandlers(deps) {
 
         const existing = await findSupabaseUserByEmail(email);
         if (existing) {
-            return sendError(response, 409, "An account with this email already exists. Try signing in instead.");
+            try {
+                await supabaseAuthRequest("otp", {
+                    body: { email, create_user: false }
+                });
+                return sendJson(response, 200, {
+                    ok: true,
+                    message: "An OTP code has been sent to your email.",
+                    email
+                });
+            } catch (e) {
+                return sendError(response, 409, "An account with this email already exists. Please sign in instead.");
+            }
         }
 
         try {
-            // Create the user in Supabase Auth
+            // Create the user in Supabase Auth (Supabase sends verification email automatically)
             await supabaseAuthRequest("signup", {
                 body: { email, password, user_metadata: { username } }
-            });
-
-            // Send OTP to verify email ownership
-            await supabaseAuthRequest("otp", {
-                body: { email, create_user: false, should_create_user: false }
             });
 
             return sendJson(response, 200, {
