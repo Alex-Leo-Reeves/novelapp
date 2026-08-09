@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +87,9 @@ fun TvPhonePairScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF06060A)),
+            .background(
+                Brush.verticalGradient(listOf(Color(0xFF0C0A18), Color(0xFF06060A), Color(0xFF050308)))
+            ),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -229,6 +232,25 @@ fun TvPhonePairScreen(
                             "Code expires in ${activePair.expiresInSeconds}s",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(0.5f)
+                        )
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            "Developed by Mike",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFF5C05D)
+                        )
+                        Text(
+                            "masteralexleoreevesd1@gmail.com",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(0.4f)
                         )
                     }
                 }

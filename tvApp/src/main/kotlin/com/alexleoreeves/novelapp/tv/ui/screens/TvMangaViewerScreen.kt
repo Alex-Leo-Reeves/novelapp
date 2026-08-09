@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
+import coil3.request.header
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

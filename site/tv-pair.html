@@ -5,18 +5,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#05060B">
-    <title>Sign in to your TV - NovaRead</title>
+    <title>Sign in to your TV — NovaRead</title>
+    <meta name="description" content="Approve your NovaRead TV by entering the code shown on screen, or sign in with email. Developed by Mike — masteralexleoreevesd1@gmail.com" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <style>
-        * {
+         :root {
+            color-scheme: dark;
+            --bg: #05060b;
+            --panel: #0c0e16;
+            --panel-2: #141824;
+            --text: #f7f5f0;
+            --muted: #9aa4b6;
+            --line: rgba(255, 255, 255, 0.1);
+            --pink: #e84d8a;
+            --pink-soft: #ff9bc3;
+            --orange: #ff784f;
+            --teal: #22d3ee;
+            --gold: #f5c05d;
+            --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            --font-display: "Space Grotesk", "Inter", ui-sans-serif, sans-serif;
+            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
-            box-sizing: border-box
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #05060B;
-            color: #F7F5F0;
+            font-family: var(--font-body);
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -24,8 +49,20 @@
             padding: 24px;
             position: relative;
             overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
         }
-        /* ambient orbs */
+        
+         ::selection {
+            background: rgba(232, 77, 138, 0.4);
+            color: #fff;
+        }
+        
+         :focus-visible {
+            outline: 2px solid var(--teal);
+            outline-offset: 3px;
+            border-radius: 6px;
+        }
+        /* ── Ambient aurora orbs ───────────────────────── */
         
         body::before,
         body::after {
@@ -38,90 +75,168 @@
         }
         
         body::before {
-            width: 380px;
-            height: 380px;
-            left: -120px;
-            top: -120px;
-            background: radial-gradient(circle, rgba(232, 77, 138, .20), transparent 68%);
+            width: 420px;
+            height: 420px;
+            left: -140px;
+            top: -140px;
+            background: radial-gradient(circle, rgba(232, 77, 138, 0.24), transparent 68%);
             animation: drift1 18s ease-in-out infinite alternate;
         }
         
         body::after {
-            width: 420px;
-            height: 420px;
-            right: -160px;
-            bottom: -160px;
-            background: radial-gradient(circle, rgba(34, 211, 238, .14), transparent 68%);
+            width: 460px;
+            height: 460px;
+            right: -180px;
+            bottom: -180px;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.16), transparent 68%);
             animation: drift2 22s ease-in-out infinite alternate;
+        }
+        
+        .orb-gold {
+            position: fixed;
+            width: 360px;
+            height: 360px;
+            left: 55%;
+            top: -160px;
+            border-radius: 50%;
+            filter: blur(90px);
+            pointer-events: none;
+            z-index: 0;
+            background: radial-gradient(circle, rgba(245, 192, 93, 0.13), transparent 68%);
+            animation: drift3 20s ease-in-out infinite alternate;
         }
         
         @keyframes drift1 {
             from {
-                transform: translate(0, 0)
+                transform: translate(0, 0);
             }
             to {
-                transform: translate(60px, 50px)
+                transform: translate(60px, 50px);
             }
         }
         
         @keyframes drift2 {
             from {
-                transform: translate(0, 0)
+                transform: translate(0, 0);
             }
             to {
-                transform: translate(-50px, -40px)
+                transform: translate(-50px, -40px);
             }
+        }
+        
+        @keyframes drift3 {
+            from {
+                transform: translate(0, 0);
+            }
+            to {
+                transform: translate(-40px, 60px);
+            }
+        }
+        /* ── Star specks ───────────────────────────────── */
+        
+        .speck {
+            position: fixed;
+            border-radius: 50%;
+            background: rgba(210, 230, 255, 0.55);
+            pointer-events: none;
+            z-index: 0;
+            animation: twinkle 3.4s ease-in-out infinite;
+        }
+        
+        @keyframes twinkle {
+            0%,
+            100% {
+                opacity: 0.2;
+            }
+            50% {
+                opacity: 0.9;
+            }
+        }
+        /* ── Card ──────────────────────────────────────── */
+        
+        .card-wrap {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 460px;
+        }
+        
+        .brand-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 22px;
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 1.25rem;
+            letter-spacing: -0.01em;
+            opacity: 0;
+            animation: rise-in 0.7s var(--ease-out) 0.1s forwards;
+        }
+        
+        .brand-bar svg {
+            width: 30px;
+            height: 30px;
+            filter: drop-shadow(0 4px 14px rgba(34, 211, 238, 0.35));
+        }
+        
+        .brand-bar .dot {
+            color: var(--pink);
         }
         
         .card {
             position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 440px;
-            background: rgba(12, 14, 22, .92);
-            border: 1px solid rgba(255, 255, 255, .1);
-            border-radius: 22px;
-            padding: 34px 26px;
-            box-shadow: 0 30px 70px rgba(0, 0, 0, .55);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
+            background: rgba(12, 14, 22, 0.9);
+            border: 1px solid var(--line);
+            border-radius: 26px;
+            padding: 34px 28px 28px;
+            box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(22px);
+            animation: rise-in 0.7s var(--ease-out) 0.2s forwards;
         }
         
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 11px;
-            justify-content: center;
-            font-weight: 900;
-            font-size: 23px;
-            margin-bottom: 6px;
-            letter-spacing: -.01em;
+        .card::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--pink), var(--orange), var(--gold), var(--teal));
+            border-radius: 26px 26px 0 0;
         }
         
-        .logo svg {
-            width: 30px;
-            height: 30px
-        }
-        
-        .logo .dot {
-            color: #E84D8A
+        @keyframes rise-in {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         
         .subtitle {
             text-align: center;
-            color: #9AA4B6;
-            font-size: 14px;
-            margin-bottom: 22px;
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-bottom: 24px;
+            font-weight: 500;
         }
         
+        .subtitle strong {
+            color: var(--text);
+        }
+        /* ── Code box ──────────────────────────────────── */
+        
         .code-box {
-            background: #141824;
-            border: 1px dashed rgba(34, 211, 238, .45);
-            border-radius: 14px;
-            padding: 20px;
-            text-align: center;
-            margin-bottom: 20px;
             position: relative;
+            background: var(--panel-2);
+            border: 1px dashed rgba(34, 211, 238, 0.45);
+            border-radius: 18px;
+            padding: 22px 16px;
+            text-align: center;
+            margin-bottom: 18px;
             overflow: hidden;
         }
         
@@ -130,67 +245,85 @@
             position: absolute;
             inset: 0 0 auto 0;
             height: 2px;
-            background: linear-gradient(90deg, transparent, #22D3EE, transparent);
+            background: linear-gradient(90deg, transparent, var(--teal), transparent);
             animation: sheen 2.6s linear infinite;
         }
         
         @keyframes sheen {
             0% {
-                transform: translateX(-100%)
+                transform: translateX(-100%);
             }
             100% {
-                transform: translateX(100%)
+                transform: translateX(100%);
             }
         }
         
         .code-box .label {
-            font-size: 13px;
-            color: #9AA4B6;
-            margin-bottom: 9px;
-            font-weight: 600
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-bottom: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
         }
         
         .code {
-            font-size: 36px;
-            font-weight: 900;
-            letter-spacing: 13px;
-            color: #22D3EE;
+            font-family: var(--font-display);
+            font-size: 2.6rem;
+            font-weight: 700;
+            letter-spacing: 0.5em;
+            padding-left: 0.5em;
+            color: var(--teal);
             font-variant-numeric: tabular-nums;
-            padding-left: 13px;
-            text-shadow: 0 0 24px rgba(34, 211, 238, .45);
+            text-shadow: 0 0 28px rgba(34, 211, 238, 0.45);
         }
+        
+        .code-box .hint {
+            margin-top: 9px;
+            font-size: 0.78rem;
+            color: rgba(154, 164, 182, 0.8);
+        }
+        /* ── Open-app button ───────────────────────────── */
         
         .btn-app {
             width: 100%;
-            background: #141824;
-            border: 1px solid rgba(232, 77, 138, .5);
-            border-radius: 13px;
-            padding: 15px;
-            font-size: 16px;
-            font-weight: 800;
-            color: #FF9BC3;
-            cursor: pointer;
-            transition: transform .18s ease, border-color .25s ease, background .25s ease;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 9px;
+            gap: 10px;
+            background: var(--panel-2);
+            border: 1px solid rgba(232, 77, 138, 0.45);
+            border-radius: 15px;
+            padding: 16px;
+            font-size: 0.98rem;
+            font-weight: 800;
+            color: var(--pink-soft);
+            cursor: pointer;
+            transition: transform 0.18s ease, border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
         }
         
         .btn-app:hover {
             transform: translateY(-2px);
-            border-color: rgba(232, 77, 138, .9);
-            background: #1a1220
+            border-color: rgba(232, 77, 138, 0.85);
+            background: #1a1220;
+            box-shadow: 0 14px 34px rgba(232, 77, 138, 0.22);
         }
+        
+        .btn-app svg {
+            flex: 0 0 auto;
+        }
+        /* ── Divider ───────────────────────────────────── */
         
         .divider {
             display: flex;
             align-items: center;
             gap: 12px;
-            text-align: center;
-            color: #5A6478;
-            font-size: 12px;
-            margin: 20px 0 12px;
+            color: #5a6478;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin: 22px 0 16px;
         }
         
         .divider::before,
@@ -198,152 +331,289 @@
             content: "";
             flex: 1;
             height: 1px;
-            background: rgba(255, 255, 255, .09);
+            background: var(--line);
+        }
+        /* ── Form ──────────────────────────────────────── */
+        
+        .field {
+            position: relative;
+            margin-bottom: 12px;
         }
         
-        input {
+        .field label {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            margin-bottom: 7px;
+        }
+        
+        .field input {
             width: 100%;
-            background: #141824;
-            border: 1px solid rgba(255, 255, 255, .13);
-            border-radius: 11px;
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            border-radius: 13px;
             padding: 15px 16px;
-            color: #F7F5F0;
-            font-size: 16px;
+            color: var(--text);
+            font-size: 0.98rem;
+            font-family: var(--font-body);
             outline: none;
-            margin-bottom: 10px;
-            transition: border-color .2s ease, box-shadow .2s ease;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
         }
         
-        input::placeholder {
-            color: #6B748A
+        .field input::placeholder {
+            color: #6b748a;
         }
         
-        input:focus {
-            border-color: #22D3EE;
-            box-shadow: 0 0 0 3px rgba(34, 211, 238, .14)
+        .field input:focus {
+            border-color: var(--teal);
+            background: rgba(34, 211, 238, 0.04);
+            box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
         }
         
-        button[type=submit] {
+        .field input[type="password"] {
+            letter-spacing: 0.12em;
+        }
+        
+        button[type="submit"] {
             width: 100%;
-            margin-top: 10px;
-            background: linear-gradient(92deg, #E84D8A, #FF784F);
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            background: linear-gradient(92deg, var(--pink), var(--orange));
             color: #fff;
             border: none;
-            border-radius: 13px;
-            padding: 16px;
-            font-size: 16px;
+            border-radius: 15px;
+            padding: 17px;
+            font-size: 1rem;
             font-weight: 800;
+            font-family: var(--font-body);
             cursor: pointer;
-            transition: transform .18s ease, box-shadow .25s ease;
-            box-shadow: 0 12px 30px rgba(232, 77, 138, .3);
+            transition: transform 0.18s ease, box-shadow 0.25s ease, opacity 0.25s ease;
+            box-shadow: 0 14px 34px rgba(232, 77, 138, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.25);
         }
         
-        button[type=submit]:hover {
+        button[type="submit"]:hover {
             transform: translateY(-2px);
-            box-shadow: 0 16px 38px rgba(232, 77, 138, .45)
+            box-shadow: 0 18px 42px rgba(232, 77, 138, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
         }
         
-        button[type=submit]:disabled {
-            opacity: .55;
+        button[type="submit"]:disabled {
+            opacity: 0.55;
             cursor: default;
-            transform: none
+            transform: none;
+            box-shadow: none;
         }
         
         .status {
             margin-top: 16px;
-            font-size: 14px;
+            font-size: 0.88rem;
             text-align: center;
             min-height: 22px;
-            font-weight: 600
+            font-weight: 700;
+            border-radius: 12px;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        .status:empty {
+            padding: 0;
+            background: none;
         }
         
         .status.ok {
-            color: #06D6A0
+            color: #06d6a0;
+            background: rgba(6, 214, 160, 0.08);
+            border: 1px solid rgba(6, 214, 160, 0.25);
         }
         
         .status.err {
-            color: #F87171
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.08);
+            border: 1px solid rgba(248, 113, 113, 0.25);
         }
         
         .status.info {
-            color: #60A5FA
+            color: #60a5fa;
+            background: rgba(96, 165, 250, 0.08);
+            border: 1px solid rgba(96, 165, 250, 0.25);
         }
         
         .hidden {
-            display: none!important
+            display: none !important;
         }
+        /* ── Dev credit ────────────────────────────────── */
         
         .dev {
-            margin-top: 22px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(255, 255, 255, .07);
-            text-align: center;
-            color: #F5C05D;
-            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 9px;
+            margin-top: 24px;
+            padding-top: 18px;
+            border-top: 1px solid var(--line);
+            color: var(--gold);
+            font-size: 0.86rem;
             font-weight: 800;
         }
         
+        .dev .dev-avatar {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--gold), var(--orange));
+            color: #241303;
+            font-size: 0.72rem;
+            font-weight: 900;
+        }
+        
         .dev .mail {
-            display: block;
-            color: #6B748A;
+            color: var(--muted);
             font-weight: 600;
-            font-size: 12px;
-            margin-top: 3px
+            font-size: 0.8rem;
+        }
+        /* ── Footer note ───────────────────────────────── */
+        
+        .foot-note {
+            text-align: center;
+            margin-top: 18px;
+            color: #4b5563;
+            font-size: 0.74rem;
+            font-weight: 600;
+            opacity: 0;
+            animation: rise-in 0.7s var(--ease-out) 0.5s forwards;
+        }
+        
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.001s !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001s !important;
+            }
+        }
+        
+        @media (max-width: 420px) {
+            body {
+                padding: 16px;
+            }
+            .card {
+                padding: 28px 20px 24px;
+                border-radius: 22px;
+            }
+            .code {
+                font-size: 2.1rem;
+            }
         }
     </style>
 </head>
 
 <body>
-    <div class="card">
-        <div class="logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-    </svg> NovaRead
+    <div class="orb-gold"></div>
+
+    <div class="card-wrap">
+        <div class="brand-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg> NovaRead
             <span class="dot">.</span>TV
         </div>
-        <div class="subtitle">Sign in to your TV</div>
 
-        <div class="code-box">
-            <div class="label">Enter this code on your TV if prompted</div>
-            <div class="code" id="codeDisplay">----</div>
+        <div class="card">
+            <div class="subtitle">
+                <strong>Sign in to your TV</strong> — enter the code from your screen
+            </div>
+
+            <div class="code-box">
+                <div class="label">Pairing code</div>
+                <div class="code" id="codeDisplay">----</div>
+                <div class="hint" id="codeHint">Waiting for TV code…</div>
+            </div>
+
+            <button class="btn-app" id="openAppBtn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF9BC3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                    <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                </svg>
+                Open NovelApp if installed
+            </button>
+
+            <div class="divider">OR SIGN IN WITH EMAIL</div>
+
+            <form id="pairForm">
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
+                </div>
+                <button type="submit" id="submitBtn">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="11" width="18" height="11" rx="2.5"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    Sign in and approve TV
+                </button>
+            </form>
+
+            <div class="status" id="statusBox" role="status" aria-live="polite"></div>
+
+            <div class="dev">
+                <span class="dev-avatar">M</span> Developed by Mike
+                <span class="mail">masteralexleoreevesd1@gmail.com</span>
+            </div>
         </div>
 
-        <button class="btn-app" id="openAppBtn">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF9BC3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
-      <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
-    </svg>
-    Open NovelApp if installed
-  </button>
-
-        <div class="divider">OR SIGN IN WITH EMAIL</div>
-
-        <form id="pairForm">
-            <input type="email" id="email" placeholder="Email" autocomplete="email" required>
-            <input type="password" id="password" placeholder="Password" autocomplete="current-password" required>
-            <button type="submit" id="submitBtn">Sign in and approve TV</button>
-        </form>
-
-        <div class="status" id="statusBox"></div>
-
-        <div class="dev">
-            Developed by Mike
-            <span class="mail">masteralexleoreevesd1@gmail.com</span>
-        </div>
+        <div class="foot-note">You can close this page after your TV approves.</div>
     </div>
 
     <script>
         (function() {
             "use strict";
+
+            // ── Twinkling star specks ──────────────────────
+            (function specks() {
+                if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+                var frag = document.createDocumentFragment();
+                for (var i = 0; i < 26; i++) {
+                    var s = document.createElement("span");
+                    s.className = "speck";
+                    var size = (Math.random() * 2 + 1).toFixed(1);
+                    s.style.width = size + "px";
+                    s.style.height = size + "px";
+                    s.style.left = (Math.random() * 100).toFixed(1) + "%";
+                    s.style.top = (Math.random() * 100).toFixed(1) + "%";
+                    s.style.animationDelay = (Math.random() * 4).toFixed(2) + "s";
+                    frag.appendChild(s);
+                }
+                document.body.appendChild(frag);
+            })();
+
+            // ── Pairing config ─────────────────────────────
             var api = "https://novelapp1.onrender.com/api";
             var pair = new URLSearchParams(window.location.search).get("pair") || "";
             var code = new URLSearchParams(window.location.search).get("code") || "";
 
             (function showCode() {
                 var el = document.getElementById("codeDisplay");
+                var hint = document.getElementById("codeHint");
                 if (code) {
                     el.textContent = code.split("").join(" ");
+                    hint.textContent = "Enter this code on your TV if prompted";
+                } else {
+                    hint.textContent = "Waiting for TV code…";
                 }
             })();
 
@@ -358,7 +628,7 @@
                     setStatus("Open this page from the QR code on your TV.", "err");
                     return;
                 }
-                setStatus("Opening NovelApp...", "info");
+                setStatus("Opening NovelApp…", "info");
                 window.location.href = "novelapp://pair?pair=" + encodeURIComponent(pair) + "&code=" + encodeURIComponent(code);
             });
 
@@ -377,8 +647,8 @@
 
                 var btn = document.getElementById("submitBtn");
                 btn.disabled = true;
-                btn.textContent = "Signing in...";
-                setStatus("Approving your TV...", "info");
+                btn.textContent = "Approving TV…";
+                setStatus("Signing you in and approving your TV…", "info");
 
                 fetch(api + "/tv-pair/approve", {
                     method: "POST",

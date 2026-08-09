@@ -24,30 +24,69 @@ import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 
 @Composable
 fun TvSplashScreen(onFinished: () -> Unit) {
-    LaunchedEffect(Unit) { kotlinx.coroutines.delay(2500); onFinished() }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(2800); onFinished() }
     val pulse = rememberInfiniteTransition(label = "pulse")
-    val glow by pulse.animateFloat(0.75f, 1.0f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "glow")
+    val glow by pulse.animateFloat(0.72f, 1.0f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "glow")
+    val ringAlpha by pulse.animateFloat(0.25f, 0.7f, infiniteRepeatable(tween(1500), RepeatMode.Reverse), label = "ringAlpha")
 
     Box(
         modifier = Modifier.fillMaxSize().background(
-            Brush.radialGradient(listOf(Color(0xFF0F041C), Color(0xFF05050A), Color.Black))
+            Brush.radialGradient(listOf(Color(0xFF170B2E), Color(0xFF05050A), Color.Black))
         ),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
-                modifier = Modifier.size(140.dp).graphicsLayer { scaleX = glow; scaleY = glow },
+                modifier = Modifier.size(150.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Box(modifier = Modifier.size(130.dp).background(
-                    Brush.radialGradient(listOf(Color(0xFF7C3AED).copy(0.4f), Color.Transparent)), CircleShape
-                ))
-                Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(72.dp))
+                // Outer animated ring
+                Box(
+                    modifier = Modifier.size(146.dp).graphicsLayer { scaleX = glow; scaleY = glow }
+                        .border(2.dp, Color(0xFF00BFFF).copy(alpha = ringAlpha), CircleShape)
+                )
+                Box(
+                    modifier = Modifier.size(130.dp).graphicsLayer { scaleX = glow; scaleY = glow },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(modifier = Modifier.size(126.dp).background(
+                        Brush.radialGradient(listOf(Color(0xFF00BFFF).copy(0.35f), Color.Transparent)), CircleShape
+                    ))
+                    Icon(
+                        Icons.Default.AutoStories, null,
+                        tint = Color(0xFF00BFFF),
+                        modifier = Modifier.size(70.dp)
+                    )
+                }
             }
-            Spacer(Modifier.height(24.dp))
-            Text("NovaRead TV", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black, color = Color.White)
-            Spacer(Modifier.height(8.dp))
-            Text("Anime · Novels · Manga · Movies", style = MaterialTheme.typography.titleLarge, color = Color(0xFF00BFFF).copy(0.9f))
+            Spacer(Modifier.height(26.dp))
+            Text(
+                "NovaRead TV",
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                letterSpacing = 1.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Anime · Novels · Manga · Movies",
+                style = MaterialTheme.typography.titleLarge,
+                color = Color(0xFF00BFFF).copy(0.9f)
+            )
+            Spacer(Modifier.height(40.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Developed by Mike",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF5C05D)
+                )
+                Text(
+                    "masteralexleoreevesd1@gmail.com",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(0.55f)
+                )
+            }
         }
     }
 }
@@ -70,23 +109,59 @@ fun TvAuthScreen(
     LaunchedEffect(externalError) { localError = externalError }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF06060A)),
+        modifier = Modifier.fillMaxSize().background(
+            Brush.verticalGradient(listOf(Color(0xFF0C0A18), Color(0xFF06060A), Color(0xFF050308)))
+        ),
         contentAlignment = Alignment.Center
     ) {
+        // Soft accent glow behind the card
+        Box(
+            modifier = Modifier.align(Alignment.Center).size(720.dp).background(
+                Brush.radialGradient(
+                    listOf(Color(0xFF00BFFF).copy(0.10f), Color.Transparent),
+                    center = androidx.compose.ui.geometry.Offset(0.5f, 0.4f)
+                ),
+                CircleShape
+            )
+        )
+
         Column(
-            modifier = Modifier.widthIn(max = 500.dp).padding(32.dp),
+            modifier = Modifier.widthIn(max = 520.dp).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(56.dp))
+            // Logo + brand
+            Box(
+                modifier = Modifier.size(72.dp).background(Color(0xFF00BFFF).copy(0.12f), RoundedCornerShape(20.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.AutoStories, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(40.dp))
+            }
             Text(
-                if (isLogin.value) "Sign In to NovaRead" else "Create Account",
-                style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White
+                if (isLogin.value) "Sign in to NovaRead" else "Create your account",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                color = Color.White
+            )
+            Text(
+                if (isLogin.value) "Welcome back — pick up where you left off." else "Join NovaRead across all your devices.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White.copy(0.55f),
+                textAlign = TextAlign.Center
             )
 
             if (localError != null) {
-                Surface(color = Color(0xFF7F1D1D), shape = RoundedCornerShape(8.dp)) {
-                    Text(localError!!, color = Color(0xFFFCA5A5), modifier = Modifier.padding(12.dp))
+                Surface(
+                    color = Color(0xFF3B0D0D),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFF87171).copy(0.35f))
+                ) {
+                    Text(
+                        localError!!,
+                        color = Color(0xFFFCA5A5),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
 
@@ -108,8 +183,8 @@ fun TvAuthScreen(
                 },
                 enabled = !isSubmitting && email.isNotBlank() && password.length >= 6,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF)),
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(10.dp)
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
                 if (isSubmitting) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                 else Text(if (isLogin.value) "Sign In" else "Create Account", fontWeight = FontWeight.Bold)
@@ -122,18 +197,34 @@ fun TvAuthScreen(
                 )
             }
 
-            HorizontalDivider(color = Color.White.copy(0.15f))
+            HorizontalDivider(color = Color.White.copy(0.12f))
 
             Button(
                 onClick = onPhonePair,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14141E)),
-                border = BorderStroke(1.dp, Color(0xFF06D6A0)),
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(10.dp)
+                border = BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.7f)),
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.QrCodeScanner, null, tint = Color(0xFF06D6A0), modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Log in with your phone", color = Color(0xFF06D6A0), fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "Developed by Mike",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF5C05D)
+                )
+                Text(
+                    "masteralexleoreevesd1@gmail.com",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(0.4f)
+                )
             }
         }
     }
@@ -155,14 +246,16 @@ private fun TvTextField(
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Color(0xFF00BFFF),
-            unfocusedBorderColor = Color.White.copy(0.2f),
+            focusedContainerColor = Color(0xFF0E0E18),
+            unfocusedContainerColor = Color(0xFF0C0C14),
+            unfocusedBorderColor = Color.White.copy(0.18f),
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
             cursorColor = Color(0xFF00BFFF),
             focusedLabelColor = Color(0xFF00BFFF),
             unfocusedLabelColor = Color.White.copy(0.5f)
         ),
-        modifier = Modifier.fillMaxWidth().onFocusChanged { isFocused= it.isFocused },
-        shape = RoundedCornerShape(8.dp)
+        modifier = Modifier.fillMaxWidth().onFocusChanged { isFocused = it.isFocused },
+        shape = RoundedCornerShape(10.dp)
     )
 }
