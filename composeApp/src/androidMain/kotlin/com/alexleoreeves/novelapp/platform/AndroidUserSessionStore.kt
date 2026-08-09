@@ -34,7 +34,8 @@ class AndroidUserSessionStore(context: Context) : UserSessionStore {
                 billingStatus = prefs.getString(KEY_BILLING_STATUS, "none").orEmpty().ifBlank { "none" },
                 paidUntil = prefs.getString(KEY_PAID_UNTIL, null),
                 createdAt = prefs.getString(KEY_CREATED_AT, "").orEmpty(),
-                maxDevices = prefs.takeIf { it.contains(KEY_MAX_DEVICES) }?.getInt(KEY_MAX_DEVICES, 2)
+                maxDevices = prefs.takeIf { it.contains(KEY_MAX_DEVICES) }?.getInt(KEY_MAX_DEVICES, 2),
+                isPremium = prefs.getBoolean(KEY_IS_PREMIUM, false)
             )
         }
     }
@@ -50,6 +51,7 @@ class AndroidUserSessionStore(context: Context) : UserSessionStore {
             .putString(KEY_BILLING_STATUS, account.billingStatus)
             .putString(KEY_PAID_UNTIL, account.paidUntil)
             .putString(KEY_CREATED_AT, account.createdAt)
+            .putBoolean(KEY_IS_PREMIUM, account.isPremium)
             .also { editor ->
                 account.maxDevices?.let { editor.putInt(KEY_MAX_DEVICES, it) }
                     ?: editor.remove(KEY_MAX_DEVICES)
@@ -87,5 +89,6 @@ class AndroidUserSessionStore(context: Context) : UserSessionStore {
         const val KEY_PAID_UNTIL = "paid_until"
         const val KEY_CREATED_AT = "created_at"
         const val KEY_MAX_DEVICES = "max_devices"
+        const val KEY_IS_PREMIUM = "is_premium"
     }
 }

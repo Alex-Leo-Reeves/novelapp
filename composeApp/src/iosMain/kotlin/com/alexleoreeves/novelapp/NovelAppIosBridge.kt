@@ -392,7 +392,8 @@ private data class IosAccountPayload(
     val plan: String,
     val billingStatus: String,
     val paidUntil: String?,
-    val createdAt: String
+    val createdAt: String,
+    val isPremium: Boolean = false
 )
 
 @Serializable
@@ -489,7 +490,8 @@ private fun SavedUserAccount.toIosAccount(): IosAccountPayload =
         plan = plan,
         billingStatus = billingStatus,
         paidUntil = paidUntil,
-        createdAt = createdAt
+        createdAt = createdAt,
+        isPremium = isPremium
     )
 
 private fun resolveIosWatchUrl(kind: String, title: String, detailUrl: String): String {

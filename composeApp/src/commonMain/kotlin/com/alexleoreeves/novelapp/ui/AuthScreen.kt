@@ -1,23 +1,23 @@
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material3.Button
@@ -73,11 +73,14 @@ fun AuthScreen(
     errorMessage: String?,
     onClearError: () -> Unit,
     onSignIn: (email: String, password: String) -> Unit,
+    onOtpSignup: (email: String, password: String) -> Unit,
     onCreateAccount: (username: String, email: String, password: String, recoverySecret: String) -> Unit,
     onRecoverAccount: (recoverySecret: String, newPassword: String) -> Unit,
+    onForgotPassword: () -> Unit,
     onDismiss: (() -> Unit)? = null
 ) {
     var mode by remember { mutableStateOf(AuthMode.CREATE_ACCOUNT) }
+    var useClassicSignup by remember { mutableStateOf(false) }
     var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -102,10 +105,6 @@ fun AuthScreen(
             return
         }
 
-        if (mode == AuthMode.CREATE_ACCOUNT && username.isBlank()) {
-            localError = "Enter a username."
-            return
-        }
         if (!email.contains("@") || !email.contains(".")) {
             localError = "Enter a valid email address."
             return
@@ -116,11 +115,19 @@ fun AuthScreen(
         }
 
         if (mode == AuthMode.CREATE_ACCOUNT) {
-            if (recoverySecret.trim().length < 10) {
-                localError = "Recovery secret must be at least 10 characters."
-                return
+            if (useClassicSignup) {
+                if (username.isBlank()) {
+                    localError = "Enter a username."
+                    return
+                }
+                if (recoverySecret.trim().length < 10) {
+                    localError = "Recovery secret must be at least 10 characters."
+                    return
+                }
+                onCreateAccount(username.trim(), email.trim(), password, recoverySecret.trim())
+            } else {
+                onOtpSignup(email.trim(), password)
             }
-            onCreateAccount(username.trim(), email.trim(), password, recoverySecret.trim())
         } else {
             onSignIn(email.trim(), password)
         }
@@ -132,8 +139,8 @@ fun AuthScreen(
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        currentTheme.surfaceColor(),
-                        currentTheme.backgroundColor()
+                        currentTheme.backgroundColor(),
+                        currentTheme.surfaceColor()
                     )
                 )
             )
@@ -144,7 +151,7 @@ fun AuthScreen(
         contentAlignment = Alignment.TopCenter
     ) {
         Card(
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()),
             modifier = Modifier
                 .fillMaxWidth()
@@ -155,11 +162,19 @@ fun AuthScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    Icons.Default.AutoStories,
-                    contentDescription = null,
-                    tint = currentTheme.accentColor()
-                )
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(currentTheme.accentColor().copy(alpha = 0.14f), RoundedCornerShape(18.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.AutoStories,
+                        contentDescription = null,
+                        tint = currentTheme.accentColor(),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
                 Text(
                     "Welcome to NovelApp",
                     style = MaterialTheme.typography.headlineMedium,
@@ -168,7 +183,14 @@ fun AuthScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    "Sign in, create an account, or recover one with your secret key.",
+                    "Every story, one screen.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = currentTheme.accentColor(),
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    "Sign in, create an account with OTP, or recover one.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = currentTheme.subTextColor(),
                     textAlign = TextAlign.Center
@@ -199,7 +221,7 @@ fun AuthScreen(
                 }
 
                 if (mode != AuthMode.RECOVER) {
-                    if (mode == AuthMode.CREATE_ACCOUNT) {
+                    if (mode == AuthMode.CREATE_ACCOUNT && useClassicSignup) {
                         AuthTextField(
                             value = username,
                             onValueChange = { username = it },
@@ -226,7 +248,7 @@ fun AuthScreen(
                     )
                 }
 
-                if (mode == AuthMode.CREATE_ACCOUNT || mode == AuthMode.RECOVER) {
+                if ((mode == AuthMode.CREATE_ACCOUNT && useClassicSignup) || mode == AuthMode.RECOVER) {
                     AuthTextField(
                         value = recoverySecret,
                         onValueChange = { recoverySecret = it },
@@ -235,6 +257,19 @@ fun AuthScreen(
                         keyboardType = KeyboardType.Password,
                         isPassword = true
                     )
+                }
+
+                if (mode == AuthMode.CREATE_ACCOUNT) {
+                    TextButton(
+                        onClick = { useClassicSignup = !useClassicSignup },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (useClassicSignup) "Use Email OTP signup instead" else "Can't use OTP? Use recovery key",
+                            color = currentTheme.accentColor(),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
 
                 if (mode == AuthMode.RECOVER) {
@@ -281,7 +316,7 @@ fun AuthScreen(
                         Text(
                             when (mode) {
                                 AuthMode.SIGN_IN -> "Sign In"
-                                AuthMode.CREATE_ACCOUNT -> "Create Account"
+                                AuthMode.CREATE_ACCOUNT -> if (useClassicSignup) "Create Account" else "Send OTP Code"
                                 AuthMode.RECOVER -> "Recover Account"
                             },
                             color = Color.White,
@@ -305,25 +340,33 @@ fun AuthScreen(
 
                 if (mode == AuthMode.SIGN_IN) {
                     TextButton(
-                        onClick = {
-                            mode = AuthMode.RECOVER
-                            localError = null
-                            onClearError()
-                        },
+                        onClick = onForgotPassword,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Forgot password? Use recovery secret", color = currentTheme.accentColor())
+                        Text("Forgot password? Reset here", color = currentTheme.accentColor())
                     }
                 }
 
                 Spacer(Modifier.height(4.dp))
 
-                Text(
-                    "Developed by ${DeveloperContact.NAME} - ${DeveloperContact.EMAIL}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = currentTheme.subTextColor(),
-                    textAlign = TextAlign.Center
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        "Developed by ${DeveloperContact.NAME}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = currentTheme.accentColor(),
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        DeveloperContact.EMAIL,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = currentTheme.subTextColor(),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
     }
@@ -388,3 +431,4 @@ private fun AuthTextField(
         shape = RoundedCornerShape(12.dp)
     )
 }
+</write_to_file>

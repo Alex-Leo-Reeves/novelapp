@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
 import com.alexleoreeves.novelapp.BuildKonfig
 import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.audio.MangaOcrReader
@@ -350,13 +352,16 @@ fun MangaViewerScreen(
                                 ) {
                                                                         val context = coil3.compose.LocalPlatformContext.current
                                     val imageRequest = androidx.compose.runtime.remember(pageUrl) {
+                                        val headers = if (pageUrl.contains("webtoon")) {
+                                            NetworkHeaders.Builder()
+                                                .set("Referer", "https://www.webtoons.com")
+                                                .build()
+                                        } else {
+                                            NetworkHeaders.EMPTY
+                                        }
                                         coil3.request.ImageRequest.Builder(context)
                                             .data(pageUrl)
-                                            .apply {
-                                                if (pageUrl.contains("webtoon")) {
-                                                    header("Referer", "https://www.webtoons.com")
-                                                }
-                                            }
+                                            .httpHeaders(headers)
                                             .build()
                                     }
                                     AsyncImage(
@@ -417,13 +422,16 @@ fun MangaViewerScreen(
                             ) { pageIndex ->
                                                                 val context = coil3.compose.LocalPlatformContext.current
                                 val imageRequest = androidx.compose.runtime.remember(pages[pageIndex]) {
+                                    val headers = if (pages[pageIndex].contains("webtoon")) {
+                                        NetworkHeaders.Builder()
+                                            .set("Referer", "https://www.webtoons.com")
+                                            .build()
+                                    } else {
+                                        NetworkHeaders.EMPTY
+                                    }
                                     coil3.request.ImageRequest.Builder(context)
                                         .data(pages[pageIndex])
-                                        .apply {
-                                            if (pages[pageIndex].contains("webtoon")) {
-                                                header("Referer", "https://www.webtoons.com")
-                                            }
-                                        }
+                                        .httpHeaders(headers)
                                         .build()
                                 }
                                 AsyncImage(
@@ -443,13 +451,16 @@ fun MangaViewerScreen(
                         ) { pageIndex ->
                                                             val context = coil3.compose.LocalPlatformContext.current
                                 val imageRequest = androidx.compose.runtime.remember(pages[pageIndex]) {
+                                    val headers = if (pages[pageIndex].contains("webtoon")) {
+                                        NetworkHeaders.Builder()
+                                            .set("Referer", "https://www.webtoons.com")
+                                            .build()
+                                    } else {
+                                        NetworkHeaders.EMPTY
+                                    }
                                     coil3.request.ImageRequest.Builder(context)
                                         .data(pages[pageIndex])
-                                        .apply {
-                                            if (pages[pageIndex].contains("webtoon")) {
-                                                header("Referer", "https://www.webtoons.com")
-                                            }
-                                        }
+                                        .httpHeaders(headers)
                                         .build()
                                 }
                                 AsyncImage(

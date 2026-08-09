@@ -16,12 +16,9 @@ data class SavedUserAccount(
     val billingStatus: String = "none",
     val paidUntil: String? = null,
     val createdAt: String = "",
-    val maxDevices: Int? = 2
-) {
-    val isPremium: Boolean
-        get() = email.equals("mike@mike.com", ignoreCase = true) ||
-            ((plan == "premium" || plan.startsWith("premium_")) && billingStatus == "active")
-}
+    val maxDevices: Int? = 2,
+    val isPremium: Boolean = false
+)
 
 fun platformHttpClient(
     block: HttpClientConfig<out HttpClientEngineConfig>.() -> Unit = {}

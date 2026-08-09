@@ -38,16 +38,68 @@ val ProfileAvatarGradients = listOf(
 fun ProfileSelectionScreen(
     currentTheme: AppTheme,
     profiles: List<UserProfile>,
+    accountUsername: String? = null,
+    onUpdateUsername: ((String) -> Unit)? = null,
     onSelectProfile: (UserProfile) -> Unit,
     onCreateProfile: (name: String, isKids: Boolean, colorIndex: Int) -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
+    var showUsernameDialog by remember { 
+        mutableStateOf(accountUsername.isNullOrBlank() || accountUsername.equals("Reader", ignoreCase = true))
+    }
+    var customUsernameInput by remember { mutableStateOf("") }
     var newProfileName by remember { mutableStateOf("") }
     var isKidsProfile by remember { mutableStateOf(false) }
     var selectedColorIndex by remember { mutableStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         GlassBackground()
+
+        if (showUsernameDialog && onUpdateUsername != null) {
+            AlertDialog(
+                onDismissRequest = { /* force entry or dismiss */ },
+                title = { Text("Choose a Username", fontWeight = FontWeight.Bold, color = Color.White) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Please create a username for your account to continue.",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp
+                        )
+                        OutlinedTextField(
+                            value = customUsernameInput,
+                            onValueChange = { customUsernameInput = it },
+                            label = { Text("Username") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonBlue,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                                focusedLabelColor = NeonBlue,
+                                unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (customUsernameInput.trim().length >= 2) {
+                                onUpdateUsername(customUsernameInput.trim())
+                                showUsernameDialog = false
+                            }
+                        },
+                        enabled = customUsernameInput.trim().length >= 2,
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonBlue)
+                    ) {
+                        Text("Save Username", color = Color.White)
+                    }
+                },
+                containerColor = Color(0xFF13151F)
+            )
+        }
 
         Column(
             modifier = Modifier

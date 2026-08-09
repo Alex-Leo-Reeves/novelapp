@@ -26,7 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
-import coil3.request.header
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -137,13 +138,16 @@ fun TvMangaViewerScreen(
                 if (pageIndex < pages.size) {
                     val context = androidx.compose.ui.platform.LocalContext.current
                     val imageRequest = remember(pages[pageIndex]) {
+                        val headers = if (pages[pageIndex].contains("webtoon")) {
+                            NetworkHeaders.Builder()
+                                .set("Referer", "https://www.webtoons.com")
+                                .build()
+                        } else {
+                            NetworkHeaders.EMPTY
+                        }
                         coil3.request.ImageRequest.Builder(context)
                             .data(pages[pageIndex])
-                            .apply {
-                                if (pages[pageIndex].contains("webtoon")) {
-                                    header("Referer", "https://www.webtoons.com")
-                                }
-                            }
+                            .httpHeaders(headers)
                             .build()
                     }
                     AsyncImage(

@@ -75,13 +75,12 @@ class AuthApi(
         return payload.user.toAccount(token)
     }
 
-    // ── OTP Auth methods (Supabase Auth proxy) ──────────────────────────
-
     /**
-     * Create Account Screen: fill username, email, password → otpSignup()
-     * Server creates user + sends OTP email → client navigates to OTP screen.
+     * Create Account (OTP flow): email + password → server creates Supabase user + sends OTP email.
+     * Username is derived from the email prefix on the client.
      */
-    suspend fun otpSignup(username: String, email: String, password: String) {
+    suspend fun otpSignup(email: String, password: String) {
+        val username = email.substringBefore("@").ifBlank { "Reader" }
         val response = client.post("$baseUrl/auth/otp/signup") {
             accept(ContentType.parse("application/json"))
             contentType(ContentType.parse("application/json"))
@@ -94,6 +93,7 @@ class AuthApi(
             throw AuthApiException(error, response.status.value)
         }
     }
+
 
     /**
      * OTP Screen (for signup or login): enter OTP code → verify.
@@ -415,7 +415,8 @@ private data class AuthUserResponse(
     val billingStatus: String = "none",
     val paidUntil: String? = null,
     val createdAt: String = "",
-    val maxDevices: Int? = 2
+    val maxDevices: Int? = 2,
+    val isPremium: Boolean = false
 ) {
     fun toAccount(token: String): SavedUserAccount =
         SavedUserAccount(
@@ -427,7 +428,8 @@ private data class AuthUserResponse(
             billingStatus = billingStatus,
             paidUntil = paidUntil,
             createdAt = createdAt,
-            maxDevices = maxDevices
+            maxDevices = maxDevices,
+            isPremium = isPremium
         )
 }
 

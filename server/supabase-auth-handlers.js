@@ -19,7 +19,11 @@ function createSupabaseAuthHandlers(deps) {
         findSupabaseUserByEmail,
         insertSupabaseUser,
         createSupabaseSession,
-        publicUser
+        publicUser,
+        getClientIp,
+        isAuthRateLimited,
+        recordAuthAttempt,
+        resetAuthAttempts
     } = deps;
 
     /**
@@ -80,11 +84,10 @@ function createSupabaseAuthHandlers(deps) {
         const body = await readBody(request);
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
-        const username = String(body.username || "").trim();
+        const username = String(body.username || "").trim() || "Reader";
 
         if (!email) return sendError(response, 400, "Email is required.");
         if (password.length < 6) return sendError(response, 400, "Password must be at least 6 characters.");
-        if (username.length < 2) return sendError(response, 400, "Username must be at least 2 characters.");
 
         const existing = await findSupabaseUserByEmail(email);
         if (existing) {
@@ -129,6 +132,13 @@ function createSupabaseAuthHandlers(deps) {
         if (!email) return sendError(response, 400, "Email is required.");
         if (!token) return sendError(response, 400, "OTP code is required.");
 
+        const ip = getClientIp(request);
+        const verifyKey = `otp-verify:${email}`;
+
+        if (isAuthRateLimited(ip) || isAuthRateLimited(verifyKey)) {
+            return sendError(response, 429, "Too many OTP verification attempts. Please try again in 15 minutes.");
+        }
+
         let authUserId;
         let authUser;
         let accessToken = null;
@@ -141,16 +151,22 @@ function createSupabaseAuthHandlers(deps) {
             authUserId = authUser && authUser.id;
             accessToken = (result && result.access_token) || null;
         } catch (err) {
+            recordAuthAttempt(ip);
+            recordAuthAttempt(verifyKey);
             return sendError(response, 401, "OTP verification failed. The code may have expired or is incorrect.");
         }
 
         if (!authUserId) {
+            recordAuthAttempt(ip);
+            recordAuthAttempt(verifyKey);
             return sendError(response, 401, "OTP verification failed. The code may have expired.");
         }
 
         // If this is a recovery flow (forgot password), don't create app session yet
         // Just return the accessToken so the client can set a new password
         if (type === "recovery") {
+            resetAuthAttempts(ip);
+            resetAuthAttempts(verifyKey);
             return sendJson(response, 200, {
                 ok: true,
                 accessToken,
@@ -174,6 +190,8 @@ function createSupabaseAuthHandlers(deps) {
             return sendError(response, err.statusCode || 403, err.message);
         }
 
+        resetAuthAttempts(ip);
+        resetAuthAttempts(verifyKey);
         const sessionToken = await createSupabaseSession(authUserId);
 
         return sendJson(response, 200, {
@@ -193,14 +211,34 @@ function createSupabaseAuthHandlers(deps) {
         const email = String(body.email || "").trim().toLowerCase();
         if (!email) return sendError(response, 400, "Email is required.");
 
+        const ip = getClientIp(request);
+        const loginKey = `otp-login:${email}`;
+
+        if (isAuthRateLimited(ip) || isAuthRateLimited(loginKey)) {
+            return sendError(response, 429, "Too many login attempts. Please try again in 15 minutes.");
+        }
+
         const user = await findSupabaseUserByEmail(email);
         if (!user) {
+            recordAuthAttempt(ip);
+            recordAuthAttempt(loginKey);
             return sendError(response, 404, "No account found with this email. Please sign up first.");
         }
 
-        await supabaseAuthRequest("otp", {
-            body: { email, create_user: false, should_create_user: false }
-        });
+        try {
+            await supabaseAuthRequest("otp", {
+                body: { email, create_user: false, should_create_user: false }
+            });
+            resetAuthAttempts(ip);
+            resetAuthAttempts(loginKey);
+        } catch (err) {
+            recordAuthAttempt(ip);
+            recordAuthAttempt(loginKey);
+            if (err.statusCode === 429) {
+                return sendError(response, 429, "Too many requests. Please wait a moment and try again.");
+            }
+            return sendError(response, 400, err.message || "OTP request failed.");
+        }
 
         return sendJson(response, 200, {
             ok: true,

@@ -57,7 +57,8 @@ suspend fun authRegister(username: String, email: String, password: String, reco
             billingStatus = user["billingStatus"]?.jsonPrimitive?.contentOrNull ?: "none",
             paidUntil = user["paidUntil"]?.jsonPrimitive?.contentOrNull,
             createdAt = user["createdAt"]?.jsonPrimitive?.contentOrNull ?: "",
-            maxDevices = user["maxDevices"]?.jsonPrimitive?.intOrNull
+            maxDevices = user["maxDevices"]?.jsonPrimitive?.intOrNull,
+            isPremium = user["isPremium"]?.jsonPrimitive?.booleanOrNull ?: false
         )
     } finally { client.close() }
 }
@@ -85,7 +86,8 @@ suspend fun authLogin(email: String, password: String): SavedUserAccount {
             billingStatus = user["billingStatus"]?.jsonPrimitive?.contentOrNull ?: "none",
             paidUntil = user["paidUntil"]?.jsonPrimitive?.contentOrNull,
             createdAt = user["createdAt"]?.jsonPrimitive?.contentOrNull ?: "",
-            maxDevices = user["maxDevices"]?.jsonPrimitive?.intOrNull
+            maxDevices = user["maxDevices"]?.jsonPrimitive?.intOrNull,
+            isPremium = user["isPremium"]?.jsonPrimitive?.booleanOrNull ?: false
         )
     } finally { client.close() }
 }
@@ -109,7 +111,8 @@ suspend fun authMe(token: String): SavedUserAccount? {
             billingStatus = user["billingStatus"]?.jsonPrimitive?.contentOrNull ?: "none",
             paidUntil = user["paidUntil"]?.jsonPrimitive?.contentOrNull,
             createdAt = user["createdAt"]?.jsonPrimitive?.contentOrNull ?: "",
-            maxDevices = user["maxDevices"]?.jsonPrimitive?.intOrNull
+            maxDevices = user["maxDevices"]?.jsonPrimitive?.intOrNull,
+            isPremium = user["isPremium"]?.jsonPrimitive?.booleanOrNull ?: false
         )
     } finally { client.close() }
 }
@@ -171,7 +174,8 @@ suspend fun pollTvPairStatus(pairId: String): TvPairPollState {
                         billingStatus = user?.get("billingStatus")?.jsonPrimitive?.contentOrNull ?: "none",
                         paidUntil = user?.get("paidUntil")?.jsonPrimitive?.contentOrNull,
                         createdAt = user?.get("createdAt")?.jsonPrimitive?.contentOrNull ?: "",
-                        maxDevices = user?.get("maxDevices")?.jsonPrimitive?.intOrNull
+                        maxDevices = user?.get("maxDevices")?.jsonPrimitive?.intOrNull,
+                        isPremium = user?.get("isPremium")?.jsonPrimitive?.booleanOrNull ?: false
                     )
                 )
             }

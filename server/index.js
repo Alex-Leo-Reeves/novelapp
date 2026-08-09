@@ -16,6 +16,45 @@ const mangaUnified = createMangaUnified({ contentItem, fetchWithAbort });
 let _supabaseOtpHandlers = null;
 let _tvPairHandler = null;
 
+// ── Auth rate-limiting (in-memory, per IP and per identifier) ───────────────
+const authRateLimits = new Map();
+const AUTH_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const AUTH_MAX_ATTEMPTS = 5;
+
+function getClientIp(request) {
+    const forwarded = request.headers["x-forwarded-for"];
+    if (forwarded) return forwarded.split(",")[0].trim();
+    return request.socket.remoteAddress || "unknown-ip";
+}
+
+function isAuthRateLimited(key) {
+    const now = Date.now();
+    const record = authRateLimits.get(key);
+    if (!record) return false;
+    if (now - record.windowStart > AUTH_LIMIT_WINDOW_MS) {
+        authRateLimits.delete(key);
+        return false;
+    }
+    return record.count >= AUTH_MAX_ATTEMPTS;
+}
+
+function recordAuthAttempt(key) {
+    const now = Date.now();
+    const record = authRateLimits.get(key) || { count: 0, windowStart: now };
+    if (now - record.windowStart > AUTH_LIMIT_WINDOW_MS) {
+        record.count = 1;
+        record.windowStart = now;
+    } else {
+        record.count++;
+    }
+    authRateLimits.set(key, record);
+}
+
+function resetAuthAttempts(key) {
+    authRateLimits.delete(key);
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 function getTvPairHandlers() {
     if (!_tvPairHandler) {
         _tvPairHandler = tvPairHandlers.createTvPairHandlers({
@@ -60,7 +99,11 @@ function getSupabaseOtpHandlers() {
             updateSupabaseUser,
             createSupabaseSession,
             publicUser,
-            assertCanCreateSession
+            assertCanCreateSession,
+            getClientIp,
+            isAuthRateLimited,
+            recordAuthAttempt,
+            resetAuthAttempts
         });
     }
     return _supabaseOtpHandlers;
@@ -598,7 +641,8 @@ function publicUser(user) {
         billingStatus: user.billingStatus || "none",
         paidUntil: user.paidUntil || null,
         createdAt: user.createdAt,
-        maxDevices: userMaxDevices(user)
+        maxDevices: userMaxDevices(user),
+        isPremium: isPremiumUser(user)
     };
 }
 
@@ -716,16 +760,39 @@ function removeSession(data, token) {
     data.sessions = data.sessions.filter((session) => session.tokenHash !== tokenHash);
 }
 
-function sendJson(response, statusCode, payload) {
+const ALLOWED_ORIGINS = [
+    "https://novelapp1.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://localhost:5173"
+];
+
+function getCorsHeaders(request) {
+    const origin = request && request.headers ? request.headers["origin"] : null;
+    const allowedOrigin = (origin && (ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".onrender.com")))
+        ? origin
+        : "*";
+
+    return {
+        "access-control-allow-origin": allowedOrigin,
+        "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "access-control-allow-headers": "Content-Type, Authorization, Accept, X-Requested-With",
+        "access-control-max-age": "86400"
+    };
+}
+
+function sendJson(response, statusCode, payload, request = null) {
+    const cors = getCorsHeaders(request);
     response.writeHead(statusCode, {
         "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store"
+        "cache-control": "no-store",
+        ...cors
     });
     response.end(JSON.stringify(payload));
 }
 
-function sendError(response, statusCode, message) {
-    sendJson(response, statusCode, { error: message });
+function sendError(response, statusCode, message, request = null) {
+    sendJson(response, statusCode, { error: message }, request);
 }
 
 function sendApiData(response, statusCode, data) {
@@ -2649,15 +2716,25 @@ async function handleRegister(request, response) {
   return sendJson(response, 201, { token, user: publicUser(user) });
 }
 
+
 async function handleLogin(request, response) {
   const body = await readBody(request);
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
   await ensurePremiumSeedUser();
 
+  const ip = getClientIp(request);
+  const emailKey = `email:${email}`;
+
+  if (isAuthRateLimited(ip) || isAuthRateLimited(emailKey)) {
+    return sendError(response, 429, "Too many login attempts. Please try again in 15 minutes.");
+  }
+
   if (supabaseEnabled()) {
     const user = await findSupabaseUserByEmail(email);
     if (!user || !passwordMatches(password, user.passwordSalt, user.passwordHash)) {
+      recordAuthAttempt(ip);
+      recordAuthAttempt(emailKey);
       return sendError(response, 401, "Email or password is incorrect.");
     }
     try {
@@ -2665,6 +2742,8 @@ async function handleLogin(request, response) {
     } catch (error) {
       return sendError(response, error.statusCode || 403, error.message);
     }
+    resetAuthAttempts(ip);
+    resetAuthAttempts(emailKey);
     const token = await createSupabaseSession(user.id);
     return sendJson(response, 200, { token, user: publicUser(user) });
   }
@@ -2674,6 +2753,8 @@ async function handleLogin(request, response) {
   const user = data.users.find((item) => item.email === email);
 
   if (!user || !passwordMatches(password, user.passwordSalt, user.passwordHash)) {
+    recordAuthAttempt(ip);
+    recordAuthAttempt(emailKey);
     return sendError(response, 401, "Email or password is incorrect.");
   }
   try {
@@ -2682,6 +2763,8 @@ async function handleLogin(request, response) {
     return sendError(response, error.statusCode || 403, error.message);
   }
 
+  resetAuthAttempts(ip);
+  resetAuthAttempts(emailKey);
   const token = createSession(data, user.id);
   writeData(data);
 
@@ -2719,6 +2802,14 @@ async function handleRecoverAccount(request, response) {
   const recoverySecret = String(body.recoverySecret || body.secretKey || "").trim();
   if (recoverySecret.length < 10) return sendError(response, 400, "Recovery secret must be at least 10 characters.");
   await ensurePremiumSeedUser();
+
+  const ip = getClientIp(request);
+  const secretKey = `recoverySecret:${recoverySecret}`;
+
+  if (isAuthRateLimited(ip) || isAuthRateLimited(secretKey)) {
+    return sendError(response, 429, "Too many recovery attempts. Please try again in 15 minutes.");
+  }
+
   const secretHash = hashRecoverySecret(recoverySecret);
   const user = supabaseEnabled()
     ? await findSupabaseUserByRecoveryHash(secretHash)
@@ -2729,12 +2820,18 @@ async function handleRecoverAccount(request, response) {
         return data.users.find((item) => item.recoverySecretHash === secretHash);
       })();
 
-  if (!user) return sendError(response, 404, "No account matched that recovery secret.");
+  if (!user) {
+    recordAuthAttempt(ip);
+    recordAuthAttempt(secretKey);
+    return sendError(response, 404, "No account matched that recovery secret.");
+  }
   try {
     await assertCanCreateSession(user);
   } catch (error) {
     return sendError(response, error.statusCode || 403, error.message);
   }
+  resetAuthAttempts(ip);
+  resetAuthAttempts(secretKey);
   const token = supabaseEnabled()
     ? await createSupabaseSession(user.id)
     : (() => {
@@ -4417,6 +4514,13 @@ function serveStatic(request, response, pathname) {
 }
 
 const server = http.createServer((request, response) => {
+  if (request.method === "OPTIONS") {
+    const cors = getCorsHeaders(request);
+    response.writeHead(204, cors);
+    response.end();
+    return;
+  }
+
   const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/health") {

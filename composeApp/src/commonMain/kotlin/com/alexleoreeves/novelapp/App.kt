@@ -26,6 +26,12 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
+sealed class OtpFlowState {
+    data class VerifySignup(val email: String, val password: String) : OtpFlowState()
+    data class VerifyForgotPassword(val email: String) : OtpFlowState()
+    data class SetNewPassword(val email: String, val accessToken: String) : OtpFlowState()
+}
+
 @Composable
 fun App(
     userSessionStore: UserSessionStore = EmptyUserSessionStore,
@@ -230,9 +236,139 @@ fun App(
         }
     }
 
+    var otpFlowState by remember { mutableStateOf<OtpFlowState?>(null) }
+    var showForgotPassword by remember { mutableStateOf(false) }
+
     NovelAppTheme(appTheme = appTheme.value) {
         if (showSplash) { SplashScreen(onFinished = { showSplash = false }); return@NovelAppTheme }
         if (!isAuthChecked) { AuthLoadingScreen(currentTheme = appTheme.value, message = "Checking your saved account..."); return@NovelAppTheme }
+
+        // OTP verification flow / New password screen
+        when (val currentOtpState = otpFlowState) {
+            is OtpFlowState.VerifySignup -> {
+                OtpVerificationScreen(
+                    email = currentOtpState.email,
+                    currentTheme = appTheme.value,
+                    isSubmitting = isAuthSubmitting,
+                    errorMessage = authError,
+                    onClearError = { authError = null },
+                    onVerifyOtp = { code ->
+                        scope.launch {
+                            isAuthSubmitting = true; authError = null
+                            runCatching { authApi.otpVerify(currentOtpState.email, code) }
+                                .onSuccess { u ->
+                                    userSessionStore.saveAccount(u); account = u; isGuestSession = false
+                                    otpFlowState = null; showAuthSheet = false
+                                    hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                                }
+                                .onFailure { authError = it.message; isAuthSubmitting = false }
+                        }
+                    },
+                    onResendOtp = {
+                        scope.launch {
+                            isAuthSubmitting = true; authError = null
+                            runCatching { authApi.otpSignup(currentOtpState.email, currentOtpState.password) }
+                                .onSuccess { authError = "A new OTP code has been sent to ${currentOtpState.email}"; isAuthSubmitting = false }
+                                .onFailure { authError = it.message; isAuthSubmitting = false }
+                        }
+                    },
+                    onUseRecoverySecret = { otpFlowState = null },
+                    onBack = { otpFlowState = null }
+                )
+                return@NovelAppTheme
+            }
+            is OtpFlowState.VerifyForgotPassword -> {
+                OtpVerificationScreen(
+                    email = currentOtpState.email,
+                    currentTheme = appTheme.value,
+                    isSubmitting = isAuthSubmitting,
+                    errorMessage = authError,
+                    onClearError = { authError = null },
+                    onVerifyOtp = { code ->
+                        scope.launch {
+                            isAuthSubmitting = true; authError = null
+                            runCatching { authApi.otpVerifyRecovery(currentOtpState.email, code) }
+                                .onSuccess { token ->
+                                    otpFlowState = OtpFlowState.SetNewPassword(currentOtpState.email, token)
+                                    isAuthSubmitting = false
+                                }
+                                .onFailure { authError = it.message; isAuthSubmitting = false }
+                        }
+                    },
+                    onResendOtp = {
+                        scope.launch {
+                            isAuthSubmitting = true; authError = null
+                            runCatching { authApi.otpForgotPassword(currentOtpState.email) }
+                                .onSuccess { authError = "A new OTP code has been sent to ${currentOtpState.email}"; isAuthSubmitting = false }
+                                .onFailure { authError = it.message; isAuthSubmitting = false }
+                        }
+                    },
+                    onUseRecoverySecret = { otpFlowState = null; showForgotPassword = true },
+                    onBack = { otpFlowState = null }
+                )
+                return@NovelAppTheme
+            }
+            is OtpFlowState.SetNewPassword -> {
+                NewPasswordScreen(
+                    email = currentOtpState.email,
+                    currentTheme = appTheme.value,
+                    isSubmitting = isAuthSubmitting,
+                    errorMessage = authError,
+                    onClearError = { authError = null },
+                    onSetNewPassword = { newPass ->
+                        scope.launch {
+                            isAuthSubmitting = true; authError = null
+                            runCatching { authApi.otpSetNewPassword(currentOtpState.email, currentOtpState.accessToken, newPass) }
+                                .onSuccess { u ->
+                                    userSessionStore.saveAccount(u); account = u; isGuestSession = false
+                                    otpFlowState = null; showForgotPassword = false; showAuthSheet = false
+                                    hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                                }
+                                .onFailure { authError = it.message; isAuthSubmitting = false }
+                        }
+                    },
+                    onCancel = { otpFlowState = null }
+                )
+                return@NovelAppTheme
+            }
+            null -> {}
+        }
+
+        // Forgot password screen
+        if (showForgotPassword) {
+            ForgotPasswordScreen(
+                currentTheme = appTheme.value,
+                isSubmitting = isAuthSubmitting,
+                errorMessage = authError,
+                onClearError = { authError = null },
+                onSendOtp = { email ->
+                    scope.launch {
+                        isAuthSubmitting = true; authError = null
+                        runCatching { authApi.otpForgotPassword(email) }
+                            .onSuccess {
+                                otpFlowState = OtpFlowState.VerifyForgotPassword(email)
+                                isAuthSubmitting = false
+                            }
+                            .onFailure { authError = it.message; isAuthSubmitting = false }
+                    }
+                },
+                onRecoverWithSecret = { rs, np ->
+                    scope.launch {
+                        isAuthSubmitting = true; authError = null
+                        runCatching { val r = authApi.recoverAccount(rs); authApi.resetPassword(r.authToken, np) }
+                            .onSuccess { r ->
+                                userSessionStore.saveAccount(r); account = r; isGuestSession = false
+                                showForgotPassword = false; showAuthSheet = false
+                                hydrateCloudState(r.authToken); queueCloudSync(); isAuthSubmitting = false
+                            }
+                            .onFailure { authError = it.message; isAuthSubmitting = false }
+                    }
+                },
+                onBackToSignIn = { showForgotPassword = false }
+            )
+            return@NovelAppTheme
+        }
+
         if (account == null && !isGuestSession) {
             AuthScreen(
                 currentTheme = appTheme.value, isSubmitting = isAuthSubmitting, errorMessage = authError,
@@ -243,6 +379,13 @@ fun App(
                     runCatching { authApi.login(e, p) }.onSuccess { u ->
                         userSessionStore.saveAccount(u); account = u; isGuestSession = false
                         hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
+                    }.onFailure { authError = it.message; isAuthSubmitting = false }
+                }},
+                onOtpSignup = { e, p -> scope.launch {
+                    isAuthSubmitting = true; authError = null
+                    runCatching { authApi.otpSignup(e, p) }.onSuccess {
+                        otpFlowState = OtpFlowState.VerifySignup(e, p)
+                        isAuthSubmitting = false
                     }.onFailure { authError = it.message; isAuthSubmitting = false }
                 }},
                 onCreateAccount = { un, e, p, rs -> scope.launch {
@@ -259,7 +402,8 @@ fun App(
                             userSessionStore.saveAccount(r); account = r; isGuestSession = false
                             hydrateCloudState(r.authToken); queueCloudSync(); isAuthSubmitting = false
                         }.onFailure { authError = it.message; isAuthSubmitting = false }
-                }}
+                }},
+                onForgotPassword = { showForgotPassword = true }
             )
             return@NovelAppTheme
         }
@@ -269,6 +413,14 @@ fun App(
             ProfileSelectionScreen(
                 currentTheme = appTheme.value,
                 profiles = activeProfiles,
+                accountUsername = account?.username,
+                onUpdateUsername = { newUsername ->
+                    account?.let { a ->
+                        val updated = a.copy(username = newUsername)
+                        account = updated
+                        userSessionStore.saveAccount(updated)
+                    }
+                },
                 onSelectProfile = { selectedProfile = it },
                 onCreateProfile = { name, isKids, colorIdx ->
                     activeProfiles.add(UserProfile(id = "p_${activeProfiles.size + 1}", name = name, isKids = isKids, avatarColorIndex = colorIdx))

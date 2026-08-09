@@ -22,7 +22,8 @@ class IosUserSessionStore : UserSessionStore {
                 plan = defaults.stringForKey(KEY_PLAN).orEmpty().ifBlank { "free" },
                 billingStatus = defaults.stringForKey(KEY_BILLING_STATUS).orEmpty().ifBlank { "none" },
                 paidUntil = defaults.stringForKey(KEY_PAID_UNTIL),
-                createdAt = defaults.stringForKey(KEY_CREATED_AT).orEmpty()
+                createdAt = defaults.stringForKey(KEY_CREATED_AT).orEmpty(),
+                isPremium = defaults.boolForKey(KEY_IS_PREMIUM)
             )
         }
     }
@@ -37,6 +38,7 @@ class IosUserSessionStore : UserSessionStore {
         account.paidUntil?.let { defaults.setObject(it, forKey = KEY_PAID_UNTIL) }
             ?: defaults.removeObjectForKey(KEY_PAID_UNTIL)
         defaults.setObject(account.createdAt, forKey = KEY_CREATED_AT)
+        defaults.setBool(account.isPremium, forKey = KEY_IS_PREMIUM)
     }
 
     override fun clearAccount() {
@@ -48,6 +50,7 @@ class IosUserSessionStore : UserSessionStore {
         defaults.removeObjectForKey(KEY_BILLING_STATUS)
         defaults.removeObjectForKey(KEY_PAID_UNTIL)
         defaults.removeObjectForKey(KEY_CREATED_AT)
+        defaults.removeObjectForKey(KEY_IS_PREMIUM)
     }
 
     private companion object {
@@ -59,5 +62,6 @@ class IosUserSessionStore : UserSessionStore {
         const val KEY_BILLING_STATUS = "billing_status"
         const val KEY_PAID_UNTIL = "paid_until"
         const val KEY_CREATED_AT = "created_at"
+        const val KEY_IS_PREMIUM = "is_premium"
     }
 }

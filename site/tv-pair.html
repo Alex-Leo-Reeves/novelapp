@@ -548,8 +548,14 @@
                 Open NovelApp if installed
             </button>
 
-            <div class="divider">OR SIGN IN WITH EMAIL</div>
+            <div class="divider" style="margin-top: 18px;">SELECT ACTION</div>
 
+            <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                <button type="button" id="tabSignIn" style="flex: 1; padding: 10px; border-radius: 12px; background: var(--teal); color: #05060b; border: none; font-weight: 800; cursor: pointer;">Sign In</button>
+                <button type="button" id="tabCreate" style="flex: 1; padding: 10px; border-radius: 12px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); font-weight: 800; cursor: pointer;">Create Account</button>
+            </div>
+
+            <!-- Sign In Form -->
             <form id="pairForm">
                 <div class="field">
                     <label for="email">Email</label>
@@ -565,6 +571,36 @@
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
                     Sign in and approve TV
+                </button>
+            </form>
+
+            <!-- Create Account Step 1: Email, Password, Username -->
+            <form id="signupForm" class="hidden">
+                <div class="field">
+                    <label for="regEmail">Email</label>
+                    <input type="email" id="regEmail" placeholder="you@example.com" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="regPassword">Password</label>
+                    <input type="password" id="regPassword" placeholder="••••••••" autocomplete="new-password" required>
+                </div>
+                <div class="field">
+                    <label for="regUsername">Choose Username</label>
+                    <input type="text" id="regUsername" placeholder="ReaderName" autocomplete="username" required>
+                </div>
+                <button type="submit" id="signupBtn">
+                    Send OTP Code
+                </button>
+            </form>
+
+            <!-- Create Account Step 2: OTP Verification -->
+            <form id="otpForm" class="hidden">
+                <div class="field">
+                    <label for="otpCode">6-Digit OTP Code</label>
+                    <input type="text" id="otpCode" placeholder="123456" maxlength="10" required style="font-size: 1.4rem; letter-spacing: 0.3em; text-align: center;">
+                </div>
+                <button type="submit" id="otpVerifyBtn">
+                    Verify OTP & Approve TV
                 </button>
             </form>
 
@@ -606,6 +642,13 @@
             var pair = new URLSearchParams(window.location.search).get("pair") || "";
             var code = new URLSearchParams(window.location.search).get("code") || "";
 
+            // Auto-trigger deep link if pair and code exist
+            if (pair && code) {
+                setTimeout(function() {
+                    window.location.href = "novelapp://pair?pair=" + encodeURIComponent(pair) + "&code=" + encodeURIComponent(code);
+                }, 300);
+            }
+
             (function showCode() {
                 var el = document.getElementById("codeDisplay");
                 var hint = document.getElementById("codeHint");
@@ -623,6 +666,34 @@
                 el.className = "status" + (type ? " " + type : "");
             }
 
+            var tabSignIn = document.getElementById("tabSignIn");
+            var tabCreate = document.getElementById("tabCreate");
+            var pairForm = document.getElementById("pairForm");
+            var signupForm = document.getElementById("signupForm");
+            var otpForm = document.getElementById("otpForm");
+
+            tabSignIn.addEventListener("click", function() {
+                tabSignIn.style.background = "var(--teal)";
+                tabSignIn.style.color = "#05060b";
+                tabCreate.style.background = "var(--panel-2)";
+                tabCreate.style.color = "var(--muted)";
+                pairForm.classList.remove("hidden");
+                signupForm.classList.add("hidden");
+                otpForm.classList.add("hidden");
+                setStatus("");
+            });
+
+            tabCreate.addEventListener("click", function() {
+                tabCreate.style.background = "var(--teal)";
+                tabCreate.style.color = "#05060b";
+                tabSignIn.style.background = "var(--panel-2)";
+                tabSignIn.style.color = "var(--muted)";
+                signupForm.classList.remove("hidden");
+                pairForm.classList.add("hidden");
+                otpForm.classList.add("hidden");
+                setStatus("");
+            });
+
             document.getElementById("openAppBtn").addEventListener("click", function() {
                 if (!pair || !code) {
                     setStatus("Open this page from the QR code on your TV.", "err");
@@ -632,7 +703,8 @@
                 window.location.href = "novelapp://pair?pair=" + encodeURIComponent(pair) + "&code=" + encodeURIComponent(code);
             });
 
-            document.getElementById("pairForm").addEventListener("submit", function(e) {
+            // Sign In submit
+            pairForm.addEventListener("submit", function(e) {
                 e.preventDefault();
                 if (!pair || !code) {
                     setStatus("This link is missing pairing info. Scan the QR on your TV again.", "err");
@@ -652,26 +724,14 @@
 
                 fetch(api + "/tv-pair/approve", {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        pair: pair,
-                        code: code,
-                        email: email,
-                        password: password
-                    })
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ pair: pair, code: code, email: email, password: password })
                 }).then(function(r) {
-                    return r.json().then(function(d) {
-                        return {
-                            ok: r.ok,
-                            d: d
-                        };
-                    });
+                    return r.json().then(function(d) { return { ok: r.ok, d: d }; });
                 }).then(function(res) {
                     if (res.ok) {
                         setStatus("TV approved! It will refresh in a few seconds.", "ok");
-                        document.getElementById("pairForm").classList.add("hidden");
+                        pairForm.classList.add("hidden");
                     } else {
                         setStatus(res.d.error || "Could not approve this TV.", "err");
                     }
@@ -680,6 +740,102 @@
                 }).then(function() {
                     btn.disabled = false;
                     btn.textContent = "Sign in and approve TV";
+                });
+            });
+
+            var activeSignupEmail = "";
+
+            // Signup step 1 submit
+            signupForm.addEventListener("submit", function(e) {
+                e.preventDefault();
+                var email = document.getElementById("regEmail").value.trim();
+                var password = document.getElementById("regPassword").value;
+                var username = document.getElementById("regUsername").value.trim();
+                if (!email || !password || !username) {
+                    setStatus("Fill in email, password, and username.", "err");
+                    return;
+                }
+                activeSignupEmail = email;
+
+                var btn = document.getElementById("signupBtn");
+                btn.disabled = true;
+                btn.textContent = "Sending OTP…";
+                setStatus("Sending verification code to " + email + "…", "info");
+
+                fetch(api + "/auth/otp/signup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email: email, password: password, username: username })
+                }).then(function(r) {
+                    return r.json().then(function(d) { return { ok: r.ok, d: d }; });
+                }).then(function(res) {
+                    if (res.ok) {
+                        setStatus("OTP sent! Enter the code sent to your email.", "ok");
+                        signupForm.classList.add("hidden");
+                        otpForm.classList.remove("hidden");
+                    } else {
+                        setStatus(res.d.error || "Signup failed.", "err");
+                    }
+                }).catch(function() {
+                    setStatus("Network error. Try again.", "err");
+                }).then(function() {
+                    btn.disabled = false;
+                    btn.textContent = "Send OTP Code";
+                });
+            });
+
+            // Signup step 2 OTP submit
+            otpForm.addEventListener("submit", function(e) {
+                e.preventDefault();
+                if (!pair || !code) {
+                    setStatus("This link is missing pairing info.", "err");
+                    return;
+                }
+                var otp = document.getElementById("otpCode").value.trim();
+                if (!otp) {
+                    setStatus("Enter the OTP code.", "err");
+                    return;
+                }
+
+                var btn = document.getElementById("otpVerifyBtn");
+                btn.disabled = true;
+                btn.textContent = "Verifying…";
+                setStatus("Verifying OTP code…", "info");
+
+                fetch(api + "/auth/otp/verify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email: activeSignupEmail, token: otp, type: "magiclink" })
+                }).then(function(r) {
+                    return r.json().then(function(d) { return { ok: r.ok, d: d }; });
+                }).then(function(res) {
+                    if (res.ok && res.d.token) {
+                        setStatus("OTP verified! Approving TV…", "info");
+                        return fetch(api + "/tv-pair/approve", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": "Bearer " + res.d.token
+                            },
+                            body: JSON.stringify({ pair: pair, code: code })
+                        }).then(function(r2) {
+                            return r2.json().then(function(d2) { return { ok: r2.ok, d: d2 }; });
+                        }).then(function(res2) {
+                            if (res2.ok) {
+                                setStatus("Account created & TV approved! It will refresh in a few seconds.", "ok");
+                                otpForm.classList.add("hidden");
+                            } else {
+                                setStatus(res2.d.error || "TV approval failed.", "err");
+                            }
+                        });
+                    } else {
+                        setStatus(res.d.error || "OTP verification failed.", "err");
+                    }
+                }).catch(function() {
+                    setStatus("Network error. Try again.", "err");
+                }).then(function() {
+                    btn.disabled = false;
+                    btn.textContent = "Verify OTP & Approve TV";
                 });
             });
         })();
