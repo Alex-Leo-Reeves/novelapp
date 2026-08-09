@@ -134,8 +134,19 @@ fun TvMangaViewerScreen(
                 contentAlignment = Alignment.Center
             ) {
                 if (pageIndex < pages.size) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val imageRequest = remember(pages[pageIndex]) {
+                        coil3.request.ImageRequest.Builder(context)
+                            .data(pages[pageIndex])
+                            .apply {
+                                if (pages[pageIndex].contains("webtoon")) {
+                                    header("Referer", "https://www.webtoons.com")
+                                }
+                            }
+                            .build()
+                    }
                     AsyncImage(
-                        model = pages[pageIndex],
+                        model = imageRequest,
                         contentDescription = "Page ${pageIndex + 1}",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier

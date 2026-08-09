@@ -348,8 +348,19 @@ fun MangaViewerScreen(
                                             pageSizes = pageSizes + (index to coordinates.size)
                                         }
                                 ) {
+                                                                        val context = coil3.compose.LocalPlatformContext.current
+                                    val imageRequest = androidx.compose.runtime.remember(pageUrl) {
+                                        coil3.request.ImageRequest.Builder(context)
+                                            .data(pageUrl)
+                                            .apply {
+                                                if (pageUrl.contains("webtoon")) {
+                                                    header("Referer", "https://www.webtoons.com")
+                                                }
+                                            }
+                                            .build()
+                                    }
                                     AsyncImage(
-                                        model = pageUrl,
+                                        model = imageRequest,
                                         contentDescription = "Page ${index + 1}",
                                         contentScale = ContentScale.FillWidth,
                                         modifier = Modifier.fillMaxWidth()
@@ -404,8 +415,19 @@ fun MangaViewerScreen(
                                 state = pagerState,
                                 modifier = Modifier.fillMaxSize()
                             ) { pageIndex ->
+                                                                val context = coil3.compose.LocalPlatformContext.current
+                                val imageRequest = androidx.compose.runtime.remember(pages[pageIndex]) {
+                                    coil3.request.ImageRequest.Builder(context)
+                                        .data(pages[pageIndex])
+                                        .apply {
+                                            if (pages[pageIndex].contains("webtoon")) {
+                                                header("Referer", "https://www.webtoons.com")
+                                            }
+                                        }
+                                        .build()
+                                }
                                 AsyncImage(
-                                    model = pages[pageIndex],
+                                    model = imageRequest,
                                     contentDescription = "Page ${pageIndex + 1}",
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier.fillMaxSize()
@@ -419,12 +441,23 @@ fun MangaViewerScreen(
                             state = pagerState,
                             modifier = Modifier.fillMaxSize()
                         ) { pageIndex ->
-                            AsyncImage(
-                                model = pages[pageIndex],
-                                contentDescription = "Page ${pageIndex + 1}",
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                                                            val context = coil3.compose.LocalPlatformContext.current
+                                val imageRequest = androidx.compose.runtime.remember(pages[pageIndex]) {
+                                    coil3.request.ImageRequest.Builder(context)
+                                        .data(pages[pageIndex])
+                                        .apply {
+                                            if (pages[pageIndex].contains("webtoon")) {
+                                                header("Referer", "https://www.webtoons.com")
+                                            }
+                                        }
+                                        .build()
+                                }
+                                AsyncImage(
+                                    model = imageRequest,
+                                    contentDescription = "Page ${pageIndex + 1}",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
+                                )
                         }
                     }
                 }

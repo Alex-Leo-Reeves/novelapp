@@ -550,7 +550,9 @@ class WebtoonScraper(private val httpClient: HttpClient) : MangaScraper {
 
     override suspend fun fetchMangaPages(chapterUrl: String): List<String> {
         return try {
-            val html = httpClient.get(chapterUrl).bodyAsText()
+            val html = httpClient.get(chapterUrl) {
+                header("Referer", "https://www.webtoons.com")
+            }.bodyAsText()
             val doc = Ksoup.parse(html)
             doc.select("img._images, .viewer_img img, img[src*=webtoon], img[data-url]")
                 .map { it.attr("data-url").ifBlank { it.attr("data-src") }.ifBlank { it.attr("src") } }

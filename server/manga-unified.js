@@ -129,13 +129,13 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
         const seen = new Set();
         while ((match = anchorRegex.exec(html)) !== null) {
             let href = match[1];
-            const titleMatch = stripTags(match[2]);
+            const inner = match[2];
+            const titleDiv = /<div[^>]*class="[^"]*line-clamp-2[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(inner);
+            const titleMatch = titleDiv ? stripTags(titleDiv[1]) : stripTags(inner);
             if (!titleMatch || titleMatch.length < 2 || seen.has(href)) continue;
             seen.add(href);
             href = resolveUrl(href, WEBCENTRAL_BASE);
-            // The cover lives inside the anchor's own inner content — searching
-            // a lookbehind region picks up the previous card's <img>.
-            const inner = match[2];
+            // The cover lives inside the anchor's own inner content.
             const coverMatch =
                 /<img[^>]*src="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i.exec(inner) ||
                 /<source[^>]*srcset="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i.exec(inner);

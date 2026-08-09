@@ -574,18 +574,18 @@ class NovelSearchRepository(
      */
     private fun curatedVideoSeeds(category: VideoCategory): List<UnifiedSearchResult> {
         return when (category) {
-            VideoCategory.CLASSIC -> listOf(
-                "Friends", "The Office", "Breaking Bad", "Game of Thrones",
-                "Stranger Things", "The Crown", "Sherlock", "Doctor Who",
-                "The Simpsons", "Seinfeld", "The Fresh Prince of Bel-Air", "Full House",
-                "The Walking Dead", "Better Call Saul", "The Mandalorian", "House",
-                "The Big Bang Theory", "How I Met Your Mother", "Modern Family", "Supernatural"
-            ).mapIndexed { i, title ->
+                        VideoCategory.CLASSIC -> listOf(
+                "Friends" to 1668, "The Office" to 2316, "Breaking Bad" to 1396, "Game of Thrones" to 1399,
+                "Stranger Things" to 66732, "The Crown" to 65495, "Sherlock" to 19885, "Doctor Who" to 57243,
+                "The Simpsons" to 456, "Seinfeld" to 1400, "The Fresh Prince of Bel-Air" to 1871, "Full House" to 1475,
+                "The Walking Dead" to 1402, "Better Call Saul" to 60059, "The Mandalorian" to 82856, "House" to 1408,
+                "The Big Bang Theory" to 1418, "How I Met Your Mother" to 1100, "Modern Family" to 1421, "Supernatural" to 1622
+            ).mapIndexed { i, (title, id) ->
                 UnifiedSearchResult(
                     id = "curated_classic_$i",
                     title = title,
                     coverUrl = "",
-                    detailPageUrl = "tmdb://tv/$i",
+                    detailPageUrl = "tmdb://tv/$id",
                     sourceName = "TMDB",
                     genre = "Classic TV",
                     synopsis = "",
@@ -593,18 +593,18 @@ class NovelSearchRepository(
                     mediaKind = VideoCategory.CLASSIC.name
                 )
             }
-            VideoCategory.MOVIES -> listOf(
-                "Inception", "The Matrix", "Interstellar", "The Dark Knight",
-                "Avengers: Endgame", "Spider-Man: No Way Home", "Dune", "Oppenheimer",
-                "The Godfather", "Pulp Fiction", "Forrest Gump", "Fight Club",
-                "The Shawshank Redemption", "Goodfellas", "The Silence of the Lambs", "The Departed",
-                "Tenet", "Blade Runner 2049", "Mad Max: Fury Road", "John Wick"
-            ).mapIndexed { i, title ->
+                        VideoCategory.MOVIES -> listOf(
+                "Inception" to 27205, "The Matrix" to 603, "Interstellar" to 157336, "The Dark Knight" to 155,
+                "Avengers: Endgame" to 299534, "Spider-Man: No Way Home" to 634649, "Dune" to 438631, "Oppenheimer" to 872585,
+                "The Godfather" to 238, "Pulp Fiction" to 680, "Forrest Gump" to 13, "Fight Club" to 550,
+                "The Shawshank Redemption" to 278, "Goodfellas" to 769, "The Silence of the Lambs" to 274, "The Departed" to 1422,
+                "Tenet" to 577922, "Blade Runner 2049" to 335984, "Mad Max: Fury Road" to 76341, "John Wick" to 245891
+            ).mapIndexed { i, (title, id) ->
                 UnifiedSearchResult(
                     id = "curated_movie_$i",
                     title = title,
                     coverUrl = "",
-                    detailPageUrl = "tmdb://movie/${300 + i}",
+                    detailPageUrl = "tmdb://movie/$id",
                     sourceName = "TMDB",
                     genre = "Movie",
                     synopsis = "",
@@ -612,17 +612,17 @@ class NovelSearchRepository(
                     mediaKind = VideoCategory.MOVIES.name
                 )
             }
-            VideoCategory.CARTOON -> listOf(
-                "SpongeBob SquarePants", "The Simpsons", "Family Guy", "Rick and Morty",
-                "Adventure Time", "Gravity Falls", "Regular Show", "Steven Universe",
-                "South Park", "Phineas and Ferb", "Bob's Burgers", "American Dad",
-                "The Amazing World of Gumball", "Avatar: The Last Airbender", "Teen Titans Go", "Ben 10"
-            ).mapIndexed { i, title ->
+                        VideoCategory.CARTOON -> listOf(
+                "SpongeBob SquarePants" to 3151, "The Simpsons" to 456, "Family Guy" to 1434, "Rick and Morty" to 60625,
+                "Adventure Time" to 15260, "Gravity Falls" to 40075, "Regular Show" to 31132, "Steven Universe" to 61175,
+                "South Park" to 2190, "Phineas and Ferb" to 14502, "Bob's Burgers" to 32726, "American Dad" to 1433,
+                "The Amazing World of Gumball" to 37554, "Avatar: The Last Airbender" to 246, "Teen Titans Go" to 48674, "Ben 10" to 1746
+            ).mapIndexed { i, (title, id) ->
                 UnifiedSearchResult(
                     id = "curated_cartoon_$i",
                     title = title,
                     coverUrl = "",
-                    detailPageUrl = "tmdb://tv/${500 + i}",
+                    detailPageUrl = "tmdb://tv/$id",
                     sourceName = "TMDB",
                     genre = "Animation, Cartoon",
                     synopsis = "",
@@ -630,17 +630,17 @@ class NovelSearchRepository(
                     mediaKind = VideoCategory.CARTOON.name
                 )
             }
-            VideoCategory.K_DRAMA -> listOf(
-                "Squid Game", "Crash Landing on You", "True Beauty", "Nevertheless",
-                "My Love from the Star", "Descendants of the Sun", "Goblin", "Itaewon Class",
-                "The Heirs", "What's Wrong with Secretary Kim", "King the Land", "Business Proposal",
-                "Hotel del Luna", "Vincenzo", "Extraordinary Attorney Woo", "The Glory"
-            ).mapIndexed { i, title ->
+                        VideoCategory.K_DRAMA -> listOf(
+                "Squid Game" to 93405, "Crash Landing on You" to 94796, "True Beauty" to 111803, "Nevertheless" to 125301,
+                "My Love from the Star" to 57647, "Descendants of the Sun" to 65334, "Goblin" to 67915, "Itaewon Class" to 96162,
+                "The Heirs" to 56218, "What's Wrong with Secretary Kim" to 79001, "King the Land" to 216738, "Business Proposal" to 136166,
+                "Hotel del Luna" to 90447, "Vincenzo" to 117376, "Extraordinary Attorney Woo" to 197067, "The Glory" to 114868
+            ).mapIndexed { i, (title, id) ->
                 UnifiedSearchResult(
                     id = "curated_kdrama_$i",
                     title = title,
                     coverUrl = "",
-                    detailPageUrl = "tmdb://tv/${700 + i}",
+                    detailPageUrl = "tmdb://tv/$id",
                     sourceName = "TMDB",
                     genre = "Korean Drama, K-Drama",
                     synopsis = "",

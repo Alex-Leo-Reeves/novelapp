@@ -96,6 +96,7 @@ fun TvHomeScreen(
                         searchPerformed = false
                         items = emptyList()
                         searchQuery = ""
+                        loadContent()
                         true
                     } else {
                         false

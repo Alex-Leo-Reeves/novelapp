@@ -69,16 +69,20 @@ class TvMediaRepository {
                 else -> emptyList()
             }
 
-            // Fallback for episodic content with 0 scraped chapters
             val isMovie = kind == "movie" || kind == "movies" || (item.isVideo && !item.isAnime && kind == "movie")
             val isEpisodic = item.isAnime || (item.isVideo && !isMovie)
             if (episodes.isEmpty() && isEpisodic) {
-                (1..24).map { epNum ->
-                    Chapter(
-                        title = "Episode $epNum",
-                        url = "tmdb-episode://${item.id.removePrefix("anilist_").removePrefix("tmdb_")}/1/$epNum",
-                        chapterNumber = epNum
-                    )
+                if (item.detailPageUrl.startsWith("tmdb://")) {
+                    val tmdbId = item.detailPageUrl.removePrefix("tmdb://").split("/").getOrNull(1) ?: ""
+                    (1..24).map { epNum ->
+                        Chapter(
+                            title = "Episode $epNum",
+                            url = "tmdb:$tmdbId:1:$epNum",
+                            chapterNumber = epNum
+                        )
+                    }
+                } else {
+                    emptyList()
                 }
             } else {
                 episodes
@@ -149,10 +153,12 @@ class TvMediaRepository {
 
         if (item.isAnime && chapter != null) {
             val epUrl = chapter.url
-            if (ConsumetAnimeScraper.isConsumetEpisodeUrl(epUrl)) {
-                return consumetAnimeScraper.extractStreamUrl(epUrl)
+            if (!epUrl.startsWith("tmdb:")) {
+                if (ConsumetAnimeScraper.isConsumetEpisodeUrl(epUrl)) {
+                    return consumetAnimeScraper.extractStreamUrl(epUrl)
+                }
+                return aninekoScraper.extractStreamUrl(epUrl) ?: animePaheScraper.extractStreamUrl(epUrl) ?: epUrl
             }
-            return aninekoScraper.extractStreamUrl(epUrl) ?: animePaheScraper.extractStreamUrl(epUrl) ?: epUrl
         }
 
         val tmdbParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
