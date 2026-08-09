@@ -106,14 +106,25 @@ function createSupabaseAuthHandlers(deps) {
         }
 
         try {
-            // Create the user in Supabase Auth (Supabase sends verification email automatically)
+            // Create the user in Supabase Auth
             await supabaseAuthRequest("signup", {
-                body: { email, password, user_metadata: { username } }
+                body: { email, password, data: { username } }
             });
+
+            // Explicitly send a 6-digit OTP email (type=signup overrides the magic link)
+            try {
+                await supabaseAuthRequest("otp", {
+                    body: { email, create_user: false }
+                });
+            } catch (otpErr) {
+                // OTP request failed (e.g. rate limit) — account was still created,
+                // Supabase already sent its own confirmation link as fallback.
+                console.warn("[OTP] Secondary OTP request failed:", otpErr.message);
+            }
 
             return sendJson(response, 200, {
                 ok: true,
-                message: "Account created. An OTP code has been sent to your email.",
+                message: "Account created. A 6-digit OTP code has been sent to your email.",
                 email
             });
         } catch (err) {
@@ -133,7 +144,7 @@ function createSupabaseAuthHandlers(deps) {
         const body = await readBody(request);
         const email = String(body.email || "").trim().toLowerCase();
         const token = String(body.token || body.otp || "").trim();
-        const type = String(body.type || "magiclink").trim();
+        const type = String(body.type || "signup").trim();
 
         if (!email) return sendError(response, 400, "Email is required.");
         if (!token) return sendError(response, 400, "OTP code is required.");

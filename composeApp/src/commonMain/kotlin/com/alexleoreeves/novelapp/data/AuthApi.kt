@@ -99,7 +99,7 @@ class AuthApi(
      * OTP Screen (for signup or login): enter OTP code → verify.
      * Returns SavedUserAccount with session token → go to home.
      */
-    suspend fun otpVerify(email: String, token: String, type: String = "magiclink"): SavedUserAccount {
+    suspend fun otpVerify(email: String, token: String, type: String = "signup"): SavedUserAccount {
         val response = client.post("$baseUrl/auth/otp/verify") {
             accept(ContentType.parse("application/json"))
             contentType(ContentType.parse("application/json"))
