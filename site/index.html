@@ -4,283 +4,1153 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NovaRead TV</title>
-    <meta name="description" content="NovaRead TV by Ozegbe Mike Isioma — a mobile entertainment app for novels, manga, anime, K-drama, cartoons, movies, saved accounts, in-app updates, AI narration, and manga OCR." />
+    <title>NovaRead TV — Every Story, One Screen</title>
+    <meta name="description" content="NovaRead TV by Mike — a mobile entertainment app for novels, manga, anime, K-drama, cartoons, Nollywood, movies, AI narration, and in-app updates. Developed by Mike — masteralexleoreevesd1@gmail.com" />
     <meta name="robots" content="index, follow" />
-    <meta name="author" content="Ozegbe Mike Isioma" />
+    <meta name="author" content="Mike" />
     <meta name="google-site-verification" content="googlea03eddeedac715ac.html" />
-    <!-- Google Search Console ownership verification via HTML file upload: the file googlea03eddeedac715ac.html is served from the site root. -->
     <link rel="canonical" href="https://novelapp1.onrender.com" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/assets/novelapp-icon.svg" />
     <style>
-        /* ── Critical inline styles (loads instantly even on slow mobile) ── */
+        /* ═══════════ NovaRead TV — animated landing ═══════════ */
         
          :root {
             color-scheme: dark;
-            --bg: #0b0d10;
-            --text: #f4f1ec;
-            --muted: #a9b1bf;
-            --line: rgba(255, 255, 255, 0.11);
-            --accent: #e84d8a;
-            --accent-2: #42d6b5;
-            --gold: #f2c766
+            --bg: #05060b;
+            --panel: #0c0e16;
+            --panel-2: #141824;
+            --text: #f7f5f0;
+            --muted: #9aa4b6;
+            --line: rgba(255, 255, 255, 0.09);
+            --pink: #e84d8a;
+            --orange: #ff784f;
+            --teal: #22d3ee;
+            --gold: #f5c05d;
+            --lime: #a3e635;
+            --font: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
         
         *,
-         :after,
-         :before {
-            box-sizing: border-box
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+        
+        html {
+            scroll-behavior: smooth;
         }
         
         body {
             margin: 0;
             min-height: 100vh;
+            overflow-x: hidden;
             background: var(--bg);
             color: var(--text);
-            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
+            font-family: var(--font);
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+        /* ── Star field ───────────────────────────────── */
+        
+        #stars {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            opacity: 0.7;
+        }
+        
+        .cursor-glow {
+            position: fixed;
+            width: 380px;
+            height: 380px;
+            left: 0;
+            top: 0;
+            z-index: 0;
+            pointer-events: none;
+            border-radius: 50%;
+            background: radial-gradient(circle at center, rgba(232, 77, 138, 0.10), transparent 62%);
+            transform: translate(-50%, -50%);
+            transition: opacity 0.4s ease;
+            opacity: 0;
+        }
+        
+        @media (hover: hover) {
+            .cursor-glow {
+                opacity: 1;
+            }
+        }
+        /* ── Floating glow orbs ──────────────────────── */
+        
+        .orb {
+            position: fixed;
+            z-index: 0;
+            border-radius: 50%;
+            filter: blur(90px);
+            pointer-events: none;
+            will-change: transform;
+        }
+        
+        .orb-1 {
+            width: 480px;
+            height: 480px;
+            left: -160px;
+            top: -120px;
+            background: radial-gradient(circle, rgba(232, 77, 138, 0.22), transparent 68%);
+            animation: drift1 22s ease-in-out infinite alternate;
+        }
+        
+        .orb-2 {
+            width: 520px;
+            height: 520px;
+            right: -200px;
+            top: 30vh;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.16), transparent 68%);
+            animation: drift2 26s ease-in-out infinite alternate;
+        }
+        
+        .orb-3 {
+            width: 420px;
+            height: 420px;
+            left: 30%;
+            bottom: -200px;
+            background: radial-gradient(circle, rgba(245, 192, 93, 0.14), transparent 68%);
+            animation: drift3 24s ease-in-out infinite alternate;
+        }
+        
+        @keyframes drift1 {
+            from {
+                transform: translate(0, 0) scale(1);
+            }
+            to {
+                transform: translate(90px, 70px) scale(1.15);
+            }
+        }
+        
+        @keyframes drift2 {
+            from {
+                transform: translate(0, 0) scale(1);
+            }
+            to {
+                transform: translate(-80px, -60px) scale(1.1);
+            }
+        }
+        
+        @keyframes drift3 {
+            from {
+                transform: translate(0, 0) scale(1);
+            }
+            to {
+                transform: translate(60px, -90px) scale(1.2);
+            }
+        }
+        /* ── Layout shell ────────────────────────────── */
+        
+        .site-header,
+        main,
+        footer {
+            position: relative;
+            z-index: 2;
         }
         
         .site-header {
             position: sticky;
             top: 0;
-            z-index: 10;
+            z-index: 50;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 20px;
             padding: 16px clamp(18px, 4vw, 48px);
-            background: rgba(11, 13, 16, 0.86);
+            background: rgba(5, 6, 11, 0.72);
             border-bottom: 1px solid var(--line);
-            backdrop-filter: blur(18px)
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
         }
         
         .brand {
             display: inline-flex;
             align-items: center;
-            gap: 10px;
-            text-decoration: none;
-            font-weight: 800
+            gap: 11px;
+            font-weight: 900;
+            font-size: 1.04rem;
+            letter-spacing: 0.2px;
         }
         
         .brand-mark {
             width: 34px;
             height: 34px;
-            border-radius: 8px;
-            display: block
+            border-radius: 9px;
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 10px 26px rgba(232, 77, 138, 0.28);
+            display: block;
+        }
+        
+        .brand .dot {
+            color: var(--pink);
         }
         
         nav {
             display: flex;
-            gap: 18px;
+            gap: 22px;
             color: var(--muted);
-            font-size: .94rem
+            font-size: 0.92rem;
+            font-weight: 600;
         }
         
         nav a {
-            text-decoration: none;
-            color: inherit
+            position: relative;
+            padding: 4px 0;
+            transition: color 0.25s ease;
         }
+        
+        nav a::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            bottom: -2px;
+            width: 0;
+            height: 2px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--pink), var(--orange));
+            transition: width 0.3s ease;
+        }
+        
+        nav a:hover {
+            color: var(--text);
+        }
+        
+        nav a:hover::after {
+            width: 100%;
+        }
+        /* ── Hero ────────────────────────────────────── */
         
         .hero {
             display: grid;
-            min-height: calc(100vh - 67px);
-            grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
-            gap: clamp(28px, 6vw, 72px);
+            grid-template-columns: minmax(0, 1.15fr) minmax(320px, 460px);
+            gap: clamp(28px, 5vw, 64px);
             align-items: center;
-            padding: clamp(36px, 7vw, 92px) clamp(18px, 5vw, 72px)
-        }
-        
-        h1 {
-            font-size: clamp(3.25rem, 8vw, 7rem);
-            line-height: .92;
-            margin: 0 0 16px;
-            letter-spacing: 0
-        }
-        
-        h2 {
-            font-size: clamp(2rem, 4vw, 3.75rem);
-            line-height: 1;
-            letter-spacing: 0;
-            max-width: 780px;
-            margin: 0
-        }
-        
-        .lede {
-            max-width: 620px;
-            color: var(--muted);
-            font-size: clamp(1rem, 1.8vw, 1.22rem);
-            line-height: 1.72;
-            margin: 0
+            min-height: calc(100vh - 67px);
+            padding: clamp(44px, 8vw, 110px) clamp(18px, 5vw, 72px) clamp(40px, 6vw, 80px);
         }
         
         .eyebrow {
-            margin: 0 0 10px;
-            color: var(--accent-2);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 18px;
+            color: var(--teal);
             font-weight: 800;
             text-transform: uppercase;
-            font-size: .78rem
+            font-size: 0.76rem;
+            letter-spacing: 0.14em;
         }
         
-        .button {
-            display: inline-flex;
-            min-height: 48px;
-            align-items: center;
-            justify-content: center;
-            border-radius: 8px;
-            padding: 0 18px;
-            text-decoration: none;
-            font-weight: 800
+        .eyebrow .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--teal);
+            box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6);
+            animation: pulse-dot 2s infinite;
         }
         
-        .button.primary {
-            background: var(--accent);
-            color: #fff
+        @keyframes pulse-dot {
+            0% {
+                box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.55);
+            }
+            70% {
+                box-shadow: 0 0 0 9px rgba(34, 211, 238, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+            }
         }
         
-        .button.secondary {
-            border: 1px solid var(--line);
-            color: var(--text)
+        h1 {
+            margin: 0 0 22px;
+            font-size: clamp(3.1rem, 7.6vw, 6.6rem);
+            line-height: 0.94;
+            letter-spacing: -0.03em;
+            font-weight: 900;
+        }
+        
+        .gradient-text {
+            background: linear-gradient(92deg, var(--pink) 0%, var(--orange) 38%, var(--gold) 72%, var(--teal) 100%);
+            background-size: 220% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: hue-slide 7s ease-in-out infinite;
+        }
+        
+        @keyframes hue-slide {
+            0%,
+            100% {
+                background-position: 0% center;
+            }
+            50% {
+                background-position: 100% center;
+            }
+        }
+        
+        .lede {
+            max-width: 600px;
+            margin: 0;
+            color: var(--muted);
+            font-size: clamp(1rem, 1.7vw, 1.18rem);
+            line-height: 1.7;
+        }
+        
+        .lede strong {
+            color: var(--text);
         }
         
         .hero-actions {
             display: flex;
             flex-wrap: wrap;
             gap: 12px;
-            margin: 28px 0 18px
+            margin: 30px 0 20px;
+        }
+        
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 50px;
+            border-radius: 12px;
+            padding: 0 20px;
+            font-weight: 800;
+            font-size: 0.94rem;
+            transition: transform 0.18s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .button.primary {
+            background: linear-gradient(92deg, var(--pink), var(--orange));
+            color: #fff;
+            box-shadow: 0 14px 36px rgba(232, 77, 138, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+            animation: cta-pulse 2.6s ease-in-out infinite;
+        }
+        
+        .button.primary:hover {
+            box-shadow: 0 18px 46px rgba(232, 77, 138, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+        
+        @keyframes cta-pulse {
+            0%,
+            100% {
+                box-shadow: 0 14px 36px rgba(232, 77, 138, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+            }
+            50% {
+                box-shadow: 0 14px 42px rgba(232, 77, 138, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+            }
+        }
+        
+        .button.secondary {
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text);
+        }
+        
+        .button.secondary:hover {
+            border-color: rgba(255, 255, 255, 0.28);
+            background: rgba(255, 255, 255, 0.06);
         }
         
         .developer {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 0;
             color: var(--gold);
-            font-weight: 800
+            font-weight: 800;
+            font-size: 0.92rem;
         }
+        
+        .developer .dev-avatar {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--gold), var(--orange));
+            color: #241303;
+            font-size: 0.72rem;
+            font-weight: 900;
+        }
+        
+        .developer .dev-mail {
+            color: var(--muted);
+            font-weight: 600;
+        }
+        /* ── Phone mockup ───────────────────────────── */
         
         .phone-preview {
             display: flex;
-            justify-content: center
+            justify-content: center;
+            perspective: 1400px;
         }
         
         .phone-shell {
-            width: min(100%, 360px);
+            position: relative;
+            width: min(100%, 340px);
             border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 36px;
-            padding: 12px;
-            background: #050607
+            border-radius: 38px;
+            padding: 13px;
+            background: #07080d;
+            box-shadow: 0 40px 90px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+            transform: rotateY(-10deg) rotateX(4deg);
+            animation: float 6.5s ease-in-out infinite;
+            transform-style: preserve-3d;
+        }
+        
+        @keyframes float {
+            0%,
+            100% {
+                transform: rotateY(-10deg) rotateX(4deg) translateY(0);
+            }
+            50% {
+                transform: rotateY(-10deg) rotateX(4deg) translateY(-16px);
+            }
+        }
+        
+        .phone-status {
+            width: 86px;
+            height: 5px;
+            margin: 2px auto 12px;
+            border-radius: 999px;
+            background: #262b38;
         }
         
         .app-screen {
-            min-height: 640px;
-            border-radius: 26px;
+            position: relative;
+            min-height: 620px;
+            border-radius: 27px;
             padding: 18px;
-            background: linear-gradient(180deg, #1c2030 0%, #10131b 44%, #0c0e13 100%);
-            overflow: hidden
+            overflow: hidden;
+            background: linear-gradient(180deg, #131726 0%, #0b0d15 48%, #08090f 100%);
+            transition: background 0.6s ease;
         }
+        
+        .app-screen.glow-pink {
+            background: linear-gradient(180deg, #1c1020 0%, #0d0a12 48%, #08090f 100%);
+        }
+        
+        .app-screen.glow-teal {
+            background: linear-gradient(180deg, #0c1a22 0%, #0a1014 48%, #08090f 100%);
+        }
+        
+        .app-screen.glow-gold {
+            background: linear-gradient(180deg, #1d170c 0%, #100e0a 48%, #08090f 100%);
+        }
+        
+        .app-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .app-top .title {
+            font-size: 1.55rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            transition: color 0.4s ease;
+        }
+        
+        .app-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            box-shadow: 0 8px 22px rgba(34, 211, 238, 0.2);
+        }
+        
+        .search-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 18px 0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 13px;
+            padding: 13px 14px;
+            color: #7f8a9d;
+            font-size: 0.88rem;
+            background: rgba(255, 255, 255, 0.045);
+        }
+        
+        .search-pill .spark {
+            color: var(--pink);
+        }
+        
+        .tab-row {
+            display: flex;
+            gap: 7px;
+            margin-bottom: 18px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        
+        .tab-row::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .tab-row span {
+            flex: 0 0 auto;
+            min-width: 62px;
+            border-radius: 9px;
+            padding: 8px 6px;
+            background: rgba(255, 255, 255, 0.055);
+            color: #8b95a7;
+            text-align: center;
+            font-size: 0.72rem;
+            font-weight: 800;
+            transition: all 0.3s ease;
+        }
+        
+        .tab-row span.active {
+            background: rgba(232, 77, 138, 0.22);
+            color: #ff9bc3;
+            box-shadow: inset 0 0 0 1px rgba(232, 77, 138, 0.4);
+        }
+        
+        .tab-row.pink span.active {
+            background: rgba(232, 77, 138, 0.22);
+            color: #ff9bc3;
+            box-shadow: inset 0 0 0 1px rgba(232, 77, 138, 0.4);
+        }
+        
+        .tab-row.teal span.active {
+            background: rgba(34, 211, 238, 0.18);
+            color: #7ce7ff;
+            box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.4);
+        }
+        
+        .tab-row.gold span.active {
+            background: rgba(245, 192, 93, 0.18);
+            color: #ffdd99;
+            box-shadow: inset 0 0 0 1px rgba(245, 192, 93, 0.4);
+        }
+        
+        .cover-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        
+        .cover-grid article {
+            min-width: 0;
+            opacity: 0;
+            transform: translateY(14px);
+            animation: cover-in 0.55s ease forwards;
+        }
+        
+        .cover-grid article:nth-child(2) {
+            animation-delay: 0.08s;
+        }
+        
+        .cover-grid article:nth-child(3) {
+            animation-delay: 0.16s;
+        }
+        
+        .cover-grid article:nth-child(4) {
+            animation-delay: 0.24s;
+        }
+        
+        @keyframes cover-in {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .cover {
+            position: relative;
+            height: 172px;
+            border-radius: 13px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        }
+        
+        .cover::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.5));
+        }
+        
+        .cover-a {
+            background: linear-gradient(145deg, #e84d8a, #ff784f);
+        }
+        
+        .cover-b {
+            background: linear-gradient(145deg, #f5c05d, #e84d8a);
+        }
+        
+        .cover-c {
+            background: linear-gradient(145deg, #22d3ee, #0e7490);
+        }
+        
+        .cover-d {
+            background: linear-gradient(145deg, #ff784f, #a3e635);
+        }
+        
+        .cover-e {
+            background: linear-gradient(145deg, #a3e635, #22d3ee);
+        }
+        
+        .cover-f {
+            background: linear-gradient(145deg, #e84d8a, #f5c05d);
+        }
+        
+        .cover-g {
+            background: linear-gradient(145deg, #22d3ee, #e84d8a);
+        }
+        
+        .cover-h {
+            background: linear-gradient(145deg, #f5c05d, #ff784f);
+        }
+        
+        .cover-grid p {
+            margin: 7px 2px 0;
+            color: #d6dce8;
+            font-size: 0.8rem;
+            font-weight: 800;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* ── Ticker marquee ─────────────────────────── */
+        
+        .ticker {
+            position: relative;
+            z-index: 2;
+            overflow: hidden;
+            border-top: 1px solid var(--line);
+            border-bottom: 1px solid var(--line);
+            background: rgba(12, 14, 22, 0.8);
+            padding: 15px 0;
+            -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+        }
+        
+        .ticker-track {
+            display: flex;
+            gap: 0;
+            width: max-content;
+            animation: ticker-scroll 30s linear infinite;
+        }
+        
+        .ticker:hover .ticker-track {
+            animation-play-state: paused;
+        }
+        
+        .ticker-item {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding-right: 18px;
+            font-weight: 900;
+            font-size: 1.02rem;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+            color: var(--muted);
+        }
+        
+        .ticker-item .star {
+            color: var(--pink);
+        }
+        
+        .ticker-item.hot {
+            color: var(--gold);
+        }
+        
+        @keyframes ticker-scroll {
+            from {
+                transform: translateX(0);
+            }
+            to {
+                transform: translateX(-50%);
+            }
+        }
+        /* ── Sections ───────────────────────────────── */
         
         .section,
         .release-panel,
         .download-panel,
         footer {
             margin: 0 auto;
-            width: min(1120px, calc(100% - 36px))
+            width: min(1120px, calc(100% - 36px));
+        }
+        
+        .section {
+            padding: 84px 0;
+        }
+        
+        .section-heading {
+            margin-bottom: 30px;
+        }
+        
+        h2 {
+            margin: 0;
+            font-size: clamp(2rem, 4.4vw, 3.6rem);
+            line-height: 1.02;
+            letter-spacing: -0.02em;
+            font-weight: 900;
+        }
+        
+        .section-heading p {
+            margin-bottom: 14px;
         }
         
         .feature-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 14px
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
         }
         
-        .feature-grid article,
+        .feature-grid article {
+            position: relative;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--panel);
+            padding: 22px;
+            overflow: hidden;
+            transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.3s ease;
+        }
+        
+        .feature-grid article::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--fx, var(--pink)), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .feature-grid article:hover {
+            transform: translateY(-5px);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 22px 48px rgba(0, 0, 0, 0.45);
+        }
+        
+        .feature-grid article:hover::before {
+            opacity: 1;
+        }
+        
+        .feature-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 46px;
+            height: 46px;
+            border-radius: 13px;
+            margin-bottom: 14px;
+            font-size: 1.3rem;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--line);
+        }
+        
+        .feature-grid h3 {
+            margin: 0 0 8px;
+            font-size: 1.04rem;
+            font-weight: 900;
+        }
+        
+        .feature-grid p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.58;
+            font-size: 0.92rem;
+        }
+        /* ── Stats band ─────────────────────────────── */
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            padding: 0 0 84px;
+            width: min(1120px, calc(100% - 36px));
+            margin: 0 auto;
+        }
+        
+        .stat {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--panel);
+            padding: 22px;
+            text-align: center;
+        }
+        
+        .stat .number {
+            font-size: clamp(1.8rem, 3.6vw, 2.8rem);
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            background: linear-gradient(92deg, var(--pink), var(--gold));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        
+        .stat .label {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        /* ── Panels ─────────────────────────────────── */
+        
         .release-panel,
         .download-panel {
             border: 1px solid var(--line);
-            border-radius: 12px;
-            background: var(--panel, #151922)
+            border-radius: 18px;
+            background: var(--panel);
         }
         
         .release-panel {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
-            gap: 24px;
+            gap: 26px;
             margin-bottom: 18px;
-            padding: clamp(22px, 4vw, 36px)
+            padding: clamp(24px, 4vw, 40px);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .release-panel::after {
+            content: "";
+            position: absolute;
+            right: -80px;
+            top: -80px;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.14), transparent 70%);
+            pointer-events: none;
+        }
+        
+        .release-copy h2 {
+            font-size: clamp(1.7rem, 3vw, 2.6rem);
+            margin-bottom: 12px;
+        }
+        
+        .release-copy p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.65;
+        }
+        
+        .release-list {
+            display: grid;
+            gap: 12px;
+            margin: 0;
+        }
+        
+        .release-list div {
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            padding: 15px 16px;
+            background: rgba(255, 255, 255, 0.04);
+        }
+        
+        .release-list dt {
+            margin-bottom: 4px;
+            color: var(--muted);
+            font-size: 0.73rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        
+        .release-list dd {
+            margin: 0;
+            color: var(--text);
+            font-weight: 800;
+            overflow-wrap: anywhere;
+        }
+        
+        .release-list a {
+            color: var(--teal);
         }
         
         .download-panel {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 24px;
-            margin-bottom: 72px;
-            padding: clamp(22px, 4vw, 36px)
+            gap: 26px;
+            margin-bottom: 84px;
+            padding: clamp(24px, 4vw, 40px);
         }
+        
+        .download-panel .eyebrow {
+            margin-bottom: 10px;
+        }
+        
+        .download-panel h2 {
+            font-size: clamp(1.6rem, 2.8vw, 2.4rem);
+            margin-bottom: 10px;
+        }
+        
+        .download-panel p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+            max-width: 440px;
+        }
+        
+        .download-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        /* ── Footer ─────────────────────────────────── */
         
         footer {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 18px;
+            gap: 20px;
             border-top: 1px solid var(--line);
-            padding: 28px 0 38px
+            padding: 30px 0 40px;
         }
         
-        @media(max-width:900px) {
+        footer .dev {
+            font-weight: 900;
+        }
+        
+        footer p {
+            margin: 4px 0 0;
+            color: var(--muted);
+        }
+        
+        footer a {
+            color: var(--gold);
+            font-weight: 700;
+        }
+        
+        .footer-links {
+            display: flex;
+            gap: 14px;
+            color: var(--muted);
+        }
+        
+        .footer-links a {
+            color: var(--muted);
+            transition: color 0.2s ease;
+        }
+        
+        .footer-links a:hover {
+            color: var(--text);
+        }
+        /* ── Reveal on scroll ───────────────────────── */
+        
+        .reveal {
+            opacity: 0;
+            transform: translateY(26px);
+            transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .reveal.d1 {
+            transition-delay: 0.08s;
+        }
+        
+        .reveal.d2 {
+            transition-delay: 0.16s;
+        }
+        
+        .reveal.d3 {
+            transition-delay: 0.24s;
+        }
+        /* ── Staggered hero entrance ────────────────── */
+        
+        .stagger {
+            opacity: 0;
+            transform: translateY(24px);
+            animation: stagger-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        
+        .stagger.s1 {
+            animation-delay: 0.05s;
+        }
+        
+        .stagger.s2 {
+            animation-delay: 0.15s;
+        }
+        
+        .stagger.s3 {
+            animation-delay: 0.25s;
+        }
+        
+        .stagger.s4 {
+            animation-delay: 0.35s;
+        }
+        
+        .stagger.s5 {
+            animation-delay: 0.45s;
+        }
+        
+        .stagger.s6 {
+            animation-delay: 0.85s;
+        }
+        
+        @keyframes stagger-in {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        /* ── Scroll progress bar ────────────────────── */
+        
+        #progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 3px;
+            width: 0;
+            z-index: 100;
+            background: linear-gradient(90deg, var(--pink), var(--orange), var(--gold), var(--teal));
+            border-radius: 0 3px 3px 0;
+        }
+        /* ── Responsive ─────────────────────────────── */
+        
+        @media (max-width: 900px) {
             .hero {
                 grid-template-columns: 1fr;
-                min-height: auto
+                min-height: auto;
+                padding-top: 40px;
+                padding-bottom: 48px;
+            }
+            .phone-preview {
+                order: -1;
             }
             .feature-grid {
-                grid-template-columns: repeat(2, 1fr)
+                grid-template-columns: repeat(2, 1fr);
             }
-            .release-panel {
-                grid-template-columns: 1fr
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
             }
+            .release-panel,
             .download-panel,
             footer {
+                align-items: flex-start;
                 flex-direction: column;
-                align-items: flex-start
+            }
+            .release-panel {
+                grid-template-columns: 1fr;
+            }
+            .download-actions {
+                justify-content: flex-start;
+            }
+            .app-screen {
+                min-height: 500px;
             }
         }
         
-        @media(max-width:620px) {
+        @media (max-width: 620px) {
             .site-header {
-                flex-direction: column;
                 align-items: flex-start;
+                flex-direction: column;
                 gap: 12px;
-                padding: 12px 16px
+                padding: 12px 16px;
             }
             nav {
                 width: 100%;
-                gap: 10px;
+                gap: 12px;
+                justify-content: flex-start;
                 overflow-x: auto;
-                white-space: nowrap
+                padding-bottom: 2px;
+                white-space: nowrap;
+                -webkit-overflow-scrolling: touch;
+            }
+            .hero {
+                gap: 28px;
+                padding: 30px 16px 40px;
+            }
+            h1 {
+                font-size: clamp(2.6rem, 15vw, 4rem);
+            }
+            h2 {
+                font-size: clamp(1.7rem, 8vw, 2.3rem);
+                line-height: 1.05;
             }
             .hero-actions,
             .button {
-                width: 100%
+                width: 100%;
+            }
+            .hero-actions {
+                flex-direction: column;
             }
             .feature-grid {
-                grid-template-columns: 1fr
+                grid-template-columns: 1fr;
+            }
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 11px;
+            }
+            .phone-shell {
+                width: min(100%, 300px);
+                border-radius: 30px;
+                padding: 10px;
+                transform: rotateY(0) rotateX(2deg);
             }
             .app-screen {
-                min-height: 380px
+                min-height: 400px;
+                border-radius: 23px;
+                padding: 14px;
             }
-            h1 {
-                font-size: clamp(2.75rem, 18vw, 4.4rem)
+            .cover {
+                height: 132px;
             }
-            h2 {
-                font-size: clamp(1.75rem, 9vw, 2.35rem)
+            .section {
+                padding: 52px 0;
+            }
+            .download-panel {
+                margin-bottom: 52px;
+            }
+        }
+        
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.001s !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001s !important;
             }
         }
     </style>
-    <link rel="stylesheet" href="/styles.css" />
 </head>
 
 <body>
+    <div id="progress"></div>
+    <canvas id="stars"></canvas>
+    <div class="cursor-glow" id="cursorGlow"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
     <header class="site-header">
         <a class="brand" href="#top" aria-label="NovaRead TV home">
             <img class="brand-mark" src="/assets/novelapp-icon.svg" alt="" />
-            <span>NovaRead TV</span>
+            <span>NovaRead<span class="dot">.</span>TV</span>
         </a>
         <nav aria-label="Main navigation">
             <a href="#features">Features</a>
@@ -293,49 +1163,52 @@
     <main id="top">
         <section class="hero">
             <div class="hero-copy">
-                <p class="eyebrow">Version 1.40 is live</p>
-                <h1>NovaRead TV</h1>
-                <p class="lede">
-                    A focused entertainment app for novels, manga, anime, K-drama, cartoons, movies, saved accounts, in-app updates, and AI-assisted narration.
+                <p class="eyebrow stagger s1"><span class="pulse-dot"></span> Version 1.40 is live</p>
+                <h1 class="stagger s2">EVERY STORY.<br /><span class="gradient-text">ONE SCREEN.</span></h1>
+                <p class="lede stagger s3">
+                    <strong>NovaRead TV</strong> is a focused entertainment app for novels, manga, anime, K-drama, cartoons, Nollywood, and movies — plus AI-assisted narration, saved accounts, and in-app updates.
                 </p>
-                <div class="hero-actions" id="download">
+                <div class="hero-actions stagger s4" id="download">
                     <a class="button primary" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk" download>
-              Download Android APK v1.40
-            </a>
+                        ↓ Android APK v1.40
+                    </a>
                     <a class="button secondary" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk" download>
-              Android TV APK
-            </a>
+                        Android TV
+                    </a>
                     <a class="button secondary" href="https://novelapp1.onrender.com/downloads/novelapp-ios.ipa" download>
-              iPhone IPA unsigned
-            </a>
+                        iPhone IPA
+                    </a>
                     <a class="button secondary" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe" download>
-              Windows installer
-            </a>
+                        Windows
+                    </a>
                     <a class="button secondary" href="/app-version.json">
-              Update manifest
-            </a>
+                        Update manifest
+                    </a>
                 </div>
-                <p class="developer">Developed by Ozegbe Mike Isioma · Account service: online</p>
+                <p class="developer stagger s5">
+                    <span class="dev-avatar">M</span> Developed by Mike
+                    <span class="dev-mail">· masteralexleoreevesd1@gmail.com</span>
+                </p>
             </div>
 
-            <div class="phone-preview" aria-label="Anime Novel Manga interface preview">
+            <div class="phone-preview stagger s6" aria-label="NovaRead app interface preview">
                 <div class="phone-shell">
                     <div class="phone-status"></div>
-                    <div class="app-screen">
+                    <div class="app-screen" id="appScreen">
                         <div class="app-top">
-                            <span>Novels</span>
+                            <span class="title" id="appTitle">Novels</span>
                             <img class="app-icon" src="/assets/novelapp-icon.svg" alt="" />
                         </div>
-                        <div class="search-pill">Search light novels...</div>
-                        <div class="tab-row">
+                        <div class="search-pill"><span class="spark">✦</span> Search light novels, manga, anime...</div>
+                        <div class="tab-row pink" id="tabRow">
                             <span class="active">Novels</span>
                             <span>Manga</span>
                             <span>Anime</span>
                             <span>K-Drama</span>
-                            <span>Cartoon</span>
+                            <span>Sports</span>
                             <span>Movies</span>
                         </div>
-                        <div class="cover-grid">
+                        <div class="cover-grid" id="coverGrid">
                             <article>
                                 <div class="cover cover-a"></div>
                                 <p>Fantasy Gate</p>
@@ -358,37 +1231,95 @@
             </div>
         </section>
 
+        <div class="ticker" aria-hidden="true">
+            <div class="ticker-track">
+                <span class="ticker-item"><span class="star">✦</span> NOVELS</span>
+                <span class="ticker-item"><span class="star">✦</span> MANGA</span>
+                <span class="ticker-item hot"><span class="star">✦</span> ANIME</span>
+                <span class="ticker-item"><span class="star">✦</span> K-DRAMA</span>
+                <span class="ticker-item"><span class="star">✦</span> CARTOONS</span>
+                <span class="ticker-item hot"><span class="star">✦</span> NOLLYWOOD</span>
+                <span class="ticker-item"><span class="star">✦</span> MOVIES</span>
+                <span class="ticker-item"><span class="star">✦</span> AI NARRATION</span>
+                <span class="ticker-item hot"><span class="star">✦</span> FOOTBALL</span>
+                <span class="ticker-item"><span class="star">✦</span> WWE</span>
+                <span class="ticker-item"><span class="star">✦</span> NOVELS</span>
+                <span class="ticker-item"><span class="star">✦</span> MANGA</span>
+                <span class="ticker-item hot"><span class="star">✦</span> ANIME</span>
+                <span class="ticker-item"><span class="star">✦</span> K-DRAMA</span>
+                <span class="ticker-item"><span class="star">✦</span> CARTOONS</span>
+                <span class="ticker-item hot"><span class="star">✦</span> NOLLYWOOD</span>
+                <span class="ticker-item"><span class="star">✦</span> MOVIES</span>
+                <span class="ticker-item"><span class="star">✦</span> AI NARRATION</span>
+                <span class="ticker-item hot"><span class="star">✦</span> FOOTBALL</span>
+                <span class="ticker-item"><span class="star">✦</span> WWE</span>
+            </div>
+        </div>
+
         <section class="section" id="features">
             <div class="section-heading">
-                <p class="eyebrow">Built for story fans</p>
-                <h2>One app for reading, watching, and listening.</h2>
+                <p class="eyebrow reveal">Built for story fans</p>
+                <h2 class="reveal d1">One app for reading,<br />watching, and listening.</h2>
             </div>
             <div class="feature-grid">
-                <article>
+                <article class="reveal" style="--fx:#e84d8a">
+                    <span class="feature-icon">📚</span>
                     <h3>Separate content tabs</h3>
-                    <p>Novels, manga, anime, K-drama, cartoons, and movies each have their own focused space.</p>
+                    <p>Novels, manga, anime, K-drama, cartoons, Nollywood, and movies each have their own focused space.</p>
                 </article>
-                <article>
+                <article class="reveal d1" style="--fx:#22d3ee">
+                    <span class="feature-icon">🖋️</span>
                     <h3>Immersive reading</h3>
-                    <p>Open chapters in a clean reader, switch themes, and keep favorites close.</p>
+                    <p>Open chapters in a clean reader, switch themes, adjust font sizes, and keep favorites close.</p>
                 </article>
-                <article>
+                <article class="reveal d2" style="--fx:#f5c05d">
+                    <span class="feature-icon">🎙️</span>
                     <h3>AI narration</h3>
-                    <p>On-device Kokoro narration highlights the active word while chapters play.</p>
+                    <p>On-device Kokoro narration highlights the active word while chapters play in your pocket.</p>
                 </article>
-                <article>
-                    <h3>Accounts and updates</h3>
-                    <p>Sign in once, keep the session saved, and receive the latest Android APK through the Render-hosted manifest.</p>
+                <article class="reveal" style="--fx:#a3e635">
+                    <span class="feature-icon">🎬</span>
+                    <h3>Movies & series</h3>
+                    <p>Stream movies, K-dramas, cartoons, and Nollywood through multiple auto-fallback servers.</p>
+                </article>
+                <article class="reveal d1" style="--fx:#ff784f">
+                    <span class="feature-icon">⚽</span>
+                    <h3>Live sports & WWE</h3>
+                    <p>Follow football fixtures, live scores, and WWE events with one-tap streaming.</p>
+                </article>
+                <article class="reveal d2" style="--fx:#e84d8a">
+                    <span class="feature-icon">🔑</span>
+                    <h3>Accounts & updates</h3>
+                    <p>Sign in once, keep the session saved, and receive the latest APK through the in-app manifest.</p>
                 </article>
             </div>
         </section>
 
-        <section class="release-panel" id="release">
+        <div class="stats" id="stats">
+            <div class="stat reveal">
+                <div class="number" data-count="8">0</div>
+                <div class="label">Content tabs</div>
+            </div>
+            <div class="stat reveal d1">
+                <div class="number" data-count="80">0</div>
+                <div class="label">Stream servers</div>
+            </div>
+            <div class="stat reveal d2">
+                <div class="number" data-count="10" data-suffix="+">0</div>
+                <div class="label">Genres covered</div>
+            </div>
+            <div class="stat reveal d3">
+                <div class="number" data-count="10" data-suffix="k+">0</div>
+                <div class="label">Stories searchable</div>
+            </div>
+        </div>
+
+        <section class="release-panel reveal" id="release">
             <div class="release-copy">
                 <p class="eyebrow">Current release</p>
                 <h2>NovaRead TV 1.40 keeps app updates on permanent release channels.</h2>
                 <p>
-                    This release bumps the Android app version and keeps Android, Android TV, and Windows/software downloads on stable GitHub Release asset links.
+                    This release bumps the Android app version and keeps Android, Android TV, and Windows downloads on stable GitHub Release asset links.
                 </p>
             </div>
             <dl class="release-list">
@@ -407,34 +1338,32 @@
             </dl>
         </section>
 
-        <section class="download-panel">
+        <section class="download-panel reveal" id="download">
             <div>
                 <p class="eyebrow">Latest builds</p>
-                <h2>Download NovaRead TV for your device.</h2>
-                <p>
-                    The Android, Android TV, Windows desktop, and unsigned iPhone builds are listed here.
-                </p>
+                <h2>Take every story with you.</h2>
+                <p>The Android, Android TV, Windows desktop, and unsigned iPhone builds are listed here.</p>
             </div>
             <div class="download-actions">
                 <a class="button primary" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk" download>
-            Android APK
-          </a>
+                    Android APK
+                </a>
                 <a class="button secondary" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk" download>
-            Android TV APK
-          </a>
+                    Android TV
+                </a>
                 <a class="button secondary" href="https://novelapp1.onrender.com/downloads/novelapp-ios.ipa" download>
-            iPhone IPA unsigned
-          </a>
+                    iPhone IPA
+                </a>
                 <a class="button secondary" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe" download>
-            Windows EXE
-          </a>
+                    Windows EXE
+                </a>
             </div>
         </section>
     </main>
 
     <footer id="contact">
         <div>
-            <strong>Developed by Ozegbe Mike Isioma</strong>
+            <div class="dev">Developed by Mike</div>
             <p>Reach me here <a href="mailto:masteralexleoreevesd1@gmail.com">masteralexleoreevesd1@gmail.com</a></p>
         </div>
         <div class="footer-links">
@@ -442,6 +1371,221 @@
             <a href="https://whatsapp.com/channel/0029Vb8fgDa2P59cCnEkWW3I">WhatsApp</a>
         </div>
     </footer>
+
+    <script>
+        (function() {
+            "use strict";
+
+            // ── Star field ────────────────────────────────
+            var canvas = document.getElementById("stars");
+            var ctx = canvas.getContext("2d");
+            var stars = [];
+            var W, H;
+
+            function resize() {
+                W = canvas.width = window.innerWidth;
+                H = canvas.height = window.innerHeight;
+                var count = Math.min(160, Math.floor((W * H) / 9000));
+                stars = [];
+                for (var i = 0; i < count; i++) {
+                    stars.push({
+                        x: Math.random() * W,
+                        y: Math.random() * H,
+                        r: Math.random() * 1.4 + 0.3,
+                        a: Math.random() * 0.6 + 0.15,
+                        v: Math.random() * 0.35 + 0.05,
+                        tw: Math.random() * Math.PI * 2
+                    });
+                }
+            }
+
+            function drawStars(t) {
+                ctx.clearRect(0, 0, W, H);
+                for (var i = 0; i < stars.length; i++) {
+                    var s = stars[i];
+                    var alpha = s.a * (0.6 + 0.4 * Math.sin(t * 0.0012 * s.v * 6 + s.tw));
+                    ctx.beginPath();
+                    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+                    ctx.fillStyle = "rgba(210, 230, 255, " + alpha.toFixed(3) + ")";
+                    ctx.fill();
+                }
+            }
+
+            var starRaf = null;
+
+            function starLoop(t) {
+                drawStars(t || 0);
+                starRaf = requestAnimationFrame(starLoop);
+            }
+
+            window.addEventListener("resize", resize);
+            resize();
+            starLoop();
+
+            // ── Cursor glow ───────────────────────────────
+            var glow = document.getElementById("cursorGlow");
+            var gx = window.innerWidth / 2;
+            var gy = window.innerHeight / 2;
+            var tx = gx;
+            var ty = gy;
+
+            window.addEventListener("pointermove", function(e) {
+                tx = e.clientX;
+                ty = e.clientY;
+                glow.style.opacity = "1";
+            });
+
+            (function glowLoop() {
+                gx += (tx - gx) * 0.12;
+                gy += (ty - gy) * 0.12;
+                glow.style.transform = "translate(" + (gx - 190) + "px, " + (gy - 190) + "px)";
+                requestAnimationFrame(glowLoop);
+            })();
+
+            // ── Scroll progress ───────────────────────────
+            var progress = document.getElementById("progress");
+
+            function updateProgress() {
+                var max = document.documentElement.scrollHeight - window.innerHeight;
+                progress.style.width = (max > 0 ? (window.scrollY / max) * 100 : 0) + "%";
+                requestAnimationFrame(updateProgress);
+            }
+            updateProgress();
+
+            // ── Reveal on scroll ──────────────────────────
+            var revealEls = document.querySelectorAll(".reveal");
+            var io = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add("visible");
+                        io.unobserve(entry.target);
+                    }
+                });
+            }, {
+                threshold: 0.14
+            });
+            revealEls.forEach(function(el) {
+                io.observe(el);
+            });
+
+            // ── Counter animation ─────────────────────────
+            var counters = document.querySelectorAll(".number[data-count]");
+            var counterIo = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    if (!entry.isIntersecting) return;
+                    counterIo.unobserve(entry.target);
+                    var el = entry.target;
+                    var target = parseInt(el.getAttribute("data-count"), 10);
+                    var suffix = el.getAttribute("data-suffix") || "";
+                    var start = null;
+                    var dur = 1400;
+
+                    function step(ts) {
+                        if (!start) start = ts;
+                        var p = Math.min((ts - start) / dur, 1);
+                        var eased = 1 - Math.pow(1 - p, 3);
+                        el.textContent = Math.round(target * eased) + suffix;
+                        if (p < 1) requestAnimationFrame(step);
+                    }
+                    requestAnimationFrame(step);
+                });
+            }, {
+                threshold: 0.5
+            });
+            counters.forEach(function(el) {
+                counterIo.observe(el);
+            });
+
+            // ── Phone content cycler ──────────────────────
+            var screens = [{
+                title: "Novels",
+                tabClass: "pink",
+                accents: ["pink"],
+                glow: "",
+                tabs: ["Novels", "Manga", "Anime", "K-Drama", "Sports", "Movies"],
+                covers: [
+                    ["cover-a", "Fantasy Gate"],
+                    ["cover-b", "Moon Reader"],
+                    ["cover-c", "Panel Flow"],
+                    ["cover-d", "Anime Night"]
+                ]
+            }, {
+                title: "Anime",
+                tabClass: "teal",
+                glow: "glow-teal",
+                tabs: ["Anime", "Donghua", "Movies", "K-Drama", "Cartoons", "Nollywood"],
+                covers: [
+                    ["cover-c", "Solo Leveling"],
+                    ["cover-g", "One Piece"],
+                    ["cover-a", "Jujutsu"],
+                    ["cover-h", "Chainsaw"]
+                ]
+            }, {
+                title: "Movies",
+                tabClass: "gold",
+                glow: "glow-gold",
+                tabs: ["Movies", "Nollywood", "K-Drama", "Cartoons", "Anime", "Sports"],
+                covers: [
+                    ["cover-b", "The Wedding Party"],
+                    ["cover-h", "Omo Ghetto"],
+                    ["cover-d", "Squid Game"],
+                    ["cover-c", "Toy Story"]
+                ]
+            }];
+            var screenIndex = 0;
+            var appScreen = document.getElementById("appScreen");
+            var appTitle = document.getElementById("appTitle");
+            var tabRow = document.getElementById("tabRow");
+            var coverGrid = document.getElementById("coverGrid");
+
+            function renderScreen(index) {
+                var s = screens[index];
+                appScreen.className = "app-screen " + s.glow;
+                if (appTitle.textContent !== s.title) {
+                    appTitle.style.opacity = "0";
+                    setTimeout(function() {
+                        appTitle.textContent = s.title;
+                        appTitle.style.opacity = "1";
+                    }, 240);
+                    appTitle.style.transition = "opacity 0.24s ease";
+                }
+                tabRow.className = "tab-row " + s.tabClass;
+                tabRow.innerHTML = "";
+                s.tabs.forEach(function(tab, i) {
+                    var span = document.createElement("span");
+                    span.textContent = tab;
+                    if (i === 0) span.className = "active";
+                    tabRow.appendChild(span);
+                });
+                coverGrid.innerHTML = "";
+                s.covers.forEach(function(pair, i) {
+                    var art = document.createElement("article");
+                    art.style.animationDelay = (i * 0.08) + "s";
+                    var div = document.createElement("div");
+                    div.className = "cover " + pair[0];
+                    var p = document.createElement("p");
+                    p.textContent = pair[1];
+                    art.appendChild(div);
+                    art.appendChild(p);
+                    coverGrid.appendChild(art);
+                });
+            }
+
+            renderScreen(0);
+            setInterval(function() {
+                screenIndex = (screenIndex + 1) % screens.length;
+                renderScreen(screenIndex);
+            }, 3200);
+
+            // Pause starfield + reduce motion if requested
+            if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                cancelAnimationFrame(starRaf);
+                document.querySelectorAll(".orb").forEach(function(orb) {
+                    orb.style.animation = "none";
+                });
+            }
+        })();
+    </script>
 </body>
 
 </html>
