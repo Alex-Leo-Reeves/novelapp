@@ -591,7 +591,8 @@ class ReadNovelFullSource(private val httpClient: HttpClient) : NovelSource {
             .takeIf { it.isNotBlank() && !it.isBlockedOrErrorPage() && it.contains("list-chapter", ignoreCase = true) }
             ?: html
         val doc = Ksoup.parse(chapterHtml)
-        doc.select("#list-chapter a[href], .list-chapter a[href], a[href*=/chapter-][href$=.html]")
+        val chapterElements = doc.select("#list-chapter a[href], .list-chapter a[href], ul.list-chapter a[href], .chapter-list a[href], a[href*=/chapter-]")
+        val parsed = chapterElements
             .mapNotNull { link ->
                 val href = link.attr("href")
                 val title = link.attr("title")
@@ -602,11 +603,26 @@ class ReadNovelFullSource(private val httpClient: HttpClient) : NovelSource {
                 Chapter(
                     title = title.ifBlank { "Chapter $chapterNumber" },
                     url = absoluteUrl(baseUrl, href),
-                    chapterNumber = chapterNumber
+                    chapterNumber = if (chapterNumber == Int.MAX_VALUE) 1 else chapterNumber
                 )
             }
             .distinctBy { it.url }
-            .sortedBy { it.chapterNumber }
+        if (parsed.isNotEmpty()) return@safeListRun parsed.sortedBy { it.chapterNumber }
+
+        // Fallback regex if Ksoup selection finds no items
+        Regex("""href=["']([^"']*/chapter-[^"']*\.html)["'][^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE)
+            .findAll(html)
+            .mapIndexed { idx, match ->
+                val href = match.groupValues[1]
+                val title = match.groupValues[2].htmlToPlainText().ifBlank { "Chapter ${idx + 1}" }
+                Chapter(
+                    title = title,
+                    url = absoluteUrl(baseUrl, href),
+                    chapterNumber = idx + 1
+                )
+            }
+            .distinctBy { it.url }
+            .toList()
     }
 
     override suspend fun fetchChapterText(chapterUrl: String): String = safeStringRun {

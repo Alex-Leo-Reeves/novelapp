@@ -71,12 +71,18 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
         const tokens = searchTokens(query);
         if (!tokens.length) return true;
         const normalized = ` ${normalizeTitle(title)} `;
-        const matches = tokens.filter((token) => normalized.includes(` ${token} `)).length;
-        return tokens.length >= 2 ? matches === tokens.length : matches > 0;
-    }
-
     // Rank a candidate title against the query: exact title match wins, then
     // prefix matches, then titles containing more query words first.
+    function titleMatchesQuery(title, query) {
+        const qNorm = normalizeTitle(query);
+        const tNorm = normalizeTitle(title);
+        if (!qNorm || !tNorm) return true;
+        if (tNorm.includes(qNorm) || qNorm.includes(tNorm)) return true;
+        const tokens = qNorm.split(" ").filter((t) => t.length > 1);
+        if (!tokens.length) return true;
+        return tokens.some((token) => tNorm.includes(token));
+    }
+
     function relevanceScore(title, query) {
         const q = normalizeTitle(query);
         const t = normalizeTitle(title);

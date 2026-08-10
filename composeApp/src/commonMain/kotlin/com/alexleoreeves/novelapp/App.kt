@@ -424,6 +424,15 @@ fun App(
                 onSelectProfile = { selectedProfile = it },
                 onCreateProfile = { name, isKids, colorIdx ->
                     activeProfiles.add(UserProfile(id = "p_${activeProfiles.size + 1}", name = name, isKids = isKids, avatarColorIndex = colorIdx))
+                },
+                onEditProfile = { profile, newName, isKids, colorIdx ->
+                    val idx = activeProfiles.indexOfFirst { it.id == profile.id }
+                    if (idx >= 0) {
+                        activeProfiles[idx] = profile.copy(name = newName, isKids = isKids, avatarColorIndex = colorIdx)
+                        if (selectedProfile?.id == profile.id) {
+                            selectedProfile = activeProfiles[idx]
+                        }
+                    }
                 }
             )
             return@NovelAppTheme

@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material3.*
@@ -17,46 +18,41 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.delay
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Splash / Opening Screen
-//  Shown on every cold launch for ~3 seconds, then calls [onFinished].
-//
-//  Credits:
-//    Developed by Mike A. (Alex Leo Reeves)
-//    Contact: masteralexleoreevesd1@gmail.com
-// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun SplashScreen(onFinished: () -> Unit) {
+    val fullTitle = "NovaRead.TV"
+    var typedTitle by remember { mutableStateOf("") }
+    var logoVisible by remember { mutableStateOf(false) }
+    var subtitleVisible by remember { mutableStateOf(false) }
+    var creditVisible by remember { mutableStateOf(false) }
 
-    // Trigger auto-advance after 3 seconds
+    // Typewriter effect + sound timing
     LaunchedEffect(Unit) {
-        delay(3200L)
+        delay(150)
+        logoVisible = true
+        delay(300)
+        for (i in 1..fullTitle.length) {
+            typedTitle = fullTitle.take(i)
+            delay(90)
+        }
+        delay(300)
+        subtitleVisible = true
+        delay(400)
+        creditVisible = true
+        delay(1200)
         onFinished()
     }
 
-    // Animation states
     val infinite = rememberInfiniteTransition(label = "pulse")
     val logoScale by infinite.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
+        initialValue = 0.96f,
+        targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
-            tween(1600, easing = FastOutSlowInEasing),
+            tween(1400, easing = FastOutSlowInEasing),
             RepeatMode.Reverse
         ),
         label = "scale"
     )
-
-    var logoVisible by remember { mutableStateOf(false) }
-    var titleVisible by remember { mutableStateOf(false) }
-    var subtitleVisible by remember { mutableStateOf(false) }
-    var creditVisible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        delay(200); logoVisible = true
-        delay(500); titleVisible = true
-        delay(400); subtitleVisible = true
-        delay(600); creditVisible = true
-    }
 
     Box(
         modifier = Modifier
@@ -64,8 +60,8 @@ fun SplashScreen(onFinished: () -> Unit) {
             .background(
                 Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFF1A0533),
-                        Color(0xFF0D0D1A),
+                        Color(0xFF1E0738),
+                        Color(0xFF0C0A1A),
                         Color(0xFF000000)
                     )
                 )
@@ -77,10 +73,10 @@ fun SplashScreen(onFinished: () -> Unit) {
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxWidth()
         ) {
-            // ── Logo Icon ─────────────────────────────────────────────────
+            // Logo Icon
             AnimatedVisibility(
                 visible = logoVisible,
-                enter = fadeIn(tween(600)) + scaleIn(tween(600))
+                enter = fadeIn(tween(500)) + scaleIn(tween(500))
             ) {
                 Box(
                     modifier = Modifier
@@ -88,24 +84,24 @@ fun SplashScreen(onFinished: () -> Unit) {
                         .graphicsLayer { scaleX = logoScale; scaleY = logoScale },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Glow ring
                     Box(
                         modifier = Modifier
                             .size(110.dp)
                             .background(
                                 Brush.radialGradient(
                                     listOf(
-                                        Color(0xFF7C3AED).copy(0.5f),
+                                        Color(0xFF22D3EE).copy(0.45f),
+                                        Color(0xFFE84D8A).copy(0.25f),
                                         Color.Transparent
                                     )
                                 ),
-                        shape = androidx.compose.foundation.shape.CircleShape
+                                shape = CircleShape
                             )
                     )
                     Icon(
                         Icons.Default.AutoStories,
                         contentDescription = null,
-                        tint = Color(0xFFE040FB),
+                        tint = Color(0xFF22D3EE),
                         modifier = Modifier.size(72.dp)
                     )
                 }
@@ -113,60 +109,53 @@ fun SplashScreen(onFinished: () -> Unit) {
 
             Spacer(Modifier.height(28.dp))
 
-            // ── App Title ────────────────────────────────────────────────
-            AnimatedVisibility(
-                visible = titleVisible,
-                enter = fadeIn(tween(700)) + slideInVertically(tween(700)) { it / 2 }
-            ) {
-                Text(
-                    text = "Watch Anime",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-            }
-            AnimatedVisibility(
-                visible = titleVisible,
-                enter = fadeIn(tween(800, 100)) + slideInVertically(tween(800, 100)) { it / 2 }
-            ) {
-                Text(
-                    text = "Read Novels · Read Manga",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFFE040FB),
-                    textAlign = TextAlign.Center
-                )
-            }
+            // Typed Title: NovaRead.TV
+            Text(
+                text = typedTitle,
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                letterSpacing = (-1).sp
+            )
 
             AnimatedVisibility(
                 visible = subtitleVisible,
-                enter = fadeIn(tween(600, 200))
+                enter = fadeIn(tween(600)) + slideInVertically(tween(600)) { it / 2 }
             ) {
-                Text(
-                    text = "— All in One —",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White.copy(0.55f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Watch Anime · Read Novels · Read Manga",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFE84D8A),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "— Ultimate Streaming Hub —",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(0.55f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
 
-            Spacer(Modifier.height(60.dp))
+            Spacer(Modifier.height(48.dp))
 
-            // ── Loading Indicator ─────────────────────────────────────────
             AnimatedVisibility(visible = subtitleVisible, enter = fadeIn(tween(400))) {
                 LinearProgressIndicator(
                     modifier = Modifier
-                        .fillMaxWidth(0.45f)
-                        .height(2.dp),
-                    color = Color(0xFF7C3AED),
-                    trackColor = Color.White.copy(0.1f)
+                        .fillMaxWidth(0.42f)
+                        .height(3.dp),
+                    color = Color(0xFF22D3EE),
+                    trackColor = Color.White.copy(0.12f)
                 )
             }
         }
 
-        // ── Developer Credit — pinned at bottom ───────────────────────────
+        // Developer Credit
         AnimatedVisibility(
             visible = creditVisible,
             enter = fadeIn(tween(700)),
@@ -176,7 +165,7 @@ fun SplashScreen(onFinished: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 36.dp)
+                    .padding(bottom = 32.dp)
             ) {
                 Text(
                     text = "Developed by Mike A. (Alex Leo Reeves)",
@@ -184,11 +173,11 @@ fun SplashScreen(onFinished: () -> Unit) {
                     color = Color.White.copy(0.5f),
                     textAlign = TextAlign.Center
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 Text(
                     text = "masteralexleoreevesd1@gmail.com",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF7C3AED).copy(0.8f),
+                    color = Color(0xFF22D3EE).copy(0.85f),
                     textAlign = TextAlign.Center
                 )
             }

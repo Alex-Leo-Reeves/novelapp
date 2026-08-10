@@ -22,7 +22,6 @@ import com.alexleoreeves.novelapp.data.AppTheme
 import com.alexleoreeves.novelapp.data.UserProfile
 import com.alexleoreeves.novelapp.ui.theme.GlassBackground
 import com.alexleoreeves.novelapp.ui.theme.NeonBlue
-import com.alexleoreeves.novelapp.ui.theme.NeonCyan
 
 val ProfileAvatarGradients = listOf(
     listOf(Color(0xFFE50914), Color(0xFFB81D24)), // Netflix Red
@@ -41,23 +40,29 @@ fun ProfileSelectionScreen(
     accountUsername: String? = null,
     onUpdateUsername: ((String) -> Unit)? = null,
     onSelectProfile: (UserProfile) -> Unit,
-    onCreateProfile: (name: String, isKids: Boolean, colorIndex: Int) -> Unit
+    onCreateProfile: (name: String, isKids: Boolean, colorIndex: Int) -> Unit,
+    onEditProfile: ((profile: UserProfile, newName: String, isKids: Boolean, colorIndex: Int) -> Unit)? = null
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var isManageMode by remember { mutableStateOf(false) }
+
     var showUsernameDialog by remember { 
         mutableStateOf(accountUsername.isNullOrBlank() || accountUsername.equals("Reader", ignoreCase = true))
     }
     var customUsernameInput by remember { mutableStateOf("") }
-    var newProfileName by remember { mutableStateOf("") }
-    var isKidsProfile by remember { mutableStateOf(false) }
-    var selectedColorIndex by remember { mutableStateOf(0) }
+
+    // Dialog state for New/Edit profile
+    var profileNameInput by remember { mutableStateOf("") }
+    var isKidsProfileInput by remember { mutableStateOf(false) }
+    var selectedColorIndexInput by remember { mutableStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         GlassBackground()
 
         if (showUsernameDialog && onUpdateUsername != null) {
             AlertDialog(
-                onDismissRequest = { /* force entry or dismiss */ },
+                onDismissRequest = { },
                 title = { Text("Choose a Username", fontWeight = FontWeight.Bold, color = Color.White) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -109,7 +114,7 @@ fun ProfileSelectionScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "Who's Watching?",
+                text = if (isManageMode) "Manage Profiles" else "Who's Watching?",
                 color = Color.White,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
@@ -119,42 +124,84 @@ fun ProfileSelectionScreen(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = "Select your profile to continue",
+                text = if (isManageMode) "Tap a profile to edit name or kids status" else "Select your profile to continue",
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 14.sp
             )
 
-            Spacer(Modifier.height(36.dp))
+            Spacer(Modifier.height(30.dp))
 
             // Profile Grid
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
-                modifier = Modifier.widthIn(max = 340.dp)
+                modifier = Modifier.widthIn(max = 360.dp)
             ) {
                 items(profiles.size) { idx ->
                     val profile = profiles[idx]
                     ProfileAvatarCard(
                         profile = profile,
-                        onClick = { onSelectProfile(profile) }
+                        isManageMode = isManageMode,
+                        onClick = {
+                            if (isManageMode) {
+                                editingProfile = profile
+                                profileNameInput = profile.name
+                                isKidsProfileInput = profile.isKids
+                                selectedColorIndexInput = profile.avatarColorIndex
+                            } else {
+                                onSelectProfile(profile)
+                            }
+                        }
                     )
                 }
 
                 // Add Profile Card
                 item {
-                    AddProfileCard(onClick = { showAddDialog = true })
+                    AddProfileCard(onClick = {
+                        editingProfile = null
+                        profileNameInput = ""
+                        isKidsProfileInput = false
+                        selectedColorIndexInput = 0
+                        showAddDialog = true
+                    })
                 }
+            }
+
+            Spacer(Modifier.height(32.dp))
+
+            // Manage Profiles Toggle Button
+            OutlinedButton(
+                onClick = { isManageMode = !isManageMode },
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+            ) {
+                Icon(
+                    if (isManageMode) Icons.Rounded.Check else Icons.Rounded.Edit,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (isManageMode) "Done" else "Manage Profiles",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
             }
         }
 
-        // Add Profile Dialog
-        if (showAddDialog) {
+        // Add or Edit Profile Dialog
+        if (showAddDialog || editingProfile != null) {
+            val isEditing = editingProfile != null
             AlertDialog(
-                onDismissRequest = { showAddDialog = false },
+                onDismissRequest = {
+                    showAddDialog = false
+                    editingProfile = null
+                },
                 title = {
                     Text(
-                        "Create New Profile",
+                        if (isEditing) "Edit Profile" else "Create New Profile",
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
@@ -162,8 +209,8 @@ fun ProfileSelectionScreen(
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         OutlinedTextField(
-                            value = newProfileName,
-                            onValueChange = { newProfileName = it },
+                            value = profileNameInput,
+                            onValueChange = { profileNameInput = it },
                             label = { Text("Profile Name") },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -190,11 +237,11 @@ fun ProfileSelectionScreen(
                                         .clip(CircleShape)
                                         .background(Brush.linearGradient(ProfileAvatarGradients[colorIdx]))
                                         .border(
-                                            width = if (selectedColorIndex == colorIdx) 2.5.dp else 0.dp,
-                                            color = if (selectedColorIndex == colorIdx) Color.White else Color.Transparent,
+                                            width = if (selectedColorIndexInput == colorIdx) 2.5.dp else 0.dp,
+                                            color = if (selectedColorIndexInput == colorIdx) Color.White else Color.Transparent,
                                             shape = CircleShape
                                         )
-                                        .clickable { selectedColorIndex = colorIdx }
+                                        .clickable { selectedColorIndexInput = colorIdx }
                                 )
                             }
                         }
@@ -205,13 +252,13 @@ fun ProfileSelectionScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text("Kids Profile", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                 Text("Family-friendly movies & cartoons only", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
                             }
                             Switch(
-                                checked = isKidsProfile,
-                                onCheckedChange = { isKidsProfile = it },
+                                checked = isKidsProfileInput,
+                                onCheckedChange = { isKidsProfileInput = it },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.White,
                                     checkedTrackColor = NeonBlue
@@ -223,20 +270,35 @@ fun ProfileSelectionScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            if (newProfileName.isNotBlank()) {
-                                onCreateProfile(newProfileName, isKidsProfile, selectedColorIndex)
-                                newProfileName = ""
-                                isKidsProfile = false
+                            if (profileNameInput.isNotBlank()) {
+                                if (isEditing && editingProfile != null) {
+                                    onEditProfile?.invoke(
+                                        editingProfile!!,
+                                        profileNameInput.trim(),
+                                        isKidsProfileInput,
+                                        selectedColorIndexInput
+                                    )
+                                } else {
+                                    onCreateProfile(
+                                        profileNameInput.trim(),
+                                        isKidsProfileInput,
+                                        selectedColorIndexInput
+                                    )
+                                }
                                 showAddDialog = false
+                                editingProfile = null
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonBlue)
                     ) {
-                        Text("Save Profile", color = Color.White)
+                        Text(if (isEditing) "Save Changes" else "Create Profile", color = Color.White)
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAddDialog = false }) {
+                    TextButton(onClick = {
+                        showAddDialog = false
+                        editingProfile = null
+                    }) {
                         Text("Cancel", color = Color.White.copy(alpha = 0.6f))
                     }
                 },
@@ -249,6 +311,7 @@ fun ProfileSelectionScreen(
 @Composable
 private fun ProfileAvatarCard(
     profile: UserProfile,
+    isManageMode: Boolean = false,
     onClick: () -> Unit
 ) {
     val gradientColors = ProfileAvatarGradients.getOrElse(profile.avatarColorIndex) { ProfileAvatarGradients[0] }
@@ -285,6 +348,22 @@ private fun ProfileAvatarCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text("KIDS", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+
+            if (isManageMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.Edit,
+                        contentDescription = "Edit Profile",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
             }
         }
