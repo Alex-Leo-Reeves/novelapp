@@ -113,7 +113,8 @@ enum class DonghuaServer(
     NONTONGO("Server 1", "Nontongo", 1),
     AUTOEMBED("Server 2", "AutoEmbed (Donghua & TMDB)", 2),
     DONGHUA_STREAM("Server 3", "DonghuaStream", 3),
-    EMBEDSU("Server 4", "EmbedSu (Donghua & TMDB)", 4);
+    EMBEDSU("Server 4", "EmbedSu (Donghua & TMDB)", 4),
+    LUCIFER_DONGHUA("Server 5", "LuciferDonghua", 5);
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }

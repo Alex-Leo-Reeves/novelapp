@@ -114,6 +114,7 @@ fun MediaDetailScreen(
             DonghuaServer.AUTOEMBED -> donghuaStreamScraper
             DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
             DonghuaServer.EMBEDSU -> donghuaStreamScraper
+            DonghuaServer.LUCIFER_DONGHUA -> luciferDonghuaScraper
         }
 
     fun buildDonghuaAutoEmbedUrl(ep: MediaEpisode): String? {
@@ -163,7 +164,7 @@ fun MediaDetailScreen(
                 val urlParts = ep.url.split(":")
                 val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
                 val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: ep.episodeNumber.coerceAtLeast(1).toString()
-                
+
                 if (detailType == "movie") {
                     "https://nontongo.win/embed/movie/$detailTmdbId"
                 } else {
@@ -178,6 +179,14 @@ fun MediaDetailScreen(
             }
             DonghuaServer.EMBEDSU -> {
                 buildDonghuaEmbedSuUrl(ep) ?: ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.LUCIFER_DONGHUA -> {
+                // Resolve the episode page URL via the LuciferDonghua scraper to get
+                // an embed/player URL that MaServerPlayerScreen can open directly.
+                // The WebView already has luciferdonghua.in iframe-extraction JS built in,
+                // so the page loads fullscreen video just like DonghuaStream (Server 3).
+                val playerUrl = luciferDonghuaScraper.resolveEpisodePlayerUrl(ep.url)
+                playerUrl ?: ep.url.takeIf { it.isNotBlank() }
             }
         }
     }

@@ -9,6 +9,7 @@ class TvMediaRepository {
     private val cartoonScraper = KimCartoonScraper(httpClient)
     private val wcoStreamScraper = WcoStreamScraper(httpClient)
     private val donghuaStreamScraper = DonghuaSiteScraper.donghuaStream(httpClient)
+    private val luciferDonghuaScraper = DonghuaSiteScraper.luciferDonghua(httpClient)
     private val aninekoScraper = AninekoScraper(httpClient)
     private val animePaheScraper = AnimePaheScraper(httpClient)
     private val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
@@ -148,7 +149,13 @@ class TvMediaRepository {
                         else "https://embed.su/embed/tv/$detailTmdbId/$s/$e"
                     } else chapter.url
                 }
-            }
+                DonghuaServer.LUCIFER_DONGHUA -> {
+                    // Resolve the episode page URL through LuciferDonghua to get the
+                    // embedded player URL. The TV WebView player already handles
+                    // luciferdonghua.in with fullscreen CSS + iframe extraction JS.
+                    luciferDonghuaScraper.resolveEpisodePlayerUrl(chapter.url)
+                        ?: chapter.url
+                }
         }
 
         if (item.isAnime && chapter != null) {
