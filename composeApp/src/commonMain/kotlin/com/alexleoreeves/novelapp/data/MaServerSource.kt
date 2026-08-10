@@ -67,24 +67,24 @@ enum class StreamServer(
         "Server 7 (AutoEmbed)",
         7,
         { id, type, s, e ->
-            if (type == "movie") "https://player.autoembed.cc/embed/movie/$id"
-            else "https://player.autoembed.cc/embed/tv/$id/$s/$e"
+            if (type == "movie") "https://autoembed.co/movie/tmdb/$id"
+            else "https://autoembed.co/tv/tmdb/$id-$s-$e"
         }
     ),
-    EMBEDSU(
-        "Server 8 (EmbedSu)",
+    VIDSRC_NET(
+        "Server 8 (VidSrc Net)",
         8,
         { id, type, s, e ->
-            if (type == "movie") "https://embed.su/embed/movie/$id"
-            else "https://embed.su/embed/tv/$id/$s/$e"
+            if (type == "movie") "https://vidsrc.net/embed/movie?tmdb=$id"
+            else "https://vidsrc.net/embed/tv?tmdb=$id&season=$s&episode=$e"
         }
     ),
-    VIDSRC_VIP(
-        "Server 9 (VidSrc VIP)",
+    SMASHY(
+        "Server 9 (SmashyStream)",
         9,
         { id, type, s, e ->
-            if (type == "movie") "https://vidsrc.vip/embed/movie/$id"
-            else "https://vidsrc.vip/embed/tv/$id/$s/$e"
+            if (type == "movie") "https://embed.smashystream.com/playere.php?tmdb=$id"
+            else "https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&ep=$e"
         }
     );
 
@@ -93,7 +93,7 @@ enum class StreamServer(
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
         /** WebView servers that load the embed directly (Servers 1-4, 6-9) */
-        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_CC, NONTONGO, TWO_EMBED, MULTI_EMBED, AUTOEMBED, EMBEDSU, VIDSRC_VIP)
+        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_CC, NONTONGO, TWO_EMBED, MULTI_EMBED, AUTOEMBED, VIDSRC_NET, SMASHY)
 
         /** ExoPlayer servers that scrape the embed for a direct stream (Server 5) */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)

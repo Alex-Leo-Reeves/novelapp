@@ -56,7 +56,7 @@ fun TvEmbedPlayer(
         stabilizeAttempts = 0
     }
 
-    // Stabilization timer: enforce minimum 3s in STABILIZING (Android uses 3s inside an 8s block)
+    // Stabilization timer: enforce minimum 3s in STABILIZING
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.STABILIZING) {
             phaseMessage = "Stabilizing player... (3s)"
@@ -132,6 +132,34 @@ fun TvEmbedPlayer(
                             val url = request?.url?.toString() ?: return false
                             val lowerUrl = url.lowercase()
 
+                            if (request.isForMainFrame) {
+                                val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") ||
+                                        embedUrl.contains("footybite") || embedUrl.contains("sportsurge") ||
+                                        embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
+                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") ||
+                                        embedUrl.contains("embed.su") || embedUrl.contains("vidlink") ||
+                                        embedUrl.contains("vidsrc") || embedUrl.contains("smashystream") ||
+                                        embedUrl.contains("2embed") || embedUrl.contains("nontongo")
+
+                                val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
+                                if (isCloudflare) return false
+
+                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !request.url.toString().contains("embed")) {
+                                    return true
+                                }
+
+                                val reqHost = request.url?.host?.lowercase() ?: ""
+                                val embedHost = android.net.Uri.parse(embedUrl).host?.lowercase() ?: ""
+                                if (reqHost.isNotEmpty() && embedHost.isNotEmpty()) {
+                                    val isSameDomain = reqHost == embedHost ||
+                                            reqHost.endsWith(".$embedHost") ||
+                                            embedHost.endsWith(".$reqHost")
+                                    if (!isSameDomain && !isWrapperSite && !isRouterEmbed) {
+                                        return true
+                                    }
+                                }
+                            }
+
                             val blockedDomains = listOf(
                                 "doubleclick.net", "googlesyndication.com", "googleadservices.com",
                                 "googletagmanager.com", "googletagservices.com", "google-analytics.com",
@@ -153,16 +181,6 @@ fun TvEmbedPlayer(
                             val isAd = blockedDomains.any { domain -> lowerUrl.contains(domain) }
                             if (isAd) return true
 
-                            // Block popunder/popup scripts that aren't from the embed origin itself
-                            if ((lowerUrl.contains("popup") || lowerUrl.contains("popunder") || lowerUrl.contains("/pop.js")) && !lowerUrl.startsWith(embedOrigin.lowercase())) {
-                                return true
-                            }
-
-                            // Allow the provider to navigate to its real player domain.
-                            // IMPORTANT: VidLink (Server 1) redirects cross-domain to
-                            // vidsrc.to/... — blocking main-frame navigation that isn't
-                            // same-domain or doesn't contain "embed" froze the player on
-                            // the landing page forever (infinite spinner, "refuses to play").
                             if (lowerUrl.startsWith("https://") || lowerUrl.startsWith("http://")) {
                                 return false
                             }
@@ -182,16 +200,23 @@ fun TvEmbedPlayer(
                             super.onPageFinished(view, url)
                             webViewRef = view
                             onWebViewCreated(view!!)
-                            
+
                             if (playerPhase == PlayerPhase.LOADING || playerPhase == PlayerPhase.READY) {
                                 val currentUrl = url?.lowercase() ?: ""
+
+                                // Cloudflare challenge — go READY so user can interact
                                 if (currentUrl.contains("challenges.cloudflare.com") || currentUrl.contains("/cdn-cgi/")) {
                                     playerPhase = PlayerPhase.READY
                                     phaseMessage = ""
                                     return
                                 }
-                                
-                                if (currentUrl.contains("multiembed") || currentUrl.contains("nontongo") || currentUrl.contains("autoembed") || currentUrl.contains("embed.su")) {
+
+                                // Nontongo, MultiEmbed, AutoEmbed, EmbedSu — skip heavy stabilization
+                                // so the user can see and click their play button immediately
+                                if (currentUrl.contains("multiembed") || currentUrl.contains("nontongo") ||
+                                    currentUrl.contains("autoembed") || currentUrl.contains("embed.su") ||
+                                    currentUrl.contains("smashystream")
+                                ) {
                                     playerPhase = PlayerPhase.READY
                                     phaseMessage = ""
                                     view?.evaluateJavascript(INLINE_VIDEO_JS, null)
@@ -202,8 +227,6 @@ fun TvEmbedPlayer(
                                     view?.evaluateJavascript(INLINE_VIDEO_JS, null)
                                     view?.evaluateJavascript(IFRAME_EXTRACTION_JS, null)
                                     view?.evaluateJavascript(FULLSCREEN_CSS_JS, null)
-                                    // Make sure it looks clean
-                                    view?.evaluateJavascript(ANIMEXIN_CLEAN_PLAYER_JS, null)
                                 }
                             }
                         }
@@ -212,10 +235,13 @@ fun TvEmbedPlayer(
                             val url = request?.url?.toString() ?: return null
                             val lowerUrl = url.lowercase()
 
-                            if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") || lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") || lowerUrl.contains("turnstile")) {
+                            if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") ||
+                                lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") ||
+                                lowerUrl.contains("turnstile")
+                            ) {
                                 return null
                             }
-                            
+
                             val adDomains = listOf(
                                 "doubleclick.net", "googlesyndication.com", "googleadservices.com",
                                 "googletagmanager.com", "googletagservices.com", "google-analytics.com",
@@ -242,7 +268,6 @@ fun TvEmbedPlayer(
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
                                 "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
                             )
-
                             val isAd = adDomains.any { domain -> lowerUrl.contains(domain) }
                             if (isAd) {
                                 return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
@@ -259,11 +284,13 @@ fun TvEmbedPlayer(
                             super.onReceivedError(view, request, error)
                             val desc = error?.description?.toString()?.lowercase() ?: ""
                             val reqUrl = request?.url?.toString() ?: ""
-                            
-                            if (desc.contains("err_aborted") || desc.contains("err_blocked") || desc.contains("err_name_not_resolved") || desc.contains("err_connection_refused")) {
+
+                            if (desc.contains("err_aborted") || desc.contains("err_blocked") ||
+                                desc.contains("err_name_not_resolved") || desc.contains("err_connection_refused")
+                            ) {
                                 return
                             }
-                            
+
                             if (request?.isForMainFrame == true) {
                                 val isRequestedHost = reqUrl == embedUrl || reqUrl.contains("cloudflare", ignoreCase = true)
                                 if (isRequestedHost) {
@@ -276,7 +303,9 @@ fun TvEmbedPlayer(
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
-                        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) { callback?.onCustomViewHidden() }
+                        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                            callback?.onCustomViewHidden()
+                        }
                         override fun onHideCustomView() {}
                     }
 
@@ -288,12 +317,10 @@ fun TvEmbedPlayer(
                         extraHeaders["Referer"] = "https://embed.su/"
                         extraHeaders["Origin"] = "https://embed.su"
                     } else if (embedUrl.contains("autoembed")) {
-                        extraHeaders["Referer"] = "https://player.autoembed.cc/"
-                        extraHeaders["Origin"] = "https://player.autoembed.cc"
-                    } else if (embedUrl.contains("febbox") || embedUrl.contains("shegu.net")) {
-                        extraHeaders["Referer"] = "https://www.febbox.com/"
-                    } else if (embedUrl.contains("animexin")) {
-                        extraHeaders["Referer"] = "https://animexin.vip/"
+                        extraHeaders["Referer"] = "https://autoembed.co/"
+                        extraHeaders["Origin"] = "https://autoembed.co"
+                    } else if (embedUrl.contains("smashystream")) {
+                        extraHeaders["Referer"] = "https://embed.smashystream.com/"
                     }
 
                     if (extraHeaders.isNotEmpty()) {
@@ -339,14 +366,172 @@ fun TvEmbedPlayer(
 
 private const val MA_SERVER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-private const val STABILIZATION_START_JS = "(function() { window.__STABILIZING = true; function muteAllVideos() { document.querySelectorAll('video').forEach(v => { v.muted = true; v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('x-webkit-airplay', 'allow'); }); } muteAllVideos(); function pollForVideo() { var videos = document.querySelectorAll('video'); for (var i = 0; i < videos.length; i++) { var v = videos[i]; var src = v.src || v.currentSrc; if (src && src.length > 10 && (src.includes('.m3u8') || src.includes('.mp4') || src.includes('blob:') || v.readyState >= 2)) { return true; } } return false; } var _checkInterval = setInterval(function() { if (pollForVideo()) clearInterval(_checkInterval); }, 1000); setTimeout(function() { clearInterval(_checkInterval); }, 20000); function clickPlayButtons() { var selectors = [ '.play-button', '.jw-icon-display', '.vjs-big-play-button', '#start', '.plyr__control--overlaid', 'button[aria-label=\"Play\"]', '.play-btn', '.btn-play', '[id*=\"play\"]', '[class*=\"play\"]', 'video', '.video-js', '[data-player]' ]; selectors.forEach(function(sel) { try { var el = document.querySelector(sel); if (el && el.tagName !== 'VIDEO') el.click(); } catch(e) {} }); } clickPlayButtons(); })();"
+private const val STABILIZATION_START_JS = """
+(function() {
+    window.__STABILIZING = true;
+    
+    function muteAllVideos() {
+        document.querySelectorAll('video').forEach(v => {
+            v.muted = true;
+            v.setAttribute('playsinline', '');
+            v.setAttribute('webkit-playsinline', '');
+            v.setAttribute('x-webkit-airplay', 'allow');
+        });
+    }
+    muteAllVideos();
+    
+    function pollForVideo() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            var src = v.src || v.currentSrc;
+            if (src && src.length > 10 && (src.includes('.m3u8') || src.includes('.mp4') || src.includes('blob:') || v.readyState >= 2)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    var _checkInterval = setInterval(function() {
+        if (pollForVideo()) clearInterval(_checkInterval);
+    }, 1000);
+    setTimeout(function() { clearInterval(_checkInterval); }, 20000);
+    
+    function clickPlayButtons() {
+        var selectors = [
+            '.play-button', '.jw-icon-display', '.vjs-big-play-button',
+            '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
+            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]',
+            'video', '.video-js', '[data-player]'
+        ];
+        selectors.forEach(function(sel) {
+            try {
+                var el = document.querySelector(sel);
+                if (el && el.tagName !== 'VIDEO') el.click();
+            } catch(e) {}
+        });
+    }
+    clickPlayButtons();
+})();
+"""
 
-private const val STABILIZATION_END_JS = "(function() { window.__STABILIZING = false; function forcePlay() { var selectors = [ '.play-button', '.jw-icon-display', '.vjs-big-play-button', '#start', '.plyr__control--overlaid', 'button[aria-label=\"Play\"]', '.play-btn', '.btn-play', '[id*=\"play\"]', '[class*=\"play\"]' ]; selectors.forEach(function(sel) { try { var el = document.querySelector(sel); if (el && el.tagName !== 'VIDEO') el.click(); } catch(e) {} }); document.querySelectorAll('video').forEach(function(v) { v.muted = false; var p = v.play(); if (p) p.catch(function() {}); }); } forcePlay(); setTimeout(forcePlay, 500); })();"
+private const val STABILIZATION_END_JS = """
+(function() {
+    window.__STABILIZING = false;
+    
+    function forcePlay() {
+        var selectors = [
+            '.play-button', '.jw-icon-display', '.vjs-big-play-button',
+            '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
+            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]'
+        ];
+        selectors.forEach(function(sel) {
+            try {
+                var el = document.querySelector(sel);
+                if (el && el.tagName !== 'VIDEO') el.click();
+            } catch(e) {}
+        });
 
-private const val INLINE_VIDEO_JS = "(function() { window.open = function() { return null; }; window.onbeforeunload = null; function forceInline() { const videos = document.querySelectorAll('video'); videos.forEach(v => { v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('x-webkit-airplay', 'allow'); }); } forceInline(); const observer = new MutationObserver(() => forceInline()); observer.observe(document.body, { childList: true, subtree: true }); })();"
+        document.querySelectorAll('video').forEach(function(v) {
+            v.muted = false;
+            var p = v.play();
+            if (p) p.catch(function() {});
+        });
+    }
 
-private const val IFRAME_EXTRACTION_JS = "(function() { var host = window.location.hostname; if (host.includes('luciferdonghua') || host.includes('donghuastream')) { if (window.__iframeExtracted) return; var attempts = 0; var interval = setInterval(function() { attempts++; if (window.__iframeExtracted || attempts > 20) { clearInterval(interval); return; } var iframes = document.querySelectorAll('iframe'); for (var i = 0; i < iframes.length; i++) { var src = iframes[i].src || iframes[i].dataset.src; if (src && !src.includes('google') && !src.includes('facebook') && !src.includes('disqus') && !src.includes('agenteimmobiliare')) { var frame = iframes[i]; window.__iframeExtracted = true; clearInterval(interval); document.body.innerHTML = ''; document.body.appendChild(frame); document.body.style.margin = '0'; document.body.style.padding = '0'; document.body.style.overflow = 'hidden'; document.body.style.backgroundColor = '#000'; frame.style.position = 'fixed'; frame.style.top = '0'; frame.style.left = '0'; frame.style.width = '100vw'; frame.style.height = '100vh'; frame.style.border = 'none'; frame.style.zIndex = '999999'; if (frame.dataset.src) { frame.src = frame.dataset.src; } return; } } }, 500); } })();"
+    forcePlay();
+    setTimeout(forcePlay, 500);
+})();
+"""
 
-private const val FULLSCREEN_CSS_JS = "(function() { var host = window.location.hostname; if (!host.includes('luciferdonghua') && !host.includes('donghuastream')) { return; } var style = document.createElement('style'); style.innerHTML = `header, footer, .sidebar, #sidebar, .site-header, .site-footer, .widget-area, .comments-area { display: none !important; } .player-area, .video-content, #player, .video-player, #playervideo, .video-info, .epcontent { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: black !important; margin: 0 !important; padding: 0 !important; } body { background: black !important; }`; document.head.appendChild(style); })();"
+private const val INLINE_VIDEO_JS = """
+(function() {
+    window.open = function() { return null; };
+    window.onbeforeunload = null;
+    function forceInline() {
+        const videos = document.querySelectorAll('video');
+        videos.forEach(v => {
+            v.setAttribute('playsinline', '');
+            v.setAttribute('webkit-playsinline', '');
+            v.setAttribute('x-webkit-airplay', 'allow');
+        });
+    }
+    forceInline();
+    const observer = new MutationObserver(() => forceInline());
+    observer.observe(document.body, { childList: true, subtree: true });
+})();
+"""
 
-private const val ANIMEXIN_CLEAN_PLAYER_JS = "(function(){ var style = document.createElement('style'); style.innerHTML = 'header, footer, sidebar, .sidebar, .comments, #comments, .disqus, .ads, .ad, div[class*=\"ad-\"] { display: none !important; } iframe, video, .player-embed, #player-embed { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: black !important; } body, html { overflow: hidden !important; background: black !important; margin: 0 !important; padding: 0 !important; }'; document.head.appendChild(style); var v = document.querySelector('video'); if(v) { v.play(); } })()"
+private const val IFRAME_EXTRACTION_JS = """
+(function() {
+    var host = window.location.hostname;
+    if (host.includes('luciferdonghua') || host.includes('donghuastream')) {
+        if (window.__iframeExtracted) return;
+        
+        var attempts = 0;
+        var interval = setInterval(function() {
+            attempts++;
+            if (window.__iframeExtracted || attempts > 20) {
+                clearInterval(interval);
+                return;
+            }
+            var iframes = document.querySelectorAll('iframe');
+            for (var i = 0; i < iframes.length; i++) {
+                var src = iframes[i].src || iframes[i].dataset.src;
+                if (src && !src.includes('google') && !src.includes('facebook') && !src.includes('disqus') && !src.includes('agenteimmobiliare')) {
+                    var frame = iframes[i];
+                    window.__iframeExtracted = true;
+                    clearInterval(interval);
+                    document.body.innerHTML = '';
+                    document.body.appendChild(frame);
+                    document.body.style.margin = '0';
+                    document.body.style.padding = '0';
+                    document.body.style.overflow = 'hidden';
+                    document.body.style.backgroundColor = '#000';
+                    frame.style.position = 'fixed';
+                    frame.style.top = '0';
+                    frame.style.left = '0';
+                    frame.style.width = '100vw';
+                    frame.style.height = '100vh';
+                    frame.style.border = 'none';
+                    frame.style.zIndex = '999999';
+                    if (frame.dataset.src) {
+                        frame.src = frame.dataset.src;
+                    }
+                    return;
+                }
+            }
+        }, 500);
+    }
+})();
+"""
+
+private const val FULLSCREEN_CSS_JS = """
+(function() {
+    var host = window.location.hostname;
+    if (!host.includes('luciferdonghua') && !host.includes('donghuastream')) {
+        return;
+    }
+    var style = document.createElement('style');
+    style.innerHTML = `
+        header, footer, .sidebar, #sidebar, .site-header, .site-footer, .widget-area, .comments-area {
+            display: none !important;
+        }
+        .player-area, .video-content, #player, .video-player, #playervideo, .video-info, .epcontent {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 999999 !important;
+            background: black !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        body {
+            background: black !important;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+"""

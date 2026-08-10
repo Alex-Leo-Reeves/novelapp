@@ -170,7 +170,7 @@ class TvMediaRepository {
         val isMovieKind = tmdbType == "movie" || ((kind == "movie" || kind == "movies") && chapter == null)
 
         if (isTmdb || (chapter != null && chapter.url.startsWith("tmdb:"))) {
-            val isTvShow = tmdbType == "tv" || (chapter != null && chapter.url.startsWith("tmdb:"))
+            val isTvShow = !isMovieKind
             if (isTvShow) {
                 val urlParts = (chapter?.url ?: "").split(":")
                 val tvId = urlParts.getOrNull(1)?.ifBlank { null } ?: tmdbId

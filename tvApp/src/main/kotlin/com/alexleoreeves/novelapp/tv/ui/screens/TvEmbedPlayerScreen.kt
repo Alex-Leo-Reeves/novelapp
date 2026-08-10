@@ -26,14 +26,8 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 /**
- * TV Embed Player Screen — full-screen WebView player for embed URLs
- * (VidLink, Nontongo, MultiEmbed, AutoEmbed, EmbedSu, etc.).
- *
- * This is the TV equivalent of Android's MaServerPlayerScreen.
- * It uses [TvEmbedPlayer] for the WebView with stabilization/ad-blocking,
- * and wraps it with TV-specific D-pad controls + preview cap logic.
- *
- * Direct .m3u8/.mp4 streams should be routed to [TvPlayerScreen] instead.
+ * TV Embed Player Screen — full-screen WebView player for embed URLs.
+ * Uses the exact same WebView approach as the working Android MaServerPlayerScreen.
  */
 @Composable
 fun TvEmbedPlayerScreen(
@@ -109,20 +103,45 @@ fun TvEmbedPlayerScreen(
     }
 
     fun playerTogglePlay() {
-        webViewRef?.evaluateJavascript(
-            "(function(){var v=document.querySelector('video');if(v){if(v.paused){v.play();}else{v.pause();}}})()",
-            null
+        val wv = webViewRef ?: return
+        // JS cannot reach video elements inside cross-origin iframes (VidLink, Nontongo, etc).
+        // A real touch event dispatched to the WebView is treated as a genuine user gesture
+        // and hits the rendered pixels directly — bypassing the cross-origin restriction.
+        val w = wv.width.takeIf { it > 0 } ?: 1920
+        val h = wv.height.takeIf { it > 0 } ?: 1080
+        val downTime = android.os.SystemClock.uptimeMillis()
+        val eventDown = android.view.MotionEvent.obtain(
+            downTime, downTime,
+            android.view.MotionEvent.ACTION_DOWN,
+            w / 2f, h / 2f, 0
         )
+        val eventUp = android.view.MotionEvent.obtain(
+            downTime, downTime + 100,
+            android.view.MotionEvent.ACTION_UP,
+            w / 2f, h / 2f, 0
+        )
+        wv.dispatchTouchEvent(eventDown)
+        wv.dispatchTouchEvent(eventUp)
+        eventDown.recycle()
+        eventUp.recycle()
     }
 
     BackHandler { onBack() }
+
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
             .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyUp) {
+                if (event.type == KeyEventType.KeyDown || event.type == KeyEventType.KeyUp) {
                     if (previewExpired) {
                         when (event.key) {
                             Key.Back -> { onBack(); true }
@@ -130,20 +149,29 @@ fun TvEmbedPlayerScreen(
                         }
                     } else {
                         showControls = true
-                        when (event.key) {
-                            Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
-                            Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
-                            Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
-                            Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
-                            Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
-                            Key.Back -> { onBack(); true }
-                            else -> false
+                        if (event.type == KeyEventType.KeyUp) {
+                            when (event.key) {
+                                Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
+                                Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
+                                Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
+                                Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
+                                Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
+                                Key.Back -> { onBack(); true }
+                                else -> false
+                            }
+                        } else {
+                            // Intercept KeyDown for navigation keys so focus doesn't jump
+                            when (event.key) {
+                                Key.DirectionLeft, Key.DirectionRight, Key.DirectionCenter, Key.Enter,
+                                Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause, Key.MediaFastForward, Key.MediaRewind -> true
+                                else -> false
+                            }
                         }
                     }
                 } else false
             }
     ) {
-        // TvEmbedPlayer handles the WebView with stabilization, ad-blocking, etc.
+        // TvEmbedPlayer — exact same WebView logic as working Android MaServerPlayerScreen
         TvEmbedPlayer(
             embedUrl = embedUrl,
             episodeTitle = title,
@@ -200,7 +228,7 @@ fun TvEmbedPlayerScreen(
                     Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 }
 
-                // Center play/pause
+                // Center play/pause button
                 Row(modifier = Modifier.fillMaxWidth().align(Alignment.Center), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     var ppFocused by remember { mutableStateOf(false) }
                     Surface(

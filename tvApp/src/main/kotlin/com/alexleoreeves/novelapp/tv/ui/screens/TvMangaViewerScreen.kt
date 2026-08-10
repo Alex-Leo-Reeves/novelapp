@@ -138,7 +138,7 @@ fun TvMangaViewerScreen(
                 if (pageIndex < pages.size) {
                     val context = androidx.compose.ui.platform.LocalContext.current
                     val imageRequest = remember(pages[pageIndex]) {
-                        val headers = if (pages[pageIndex].contains("webtoon")) {
+                        val headers = if (pages[pageIndex].contains("webtoon", ignoreCase = true)) {
                             NetworkHeaders.Builder()
                                 .set("Referer", "https://www.webtoons.com")
                                 .build()

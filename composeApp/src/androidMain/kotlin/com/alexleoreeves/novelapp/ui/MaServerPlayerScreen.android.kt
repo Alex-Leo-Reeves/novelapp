@@ -276,7 +276,7 @@ actual fun MaServerPlayerScreen(
                                 val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") || 
                                                     embedUrl.contains("footybite") || embedUrl.contains("sportsurge") || 
                                                     embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
-                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su")
+                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su") || embedUrl.contains("vidlink") || embedUrl.contains("vidsrc") || embedUrl.contains("smashystream") || embedUrl.contains("2embed")
                                 
                                 // ALWAYS allow Cloudflare challenge pages to proceed
                                 val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
