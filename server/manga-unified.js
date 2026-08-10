@@ -68,12 +68,6 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
     }
 
     function titleMatchesQuery(title, query) {
-        const tokens = searchTokens(query);
-        if (!tokens.length) return true;
-        const normalized = ` ${normalizeTitle(title)} `;
-    // Rank a candidate title against the query: exact title match wins, then
-    // prefix matches, then titles containing more query words first.
-    function titleMatchesQuery(title, query) {
         const qNorm = normalizeTitle(query);
         const tNorm = normalizeTitle(title);
         if (!qNorm || !tNorm) return true;
