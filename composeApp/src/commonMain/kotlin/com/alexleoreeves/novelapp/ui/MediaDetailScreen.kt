@@ -207,7 +207,7 @@ fun MediaDetailScreen(
             }
             DonghuaServer.ANIMEXIN -> {
                 // AnimeXin: resolve the episode page URL to extract the best embed player URL.
-                // animexin.vip hosts Donghua and Anime with direct iframe embed extraction.
+                // animexin.dev hosts Donghua and Anime with direct iframe embed extraction.
                 val playerUrl = animeXinScraper.resolveEpisodePlayerUrl(ep.url)
                 playerUrl ?: ep.url.takeIf { it.isNotBlank() }
             }

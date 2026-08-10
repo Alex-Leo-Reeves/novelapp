@@ -82,6 +82,7 @@ fun TvPlayerScreen(
                 )
                 val vlc = LibVLC(context, args)
                 val mp = MediaPlayer(vlc)
+                mp.volume = 100
 
                 val media = Media(vlc, Uri.parse(resolvedUrl))
                 if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
@@ -179,6 +180,12 @@ fun TvPlayerScreen(
         vlcMediaPlayer?.let { if (it.isPlaying) it.pause() else it.play() }
     }
 
+    fun playerUnmute() {
+        vlcMediaPlayer?.let { player ->
+            if (player.volume <= 0) player.volume = 100
+        }
+    }
+
     BackHandler { onBack() }
 
     Box(
@@ -186,7 +193,17 @@ fun TvPlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyUp) {
+                val keyCode = event.nativeKeyEvent.keyCode
+                val isVolumeKey = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+                    keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN ||
+                    keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE
+                if (isVolumeKey) {
+                    if (event.type == KeyEventType.KeyUp) {
+                        showControls = true
+                        playerUnmute()
+                    }
+                    false
+                } else if (event.type == KeyEventType.KeyUp) {
                     if (previewExpired) {
                         when (event.key) {
                             Key.Back -> { onBack(); true }

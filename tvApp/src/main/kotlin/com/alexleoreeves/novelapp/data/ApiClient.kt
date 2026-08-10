@@ -375,7 +375,7 @@ suspend fun fetchWatchRouteOptions(kind: String, title: String, detailUrl: Strin
         list.add(
             WatchRouteOption(
                 provider = "Animexin (Donghua & Anime)",
-                url = "https://animexin.vip/?s=$encodedTitle",
+                url = "https://animexin.dev/?s=$encodedTitle",
                 route = "embed"
             )
         )

@@ -1195,14 +1195,14 @@ private fun String.isNonPlayableAnimeProviderUrl(): Boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  AnimeXin Scraper — animexin.vip
+//  AnimeXin Scraper — animexin.dev
 //  Dedicated Donghua + Anime streaming site with direct embed extraction.
 //  No API key. Works the same way as DonghuaSiteScraper.
 // ─────────────────────────────────────────────────────────────────────────────
 class AnimeXinScraper(private val client: HttpClient) {
 
     companion object {
-        private const val BASE_URL = "https://animexin.vip"
+        private const val BASE_URL = "https://animexin.dev"
         private val BROWSER_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -1211,7 +1211,7 @@ class AnimeXinScraper(private val client: HttpClient) {
     }
 
     /**
-     * Search animexin.vip for a Donghua/Anime title and return a list of episodes.
+     * Search animexin.dev for a Donghua/Anime title and return a list of episodes.
      */
     suspend fun fetchEpisodes(titleQuery: String, maxEpisodes: Int = 300): List<MediaEpisode> {
         val queries = listOf(

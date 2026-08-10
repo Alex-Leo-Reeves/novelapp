@@ -14,8 +14,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.TvSearchHistoryManager
+import com.alexleoreeves.novelapp.data.TvNovelSearchRepository
 import com.alexleoreeves.novelapp.tv.ui.components.TvSearchKeyboard
 import com.alexleoreeves.novelapp.tv.ui.theme.*
+import kotlinx.coroutines.delay
 
 @Composable
 fun TvSearchScreen(
@@ -30,6 +32,21 @@ fun TvSearchScreen(
     var history by remember { mutableStateOf(historyManager.getHistory()) }
     var query by remember { mutableStateOf(initialQuery) }
     var category by remember { mutableStateOf(selectedCategory) }
+    var liveSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    val novelRepo = remember { TvNovelSearchRepository() }
+
+    LaunchedEffect(query, category) {
+        val trimmed = query.trim()
+        liveSuggestions = emptyList()
+        if (trimmed.length >= 2) {
+            delay(350L)
+            liveSuggestions = searchTvContentForCategory(category, trimmed, novelRepo)
+                .map { it.title }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase() }
+                .take(10)
+        }
+    }
 
     fun executeSearch(searchQuery: String) {
         val trimmed = searchQuery.trim()
@@ -81,15 +98,7 @@ fun TvSearchScreen(
             onValueChange = { query = it },
             onSearch = { executeSearch(query) },
             onBack = onClose,
-            suggestions = listOf(
-                "Lord of the Mysteries",
-                "Blue Lock",
-                "Solo Leveling",
-                "One Piece",
-                "Attack on Titan",
-                "Demon Slayer",
-                "Jujutsu Kaisen"
-            ),
+            suggestions = liveSuggestions.ifEmpty { defaultTvSearchSuggestions(category, query) },
             onSuggestionClick = { sug ->
                 query = sug
                 executeSearch(sug)
@@ -108,3 +117,20 @@ fun TvSearchScreen(
     }
 }
 
+private fun defaultTvSearchSuggestions(category: String, query: String): List<String> {
+    val base = when (category.lowercase()) {
+        "anime" -> listOf("Dragon Ball Super: Broly", "Dragon Ball Z", "One Piece", "Solo Leveling", "Blue Lock", "Attack on Titan", "Demon Slayer")
+        "movie" -> listOf("Spider-Man: Homecoming", "Inception", "The Matrix", "Black Panther", "Avatar", "Toy Story")
+        "donghua" -> listOf("Renegade Immortal", "Swallowed Star", "Soul Land", "Perfect World", "Battle Through The Heavens")
+        "kdrama" -> listOf("Queen of Tears", "True Beauty", "Crash Landing on You", "Squid Game")
+        "cartoon" -> listOf("Avatar: The Last Airbender", "Teen Titans", "Adventure Time", "SpongeBob SquarePants")
+        "novel" -> listOf("Lord of the Mysteries", "My Vampire System", "Renegade Immortal", "A Will Eternal", "Mother of Learning")
+        else -> listOf("Dragon Ball Super: Broly", "Spider-Man: Homecoming", "Dragon Ball Z", "Lord of the Mysteries", "Solo Leveling", "One Piece")
+    }
+    val trimmed = query.trim()
+    return if (trimmed.length < 2) {
+        base
+    } else {
+        base.filter { it.contains(trimmed, ignoreCase = true) }.ifEmpty { base }
+    }
+}

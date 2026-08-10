@@ -252,6 +252,14 @@ fun TvDetailScreen(
                 }
 
                 if (isVideoTitle) {
+                    val primaryChapter = chapters.firstOrNull()
+                    val watchLabel = when {
+                        primaryChapter?.url?.startsWith("tmdb-movie://", ignoreCase = true) == true -> "Watch Now"
+                        kind == "movie" || item.mediaKind.equals("movies", ignoreCase = true) -> "Watch Now"
+                        primaryChapter?.title?.equals("Full Movie", ignoreCase = true) == true -> "Watch Now"
+                        chapters.isNotEmpty() -> "Watch Episode 1"
+                        else -> "Watch Now"
+                    }
                     var watchFocused by remember { mutableStateOf(false) }
                     Surface(
                         onClick = { playMedia(chapters.firstOrNull()) },
@@ -269,7 +277,7 @@ fun TvDetailScreen(
                             Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (chapters.isNotEmpty()) "Watch Episode 1" else "Watch Now",
+                                watchLabel,
                                 color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
                             )
                         }

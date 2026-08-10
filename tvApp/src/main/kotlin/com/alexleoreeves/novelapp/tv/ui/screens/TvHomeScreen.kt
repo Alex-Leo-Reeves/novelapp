@@ -27,6 +27,7 @@ import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 @Composable
@@ -183,11 +184,7 @@ fun TvHomeScreen(
                         selectedSearchCategory = category
                         scope.launch {
                             isLoading = true
-                            if (category == "novel") {
-                                items = novelRepo.searchNovels(query)
-                            } else {
-                                items = searchContent(category, query)
-                            }
+                            items = searchTvContentForCategory(category, query, novelRepo)
                             searchPerformed = true
                             isLoading = false
                         }
@@ -266,6 +263,30 @@ fun TvHomeScreen(
                 }
             }
         }
+    }
+}
+
+suspend fun searchTvContentForCategory(
+    category: String,
+    query: String,
+    novelRepo: TvNovelSearchRepository
+): List<UnifiedSearchResult> {
+    val trimmed = query.trim()
+    if (trimmed.isBlank()) return emptyList()
+    val normalized = category.lowercase().ifBlank { "all" }
+    if (normalized == "novel") return novelRepo.searchNovels(trimmed)
+    if (normalized != "all") return searchContent(normalized, trimmed)
+
+    val categories = listOf("anime", "movie", "donghua", "kdrama", "cartoon", "classic", "nigerian", "manga", "comic", "novel")
+    return coroutineScope {
+        categories.map { cat ->
+            async {
+                if (cat == "novel") novelRepo.searchNovels(trimmed) else searchContent(cat, trimmed)
+            }
+        }.awaitAll()
+            .flatten()
+            .distinctBy { item -> item.detailPageUrl.ifBlank { item.id } }
+            .take(96)
     }
 }
 

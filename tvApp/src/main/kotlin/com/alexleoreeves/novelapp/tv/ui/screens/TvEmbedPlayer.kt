@@ -236,6 +236,7 @@ fun TvEmbedPlayer(
                             val lowerUrl = url.lowercase()
 
                             if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") ||
+                                lowerUrl.contains("vidsrc.cc") || lowerUrl.contains("vidsrc.to") ||
                                 lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") ||
                                 lowerUrl.contains("turnstile")
                             ) {
@@ -317,8 +318,14 @@ fun TvEmbedPlayer(
                         extraHeaders["Referer"] = "https://embed.su/"
                         extraHeaders["Origin"] = "https://embed.su"
                     } else if (embedUrl.contains("autoembed")) {
-                        extraHeaders["Referer"] = "https://autoembed.co/"
-                        extraHeaders["Origin"] = "https://autoembed.co"
+                        extraHeaders["Referer"] = "https://player.autoembed.cc/"
+                        extraHeaders["Origin"] = "https://player.autoembed.cc"
+                    } else if (embedUrl.contains("vidsrc.cc")) {
+                        extraHeaders["Referer"] = "https://vidsrc.cc/"
+                        extraHeaders["Origin"] = "https://vidsrc.cc"
+                    } else if (embedUrl.contains("vidsrc.to")) {
+                        extraHeaders["Referer"] = "https://vidsrc.to/"
+                        extraHeaders["Origin"] = "https://vidsrc.to"
                     } else if (embedUrl.contains("smashystream")) {
                         extraHeaders["Referer"] = "https://embed.smashystream.com/"
                     }

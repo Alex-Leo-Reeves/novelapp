@@ -107,7 +107,11 @@ fun TvSearchKeyboard(
             "manga" to "Manga",
             "anime" to "Anime",
             "donghua" to "Donghua",
-            "movie" to "Movies"
+            "movie" to "Movies",
+            "kdrama" to "K-Drama",
+            "cartoon" to "Cartoon",
+            "classic" to "Classic",
+            "nigerian" to "Nollywood"
         )
         Row(
             modifier = Modifier

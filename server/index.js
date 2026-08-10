@@ -1256,6 +1256,58 @@ const KNOWN_MEDIA = [
     ["rumour-has-it", "Rumour Has It", "Nigerian, Drama", "TMDB", "movie", "tmdb://movie/693111", "A small-town rumor spirals out of control, threatening relationships and reputation.", ""]
 ];
 
+function normalizeTitleKey(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/['’]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+        .replace(/\s+/g, " ");
+}
+
+function compactTitleKey(value) {
+    return normalizeTitleKey(value).replace(/\s+/g, "");
+}
+
+function tmdbResultScore(item, query, normalizedType) {
+    if (!query) return Number(item.popularity || 0);
+
+    const title = item.title || item.name || "";
+    const originalTitle = item.original_title || item.original_name || "";
+    const q = normalizeTitleKey(query);
+    const compactQ = compactTitleKey(query);
+    const titleKey = normalizeTitleKey(title);
+    const originalKey = normalizeTitleKey(originalTitle);
+    const compactTitle = compactTitleKey(title);
+    const compactOriginal = compactTitleKey(originalTitle);
+    const mediaType = item.media_type || item.__media_type || "";
+    const genres = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+
+    let score = 0;
+    if (titleKey === q) score += 1000;
+    if (originalKey === q) score += 950;
+    if (compactTitle === compactQ) score += 900;
+    if (compactOriginal === compactQ) score += 850;
+    if (titleKey.startsWith(q)) score += 300;
+    if (originalKey.startsWith(q)) score += 260;
+    if (titleKey.includes(q)) score += 180;
+    if (originalKey.includes(q)) score += 160;
+    if (compactTitle.includes(compactQ)) score += 140;
+    if (compactOriginal.includes(compactQ)) score += 120;
+
+    if (normalizedType === "movies" && mediaType === "movie") score += 160;
+    if (normalizedType === "anime") {
+        if (item.original_language === "ja") score += 80;
+        if (genres.includes(16)) score += 70;
+        if (mediaType === "movie" && /\b(movie|film|ova|broly|the movie)\b/i.test(query)) score += 110;
+        if (mediaType === "tv" && /\b(series|season|episode|z|super|gt)\b/i.test(query)) score += 60;
+    }
+
+    score += Math.min(Number(item.popularity || 0), 100);
+    return score;
+}
+
 function fixtureItems(type, query = "") {
     const normalizedType = normalizeContentType(type);
     const raw = normalizedType === "manga" ? KNOWN_MANGA :
@@ -1355,7 +1407,7 @@ async function tmdbItems(type, query, page = 1) {
         // Multi-search returns both movies and TV in one call, which is essential for
         // finding results like "agency" (a movie) or "forever 2024" (a TV show/movie).
         // We then filter by media_type appropriately.
-        if (normalizedType === "movies" || normalizedType === "classic" || normalizedType === "cartoon" || normalizedType === "kdrama") {
+        if (normalizedType === "movies" || normalizedType === "classic" || normalizedType === "cartoon" || normalizedType === "kdrama" || normalizedType === "anime") {
             endpoint = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
         } else {
             endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
@@ -1371,7 +1423,7 @@ async function tmdbItems(type, query, page = 1) {
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&with_genres=16&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
         // Fall back to mixed discover if query (handle in general logic below)
     } else if (normalizedType === "anime") {
-        // Anime: animation genre (16) + Japanese language + anime keyword
+        // Anime home starts with series; contentSearch also includes anime movies.
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
     } else if (normalizedType === "classic") {
         // Classic home: discover TV (live-action + classic animation, exclude Japanese content)
@@ -1383,12 +1435,32 @@ async function tmdbItems(type, query, page = 1) {
     }
 
     const payload = await fetchWithTimeout(endpoint, { headers });
-    let results = payload.results || [];
+    let results = (payload.results || []).map((item) => ({
+        ...item,
+        __media_type: item.media_type || mediaType
+    }));
+
+    if (!query && normalizedType === "anime") {
+        const movieEndpoint = `https://api.themoviedb.org/3/discover/movie?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        const moviePayload = await fetchWithTimeout(movieEndpoint, { headers }).catch(() => null);
+        const animeMovies = ((moviePayload && moviePayload.results) || []).map((item) => ({
+            ...item,
+            __media_type: "movie"
+        }));
+        results = [...results, ...animeMovies];
+    }
 
     // For multi-search, include BOTH movies AND TV shows (not just movies)
     // This ensures searching "agency" finds the movie, and "forever 2024" finds the movie too
     if (query && endpoint.includes("/search/multi")) {
         results = results.filter(item => item.media_type === "movie" || item.media_type === "tv");
+        if (normalizedType === "anime") {
+            results = results.filter(item => {
+                const language = item.original_language || "";
+                const genres = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+                return language === "ja" || genres.includes(16) || normalizeTitleKey(item.title || item.name).includes(normalizeTitleKey(query));
+            });
+        }
         // If multi-search returned fewer than 5 results, also try dedicated movie search + TV search as fallback
         if (results.length < 5) {
             const movieEndpoint = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&page=1${apiSuffix}`;
@@ -1397,8 +1469,8 @@ async function tmdbItems(type, query, page = 1) {
                 fetchWithTimeout(movieEndpoint, { headers }).catch(() => null),
                 fetchWithTimeout(tvEndpoint, { headers }).catch(() => null)
             ]);
-            const movieResults = (moviePayload && moviePayload.results) || [];
-            const tvResults = (tvPayload && tvPayload.results) || [];
+            const movieResults = ((moviePayload && moviePayload.results) || []).map((item) => ({ ...item, __media_type: "movie" }));
+            const tvResults = ((tvPayload && tvPayload.results) || []).map((item) => ({ ...item, __media_type: "tv" }));
             results = [...results, ...movieResults, ...tvResults];
         }
     }
@@ -1407,12 +1479,19 @@ async function tmdbItems(type, query, page = 1) {
         results = results.filter(item => item.media_type === "tv");
     }
 
+    if (query) {
+        results = results
+            .map((item, index) => ({ item, index, score: tmdbResultScore(item, query, normalizedType) }))
+            .sort((a, b) => b.score - a.score || a.index - b.index)
+            .map((entry) => entry.item);
+    }
+
     return results.slice(0, 24).map((item) => {
-        const itemType = item.media_type === "movie" ? "movie" : "tv";
+        const itemType = (item.media_type || item.__media_type) === "movie" ? "movie" : "tv";
         return contentItem({
             id: `tmdb_${itemType}_${item.id}`,
             title: item.title || item.name || "Untitled",
-            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : "Movie",
+            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : normalizedType === "anime" ? (itemType === "movie" ? "Anime Movie" : "Anime Series") : "Movie",
             coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
             detailUrl: `tmdb://${itemType}/${item.id}`,
             sourceName: "TMDB",
@@ -1426,7 +1505,12 @@ async function tmdbBestMatch(type, title) {
     const query = String(title || "").trim();
     if (!query) return null;
     const items = await tmdbItems(type, query, 1).catch(() => []);
-    return items.find((item) => /^tmdb:\/\//.test(item.detailUrl)) || null;
+    const normalizedQuery = normalizeTitleKey(query);
+    const compactQuery = compactTitleKey(query);
+    return items.find((item) => /^tmdb:\/\//.test(item.detailUrl) && normalizeTitleKey(item.title) === normalizedQuery) ||
+        items.find((item) => /^tmdb:\/\//.test(item.detailUrl) && compactTitleKey(item.title) === compactQuery) ||
+        items.find((item) => /^tmdb:\/\//.test(item.detailUrl)) ||
+        null;
 }
 
 async function wikidataTmdbMatch(type, title) {
@@ -1777,7 +1861,7 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
       },
       {
         provider: "Server 2 (VidSrc)",
-        url: movie ? `https://vidsrc.to/embed/movie/${id}` : `https://vidsrc.to/embed/tv/${id}/${season}/${episode}`
+        url: movie ? `https://vidsrc.cc/v2/embed/movie/${id}` : `https://vidsrc.cc/v2/embed/tv/${id}/${season}/${episode}`
       },
       {
         provider: "Server 3 (Nontongo)",

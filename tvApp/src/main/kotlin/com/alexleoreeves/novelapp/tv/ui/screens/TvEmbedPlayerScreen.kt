@@ -128,6 +128,10 @@ fun TvEmbedPlayerScreen(
         eventUp.recycle()
     }
 
+    fun playerUnmute() {
+        webViewRef?.evaluateJavascript(EMBED_UNMUTE_JS, null)
+    }
+
     BackHandler { onBack() }
 
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -143,7 +147,17 @@ fun TvEmbedPlayerScreen(
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown || event.type == KeyEventType.KeyUp) {
+                val keyCode = event.nativeKeyEvent.keyCode
+                val isVolumeKey = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+                    keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN ||
+                    keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE
+                if (isVolumeKey) {
+                    if (event.type == KeyEventType.KeyUp) {
+                        showControls = true
+                        playerUnmute()
+                    }
+                    false
+                } else if (event.type == KeyEventType.KeyDown || event.type == KeyEventType.KeyUp) {
                     if (previewExpired) {
                         when (event.key) {
                             Key.Back -> { onBack(); true }
@@ -269,6 +283,25 @@ private const val EMBED_VIDEO_STATE_JS =
 
 private const val EMBED_PAUSE_JS =
     "(function(){var v=document.querySelector('video');if(v){v.pause();v.muted=true;}})()"
+
+private const val EMBED_UNMUTE_JS = """
+(function(){
+    function unmute(root) {
+        try {
+            root.querySelectorAll('video,audio').forEach(function(v) {
+                v.muted = false;
+                v.volume = 1.0;
+                var p = v.play && v.play();
+                if (p) p.catch(function(){});
+            });
+            root.querySelectorAll('[aria-label*="Mute"],[title*="Mute"],[class*="mute"],[id*="mute"]').forEach(function(el) {
+                try { el.click(); } catch(e) {}
+            });
+        } catch(e) {}
+    }
+    unmute(document);
+})();
+"""
 
 private fun formatEmbedTime(millis: Long): String {
     if (millis <= 0) return "0:00"

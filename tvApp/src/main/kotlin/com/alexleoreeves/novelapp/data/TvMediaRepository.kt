@@ -22,6 +22,18 @@ class TvMediaRepository {
         val isTmdb = item.detailPageUrl.startsWith("tmdb://")
 
         return try {
+            val backendChapters = if (item.isAnime || isTmdb) {
+                fetchChapters(
+                    if (item.isAnime) "anime" else kind.ifBlank { "movie" },
+                    item.detailPageUrl.ifBlank { item.url },
+                    item.title,
+                    item.sourceName
+                )
+            } else {
+                emptyList()
+            }
+            if (backendChapters.isNotEmpty()) return backendChapters
+
             val episodes = when {
                 isDonghua -> donghuaStreamScraper.fetchEpisodes(
                     titleQuery = item.title,
@@ -71,24 +83,7 @@ class TvMediaRepository {
                 else -> emptyList()
             }
 
-            val isMovie = kind == "movie" || kind == "movies" || (item.isVideo && !item.isAnime && kind == "movie")
-            val isEpisodic = item.isAnime || (item.isVideo && !isMovie)
-            if (episodes.isEmpty() && isEpisodic) {
-                if (item.detailPageUrl.startsWith("tmdb://")) {
-                    val tmdbId = item.detailPageUrl.removePrefix("tmdb://").split("/").getOrNull(1) ?: ""
-                    (1..24).map { epNum ->
-                        Chapter(
-                            title = "Episode $epNum",
-                            url = "tmdb:$tmdbId:1:$epNum",
-                            chapterNumber = epNum
-                        )
-                    }
-                } else {
-                    emptyList()
-                }
-            } else {
-                episodes
-            }
+            episodes
         } catch (e: Exception) {
             emptyList()
         }
@@ -103,6 +98,13 @@ class TvMediaRepository {
         val kind = item.mediaKind.lowercase()
         val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
         val isTmdb = item.detailPageUrl.startsWith("tmdb://")
+        val targetServer = server ?: StreamServer.VIDLINK
+
+        if (!isDonghua) {
+            parseTmdbPlaybackMarker(chapter?.url, item.detailPageUrl, chapter?.chapterNumber)?.let { marker ->
+                return targetServer.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)
+            }
+        }
         
         // nollywood direct
         if (item.id.startsWith("youtube_nollywood_")) {
@@ -170,11 +172,12 @@ class TvMediaRepository {
                     // AnimeXin: resolve episode page URL to embed player URL.
                     animeXinScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
                 }
+            }
         }
 
         if (item.isAnime && chapter != null) {
             val epUrl = chapter.url
-            if (!epUrl.startsWith("tmdb:")) {
+            if (!epUrl.startsWith("tmdb:") && !epUrl.startsWith("tmdb-", ignoreCase = true)) {
                 if (ConsumetAnimeScraper.isConsumetEpisodeUrl(epUrl)) {
                     return consumetAnimeScraper.extractStreamUrl(epUrl)
                 }
@@ -185,8 +188,6 @@ class TvMediaRepository {
         val tmdbParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
         val tmdbType = tmdbParts.getOrNull(0) ?: "movie"
         val tmdbId = tmdbParts.getOrNull(1) ?: ""
-
-        val targetServer = server ?: StreamServer.VIDLINK
 
         val isMovieKind = tmdbType == "movie" || ((kind == "movie" || kind == "movies") && chapter == null)
 
@@ -217,4 +218,55 @@ class TvMediaRepository {
 
         return chapter?.url
     }
+}
+
+private data class TmdbPlaybackMarker(
+    val tmdbId: String,
+    val mediaType: String,
+    val season: String = "1",
+    val episode: String = "1"
+)
+
+private fun parseTmdbPlaybackMarker(
+    chapterUrl: String?,
+    detailUrl: String,
+    chapterNumber: Int?
+): TmdbPlaybackMarker? {
+    val cleanChapter = chapterUrl.orEmpty().trim()
+
+    Regex("""^tmdb-episode://(\d+)/(\d+)/(\d+)$""")
+        .find(cleanChapter)
+        ?.let { match ->
+            return TmdbPlaybackMarker(
+                tmdbId = match.groupValues[1],
+                mediaType = "tv",
+                season = match.groupValues[2],
+                episode = match.groupValues[3]
+            )
+        }
+
+    Regex("""^tmdb-movie://(\d+)$""")
+        .find(cleanChapter)
+        ?.let { match ->
+            return TmdbPlaybackMarker(tmdbId = match.groupValues[1], mediaType = "movie")
+        }
+
+    Regex("""^(?:tmdb|tv):(\d+):(\d+):(\d+)$""")
+        .find(cleanChapter)
+        ?.let { match ->
+            return TmdbPlaybackMarker(
+                tmdbId = match.groupValues[1],
+                mediaType = "tv",
+                season = match.groupValues[2],
+                episode = match.groupValues[3]
+            )
+        }
+
+    val detailMatch = Regex("""^tmdb://(movie|tv)/(\d+)""").find(detailUrl.trim()) ?: return null
+    val mediaType = detailMatch.groupValues[1]
+    val tmdbId = detailMatch.groupValues[2]
+    if (mediaType == "movie") return TmdbPlaybackMarker(tmdbId = tmdbId, mediaType = "movie")
+
+    val episode = chapterNumber?.coerceAtLeast(1)?.toString() ?: "1"
+    return TmdbPlaybackMarker(tmdbId = tmdbId, mediaType = "tv", season = "1", episode = episode)
 }
