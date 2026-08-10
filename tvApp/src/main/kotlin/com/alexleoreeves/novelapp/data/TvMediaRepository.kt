@@ -10,6 +10,7 @@ class TvMediaRepository {
     private val wcoStreamScraper = WcoStreamScraper(httpClient)
     private val donghuaStreamScraper = DonghuaSiteScraper.donghuaStream(httpClient)
     private val luciferDonghuaScraper = DonghuaSiteScraper.luciferDonghua(httpClient)
+    private val animeXinScraper = AnimeXinScraper(httpClient)
     private val aninekoScraper = AninekoScraper(httpClient)
     private val animePaheScraper = AnimePaheScraper(httpClient)
     private val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
@@ -150,11 +151,24 @@ class TvMediaRepository {
                     } else chapter.url
                 }
                 DonghuaServer.LUCIFER_DONGHUA -> {
-                    // Resolve the episode page URL through LuciferDonghua to get the
-                    // embedded player URL. The TV WebView player already handles
-                    // luciferdonghua.in with fullscreen CSS + iframe extraction JS.
                     luciferDonghuaScraper.resolveEpisodePlayerUrl(chapter.url)
                         ?: chapter.url
+                }
+                DonghuaServer.VIDSRC -> {
+                    val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+                    val detailType = detailParts.getOrNull(0).orEmpty()
+                    val detailTmdbId = detailParts.getOrNull(1).orEmpty()
+                    if (item.detailPageUrl.startsWith("tmdb://") && detailTmdbId.isNotBlank()) {
+                        val urlParts = chapter.url.split(":")
+                        val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+                        val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: chapter.chapterNumber.coerceAtLeast(1).toString()
+                        if (detailType == "movie") "https://vidsrc.to/embed/movie/$detailTmdbId"
+                        else "https://vidsrc.to/embed/tv/$detailTmdbId/$s/$e"
+                    } else chapter.url
+                }
+                DonghuaServer.ANIMEXIN -> {
+                    // AnimeXin: resolve episode page URL to embed player URL.
+                    animeXinScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
                 }
         }
 

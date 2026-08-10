@@ -58,6 +58,7 @@ fun MediaDetailScreen(
     val youtubeNollywoodScraper = remember { YouTubeNollywoodScraper(httpClient) }
     val donghuaStreamScraper = remember { DonghuaSiteScraper.donghuaStream(httpClient) }
     val luciferDonghuaScraper = remember { DonghuaSiteScraper.luciferDonghua(httpClient) }
+    val animeXinScraper = remember { AnimeXinScraper(httpClient) }
 
     val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
@@ -110,11 +111,13 @@ fun MediaDetailScreen(
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
         when (selectedDonghuaServer) {
-            DonghuaServer.NONTONGO -> donghuaStreamScraper // Not used for Nontongo, but required for exhaustiveness
+            DonghuaServer.NONTONGO -> donghuaStreamScraper
             DonghuaServer.AUTOEMBED -> donghuaStreamScraper
             DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
             DonghuaServer.EMBEDSU -> donghuaStreamScraper
             DonghuaServer.LUCIFER_DONGHUA -> luciferDonghuaScraper
+            DonghuaServer.VIDSRC -> donghuaStreamScraper // URL built directly, scraper not used
+            DonghuaServer.ANIMEXIN -> donghuaStreamScraper // AnimeXin has its own scraper; episodes loaded separately
         }
 
     fun buildDonghuaAutoEmbedUrl(ep: MediaEpisode): String? {
@@ -186,6 +189,26 @@ fun MediaDetailScreen(
                 // The WebView already has luciferdonghua.in iframe-extraction JS built in,
                 // so the page loads fullscreen video just like DonghuaStream (Server 3).
                 val playerUrl = luciferDonghuaScraper.resolveEpisodePlayerUrl(ep.url)
+                playerUrl ?: ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.VIDSRC -> {
+                // VidSrc.to: build the embed URL directly from the TMDB ID — no scraping,
+                // no bot-protection risk. Widest Donghua/anime TMDB coverage.
+                val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+                val detailType = detailParts.getOrNull(0).orEmpty()
+                val detailTmdbId = detailParts.getOrNull(1).orEmpty()
+                if (item.detailPageUrl.startsWith("tmdb://") && detailTmdbId.isNotBlank()) {
+                    val urlParts = ep.url.split(":")
+                    val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+                    val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: ep.episodeNumber.coerceAtLeast(1).toString()
+                    if (detailType == "movie") "https://vidsrc.to/embed/movie/$detailTmdbId"
+                    else "https://vidsrc.to/embed/tv/$detailTmdbId/$s/$e"
+                } else ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.ANIMEXIN -> {
+                // AnimeXin: resolve the episode page URL to extract the best embed player URL.
+                // animexin.vip hosts Donghua and Anime with direct iframe embed extraction.
+                val playerUrl = animeXinScraper.resolveEpisodePlayerUrl(ep.url)
                 playerUrl ?: ep.url.takeIf { it.isNotBlank() }
             }
         }
@@ -440,18 +463,26 @@ fun MediaDetailScreen(
         val isMovie = mediaType == "movie"
         val needsTmdbMatch = !isDonghuaItem && ((episodesList.isEmpty() && !isMovie) || (isMovie && !isTmdbDetail))
         if (needsTmdbMatch) {
+            val isAnimeLike = item.isAnime ||
+                item.mediaKind.equals(VideoCategory.ANIME.name, ignoreCase = true)
             val tmdbMatch = runCatching {
                 tmdbScraper.search(item.title)
                     .sortedWith(
                         compareByDescending<MediaResult> { it.title.normalizedMediaTitle() == item.title.normalizedMediaTitle() }
                             .thenByDescending {
-                                when (item.mediaKind) {
-                                    VideoCategory.K_DRAMA.name -> it.type == "TVSHOW"
-                                    VideoCategory.CARTOON.name -> it.type == "TVSHOW" || it.genres.contains("Animation", ignoreCase = true)
-                                    else -> true
+                                when {
+                                    // For anime: strongly prefer TV shows with Animation genre
+                                    isAnimeLike -> (if (it.type == "TVSHOW") 10 else 0) +
+                                        (if (it.genres.contains("Animation", ignoreCase = true)) 5 else 0) +
+                                        (if (it.genres.contains("Anime", ignoreCase = true)) 5 else 0)
+                                    item.mediaKind == VideoCategory.K_DRAMA.name -> if (it.type == "TVSHOW") 1 else 0
+                                    item.mediaKind == VideoCategory.CARTOON.name -> if (it.type == "TVSHOW" || it.genres.contains("Animation", ignoreCase = true)) 1 else 0
+                                    else -> 0
                                 }
                             }
                     )
+                    // For anime: only accept TVSHOW results to avoid fetching a wrong movie TMDB ID
+                    .filter { if (isAnimeLike) it.type == "TVSHOW" else true }
                     .firstOrNull()
             }.getOrNull()
             if (tmdbMatch != null) {
