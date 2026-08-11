@@ -136,8 +136,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 41
-        versionName = "1.41"
+        versionCode = 42
+        versionName = "1.42"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -218,7 +218,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovaRead TV"
-            packageVersion = "1.41.0"
+            packageVersion = "1.42.0"
             description = "NovaRead TV"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"

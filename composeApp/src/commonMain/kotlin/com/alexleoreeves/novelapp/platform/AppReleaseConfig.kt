@@ -10,7 +10,7 @@ object AppReleaseConfig {
     const val UPDATE_MANIFEST_URL = "https://novelapp1.onrender.com/app-version.json"
     const val ANDROID_DOWNLOAD_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk"
     const val ANDROID_TV_DOWNLOAD_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk"
-    const val DESKTOP_DOWNLOAD_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe"
+    const val DESKTOP_DOWNLOAD_URL = "https://novelapp1.onrender.com/downloads/novelapp-windows.exe"
     const val IOS_DOWNLOAD_URL = "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa"
     const val DOWNLOAD_URL = ANDROID_DOWNLOAD_URL
     const val KOKORO_MANIFEST_URL = "https://novelapp1.onrender.com/assets/kokoro/manifest.json"
