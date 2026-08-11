@@ -52,39 +52,34 @@ import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
 
+/**
+ * iOS actual — YouTube player backed by WKWebView navigating to
+ * https://www.youtube.com/embed/<videoId> with autoplay and muted=false.
+ */
 @OptIn(ExperimentalForeignApi::class)
 @Composable
-actual fun AnimePlayerScreen(
-    streamUrl: String,
-    episodeTitle: String,
+actual fun YouTubePlayerScreen(
+    videoId: String,
+    title: String,
     currentTheme: AppTheme,
-    initialPositionMs: Long,
-    onProgress: (Long) -> Unit,
-    previewLimitMs: Long?,
-    onPreviewFinished: () -> Unit,
-    contentKind: String,
-    subtitlesJson: String?,
     onBack: () -> Unit
 ) {
-    var retryKey by remember(streamUrl) { mutableStateOf(0) }
-    var isLoading by remember(streamUrl, retryKey) { mutableStateOf(true) }
-    var errorMessage by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
-    val providerName = streamUrl.providerName()
+    var retryKey by remember(videoId) { mutableStateOf(0) }
+    var isLoading by remember(videoId, retryKey) { mutableStateOf(true) }
+    var errorMessage by remember(videoId, retryKey) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(streamUrl, retryKey, isLoading) {
+    val embedUrl = remember(videoId) {
+        "https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&rel=0"
+    }
+
+    LaunchedEffect(videoId, retryKey, isLoading) {
         if (isLoading) {
-            delay(18_000)
+            delay(20_000)
             if (isLoading) {
-                errorMessage = "$providerName is taking too long to respond. Try another provider or episode."
+                errorMessage = "YouTube is taking too long to respond. Check your connection and retry."
                 isLoading = false
             }
         }
-    }
-
-    LaunchedEffect(streamUrl, retryKey, previewLimitMs) {
-        val limit = previewLimitMs ?: return@LaunchedEffect
-        delay(limit)
-        onPreviewFinished()
     }
 
     Box(
@@ -102,8 +97,8 @@ actual fun AnimePlayerScreen(
                     WKWebView(frame = CGRectZero.readValue(), configuration = config).apply {
                         setOpaque(false)
                         backgroundColor = platform.UIKit.UIColor.blackColor
-                        customUserAgent = PLAYER_USER_AGENT
-                        navigationDelegate = PlayerNavigationDelegate(
+                        customUserAgent = YOUTUBE_USER_AGENT
+                        navigationDelegate = YouTubeNavigationDelegate(
                             onStarted = {
                                 isLoading = true
                                 errorMessage = null
@@ -116,7 +111,7 @@ actual fun AnimePlayerScreen(
                                 errorMessage = message
                             }
                         )
-                        loadRequest(streamUrl.toPlayerRequest())
+                        loadRequest(embedUrl.toYouTuBeRequest())
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -128,10 +123,9 @@ actual fun AnimePlayerScreen(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            PlayerLoadingOverlay(
-                title = episodeTitle,
-                providerName = providerName,
-                message = errorMessage ?: "Loading secure player...",
+            YouTubeLoadingOverlay(
+                title = title,
+                message = errorMessage ?: "Loading YouTube player...",
                 isError = errorMessage != null,
                 onRetry = {
                     errorMessage = null
@@ -155,9 +149,8 @@ actual fun AnimePlayerScreen(
 }
 
 @Composable
-private fun PlayerLoadingOverlay(
+private fun YouTubeLoadingOverlay(
     title: String,
-    providerName: String,
     message: String,
     isError: Boolean,
     onRetry: () -> Unit,
@@ -178,11 +171,11 @@ private fun PlayerLoadingOverlay(
                 Icon(
                     Icons.Default.Refresh,
                     contentDescription = null,
-                    tint = Color(0xFF00BFFF),
+                    tint = Color(0xFFFF3B30),
                     modifier = Modifier.size(42.dp)
                 )
             } else {
-                CircularProgressIndicator(color = Color(0xFF00BFFF))
+                CircularProgressIndicator(color = Color(0xFFFF3B30))
             }
             Text(
                 title,
@@ -192,7 +185,7 @@ private fun PlayerLoadingOverlay(
                 maxLines = 2
             )
             Text(
-                providerName,
+                "YouTube",
                 color = Color.White.copy(alpha = 0.7f),
                 style = MaterialTheme.typography.labelLarge
             )
@@ -209,7 +202,7 @@ private fun PlayerLoadingOverlay(
                 }
                 Button(
                     onClick = onRetry,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFFF))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3B30))
                 ) {
                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
@@ -220,7 +213,7 @@ private fun PlayerLoadingOverlay(
     }
 }
 
-private class PlayerNavigationDelegate(
+private class YouTubeNavigationDelegate(
     private val onStarted: () -> Unit,
     private val onFinished: () -> Unit,
     private val onFailed: (String) -> Unit
@@ -251,16 +244,10 @@ private class PlayerNavigationDelegate(
         decidePolicyForNavigationAction: platform.WebKit.WKNavigationAction,
         decisionHandler: (platform.WebKit.WKNavigationActionPolicy) -> Unit
     ) {
-        val url = decidePolicyForNavigationAction.request.URL?.absoluteString ?: ""
         val host = decidePolicyForNavigationAction.request.URL?.host?.lowercase() ?: ""
-        
-        // Let it start with some initial host logic if needed, but for simplicity we just allow whitelist.
-        val allowedDomains = listOf(
-            "vidsrc", "nontongo", "multiembed", "streamingnow", "vidlink", 
-            "youtube.com", "vimeo.com", "dailymotion.com"
-        )
-        
-        if (allowedDomains.any { host.contains(it) }) {
+        if ("youtube.com" in host || "youtube-nocookie.com" in host ||
+            "googlevideo.com" in host || "ytimg.com" in host
+        ) {
             decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
         } else {
             decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
@@ -268,47 +255,19 @@ private class PlayerNavigationDelegate(
     }
 }
 
-private fun String.toPlayerRequest(): NSMutableURLRequest {
-    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidsrc.to")!!
+private fun String.toYouTuBeRequest(): NSMutableURLRequest {
+    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://www.youtube.com")!!
     return NSMutableURLRequest.requestWithURL(url).apply {
-        allHTTPHeaderFields = playerHeaders()
+        allHTTPHeaderFields = mapOf(
+            "User-Agent" to YOUTUBE_USER_AGENT,
+            "Accept" to "*/*",
+            "Accept-Language" to "en-US,en;q=0.9"
+        )
     }
 }
 
-private fun String.playerHeaders(): Map<String, String> =
-    mapOf(
-        "User-Agent" to PLAYER_USER_AGENT,
-        "Referer" to playerReferer(),
-        "Origin" to playerOrigin(),
-        "Accept" to "*/*",
-        "Accept-Language" to "en-US,en;q=0.9"
-    )
-
-private fun String.playerReferer(): String = "${playerOrigin()}/"
-
-private fun String.playerOrigin(): String {
-    val url = NSURL.URLWithString(this)
-    val scheme = url?.scheme ?: "https"
-    val host = url?.host ?: "vidsrc.to"
-    return "$scheme://$host"
-}
-
-private fun String.providerName(): String {
-    val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded provider"
-    return when {
-        "vidlink" in host -> "VidLink"
-        "nontongo" in host -> "Nontongo"
-        "multiembed" in host || "streamingnow" in host -> "MultiEmbed"
-        "vidsrcme" in host -> "VidSrc.me"
-        "vidsrc.in" == host || host.endsWith(".vidsrc.in") -> "VidSrc.in"
-        "vidsrc.to" == host || host.endsWith(".vidsrc.to") -> "VidSrc.to"
-        "autoembed" in host -> "AutoEmbed"
-        "vidsrc" in host -> "VidSrc"
-        "embed" in host -> "Embed provider"
-        else -> host
-    }
-}
-
-private const val PLAYER_USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+private const val YOUTUBE_USER_AGENT =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+</｜｜DSML｜｜>
+</｜｜DSML｜｜>

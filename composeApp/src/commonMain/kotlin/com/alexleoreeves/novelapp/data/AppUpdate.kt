@@ -1,6 +1,7 @@
 package com.alexleoreeves.novelapp.data
 
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
+import com.alexleoreeves.novelapp.platform.AppUpdateTarget
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -40,12 +41,11 @@ private fun compareVersions(v1: String, v2: String): Int {
     return 0
 }
 
-suspend fun fetchAppUpdateManifest(client: HttpClient, isTv: Boolean = false, isDesktop: Boolean = false): AppUpdateManifest? {
-    val defaultUrl = when {
-        isTv -> AppReleaseConfig.ANDROID_TV_DOWNLOAD_URL
-        isDesktop -> AppReleaseConfig.DESKTOP_DOWNLOAD_URL
-        else -> AppReleaseConfig.ANDROID_DOWNLOAD_URL
-    }
+suspend fun fetchAppUpdateManifest(
+    client: HttpClient,
+    target: AppUpdateTarget = AppUpdateTarget.ANDROID
+): AppUpdateManifest? {
+    val defaultUrl = target.downloadUrl()
 
     val githubResult = runCatching {
         val response = client.get("https://api.github.com/repos/Alex-Leo-Reeves/novelapp/releases/latest").body<String>()

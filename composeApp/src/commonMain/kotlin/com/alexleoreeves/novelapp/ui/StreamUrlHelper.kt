@@ -169,21 +169,24 @@ private fun buildCineProSubtitlesJson(tracks: List<CineProSubtitleTrack>): Strin
     val validTracks = tracks.filter { it.url.isNotBlank() && it.language.isNotBlank() }
     if (validTracks.isEmpty()) return null
     // For direct URL subtitles, build standard [{file, label, srclang, kind}] JSON
-    val jsonArray = org.json.JSONArray()
-    for (track in validTracks.take(5)) {
-        // If the URL is a full HTTP URL, use it directly
-        val fileUrl = if (track.url.startsWith("http")) track.url else {
-            // Relative URLs would need CINEPRO_BASE_URL prefix — skip for now
-            if (track.url.startsWith("/")) null else null
-        } ?: continue
-        val obj = org.json.JSONObject()
-        obj.put("file", fileUrl)
-        obj.put("label", track.label.ifBlank { "CinePro ${track.language.uppercase()}" })
-        obj.put("srclang", track.language)
-        obj.put("kind", "captions")
-        jsonArray.put(obj)
+    val jsonArray = kotlinx.serialization.json.buildJsonArray {
+        for (track in validTracks.take(5)) {
+            // If the URL is a full HTTP URL, use it directly
+            val fileUrl = if (track.url.startsWith("http")) track.url else {
+                // Relative URLs would need CINEPRO_BASE_URL prefix — skip for now
+                if (track.url.startsWith("/")) null else null
+            } ?: continue
+            add(
+                buildJsonObject {
+                    put("file", fileUrl)
+                    put("label", track.label.ifBlank { "CinePro ${track.language.uppercase()}" })
+                    put("srclang", track.language)
+                    put("kind", "captions")
+                }
+            )
+        }
     }
-    return if (jsonArray.length() > 0) jsonArray.toString() else null
+    return if (jsonArray.isNotEmpty()) jsonArray.toString() else null
 }
 
 /**

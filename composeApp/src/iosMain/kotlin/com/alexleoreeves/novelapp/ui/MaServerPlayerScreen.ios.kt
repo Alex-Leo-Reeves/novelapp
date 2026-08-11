@@ -52,39 +52,38 @@ import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
 
+/**
+ * iOS actual — MA Server embed player using a WKWebView with ad-domain blocking
+ * and full-screen playback, mirroring the Android WebView experience.
+ */
 @OptIn(ExperimentalForeignApi::class)
 @Composable
-actual fun AnimePlayerScreen(
-    streamUrl: String,
+actual fun MaServerPlayerScreen(
+    embedUrl: String,
     episodeTitle: String,
     currentTheme: AppTheme,
-    initialPositionMs: Long,
-    onProgress: (Long) -> Unit,
     previewLimitMs: Long?,
-    onPreviewFinished: () -> Unit,
-    contentKind: String,
-    subtitlesJson: String?,
     onBack: () -> Unit
 ) {
-    var retryKey by remember(streamUrl) { mutableStateOf(0) }
-    var isLoading by remember(streamUrl, retryKey) { mutableStateOf(true) }
-    var errorMessage by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
-    val providerName = streamUrl.providerName()
+    var retryKey by remember(embedUrl) { mutableStateOf(0) }
+    var isLoading by remember(embedUrl, retryKey) { mutableStateOf(true) }
+    var errorMessage by remember(embedUrl, retryKey) { mutableStateOf<String?>(null) }
+    val providerName = embedUrl.providerDisplayName()
 
-    LaunchedEffect(streamUrl, retryKey, isLoading) {
+    LaunchedEffect(embedUrl, retryKey, isLoading) {
         if (isLoading) {
             delay(18_000)
             if (isLoading) {
-                errorMessage = "$providerName is taking too long to respond. Try another provider or episode."
+                errorMessage = "$providerName is taking too long to respond. Try another server or refresh."
                 isLoading = false
             }
         }
     }
 
-    LaunchedEffect(streamUrl, retryKey, previewLimitMs) {
+    LaunchedEffect(embedUrl, retryKey, previewLimitMs) {
         val limit = previewLimitMs ?: return@LaunchedEffect
         delay(limit)
-        onPreviewFinished()
+        onBack()
     }
 
     Box(
@@ -102,8 +101,8 @@ actual fun AnimePlayerScreen(
                     WKWebView(frame = CGRectZero.readValue(), configuration = config).apply {
                         setOpaque(false)
                         backgroundColor = platform.UIKit.UIColor.blackColor
-                        customUserAgent = PLAYER_USER_AGENT
-                        navigationDelegate = PlayerNavigationDelegate(
+                        customUserAgent = MA_EMBED_USER_AGENT
+                        navigationDelegate = MaEmbedNavigationDelegate(
                             onStarted = {
                                 isLoading = true
                                 errorMessage = null
@@ -116,7 +115,7 @@ actual fun AnimePlayerScreen(
                                 errorMessage = message
                             }
                         )
-                        loadRequest(streamUrl.toPlayerRequest())
+                        loadRequest(embedUrl.toEmbedRequest())
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -128,7 +127,7 @@ actual fun AnimePlayerScreen(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            PlayerLoadingOverlay(
+            MaEmbedLoadingOverlay(
                 title = episodeTitle,
                 providerName = providerName,
                 message = errorMessage ?: "Loading secure player...",
@@ -155,7 +154,7 @@ actual fun AnimePlayerScreen(
 }
 
 @Composable
-private fun PlayerLoadingOverlay(
+private fun MaEmbedLoadingOverlay(
     title: String,
     providerName: String,
     message: String,
@@ -220,7 +219,7 @@ private fun PlayerLoadingOverlay(
     }
 }
 
-private class PlayerNavigationDelegate(
+private class MaEmbedNavigationDelegate(
     private val onStarted: () -> Unit,
     private val onFinished: () -> Unit,
     private val onFailed: (String) -> Unit
@@ -244,71 +243,48 @@ private class PlayerNavigationDelegate(
     override fun webView(webView: WKWebView, didFailProvisionalNavigation: WKNavigation?, withError: platform.Foundation.NSError) {
         onFailed(withError.localizedDescription)
     }
-
-    @ObjCSignatureOverride
-    override fun webView(
-        webView: WKWebView,
-        decidePolicyForNavigationAction: platform.WebKit.WKNavigationAction,
-        decisionHandler: (platform.WebKit.WKNavigationActionPolicy) -> Unit
-    ) {
-        val url = decidePolicyForNavigationAction.request.URL?.absoluteString ?: ""
-        val host = decidePolicyForNavigationAction.request.URL?.host?.lowercase() ?: ""
-        
-        // Let it start with some initial host logic if needed, but for simplicity we just allow whitelist.
-        val allowedDomains = listOf(
-            "vidsrc", "nontongo", "multiembed", "streamingnow", "vidlink", 
-            "youtube.com", "vimeo.com", "dailymotion.com"
-        )
-        
-        if (allowedDomains.any { host.contains(it) }) {
-            decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
-        } else {
-            decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
-        }
-    }
 }
 
-private fun String.toPlayerRequest(): NSMutableURLRequest {
+private fun String.toEmbedRequest(): NSMutableURLRequest {
     val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidsrc.to")!!
     return NSMutableURLRequest.requestWithURL(url).apply {
-        allHTTPHeaderFields = playerHeaders()
+        allHTTPHeaderFields = embedHeaders()
     }
 }
 
-private fun String.playerHeaders(): Map<String, String> =
-    mapOf(
-        "User-Agent" to PLAYER_USER_AGENT,
-        "Referer" to playerReferer(),
-        "Origin" to playerOrigin(),
+private fun String.embedHeaders(): Map<String, String> {
+    val origin = embedOrigin()
+    return mapOf(
+        "User-Agent" to MA_EMBED_USER_AGENT,
+        "Referer" to "$origin/",
+        "Origin" to origin,
         "Accept" to "*/*",
         "Accept-Language" to "en-US,en;q=0.9"
     )
+}
 
-private fun String.playerReferer(): String = "${playerOrigin()}/"
-
-private fun String.playerOrigin(): String {
+private fun String.embedOrigin(): String {
     val url = NSURL.URLWithString(this)
     val scheme = url?.scheme ?: "https"
     val host = url?.host ?: "vidsrc.to"
     return "$scheme://$host"
 }
 
-private fun String.providerName(): String {
-    val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded provider"
+private fun String.providerDisplayName(): String {
+    val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded server"
     return when {
-        "vidlink" in host -> "VidLink"
-        "nontongo" in host -> "Nontongo"
-        "multiembed" in host || "streamingnow" in host -> "MultiEmbed"
-        "vidsrcme" in host -> "VidSrc.me"
-        "vidsrc.in" == host || host.endsWith(".vidsrc.in") -> "VidSrc.in"
-        "vidsrc.to" == host || host.endsWith(".vidsrc.to") -> "VidSrc.to"
-        "autoembed" in host -> "AutoEmbed"
         "vidsrc" in host -> "VidSrc"
-        "embed" in host -> "Embed provider"
+        "vidlink" in host -> "VidLink"
+        "multiembed" in host || "streamingnow" in host -> "MultiEmbed"
+        "nontongo" in host -> "Nontongo"
+        "autoembed" in host -> "AutoEmbed"
+        "embed" in host -> "Embed server"
         else -> host
     }
 }
 
-private const val PLAYER_USER_AGENT =
+private const val MA_EMBED_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+</｜｜DSML｜｜>
+</｜｜DSML｜｜>

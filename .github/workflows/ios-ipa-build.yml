@@ -13,7 +13,6 @@ on:
       - "gradle.properties"
       - "gradlew"
       - "iosApp/**"
-      - "kokoro-assets-runtime/**"
       - "local.defaults.properties"
       - "settings.gradle.kts"
 
@@ -22,7 +21,7 @@ permissions:
 
 jobs:
   build-ios:
-    name: Build signed iPhone IPA
+    name: Build NovaRead IPA (shared Compose app)
     runs-on: macos-15
     env:
       IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
@@ -33,6 +32,14 @@ jobs:
       IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
       IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
       KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+      RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
+      RAPID_API_HOST: ${{ secrets.RAPID_API_HOST }}
+      MANGADEX_CLIENT_ID: ${{ secrets.MANGADEX_CLIENT_ID }}
+      MANGADEX_CLIENT_SECRET: ${{ secrets.MANGADEX_CLIENT_SECRET }}
+      MANGADEX_USERNAME: ${{ secrets.MANGADEX_USERNAME }}
+      MANGADEX_PASSWORD: ${{ secrets.MANGADEX_PASSWORD }}
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      TMDB_READ_ACCESS_TOKEN: ${{ secrets.TMDB_READ_ACCESS_TOKEN }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_CLOUD_API_KEY: ${{ secrets.GROQ_CLOUD_API_KEY }}
 
@@ -65,7 +72,6 @@ jobs:
             echo "can_sign=false" >> "$GITHUB_OUTPUT"
           fi
           if [ -z "$IOS_EXPORT_METHOD" ]; then
-            echo "IOS_EXPORT_METHOD was not set; defaulting to ad-hoc."
             echo "IOS_EXPORT_METHOD=ad-hoc" >> "$GITHUB_ENV"
           fi
           if [ -z "$KEYCHAIN_PASSWORD" ]; then
@@ -88,21 +94,21 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Bootstrap Xcode project for CocoaPods
-        run: cd iosApp && xcodegen generate --spec project.yml
-
-      - name: Download ONNX Runtime iOS Framework
+      - name: Write API key xcconfig
         run: |
-          cat << 'EOF' > Podfile
-          platform :ios, '16.0'
-          project 'iosApp/AnimeNovelManga.xcodeproj'
-          target 'AnimeNovelManga' do
-            pod 'onnxruntime-c', '1.17.1'
-          end
-          EOF
-          pod install
-          mv Pods/onnxruntime-c/onnxruntime.xcframework iosApp/onnxruntime.xcframework
-          rm -rf Podfile Podfile.lock Pods AnimeNovelManga.xcworkspace
+          set -euo pipefail
+          printf 'RAPID_API_KEY = %s\nRAPID_API_HOST = %s\nMANGADEX_CLIENT_ID = %s\nMANGADEX_CLIENT_SECRET = %s\nMANGADEX_USERNAME = %s\nMANGADEX_PASSWORD = %s\nTMDB_API_KEY = %s\nTMDB_READ_ACCESS_TOKEN = %s\nGROQ_API_KEY = %s\nGROQ_CLOUD_API_KEY = %s\n' \
+            "${RAPID_API_KEY:-mock_rapid_api_key}" \
+            "${RAPID_API_HOST:-webnovel.p.rapidapi.com}" \
+            "${MANGADEX_CLIENT_ID:-mock_client_id}" \
+            "${MANGADEX_CLIENT_SECRET:-mock_client_secret}" \
+            "${MANGADEX_USERNAME:-mock_user}" \
+            "${MANGADEX_PASSWORD:-mock_pass}" \
+            "${TMDB_API_KEY:-mock_tmdb_api_key}" \
+            "${TMDB_READ_ACCESS_TOKEN:-mock_tmdb_read_access_token}" \
+            "${GROQ_API_KEY:-mock_groq_api_key}" \
+            "${GROQ_CLOUD_API_KEY:-mock_groq_api_key}" \
+            > iosApp/Config.xcconfig
 
       - name: Generate Xcode project
         run: cd iosApp && xcodegen generate --spec project.yml
@@ -113,7 +119,7 @@ jobs:
           set -euo pipefail
 
           CERTIFICATE_PATH="$RUNNER_TEMP/ios_distribution.p12"
-          PROFILE_PATH="$RUNNER_TEMP/NovelApp.mobileprovision"
+          PROFILE_PATH="$RUNNER_TEMP/NovaRead.mobileprovision"
           KEYCHAIN_PATH="$RUNNER_TEMP/ios-build.keychain-db"
 
           echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH" 2>/dev/null \
@@ -138,7 +144,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/NovelApp.mobileprovision"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/NovaRead.mobileprovision"
 
       - name: Build unsigned iPhone app for compile check
         if: steps.signing.outputs.can_sign != 'true'
@@ -147,14 +153,16 @@ jobs:
           mkdir -p build/ios
 
           xcodebuild \
-            -project iosApp/AnimeNovelManga.xcodeproj \
-            -scheme AnimeNovelManga \
+            -project iosApp/NovaRead.xcodeproj \
+            -scheme NovaRead \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
             clean build
 
       - name: Package unsigned IPA artifact
@@ -162,7 +170,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="build/ios/DerivedData/Build/Products/Release-iphoneos/AnimeNovelManga.app"
+          APP_PATH="build/ios/DerivedData/Build/Products/Release-iphoneos/NovaRead.app"
           IPA_PATH="build/ios/novelapp-ios-unsigned.ipa"
 
           if [ ! -d "$APP_PATH" ]; then
@@ -173,10 +181,16 @@ jobs:
 
           rm -rf build/ios/unsigned-payload
           mkdir -p build/ios/unsigned-payload/Payload
-          cp -R "$APP_PATH" build/ios/unsigned-payload/Payload/AnimeNovelManga.app
+          cp -R "$APP_PATH" build/ios/unsigned-payload/Payload/NovaRead.app
           (cd build/ios/unsigned-payload && zip -qry "../novelapp-ios-unsigned.ipa" Payload)
 
           echo "Unsigned IPA created at $IPA_PATH"
+          IPA_SIZE_MB=$(du -m "$IPA_PATH" | cut -f1)
+          echo "Unsigned IPA size: ${IPA_SIZE_MB} MB"
+          if [ "$IPA_SIZE_MB" -lt 40 ]; then
+            echo "::error::Unsigned IPA is only ${IPA_SIZE_MB} MB - a full Compose Multiplatform app is expected to be larger. Refusing to publish a broken build."
+            exit 1
+          fi
           echo "::notice::Unsigned IPA artifact created. It is useful for inspection/testing, but an iPhone still needs a signed IPA to install normally."
 
       - name: Upload unsigned IPA artifact
@@ -212,52 +226,44 @@ jobs:
           mkdir -p build/ios
 
           xcodebuild \
-            -project iosApp/AnimeNovelManga.xcodeproj \
-            -scheme AnimeNovelManga \
+            -project iosApp/NovaRead.xcodeproj \
+            -scheme NovaRead \
             -configuration Release \
             -sdk iphoneos \
-            -archivePath build/ios/AnimeNovelManga.xcarchive \
+            -archivePath build/ios/NovaRead.xcarchive \
             DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
             CODE_SIGN_STYLE=Manual \
             PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
             clean archive
 
       - name: Export signed IPA
         if: steps.signing.outputs.can_sign == 'true'
         run: |
           set -euo pipefail
-
-          cat > build/ios/ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>${IOS_EXPORT_METHOD}</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>teamID</key>
-            <string>${IOS_TEAM_ID}</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>${IOS_BUNDLE_ID}</key>
-              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
-            </dict>
-            <key>stripSwiftSymbols</key>
-            <true/>
-          </dict>
-          </plist>
-          EOF
+          mkdir -p build/ios
+          IOS_EXPORT_METHOD="${IOS_EXPORT_METHOD:-ad-hoc}"
+          python3 -c "import plistlib,os; p={'method':os.environ['IOS_EXPORT_METHOD'],'signingStyle':'manual','teamID':os.environ['IOS_TEAM_ID'],'provisioningProfiles':{os.environ['IOS_BUNDLE_ID']:os.environ['IOS_PROVISIONING_PROFILE_NAME']},'stripSwiftSymbols':True}; plistlib.dump(p, open('build/ios/ExportOptions.plist','wb'))"
 
           xcodebuild \
             -exportArchive \
-            -archivePath build/ios/AnimeNovelManga.xcarchive \
+            -archivePath build/ios/NovaRead.xcarchive \
             -exportPath build/ios/export \
             -exportOptionsPlist build/ios/ExportOptions.plist
 
           mkdir -p site/downloads
           cp build/ios/export/*.ipa site/downloads/novelapp-ios.ipa
+
+          SIGNED_IPA_PATH=$(ls build/ios/export/*.ipa 2>/dev/null | head -1)
+          if [ -n "$SIGNED_IPA_PATH" ]; then
+            SIGNED_SIZE_MB=$(du -m "$SIGNED_IPA_PATH" | cut -f1)
+            echo "Signed IPA size: ${SIGNED_SIZE_MB} MB"
+            if [ "$SIGNED_SIZE_MB" -lt 40 ]; then
+              echo "::error::Signed IPA is only ${SIGNED_SIZE_MB} MB - a full Compose Multiplatform app is expected to be larger. Refusing to publish a broken build."
+              exit 1
+            fi
+          fi
 
       - name: Upload IPA artifact
         if: steps.signing.outputs.can_sign == 'true'

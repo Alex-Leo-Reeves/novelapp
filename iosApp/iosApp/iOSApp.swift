@@ -1,18 +1,23 @@
 import SwiftUI
 import UIKit
+import ComposeApp
 
 @main
 struct iOSApp: App {
-    init() {
-        UITableView.appearance().backgroundColor = .clear
-        UITableViewCell.appearance().backgroundColor = .clear
-    }
-
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.ignoresSafeArea())
+            ComposeView()
+                .ignoresSafeArea(.all)
         }
     }
 }
+
+struct ComposeView: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        MainViewControllerKt.MainViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+</｜｜DSML｜｜>
+</｜｜DSML｜｜>

@@ -35,7 +35,8 @@ sealed class OtpFlowState {
 @Composable
 fun App(
     userSessionStore: UserSessionStore = EmptyUserSessionStore,
-    linkOpener: ExternalLinkOpener = NoOpExternalLinkOpener
+    linkOpener: ExternalLinkOpener = NoOpExternalLinkOpener,
+    updateTarget: AppUpdateTarget = AppUpdateTarget.ANDROID
 ) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
@@ -186,7 +187,7 @@ fun App(
 
     LaunchedEffect(showSplash, isAuthChecked) {
         if (!showSplash && isAuthChecked) {
-            startupUpdateManifest = fetchAppUpdateManifest(updateClient)?.takeIf { it.isAvailable }
+            startupUpdateManifest = fetchAppUpdateManifest(updateClient, updateTarget)?.takeIf { it.isAvailable }
         }
     }
 
@@ -664,13 +665,21 @@ fun App(
                     hydrateCloudState(u.authToken); queueCloudSync(); isAuthSubmitting = false
                 }.onFailure { authError = it.message; isAuthSubmitting = false }
             }},
-            onRecoverAccount = { rs, np -> scope.launch {
+                    onOtpSignup = { e, p -> scope.launch {
+                isAuthSubmitting = true; authError = null
+                runCatching { authApi.otpSignup(e, p) }.onSuccess {
+                    otpFlowState = OtpFlowState.VerifySignup(e, p)
+                    isAuthSubmitting = false
+                }.onFailure { authError = it.message; isAuthSubmitting = false }
+            }},
+                    onRecoverAccount = { rs, np -> scope.launch {
                 isAuthSubmitting = true; authError = null
                 runCatching { val r = authApi.recoverAccount(rs); authApi.resetPassword(r.authToken, np) }
                     .onSuccess { r -> userSessionStore.saveAccount(r); account = r; isGuestSession = false; showAuthSheet = false
                         hydrateCloudState(r.authToken); queueCloudSync(); isAuthSubmitting = false }
                     .onFailure { authError = it.message; isAuthSubmitting = false }
-            }}
+            }},
+            onForgotPassword = { showAuthSheet = false; showForgotPassword = true }
         )
 
         subscriptionMessage?.let { m -> AlertDialog(onDismissRequest = { subscriptionMessage = null }, title = { Text("Premium") }, text = { Text(m) }, confirmButton = { Button(onClick = { beginPremiumCheckout("premium_3_devices") }) { Text("Subscribe") } }, dismissButton = { TextButton(onClick = { subscriptionMessage = null }) { Text("Close") } }) }

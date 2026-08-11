@@ -2,10 +2,26 @@
 
 package com.alexleoreeves.novelapp.data
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsBytes
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
+import io.ktor.utils.io.readAvailable
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
+import platform.Foundation.NSFileHandle
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSString
+import platform.Foundation.NSURL
 import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.create
@@ -17,7 +33,7 @@ private fun documentsDirectory(): String =
         ?: ""
 
 private fun safePathPart(value: String): String =
-    value.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    value.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "item" }
 
 private fun ensureDirectory(path: String) {
     NSFileManager.defaultManager.createDirectoryAtPath(
@@ -30,6 +46,12 @@ private fun ensureDirectory(path: String) {
 
 private fun novelDownloadsDir(novelId: String): String {
     val dir = "${documentsDirectory()}/downloads/novels/${safePathPart(novelId)}"
+    ensureDirectory(dir)
+    return dir
+}
+
+private fun videoDownloadsDir(parentId: String, episodeNumber: Int): String {
+    val dir = "${documentsDirectory()}/downloads/videos/${safePathPart(parentId)}/ep_$episodeNumber"
     ensureDirectory(dir)
     return dir
 }
@@ -76,12 +98,197 @@ actual suspend fun saveDownloadedVideo(
     parentId: String,
     episodeNumber: Int,
     sourceUrl: String
-): DownloadedVideoFile =
-    DownloadedVideoFile(error = "Offline video downloads are only available on Android right now.")
+): DownloadedVideoFile = withContext(Dispatchers.Default) {
+    runCatching {
+        if (!sourceUrl.startsWith("http", ignoreCase = true)) {
+            return@runCatching DownloadedVideoFile(error = "Local video file was not found.")
+        }
+
+        val dir = videoDownloadsDir(parentId, episodeNumber)
+        NSFileManager.defaultManager.removeItemAtPath(dir, error = null)
+        ensureDirectory(dir)
+
+        val client = HttpClient(Darwin) { expectSuccess = false }
+        try {
+            if (sourceUrl.isIosHlsLikeUrl()) {
+                saveIosHlsDownload(client, sourceUrl, dir)
+            } else {
+                val extension = sourceUrl.substringBefore("?")
+                    .substringBefore("#")
+                    .substringAfterLast(".", "mp4")
+                    .takeIf { it.length in 2..5 }
+                    ?: "mp4"
+                val filePath = "$dir/episode.$extension"
+                downloadIosToFile(client, sourceUrl, filePath)
+                DownloadedVideoFile(filePath, iosFileSize(filePath))
+            }
+        } finally {
+            client.close()
+        }
+    }.getOrElse { error ->
+        DownloadedVideoFile(error = error.message ?: "Video download failed.")
+    }
+}
 
 actual fun isDownloadedLocalFileAvailable(localPath: String): Boolean {
     val path = localPath.removePrefix("file://")
-    return path.isNotBlank() && NSFileManager.defaultManager.fileExistsAtPath(path)
+    if (path.isBlank()) return false
+    return NSFileManager.defaultManager.fileExistsAtPath(path) && iosFileSize(path) > 0L
 }
 
-actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? = null
+actual suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long): String? =
+    withContext(Dispatchers.Default) {
+        runCatching {
+            val client = HttpClient(Darwin) { expectSuccess = false }
+            try {
+                val html = client.get(embedUrl) {
+                    header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+                    header("Accept", "*/*")
+                    header("Accept-Language", "en-US,en;q=0.9")
+                }.bodyAsText()
+                EmbedStreamExtractor.findDirectStream(html)
+            } finally {
+                client.close()
+            }
+        }.getOrNull()
+    }
+
+// ── iOS download helpers ─────────────────────────────────────────────────────
+
+private fun String.isIosHlsLikeUrl(): Boolean {
+    val clean = substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".m3u8") ||
+        Regex("""/(playlist|manifest|hls)(/|$)""").containsMatchIn(clean)
+}
+
+private fun downloadIosToFile(client: HttpClient, url: String, filePath: String) {
+    val response = client.get(url) {
+        header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+        header("Accept", "*/*")
+        header("Accept-Encoding", "identity")
+    }
+    val channel = response.bodyAsChannel()
+    val buffer = ByteArray(64 * 1024)
+    while (true) {
+        val read = channel.readAvailable(buffer)
+        if (read <= 0) break
+        iosAppendBytes(filePath, buffer.copyOf(read))
+    }
+}
+
+private fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, dir: String): DownloadedVideoFile {
+    val masterText = iosFetchText(client, sourceUrl)
+    val (playlistUrl, playlistText) = iosSelectMediaPlaylist(client, sourceUrl, masterText)
+    val playlistPath = "$dir/playlist.m3u8"
+    var totalBytes = 0L
+    var segmentIndex = 0
+    var keyIndex = 0
+    val rewritten = playlistText
+        .lineSequence()
+        .map { line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("#EXT-X-KEY", ignoreCase = true) && "URI=\"" in trimmed -> {
+                    val keyUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
+                    if (keyUri.isNullOrBlank()) line else {
+                        val keyUrl = iosResolveUrl(playlistUrl, keyUri)
+                        val keyPath = "$dir/key_${keyIndex++}.bin"
+                        iosDownloadBytesToFile(client, keyUrl, keyPath)
+                        totalBytes += iosFileSize(keyPath)
+                        line.replace("""URI="$keyUri"""", """URI="${keyPath.substringAfterLast("/")}"""")
+                    }
+                }
+                trimmed.isBlank() || trimmed.startsWith("#") -> line
+                else -> {
+                    val segmentUrl = iosResolveUrl(playlistUrl, trimmed)
+                    val extension = segmentUrl.substringBefore("?")
+                        .substringBefore("#")
+                        .substringAfterLast(".", "ts")
+                        .takeIf { it.length in 2..5 }
+                        ?: "ts"
+                    val segmentPath = "$dir/seg_${segmentIndex.toString().padStart(5, '0')}.$extension"
+                    segmentIndex += 1
+                    iosDownloadBytesToFile(client, segmentUrl, segmentPath)
+                    totalBytes += iosFileSize(segmentPath)
+                    segmentPath.substringAfterLast("/")
+                }
+            }
+        }
+        .joinToString("\n")
+    iosWriteUtf8(playlistPath, rewritten)
+    return DownloadedVideoFile(playlistPath, totalBytes + iosFileSize(playlistPath))
+}
+
+private fun iosDownloadBytesToFile(client: HttpClient, url: String, filePath: String) {
+    val bytes = client.get(url) {
+        header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+        header("Accept", "*/*")
+        header("Accept-Encoding", "identity")
+    }.bodyAsBytes()
+    bytes.toNSData().writeToFile(filePath, atomically = false)
+}
+
+private fun iosSelectMediaPlaylist(client: HttpClient, sourceUrl: String, playlistText: String): Pair<String, String> {
+    if (!playlistText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) return sourceUrl to playlistText
+    val lines = playlistText.lines()
+    var nextUriIsVariant = false
+    for (line in lines) {
+        val trimmed = line.trim()
+        if (trimmed.startsWith("#EXT-X-STREAM-INF", ignoreCase = true)) {
+            nextUriIsVariant = true
+        } else if (nextUriIsVariant && trimmed.isNotBlank() && !trimmed.startsWith("#")) {
+            val mediaUrl = iosResolveUrl(sourceUrl, trimmed)
+            return mediaUrl to iosFetchText(client, mediaUrl)
+        }
+    }
+    return sourceUrl to playlistText
+}
+
+private fun iosResolveUrl(baseUrl: String, value: String): String {
+    val base = NSURL.URLWithString(baseUrl) ?: return value
+    return base.URLWithString(value)?.absoluteString ?: value
+}
+
+private suspend fun iosFetchText(client: HttpClient, url: String): String =
+    client.get(url) {
+        header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+        header("Accept", "*/*")
+    }.bodyAsText()
+
+private fun iosAppendBytes(filePath: String, bytes: ByteArray) {
+    if (bytes.isEmpty()) return
+    if (NSFileManager.defaultManager.fileExistsAtPath(filePath)) {
+        val handle = NSFileHandle.fileHandleForWritingAtPath(filePath)
+        if (handle != null) {
+            handle.seekToEndOfFile()
+            handle.writeData(bytes.toNSData())
+            handle.closeFile()
+            return
+        }
+    }
+    bytes.toNSData().writeToFile(filePath, atomically = false)
+}
+
+private fun iosWriteUtf8(filePath: String, text: String) {
+    NSString.create(string = text).writeToFile(
+        path = filePath,
+        atomically = true,
+        encoding = NSUTF8StringEncoding,
+        error = null
+    )
+}
+
+private fun iosFileSize(filePath: String): Long {
+    val attributes = NSFileManager.defaultManager.attributesOfItemAtPath(filePath, error = null)
+        ?: return 0L
+    val size = attributes["NSFileSize"] as? NSNumber ?: return 0L
+    return size.longLongValue
+}
+
+private fun ByteArray.toNSData(): NSData = usePinned { pinned ->
+    NSData.create(bytes = pinned.addressOf(0), length = size.toULong())
+}
+
+private const val IOS_DOWNLOAD_USER_AGENT =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"

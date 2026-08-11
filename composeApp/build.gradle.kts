@@ -100,8 +100,25 @@ kotlin {
                 implementation(libs.ktor.client.cio)
                 implementation(libs.jspecify)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
+                // In-app JavaFX WebView for desktop video players (embed providers,
+                // YouTube, direct mp4/webm). OpenJFX publishes the Java classes AND
+                // native libs inside the platform-classifier jars (the unclassified
+                // jars are empty stubs), so we declare the `win` classifier for all
+                // six modules. On the Windows CI runner this is exactly what the EXE
+                // needs. On other hosts (e.g. this Linux box) the win jars still
+                // resolve and compile fine; at runtime the lazy DesktopJavaFxCheck
+                // probe fails to load the Windows natives → players degrade to
+                // browser-open instead of crashing.
+                implementation("org.openjfx:javafx-base:21.0.4:win")
+                implementation("org.openjfx:javafx-graphics:21.0.4:win")
+                implementation("org.openjfx:javafx-controls:21.0.4:win")
+                implementation("org.openjfx:javafx-web:21.0.4:win")
+                implementation("org.openjfx:javafx-media:21.0.4:win")
+                implementation("org.openjfx:javafx-swing:21.0.4:win")
+                // SwingPanel (androidx.compose.ui.awt.SwingPanel) hosts the JFXPanel
+                // inside Compose Desktop — it ships in the desktop `ui` artifact,
+                // which compose.desktop.currentOs already provides.
             }
-
         }
     }
 }
@@ -119,8 +136,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 40
-        versionName = "1.40"
+        versionCode = 41
+        versionName = "1.41"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -197,10 +214,11 @@ compose.desktop {
             targetFormats(
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg,
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovaRead TV"
-            packageVersion = "1.40.0"
+            packageVersion = "1.41.0"
             description = "NovaRead TV"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"

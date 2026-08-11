@@ -86,6 +86,14 @@ enum class StreamServer(
             if (type == "movie") "https://embed.smashystream.com/playere.php?tmdb=$id"
             else "https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&ep=$e"
         }
+    ),
+    CINEPRO(
+        "Server 10 (CinePro)",
+        10,
+        { id, type, s, e ->
+            if (type == "movie") "https://cinepro-core-esmh.onrender.com/v1/movies/$id"
+            else "https://cinepro-core-esmh.onrender.com/v1/tv/$id/seasons/$s/episodes/$e"
+        }
     );
 
     companion object {

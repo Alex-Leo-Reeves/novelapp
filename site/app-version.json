@@ -6,9 +6,12 @@
     "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "releaseNotes": [
-        "TV: real episodes, server picker, fullscreen player, mandatory sign-in, profile selector",
-        "TV + Android: free-preview enforcement on WebView playback",
-        "Android: 20-minute preview cap for movie embeds"
+        "Desktop (EXE): real in-app narration (SAPI voice, word/paragraph highlight, pause/skip/seek)",
+        "Desktop (EXE): in-app video players (JavaFX WebView) for anime, MA server, YouTube — no browser hop",
+        "Desktop + iOS: offline video/audio downloads now work in-app",
+        "iOS (IPA): real narration via AVSpeechSynthesizer with word-by-word highlight + pause/skip/seek",
+        "iOS + Desktop: full in-app update checker points each platform at its own build",
+        "Android + TV unchanged — all new features land without touching their behavior"
     ],
     "forceUpdate": false,
     "apkBytes": 193123325,
