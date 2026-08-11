@@ -104,13 +104,13 @@ fun TvEmbedPlayerScreen(
         )
     }
 
-    fun playerTogglePlay() {
-        val wv = webViewRef ?: return
-        // JS cannot reach video elements inside cross-origin iframes (VidLink, Nontongo, etc).
-        // A real touch event dispatched to the WebView is treated as a genuine user gesture
-        // and hits the rendered pixels directly — bypassing the cross-origin restriction.
-        val w = wv.width.takeIf { it > 0 } ?: 1920
-        val h = wv.height.takeIf { it > 0 } ?: 1080
+    /**
+     * Injects a real center tap into the WebView. Used as a fallback when the
+     * <video> lives inside a cross-origin iframe that injected JS cannot reach.
+     */
+    fun dispatchCenterTouch(webView: WebView) {
+        val w = webView.width.takeIf { it > 0 } ?: 1920
+        val h = webView.height.takeIf { it > 0 } ?: 1080
         val downTime = android.os.SystemClock.uptimeMillis()
         val eventDown = android.view.MotionEvent.obtain(
             downTime, downTime,
@@ -122,14 +122,31 @@ fun TvEmbedPlayerScreen(
             android.view.MotionEvent.ACTION_UP,
             w / 2f, h / 2f, 0
         )
-        wv.dispatchTouchEvent(eventDown)
-        wv.dispatchTouchEvent(eventUp)
+        webView.dispatchTouchEvent(eventDown)
+        webView.dispatchTouchEvent(eventUp)
         eventDown.recycle()
         eventUp.recycle()
     }
 
+    fun playerTogglePlay() {
+        val wv = webViewRef ?: return
+        // Prefer direct JS play/pause — reliable even when the embed has hidden
+        // its controls, and it also unmutes when (re)starting playback.
+        // Falls back to a synthetic center tap only when the <video> is inside
+        // a cross-origin iframe that JS cannot reach.
+        wv.evaluateJavascript(EMBED_TOGGLE_PLAY_JS) { raw ->
+            val result = raw?.trim()?.trim('"') ?: "none"
+            if (result == "none") dispatchCenterTouch(wv)
+        }
+    }
+
     fun playerUnmute() {
-        webViewRef?.evaluateJavascript(EMBED_UNMUTE_JS, null)
+        val wv = webViewRef ?: return
+        // Unmute via JS when the video is reachable. No touch fallback here —
+        // a center tap could accidentally toggle play/pause while the user is
+        // only adjusting volume. The volume keys return false below, so the
+        // system TV volume still changes normally.
+        wv.evaluateJavascript(EMBED_UNMUTE_JS, null)
     }
 
     BackHandler { onBack() }
@@ -284,22 +301,79 @@ private const val EMBED_VIDEO_STATE_JS =
 private const val EMBED_PAUSE_JS =
     "(function(){var v=document.querySelector('video');if(v){v.pause();v.muted=true;}})()"
 
-private const val EMBED_UNMUTE_JS = """
+/**
+ * Toggle play/pause on reachable <video> elements — the top-level document
+ * plus any same-origin iframes (VidLink, Nontongo and friends render their
+ * player in a same-origin iframe). Unmutes + restores volume when resuming,
+ * so OK never resumes into silence.
+ *
+ * Returns "toggled" when a video was toggled, "none" when no reachable video
+ * exists. "none" triggers the synthetic center-touch fallback for videos that
+ * live inside cross-origin iframes where JS cannot reach.
+ */
+private const val EMBED_TOGGLE_PLAY_JS = """
 (function(){
-    function unmute(root) {
+    function tryToggle(root) {
+        var v = root.querySelector('video,audio');
+        if (!v) return false;
         try {
-            root.querySelectorAll('video,audio').forEach(function(v) {
+            if (v.paused) {
                 v.muted = false;
                 v.volume = 1.0;
-                var p = v.play && v.play();
-                if (p) p.catch(function(){});
-            });
-            root.querySelectorAll('[aria-label*="Mute"],[title*="Mute"],[class*="mute"],[id*="mute"]').forEach(function(el) {
-                try { el.click(); } catch(e) {}
-            });
+                var p = v.play();
+                if (p && p.catch) p.catch(function(){});
+            } else {
+                v.pause();
+            }
+            return true;
+        } catch(e) { return false; }
+    }
+    if (tryToggle(document)) return 'toggled';
+    var frames = document.querySelectorAll('iframe');
+    for (var i = 0; i < frames.length; i++) {
+        try {
+            var doc = frames[i].contentDocument || frames[i].contentWindow.document;
+            if (doc && tryToggle(doc)) return 'toggled';
         } catch(e) {}
     }
-    unmute(document);
+    return 'none';
+})()
+"""
+
+/**
+ * Unmute every reachable <video>/<audio> — the top-level document plus any
+ * same-origin iframes. Clicking in-page "mute" buttons is also attempted for
+ * players that keep their own mute state. Volume keys return false from the
+ * key handler, so the system TV volume still changes normally.
+ */
+private const val EMBED_UNMUTE_JS = """
+(function(){
+    function collectVideos(root) {
+        var out = [];
+        try { root.querySelectorAll('video,audio').forEach(function(v){ out.push(v); }); } catch(e) {}
+        try {
+            root.querySelectorAll('iframe').forEach(function(f){
+                try {
+                    var doc = f.contentDocument || f.contentWindow.document;
+                    if (doc) out = out.concat(collectVideos(doc));
+                } catch(e) {}
+            });
+        } catch(e) {}
+        return out;
+    }
+    collectVideos(document).forEach(function(v) {
+        try {
+            v.muted = false;
+            v.volume = 1.0;
+            var p = v.play && v.play();
+            if (p) p.catch(function(){});
+        } catch(e) {}
+    });
+    try {
+        document.querySelectorAll('[aria-label*="Mute"],[title*="Mute"],[class*="mute"],[id*="mute"]').forEach(function(el) {
+            try { el.click(); } catch(e) {}
+        });
+    } catch(e) {}
 })();
 """
 

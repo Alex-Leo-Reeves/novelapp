@@ -426,7 +426,24 @@ private const val STABILIZATION_END_JS = """
 (function() {
     window.__STABILIZING = false;
     
-    function forcePlay() {
+    // Unmute and play videos — both at the top level and inside same-origin
+    // iframes (VidLink, Nontongo, etc. render their player in an iframe, so
+    // top-level-only search left playback muted).
+    function collectVideos(root) {
+        var out = [];
+        try { root.querySelectorAll('video').forEach(function(v){ out.push(v); }); } catch(e) {}
+        try {
+            root.querySelectorAll('iframe').forEach(function(f){
+                try {
+                    var doc = f.contentDocument || f.contentWindow.document;
+                    if (doc) out = out.concat(collectVideos(doc));
+                } catch(e) {}
+            });
+        } catch(e) {}
+        return out;
+    }
+
+    function clickPlayButtons(root) {
         var selectors = [
             '.play-button', '.jw-icon-display', '.vjs-big-play-button',
             '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
@@ -434,20 +451,27 @@ private const val STABILIZATION_END_JS = """
         ];
         selectors.forEach(function(sel) {
             try {
-                var el = document.querySelector(sel);
+                var el = root.querySelector(sel);
                 if (el && el.tagName !== 'VIDEO') el.click();
             } catch(e) {}
         });
-
-        document.querySelectorAll('video').forEach(function(v) {
-            v.muted = false;
-            var p = v.play();
-            if (p) p.catch(function() {});
+    }
+    
+    function forcePlay() {
+        clickPlayButtons(document);
+        collectVideos(document).forEach(function(v) {
+            try {
+                v.muted = false;
+                v.volume = 1.0;
+                var p = v.play();
+                if (p) p.catch(function() {});
+            } catch(e) {}
         });
     }
 
     forcePlay();
     setTimeout(forcePlay, 500);
+    setTimeout(forcePlay, 1500);
 })();
 """
 
