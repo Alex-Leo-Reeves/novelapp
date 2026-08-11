@@ -45,3 +45,5 @@ cinepro/core/dist/
 # Large binary downloads (host separately)
 site/downloads/*.apk
 site/downloads/*.ipa
+
+render-video-sources.env
