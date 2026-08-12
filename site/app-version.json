@@ -1,19 +1,47 @@
 {
+    "_instructions": "PERMANENT release-channel URLs — do NOT change apkUrl / tvApkUrl / desktopUrl / ipaUrl for a routine release. To ship a new build you REPLACE the binary behind each URL and update ONLY the version fields + release notes plus the matching sha256/bytes. Per-platform overrides (tvVersion*, desktopVersion*, iosVersion*) let TV, Windows EXE, and iOS ship on their OWN tracks; when null they fall back to the top-level Android values. ⚠️ Each per-platform versionCode MUST equal the versionCode that platform actually BUILDS with (tvApp/build.gradle.kts for TV, PlatformAppVersion.desktop.kt + composeApp packageVersion for EXE, iosApp/project.yml for iOS) — a mismatch makes that platform show a false 'update available'. AFTER BUILDING, fill in the sha256 + bytes for every platform (empty string / 0 = the app skips integrity verification for that platform until you provide them). Compute with: sha256sum <file>  and  stat --format=%s <file>",
     "versionCode": 42,
     "versionName": "1.42",
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
-    "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
-    "desktopUrl": "https://novelapp1.onrender.com/downloads/novelapp-windows.exe",
-    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
-    "releaseNotes": [
-        "Desktop (EXE): real in-app narration (SAPI voice, word/paragraph highlight, pause/skip/seek)",
-        "Desktop (EXE): in-app video players (JavaFX WebView) for anime, MA server, YouTube — no browser hop",
-        "Desktop + iOS: offline video/audio downloads now work in-app",
-        "iOS (IPA): real narration via AVSpeechSynthesizer with word-by-word highlight + pause/skip/seek",
-        "iOS + Desktop: full in-app update checker points each platform at its own build",
-        "Android + TV unchanged — all new features land without touching their behavior"
-    ],
-    "forceUpdate": false,
+    "apkSha256": "557fea5e858e6aa53a6607cca8fc3a52bc4530c71eb9deeddc417a29a5e6489f",
     "apkBytes": 193123325,
-    "apkSha256": "557fea5e858e6aa53a6607cca8fc3a52bc4530c71eb9deeddc417a29a5e6489f"
+    "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
+    "tvApkSha256": "",
+    "tvApkBytes": 0,
+    "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
+    "desktopSha256": "",
+    "desktopBytes": 0,
+    "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
+    "ipaSha256": "",
+    "ipaBytes": 0,
+    "tvVersionCode": 41,
+    "tvVersionName": "1.41",
+    "tvReleaseNotes": [
+        "Android TV (TV): dedicated 10-foot interface tuned for remote + leanback browsing",
+        "Android TV (TV): full novels, manga, comics, anime, donghua, K-drama, cartoon, classic, movies, Nollywood and sports sections",
+        "Android TV (TV): phone-pair sign-in so you can log in from your phone by scanning",
+        "Android TV (TV): in-app APK updates over the v1.40 permanent channel"
+    ],
+    "desktopVersionCode": 42,
+    "desktopVersionName": "1.42",
+    "desktopReleaseNotes": [
+        "Windows (EXE): real in-app narration (SAPI voice, word/paragraph highlight, pause/skip/seek)",
+        "Windows (EXE): in-app video players for anime, MA server, and YouTube — no browser hop",
+        "Windows (EXE): offline video/audio downloads work in-app",
+        "Windows (EXE): update checker uses the desktop channel (desktopVersionCode 42) — no false prompts when only Android bumps"
+    ],
+    "iosVersionCode": 42,
+    "iosVersionName": "1.42",
+    "iosReleaseNotes": [
+        "iOS (IPA): same shared core as Android/Desktop — players, narration, downloads, accounts",
+        "iOS (IPA): manual sideload only — the in-app update button opens the IPA download, no auto-install",
+        "iOS (IPA): iOS now ships on its OWN release track so an Android-only bump never prompts iOS"
+    ],
+    "releaseNotes": [
+        "Android + iOS + Desktop: common app core with per-platform players and narration",
+        "Desktop (EXE): in-app SAPI narration with word-level highlight and full playback controls",
+        "Desktop (EXE) + iOS: offline video/audio downloads now work in-app",
+        "TV, Windows EXE and iOS each ship on their own release tracks with per-platform version + notes; only the Android phone APK auto-prompts on the top-level bump"
+    ],
+    "forceUpdate": false
 }

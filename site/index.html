@@ -1957,15 +1957,27 @@
         <section class="release-panel reveal" id="release">
             <div class="release-copy">
                 <p class="eyebrow">Current release</p>
-                <h2>NovaRead TV 1.40 keeps app updates on permanent release channels.</h2>
+                <h2>NovaRead TV ships per platform on permanent release channels.</h2>
                 <p>
-                    This release bumps the Android app version and keeps Android, Android TV, and Windows downloads on stable GitHub Release asset links.
+                    Android, Android TV, Windows, and iOS each track their own version, so a bump on one platform never prompts a false update on another.
                 </p>
             </div>
             <dl class="release-list">
                 <div>
-                    <dt>Version</dt>
-                    <dd>1.40 · code 40</dd>
+                    <dt>Android</dt>
+                    <dd>1.42 · code 42</dd>
+                </div>
+                <div>
+                    <dt>Android TV</dt>
+                    <dd>1.41 · code 41</dd>
+                </div>
+                <div>
+                    <dt>Windows</dt>
+                    <dd>1.42 · code 42</dd>
+                </div>
+                <div>
+                    <dt>iOS</dt>
+                    <dd>1.42 · code 42</dd>
                 </div>
                 <div>
                     <dt>Service</dt>
@@ -1999,7 +2011,7 @@
                             </svg>
                         </span>
                         <h4>Android APK</h4>
-                        <p class="meta">Phones & tablets<br />v1.40 · arm64</p>
+                        <p class="meta">Phones & tablets<br />v1.42 · arm64</p>
                         <span class="go">Download <span class="arrow">→</span></span>
                     </a>
                     <a class="platform-card" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk" download>
@@ -2010,28 +2022,16 @@
                             </svg>
                         </span>
                         <h4>Android TV</h4>
-                        <p class="meta">10-foot interface<br />v1.40 · leanback</p>
+                        <p class="meta">10-foot interface<br />v1.41 · leanback</p>
                         <span class="go">Download <span class="arrow">→</span></span>
                     </a>
                     <a class="platform-card" href="https://novelapp1.onrender.com/downloads/novelapp-ios.ipa" download>
                         <span class="icon-tile">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="#f5c05d" aria-hidden="true">
-                                <path d="M16.6 12.7c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-2-.9-3.3-.9-1.7 0-3.2 1-4.1 2.5-1.8 3.1-.5 7.6 1.2 10.1.9 1.2 1.9 2.6 3.3 2.6 1.3 0 1.8-.8 3.4-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.5 1.4-2.9 1.4-3-.1 0-2.7-1-2.7-4zM14.2 5.6c.7-.9 1.2-2.1 1.1-3.3-1.1 0-2.4.7-3.1 1.6-.7.8-1.3 2-1.1 3.2 1.2.1 2.4-.6 3.1-1.5z"/>
-                            </svg>
-                        </span>
-                        <h4>iPhone IPA</h4>
-                        <p class="meta">Unsigned sideload<br />via companion app</p>
-                        <span class="go">Download <span class="arrow">→</span></span>
-                    </a>
-                    <a class="platform-card" href="https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe" download>
-                        <span class="icon-tile">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" aria-hidden="true">
-                                <rect x="4" y="4" width="16" height="16" rx="2.5"/>
-                                <path d="M9 4v16M4 12h16"/>
                             </svg>
                         </span>
                         <h4>Windows</h4>
-                        <p class="meta">Desktop & big screens<br />v1.41 · portable</p>
+                        <p class="meta">Desktop & big screens<br />v1.42 · portable</p>
                         <span class="go">Download <span class="arrow">→</span></span>
                     </a>
                 </div>
@@ -2473,6 +2473,11 @@
             }
         })();
     </script>
+</body>
+
+</html>
+/* ── Reduced motion: kill grain + orbs ──────── */ if (reducedMotion) { document.querySelectorAll(".orb").forEach(function(orb) { orb.style.animation = "none"; }); document.querySelector(".grain").style.animation = "none"; } })();
+</script>
 </body>
 
 </html>

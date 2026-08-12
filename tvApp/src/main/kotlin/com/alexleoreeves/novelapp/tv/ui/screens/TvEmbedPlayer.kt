@@ -56,7 +56,10 @@ fun TvEmbedPlayer(
         stabilizeAttempts = 0
     }
 
-    // Stabilization timer: enforce minimum 3s in STABILIZING
+    // Stabilization timer: enforce minimum 3s in STABILIZING.
+    // IMPORTANT: on READY we do NOT auto-play. Embed autoplay is rejected
+    // without a user gesture, which left the UI showing "playing" while the
+    // video sat paused. The player starts paused; the user presses OK/Play.
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.STABILIZING) {
             phaseMessage = "Stabilizing player... (3s)"
@@ -64,7 +67,7 @@ fun TvEmbedPlayer(
             if (playerPhase == PlayerPhase.STABILIZING) {
                 playerPhase = PlayerPhase.READY
                 phaseMessage = ""
-                webViewRef?.evaluateJavascript(STABILIZATION_END_JS, null)
+                webViewRef?.evaluateJavascript(STABILIZATION_IDLE_JS, null)
             }
         }
     }

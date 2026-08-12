@@ -27,8 +27,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.platform.AppUpdateTarget
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
+import com.alexleoreeves.novelapp.tv.update.TvUpdateInstaller
+import androidx.compose.ui.platform.LocalContext
 import com.alexleoreeves.novelapp.tv.ui.screens.TvAuthScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvSplashScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvPhonePairScreen
@@ -83,6 +86,13 @@ fun TvApp(
     var isLoading by remember { mutableStateOf(true) }
     var remoteConfig by remember { mutableStateOf(TvRemoteConfigDefaults.default) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // In-app update state (Android TV APK channel)
+    var startupUpdateManifest by remember { mutableStateOf<AppUpdateManifest?>(null) }
+    var isStartupUpdateDismissed by remember { mutableStateOf(false) }
+    val updateProgress by AppUpdateProgressBus.state.collectAsState()
+    val tvUpdateInstaller = remember(context) { TvUpdateInstaller }
 
     // Load saved account
     LaunchedEffect(Unit) {
@@ -107,6 +117,22 @@ fun TvApp(
             val fetched = fetchTvConfig()
             if (fetched != null) remoteConfig = fetched
             delay(remoteConfig.effectiveRefreshMillis)
+        }
+    }
+
+    // In-app update check (Android TV APK channel). The manifest is the
+    // authoritative source (site/app-version.json) and carries tvApkSha256 /
+    // tvApkBytes for verification. iOS has NO auto-update — its button only
+    // opens the ipaUrl. Android/Desktop handle their own updates.
+    LaunchedEffect(Unit) {
+        val client = platformHttpClient()
+        try {
+            startupUpdateManifest = fetchAppUpdateManifest(client, AppUpdateTarget.ANDROID_TV)
+                ?.takeIf { it.isAvailableFor(AppUpdateTarget.ANDROID_TV) }
+        } catch (_: Exception) {
+            startupUpdateManifest = null
+        } finally {
+            client.close()
         }
     }
 
@@ -368,6 +394,85 @@ fun TvApp(
                         }
                     }
                 }
+            }
+        }
+
+        // ── In-app update (Android TV APK channel) ─────────────────────────
+        // The TV APK update URL is the PERMANENT channel in AppReleaseConfig —
+        // never change it for a routine release. tvApkSha256/tvApkBytes in the
+        // manifest are verified before install (skipped while empty = you haven't
+        // supplied the hash/size for the new build yet). iOS has NO auto-update:
+        // its button only opens the ipaUrl for manual download.
+        if (updateProgress.isActive) {
+            AlertDialog(
+                onDismissRequest = { if (updateProgress.canDismiss) AppUpdateProgressBus.clear() },
+                title = {
+                    Text(
+                        when (updateProgress.phase) {
+                            AppUpdatePhase.Downloading -> "Downloading update"
+                            AppUpdatePhase.Verifying -> "Verifying update"
+                            AppUpdatePhase.ReadyToInstall -> "Preparing install"
+                            AppUpdatePhase.Installing -> "Finish install"
+                            AppUpdatePhase.Error -> "Update failed"
+                            AppUpdatePhase.Idle -> "Update"
+                        }
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(updateProgress.message.ifBlank { "Preparing update..." })
+                        val f = updateProgress.fraction
+                        if (f != null) {
+                            LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth(), color = NeonBlue)
+                            Text("${(f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = TvSubtext)
+                        } else if (!updateProgress.canDismiss) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = NeonBlue)
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (updateProgress.canDismiss) {
+                        Button(onClick = { AppUpdateProgressBus.clear() }) { Text(if (updateProgress.phase == AppUpdatePhase.Installing) "Done" else "Close") }
+                    }
+                }
+            )
+        } else {
+            startupUpdateManifest?.takeIf { !isStartupUpdateDismissed }?.let { u ->
+                AlertDialog(
+                    onDismissRequest = { if (!u.forceUpdate) isStartupUpdateDismissed = true },
+                    title = { Text("Update available") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("NovaRead TV ${u.versionNameFor(AppUpdateTarget.ANDROID_TV)} is ready to install.")
+                            val tvNotes = u.releaseNotesFor(AppUpdateTarget.ANDROID_TV)
+                            if (tvNotes.isNotEmpty()) {
+                                Text(
+                                    tvNotes.joinToString("\n") { "- $it" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TvSubtext
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                tvUpdateInstaller.start(
+                                    context,
+                                    url = u.tvApkUrl.ifBlank { AppUpdateTarget.ANDROID_TV.downloadUrl() },
+                                    sha256 = u.tvApkSha256,
+                                    bytes = u.tvApkBytes
+                                )
+                                if (!u.forceUpdate) isStartupUpdateDismissed = true
+                            }
+                        ) { Text("Install update") }
+                    },
+                    dismissButton = {
+                        if (!u.forceUpdate) {
+                            TextButton(onClick = { isStartupUpdateDismissed = true }) { Text("Later") }
+                        }
+                    }
+                )
             }
         }
     }

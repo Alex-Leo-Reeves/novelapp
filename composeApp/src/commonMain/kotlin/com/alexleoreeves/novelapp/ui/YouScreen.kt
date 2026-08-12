@@ -52,6 +52,7 @@ fun YouScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
     linkOpener: ExternalLinkOpener,
+    updateTarget: AppUpdateTarget = AppUpdateTarget.ANDROID,
     onPlayEpisode: (localPath: String, title: String) -> Unit,
     onReadMangaChapter: (localPath: String, title: String) -> Unit,
     onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
@@ -80,8 +81,8 @@ fun YouScreen(
     suspend fun checkForUpdates() {
         updateState = UpdateState.Checking
         updateState = try {
-            val manifest = fetchAppUpdateManifest(client) ?: error("Update manifest unavailable")
-            if (manifest.isAvailable) UpdateState.Available(manifest) else UpdateState.Current
+            val manifest = fetchAppUpdateManifest(client, updateTarget) ?: error("Update manifest unavailable")
+            if (manifest.isAvailableFor(updateTarget)) UpdateState.Available(manifest) else UpdateState.Current
         } catch (e: Exception) {
             UpdateState.Failed(e.message ?: "Update check failed")
         }
@@ -289,6 +290,7 @@ fun YouScreen(
                 GlassSectionLabel("App update")
                 UpdateCard(
                     state = updateState,
+                    updateTarget = updateTarget,
                     onCheckAgain = { scope.launch { checkForUpdates() } },
                     onDownload = { url -> linkOpener.open(url.ifBlank { AppReleaseConfig.DOWNLOAD_URL }) }
                 )
@@ -424,6 +426,7 @@ private fun ContactCard(title: String, subtitle: String, enabled: Boolean, onCli
 @Composable
 private fun UpdateCard(
     state: UpdateState,
+    updateTarget: AppUpdateTarget,
     onCheckAgain: () -> Unit,
     onDownload: (String) -> Unit
 ) {
@@ -445,7 +448,7 @@ private fun UpdateCard(
                             UpdateState.Idle -> "Ready to check"
                             UpdateState.Checking -> "Checking for updates"
                             UpdateState.Current -> "You are up to date"
-                            is UpdateState.Available -> "Version ${state.manifest.versionName} is available"
+                            is UpdateState.Available -> "Version ${state.manifest.versionNameFor(updateTarget)} is available"
                             is UpdateState.Failed -> "Could not check updates"
                         },
                         color = Color.White,
@@ -460,8 +463,11 @@ private fun UpdateCard(
                 }
             }
 
-            if (state is UpdateState.Available && state.manifest.releaseNotes.isNotEmpty()) {
-                Text(state.manifest.releaseNotes.joinToString(separator = "\n") { "- $it" }, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+            if (state is UpdateState.Available) {
+                val targetNotes = state.manifest.releaseNotesFor(updateTarget)
+                if (targetNotes.isNotEmpty()) {
+                    Text(targetNotes.joinToString(separator = "\n") { "- $it" }, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -471,7 +477,7 @@ private fun UpdateCard(
                 ) { Text("Check") }
                 if (state is UpdateState.Available) {
                     Button(
-                        onClick = { onDownload(state.manifest.apkUrl) },
+                        onClick = { onDownload(state.manifest.downloadUrlFor(updateTarget)) },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
                         modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
                     ) { Text("Download", color = Color.White, fontWeight = FontWeight.Bold) }

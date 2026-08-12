@@ -187,7 +187,8 @@ fun App(
 
     LaunchedEffect(showSplash, isAuthChecked) {
         if (!showSplash && isAuthChecked) {
-            startupUpdateManifest = fetchAppUpdateManifest(updateClient, updateTarget)?.takeIf { it.isAvailable }
+            startupUpdateManifest = fetchAppUpdateManifest(updateClient, updateTarget)
+                ?.takeIf { it.isAvailableFor(updateTarget) }
         }
     }
 
@@ -604,7 +605,8 @@ fun App(
                                 BottomTab.YOU -> {
                                     if (account == null) { showAuthSheet = true; currentTab.value = BottomTab.DISCOVER }
                                     else YouScreen(
-                                        account = account!!, currentTheme = appTheme.value, downloadRepo = downloadRepo, linkOpener = linkOpener, ttsController = ttsController,
+                                        account = account!!, currentTheme = appTheme.value, downloadRepo = downloadRepo, linkOpener = linkOpener,
+                                        updateTarget = updateTarget, ttsController = ttsController,
                                         favorites = favorites.toList(),
                                         onPlayEpisode = { p, t -> selectedAnime.value = null; animeStreamUrl.value = p; animeEpisodeTitle.value = t; animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0; animePreviewLimitMs.value = null },
                                         onReadMangaChapter = { p, t -> selectedNovel.value = UnifiedSearchResult(id = p, title = t, coverUrl = "", detailPageUrl = p, sourceName = "local", isManga = true); selectedChapterUrl.value = p; selectedChapterTitle.value = t; selectedNovelTitle.value = t; selectedSourceName.value = "local" },
@@ -703,8 +705,8 @@ fun App(
                 onDismissRequest = { if (!u.forceUpdate) isStartupUpdateDismissed = true },
                 icon = { Icon(Icons.Default.Download, null, tint = appTheme.value.accentColor()) },
                 title = { Text("Update available") },
-                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Version ${u.versionName} is ready to install."); if (u.releaseNotes.isNotEmpty()) Text(u.releaseNotes.joinToString("\n") { "- $it" }, style = MaterialTheme.typography.bodyMedium) } },
-                confirmButton = { Button(onClick = { linkOpener.open(u.apkUrl.ifBlank { AppReleaseConfig.DOWNLOAD_URL }); if (!u.forceUpdate) isStartupUpdateDismissed = true }) { Text("Install update") } },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Version ${u.versionNameFor(updateTarget)} is ready to install."); val notes = u.releaseNotesFor(updateTarget); if (notes.isNotEmpty()) Text(notes.joinToString("\n") { "- $it" }, style = MaterialTheme.typography.bodyMedium) } },
+                confirmButton = { Button(onClick = { linkOpener.open(u.downloadUrlFor(updateTarget)); if (!u.forceUpdate) isStartupUpdateDismissed = true }) { Text(if (updateTarget == AppUpdateTarget.IOS) "Open download" else "Install update") } },
                 dismissButton = { if (!u.forceUpdate) TextButton(onClick = { isStartupUpdateDismissed = true }) { Text("Later") } }
             )
         }

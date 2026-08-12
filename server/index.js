@@ -141,9 +141,15 @@ const OPENSUBTITLES_USERNAME = String(process.env.OPENSUBTITLES_USERNAME || proc
 const OPENSUBTITLES_PASSWORD = String(process.env.OPENSUBTITLES_PASSWORD || process.env.opensubtitles_password || "").trim();
 const SUBDL_API_KEY = String(process.env.SUBDL_API_KEY || process.env.subdl_api_key || "").trim();
 const PUBLIC_APP_URL = cleanBaseUrl(process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || "https://novelapp1.onrender.com");
+// ── PERMANENT release-channel URLs (do NOT change for a routine release) ────
+// These are stable channel URLs. To ship a new build you REPLACE the binary
+// behind the URL (GitHub Release asset for APKs, the file served from Render
+// for the EXE/IPA) and update ONLY versionCode/versionName/releaseNotes plus
+// the matching sha256/bytes in site/app-version.json.
 const ANDROID_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk";
-const ANDROID_TV_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.4/novelapp-androidtv.apk";
+const ANDROID_TV_APK_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk";
 const DESKTOP_INSTALLER_URL = "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe";
+const IOS_INSTALLER_URL = "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa";
 const SESSION_DAYS = 365;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
@@ -326,6 +332,20 @@ function buildAppVersionPayload() {
         tvApkUrl: ANDROID_TV_APK_URL,
         desktopUrl: DESKTOP_INSTALLER_URL,
         ipaUrl: `${PUBLIC_APP_URL}/downloads/novelapp-ios.ipa`,
+        // Per-platform version overrides — TV, Windows EXE, and iOS ship on
+        // their OWN tracks. When absent the clients fall back to the top-level
+        // Android values. ⚠️ Each per-platform versionCode MUST equal the
+        // versionCode that platform actually builds with, or that platform
+        // will show a false "update available" prompt.
+        tvVersionCode: null,
+        tvVersionName: null,
+        tvReleaseNotes: null,
+        desktopVersionCode: null,
+        desktopVersionName: null,
+        desktopReleaseNotes: null,
+        iosVersionCode: null,
+        iosVersionName: null,
+        iosReleaseNotes: null,
         releaseNotes: [],
         forceUpdate: false
     };
@@ -769,9 +789,9 @@ const ALLOWED_ORIGINS = [
 
 function getCorsHeaders(request) {
     const origin = request && request.headers ? request.headers["origin"] : null;
-    const allowedOrigin = (origin && (ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".onrender.com")))
-        ? origin
-        : "*";
+    const allowedOrigin = (origin && (ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".onrender.com"))) ?
+        origin :
+        "*";
 
     return {
         "access-control-allow-origin": allowedOrigin,
@@ -1469,8 +1489,8 @@ async function tmdbItems(type, query, page = 1) {
                 fetchWithTimeout(movieEndpoint, { headers }).catch(() => null),
                 fetchWithTimeout(tvEndpoint, { headers }).catch(() => null)
             ]);
-            const movieResults = ((moviePayload && moviePayload.results) || []).map((item) => ({ ...item, __media_type: "movie" }));
-            const tvResults = ((tvPayload && tvPayload.results) || []).map((item) => ({ ...item, __media_type: "tv" }));
+            const movieResults = ((moviePayload && moviePayload.results) || []).map((item) => ({...item, __media_type: "movie" }));
+            const tvResults = ((tvPayload && tvPayload.results) || []).map((item) => ({...item, __media_type: "tv" }));
             results = [...results, ...movieResults, ...tvResults];
         }
     }
