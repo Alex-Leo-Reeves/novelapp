@@ -27,8 +27,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.platform.AppUpdateTarget
+
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
 import com.alexleoreeves.novelapp.tv.update.TvUpdateInstaller
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +71,7 @@ data class NavigationState(
     val playTitle: String = "",
     val playPreviewLimitMs: Long? = null,
     val playerFromSection: TvSection? = null,
+    val bingeSession: TvBingeSession? = null,
     val readerText: String = "",
     val readerTitle: String = "",
     val mangaPages: List<String> = emptyList(),
@@ -76,6 +80,7 @@ data class NavigationState(
     val account: SavedUserAccount? = null,
     val selectedProfile: TvProfile? = null
 )
+
 
 @Composable
 fun TvApp(
@@ -94,12 +99,19 @@ fun TvApp(
     val updateProgress by AppUpdateProgressBus.state.collectAsState()
     val tvUpdateInstaller = remember(context) { TvUpdateInstaller }
 
+    // Persistent watch-progress store — survives app kills, TV power loss and
+    // re-launches. Keyed by "${mediaId}::${episodeTitle}".
+    val watchProgressStore = remember(context) { TvWatchProgressStore(context) }
+
     // Load saved account
     LaunchedEffect(Unit) {
         val saved = sessionStore.loadAccount()
         if (saved != null && saved.authToken.isNotBlank()) {
-            // Verify token is still valid
-            val fresh = try { authMe(saved.authToken) } catch (_: Exception) { null }
+            // Verify token is still valid. authMe returns null ONLY for a real
+            // 401/403 rejection; it throws for transient errors (a TV boots
+            // before the network is up). So: null → session truly dead, clear.
+            // Exception → keep the saved account and continue (no forced logout).
+            val fresh = try { authMe(saved.authToken) } catch (_: Exception) { saved }
             if (fresh != null) {
                 nav = nav.copy(account = fresh)
                 sessionStore.saveAccount(fresh)
@@ -156,6 +168,133 @@ fun TvApp(
             TvScreen.PROFILE -> nav.copy(screen = TvScreen.AUTH, account = nav.account)
             TvScreen.SPLASH -> nav.copy(screen = if (nav.account != null) TvScreen.PROFILE else TvScreen.AUTH)
             else -> nav
+        }
+    }
+
+    /**
+     * Launches a binge session: resolves the first episode (if the session is
+     * lazy), records the resume key, and routes to PLAYER or EMBED_PLAYER.
+     */
+    fun playBingeEpisode(
+        currentNav: NavigationState,
+        session: TvBingeSession,
+        progressStore: TvWatchProgressStore,
+        ctx: android.content.Context,
+        onResult: (NavigationState) -> Unit
+    ) {
+        if (session.episodes.isEmpty()) {
+            onResult(currentNav)
+            return
+        }
+        val current = session.current
+        val targetIndex = session.currentIndex
+        val progressKey = "${session.item.id}::${session.item.title} - ${current?.chapter?.title}"
+        val resumeMs = progressStore.loadResumeKey(progressKey) ?: 0L
+
+        val resolved = session.episodes.getOrNull(targetIndex)
+        if (resolved != null && resolved.url.isNotBlank() && !resolved.isDirect) {
+            // Already resolved → route to embed player.
+            val title = "${session.item.title} - ${resolved.chapter.title}"
+            onResult(
+                currentNav.copy(
+                    screen = TvScreen.EMBED_PLAYER,
+                    selectedItem = session.item,
+                    playUrl = resolved.url,
+                    playTitle = title,
+                    playPreviewLimitMs = null,
+                    playerFromSection = null,
+                    bingeSession = session
+                )
+            )
+        } else if (resolved != null && resolved.url.isNotBlank() && resolved.isDirect) {
+            // Already resolved → direct LibVLC player.
+            val title = "${session.item.title} - ${resolved.chapter.title}"
+            onResult(
+                currentNav.copy(
+                    screen = TvScreen.PLAYER,
+                    selectedItem = session.item,
+                    playUrl = resolved.url,
+                    playTitle = title,
+                    playPreviewLimitMs = null,
+                    playerFromSection = null,
+                    bingeSession = session
+                )
+            )
+        } else {
+            // Lazy episode → resolve now on the session's server.
+            scope.launch {
+                val repo = TvMediaRepository()
+                val resolvedEpisode = repo.resolveBingeEpisode(
+                    context = ctx,
+                    item = session.item,
+                    chapter = current?.chapter,
+                    server = if (session.isDonghua) null else session.server,
+                    donghuaServer = if (session.isDonghua) session.donghuaServer else null,
+                    isDonghua = session.isDonghua
+                )
+                if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) {
+                    onResult(currentNav) // stream unavailable; stay on detail
+                    return@launch
+                }
+                val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
+                val title = "${session.item.title} - ${resolvedEpisode.chapter.title}"
+                onResult(
+                    currentNav.copy(
+                        screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
+                        selectedItem = session.item,
+                        playUrl = resolvedEpisode.url,
+                        playTitle = title,
+                        playPreviewLimitMs = null,
+                        playerFromSection = null,
+                        bingeSession = updatedSession
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Advances (or retreats) the current binge session by [delta] episodes,
+     * resolving a lazy target episode on the SAME server, then re-routes the
+     * player. Used by remote NEXT/PREV and by auto-next on episode end.
+     */
+    fun advanceBinge(delta: Int) {
+        val session = nav.bingeSession ?: return
+        val targetIndex = session.currentIndex + delta
+        if (targetIndex < 0 || targetIndex > session.episodes.lastIndex) return
+        val target = session.episodes.getOrNull(targetIndex) ?: return
+        val targetTitle = "${session.item.title} - ${target.chapter.title}"
+        val targetNav = nav.copy(
+            selectedItem = session.item,
+            bingeSession = session.withIndex(targetIndex)
+        )
+
+        if (target.url.isNotBlank()) {
+            nav = targetNav.copy(
+                screen = if (target.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
+                playUrl = target.url,
+                playTitle = targetTitle
+            )
+        } else {
+            scope.launch {
+                val repo = TvMediaRepository()
+                val resolvedEpisode = repo.resolveBingeEpisode(
+                    context = context,
+                    item = session.item,
+                    chapter = target.chapter,
+                    server = if (session.isDonghua) null else session.server,
+                    donghuaServer = if (session.isDonghua) session.donghuaServer else null,
+                    isDonghua = session.isDonghua
+                )
+                if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) return@launch
+                val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
+                nav = targetNav.copy(
+                    bingeSession = updatedSession,
+                    screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
+                    playUrl = resolvedEpisode.url,
+                    playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}"
+                )
+            }
         }
     }
 
@@ -306,22 +445,18 @@ fun TvApp(
                                     TvDetailScreen(
                                         item = item,
                                         account = nav.account,
-                                        onPlayDirectStream = { url, title, previewLimitMs ->
-                                            nav = nav.copy(
-                                                screen = TvScreen.PLAYER,
-                                                playUrl = url,
-                                                playTitle = title,
-                                                playPreviewLimitMs = previewLimitMs,
-                                                playerFromSection = null
-                                            )
+                                        onPlaySession = { session ->
+                                            playBingeEpisode(nav, session, watchProgressStore, context) { updatedNav ->
+                                                nav = updatedNav
+                                            }
                                         },
-                                        onPlayEmbed = { url, title, previewLimitMs ->
+                                        onOpenRecommendations = { recItem, _ ->
                                             nav = nav.copy(
-                                                screen = TvScreen.EMBED_PLAYER,
-                                                playUrl = url,
-                                                playTitle = title,
-                                                playPreviewLimitMs = previewLimitMs,
-                                                playerFromSection = null
+                                                screen = TvScreen.DETAIL,
+                                                selectedItem = recItem,
+                                                playUrl = "",
+                                                playTitle = "",
+                                                bingeSession = null
                                             )
                                         },
                                         onReadNovel = { text, title ->
@@ -330,24 +465,54 @@ fun TvApp(
                                         onReadManga = { pages, title ->
                                             nav = nav.copy(screen = TvScreen.MANGA_VIEWER, mangaPages = pages, mangaTitle = title)
                                         },
+                                        watchProgressStore = watchProgressStore,
                                         onBack = { goBack() }
                                     )
                                 }
                             }
 
                             TvScreen.PLAYER -> {
+                                val session = nav.bingeSession
+                                val current = session?.current
+                                val progressKey = "${nav.selectedItem?.id ?: nav.playUrl}::${nav.playTitle}"
                                 TvPlayerScreen(
-                                    streamUrl = nav.playUrl,
-                                    title = nav.playTitle,
+                                    streamUrl = current?.url.orEmpty().ifBlank { nav.playUrl },
+                                    title = current?.chapter?.title?.let { "${session.item.title} - $it" }.orEmpty().ifBlank { nav.playTitle },
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
-                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || nav.selectedItem?.isAnime == true || nav.selectedItem?.mediaKind.equals("donghua", ignoreCase = true) == true,
+                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
+                                    resumePositionMs = watchProgressStore.loadResumeKey(progressKey),
+                                    onProgress = { positionMs, durationMs ->
+                                        watchProgressStore.save(progressKey, positionMs, durationMs)
+                                    },
+                                    bingeSession = session,
+                                    isMovieEnded = session?.isMovieLike == true,
+                                    serverName = session?.serverName,
+                                    onNext = { advanceBinge(1) },
+                                    onPrev = { advanceBinge(-1) },
+                                    onEnded = {
+                                        if (session?.hasNext == true) {
+                                            advanceBinge(1)
+                                        } else {
+                                            nav = nav.copy(playTitle = nav.playTitle, playUrl = nav.playUrl, bingeSession = null)
+                                        }
+                                    },
+                                    onOpenRecommendations = { recItem ->
+                                        nav = nav.copy(
+                                            screen = TvScreen.DETAIL,
+                                            selectedItem = recItem,
+                                            playUrl = "",
+                                            playTitle = "",
+                                            bingeSession = null
+                                        )
+                                    },
                                     onUpgrade = {
                                         nav = nav.copy(
                                             screen = TvScreen.HOME,
                                             selectedSection = TvSection.YOU,
                                             playUrl = "",
-                                            playTitle = ""
+                                            playTitle = "",
+                                            bingeSession = null
                                         )
                                     },
                                     onBack = { goBack() }
@@ -355,18 +520,47 @@ fun TvApp(
                             }
 
                             TvScreen.EMBED_PLAYER -> {
+                                val session = nav.bingeSession
+                                val current = session?.current
+                                val progressKey = "${nav.selectedItem?.id ?: nav.playUrl}::${nav.playTitle}"
                                 TvEmbedPlayerScreen(
-                                    embedUrl = nav.playUrl,
-                                    title = nav.playTitle,
+                                    embedUrl = current?.url.orEmpty().ifBlank { nav.playUrl },
+                                    title = current?.chapter?.title?.let { "${session.item.title} - $it" }.orEmpty().ifBlank { nav.playTitle },
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
-                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || nav.selectedItem?.isAnime == true || nav.selectedItem?.mediaKind.equals("donghua", ignoreCase = true) == true,
+                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
+                                    resumePositionMs = watchProgressStore.loadResumeKey(progressKey),
+                                    onProgress = { positionMs, durationMs ->
+                                        watchProgressStore.save(progressKey, positionMs, durationMs)
+                                    },
+                                    bingeSession = session,
+                                    isMovieEnded = session?.isMovieLike == true,
+                                    serverName = session?.serverName,
+                                    onNext = { advanceBinge(1) },
+                                    onPrev = { advanceBinge(-1) },
+                                    onEnded = {
+                                        if (session?.hasNext == true) {
+                                            advanceBinge(1)
+                                        } else {
+                                            nav = nav.copy(playTitle = nav.playTitle, playUrl = nav.playUrl, bingeSession = null)
+                                        }
+                                    },
+                                    onOpenRecommendations = { recItem ->
+                                        nav = nav.copy(
+                                            screen = TvScreen.DETAIL,
+                                            selectedItem = recItem,
+                                            playUrl = "",
+                                            playTitle = "",
+                                            bingeSession = null
+                                        )
+                                    },
                                     onUpgrade = {
                                         nav = nav.copy(
                                             screen = TvScreen.HOME,
                                             selectedSection = TvSection.YOU,
                                             playUrl = "",
-                                            playTitle = ""
+                                            playTitle = "",
+                                            bingeSession = null
                                         )
                                     },
                                     onBack = { goBack() }

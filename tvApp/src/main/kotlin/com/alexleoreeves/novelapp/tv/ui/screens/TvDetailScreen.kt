@@ -22,7 +22,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
@@ -36,8 +38,9 @@ import androidx.activity.compose.BackHandler
 fun TvDetailScreen(
     item: UnifiedSearchResult,
     account: SavedUserAccount?,
-    onPlayDirectStream: (url: String, title: String, previewLimitMs: Long?) -> Unit,
-    onPlayEmbed: (url: String, title: String, previewLimitMs: Long?) -> Unit,
+    watchProgressStore: TvWatchProgressStore,
+    onPlaySession: (TvBingeSession) -> Unit,
+    onOpenRecommendations: (recItem: UnifiedSearchResult, fromItem: UnifiedSearchResult?) -> Unit,
     onReadNovel: (text: String, title: String) -> Unit,
     onReadManga: (pages: List<String>, title: String) -> Unit,
     onBack: () -> Unit
@@ -104,35 +107,47 @@ fun TvDetailScreen(
         scope.launch {
             statusText = "Resolving stream..."
             if (isVideoTitle) {
-                val url = mediaRepo.resolveStreamUrl(item, chapter, selectedServer, selectedDonghuaServer)
-                if (url != null) {
-                    val titleSuffix = chapter?.let { " - ${it.title}" } ?: ""
-                    val fullTitle = "${item.title}$titleSuffix"
-                    statusText = ""
+                // Build the full binge session: every episode for this title, all
+                // routed through the SAME server the user just selected. The first
+                // episode is resolved now; the rest resolve lazily on auto-next /
+                // remote NEXT (see TvApp#playBingeEpisode) so anime/donghua
+                // scrapers never hammer hundreds of episode pages up front.
+                val chapterList = chapters.sortedBy { it.chapterNumber }
+                val startChapter = chapter ?: chapterList.firstOrNull()
+                    ?: Chapter(item.title, item.detailPageUrl, 0)
+                val startIndex = chapterList.indexOfFirst { it.url == startChapter.url }
+                    .coerceAtLeast(0)
 
-                    if (selectedServer == StreamServer.VIDLINK_EXO) {
-                        // Server 5 (VidLink Exo): scrape the VidLink page to a direct
-                        // .m3u8/.mp4 via a hidden WebView, then play natively.
-                        statusText = "Resolving native stream..."
-                        val scraped = extractTvStreamFromEmbed(context, url)
-                        statusText = ""
-                        if (scraped != null) {
-                            onPlayDirectStream(scraped.url, fullTitle, null)
-                        } else {
-                            statusText = "Server 5 could not resolve a native stream. Try another server."
-                        }
-                    } else if (!isDonghua && isTvPlayableStreamUrl(url)) {
-                        // Direct stream (.m3u8/.mp4 from anime/drama/cartoon scrapers)
-                        // can't run inside a WebView → native player.
-                        onPlayDirectStream(url, fullTitle, null)
-                    } else {
-                        // Embed page (Servers 1-4, 6, 7, 8 + all Donghua) → full
-                        // WebView browser/web player so the provider's own player shows.
-                        onPlayEmbed(url, fullTitle, null)
-                    }
-                } else {
+                val first = mediaRepo.resolveBingeEpisode(
+                    context = context,
+                    item = item,
+                    chapter = startChapter,
+                    server = selectedServer,
+                    donghuaServer = selectedDonghuaServer,
+                    isDonghua = isDonghua
+                )
+                if (first == null || first.url.isBlank()) {
                     statusText = "Stream unavailable. Try another server."
+                    return@launch
                 }
+
+                val episodes = chapterList.mapIndexed { idx, ch ->
+                    if (idx == startIndex) first
+                    else TvBingeEpisode(chapter = ch, kind = deriveBingeKind(item, ch, isDonghua))
+                }.ifEmpty { listOf(first) }
+
+                val session = TvBingeSession(
+                    item = item,
+                    episodes = episodes,
+                    serverName = if (isDonghua) selectedDonghuaServer.displayName else selectedServer.displayName,
+                    server = if (isDonghua) null else selectedServer,
+                    donghuaServer = if (isDonghua) selectedDonghuaServer else null,
+                    currentIndex = startIndex,
+                    isDonghua = isDonghua,
+                    isPremium = account?.isPremium == true
+                )
+                statusText = ""
+                onPlaySession(session)
             } else if (item.isManga || item.isComic) {
                 val chUrl = chapter?.url ?: return@launch
                 val pages = fetchMangaPages(chUrl)
@@ -282,6 +297,43 @@ fun TvDetailScreen(
                             )
                         }
                     }
+
+                    // Resume button — appears when a chapter has saved watch progress
+                    // (power loss / app kill / exit). Launches that exact episode; the
+                    // player then auto-seeks to the saved position on load.
+                    val resumeChapter = remember(chapters) {
+                        chapters.firstOrNull { ch ->
+                            watchProgressStore.loadResumeKey(resumeProgressKey(item, ch)) != null
+                        }
+                    }
+                    val resumeMs = remember(resumeChapter) {
+                        resumeChapter?.let { watchProgressStore.load(resumeProgressKey(item, it))?.positionMs } ?: 0L
+                    }
+                    if (resumeChapter != null && resumeMs > 0L) {
+                        var resumeFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { playMedia(resumeChapter) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (resumeFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.15f),
+                            border = if (resumeFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.5f)),
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                                .onFocusChanged { resumeFocused = it.isFocused }
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Replay, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Resume ${formatTvClock(resumeMs)}",
+                                    color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
                 }
                 
                 if (statusText.isNotBlank()) {
@@ -424,4 +476,18 @@ fun TvDetailScreen(
             }
         }
     }
+}
+
+/** Builds the exact watch-progress key the TvApp player uses for a chapter. */
+private fun resumeProgressKey(item: UnifiedSearchResult, chapter: Chapter): String {
+    val suffix = chapter.title.takeIf { it.isNotBlank() }?.let { " - $it" } ?: ""
+    return "${item.id}::${item.title}$suffix"
+}
+
+private fun formatTvClock(millis: Long): String {
+    if (millis <= 0) return "0:00"
+    val totalSeconds = millis / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "$minutes:${seconds.toString().padStart(2, '0')}"
 }

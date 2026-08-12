@@ -24,7 +24,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
+import com.alexleoreeves.novelapp.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.tv.data.TvBingeSession
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.tv.ui.components.TvMovieEndRail
 import kotlinx.coroutines.delay
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
@@ -50,7 +53,16 @@ fun TvPlayerScreen(
     previewLimitMs: Long? = null,
     isEpisodic: Boolean = false,
     episodicFraction: Double = TV_EPISODIC_FREE_FRACTION,
-    onUpgrade: () -> Unit = {}
+    onUpgrade: () -> Unit = {},
+    resumePositionMs: Long? = null,
+    onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
+    bingeSession: TvBingeSession? = null,
+    isMovieEnded: Boolean = false,
+    serverName: String? = null,
+    onNext: () -> Unit = {},
+    onPrev: () -> Unit = {},
+    onEnded: () -> Unit = {},
+    onOpenRecommendations: (UnifiedSearchResult) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showControls by remember { mutableStateOf(true) }
@@ -61,6 +73,26 @@ fun TvPlayerScreen(
     var previewExpired by remember { mutableStateOf(false) }
     var vlcMediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var libVlc by remember { mutableStateOf<LibVLC?>(null) }
+    // Resume-once from the saved position (power loss / app kill).
+    // Keyed on streamUrl so navigating to a new episode resets the flag.
+    var hasAppliedResume by remember(streamUrl) { mutableStateOf(false) }
+    var lastSavedPosition by remember(streamUrl) { mutableStateOf(0L) }
+    val resumeMs = resumePositionMs?.takeIf { it > 30_000L } ?: 0L
+
+    // End-of-media detection: fires once per episode when playback reaches
+    // within 10 seconds of the end. Keyed on streamUrl so auto-next resets it.
+    var endedFired by remember(streamUrl) { mutableStateOf(false) }
+    val currentOnEnded by rememberUpdatedState(onEnded)
+
+    // Reset playback state when a new episode/title loads so the progress bar
+    // never shows the previous title's duration or position.
+    LaunchedEffect(streamUrl) {
+        isPlaying = false
+        currentPosition = 0L
+        duration = 0L
+        errorMsg = null
+        previewExpired = false
+    }
 
     val isPremium = account?.isPremium == true
     val resolvedUrl = streamUrl.trim()
@@ -98,9 +130,22 @@ fun TvPlayerScreen(
                             if (duration <= 0 && mp.length > 0) {
                                 duration = mp.length
                             }
+                            // End of media: within 10s of the end → fire onEnded
+                            // ONCE per episode (auto-next / movie-end card).
+                            val len = mp.length
+                            if (!endedFired && len > 0 && mp.time > 0 && len - mp.time <= 10_000L) {
+                                endedFired = true
+                                currentOnEnded()
+                            }
                         }
                         MediaPlayer.Event.LengthChanged -> {
                             duration = mp.length
+                        }
+                        MediaPlayer.Event.EndReached -> {
+                            if (!endedFired) {
+                                endedFired = true
+                                currentOnEnded()
+                            }
                         }
                         MediaPlayer.Event.Playing -> {
                             isPlaying = true
@@ -140,6 +185,41 @@ fun TvPlayerScreen(
             val mp = vlcMediaPlayer ?: return@LaunchedEffect
             delay(500)
             if (!mp.isPlaying) mp.play()
+        }
+
+        // Resume-once: jump back to the saved position (power loss / app kill)
+        // the first time playback actually starts. LibVLC needs the surface
+        // attached and the media playing before a seek lands, so we poll until
+        // the player reports playing.
+        LaunchedEffect(vlcMediaPlayer) {
+            val mp = vlcMediaPlayer ?: return@LaunchedEffect
+            while (!hasAppliedResume && !previewExpired) {
+                if (resumeMs > 0 && mp.isPlaying) {
+                    hasAppliedResume = true
+                    currentPosition = resumeMs
+                    runCatching {
+                        mp.time = resumeMs.coerceIn(0L, mp.length.takeIf { it > 0 } ?: resumeMs)
+                    }
+                }
+                delay(300)
+            }
+        }
+
+        // Persist playback position every ~5s so a power cut / app kill loses
+        // at most a few seconds. Skipped until resume is applied so a mid-load
+        // position of 0 can never overwrite the saved spot.
+        LaunchedEffect(vlcMediaPlayer) {
+            val mp = vlcMediaPlayer ?: return@LaunchedEffect
+            while (true) {
+                delay(5_000L)
+                if (hasAppliedResume || resumeMs == 0L) {
+                    val pos = mp.time
+                    if (pos > 0 && pos - lastSavedPosition >= 5_000L) {
+                        lastSavedPosition = pos
+                        onProgress(pos, duration.takeIf { it > 0 } ?: mp.length)
+                    }
+                }
+            }
         }
     }
 
@@ -186,6 +266,21 @@ fun TvPlayerScreen(
         }
     }
 
+    /**
+     * Manual "Resume": jump straight to the saved position (power loss /
+     * app kill). Shown when the automatic resume hasn't applied yet, so the
+     * user can re-trigger it with the OK button.
+     */
+    fun playerResume() {
+        vlcMediaPlayer?.let { mp ->
+            hasAppliedResume = true
+            currentPosition = resumeMs
+            runCatching {
+                mp.time = resumeMs.coerceIn(0L, mp.length.takeIf { it > 0 } ?: resumeMs)
+            }
+        }
+    }
+
     BackHandler { onBack() }
 
     Box(
@@ -217,6 +312,8 @@ fun TvPlayerScreen(
                             Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
                             Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
                             Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
+                            Key.MediaNext -> { onNext(); true }
+                            Key.MediaPrevious -> { onPrev(); true }
                             Key.Back -> { onBack(); true }
                             else -> false
                         }
@@ -260,6 +357,29 @@ fun TvPlayerScreen(
                         Text("Go Back", fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+        }
+
+        // Movie-end recommendations rail — shown when a movie reaches the end
+        // (isMovieEnded + endedFired). Loads similar titles from the backend;
+        // selecting one opens its detail screen (server picker) via
+        // onOpenRecommendations.
+        if (isMovieEnded && endedFired) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxHeight().background(Color.Black.copy(0.65f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Default.Movie, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(56.dp))
+                        Text("Movie finished", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Pick what to watch next", color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                TvMovieEndRail(
+                    item = bingeSession?.item,
+                    onSelect = { rec -> onOpenRecommendations(rec) }
+                )
             }
         }
 
@@ -309,9 +429,46 @@ fun TvPlayerScreen(
                     }
                     Spacer(Modifier.width(16.dp))
                     Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+
+                    // Server badge — shows which server the binge session is
+                    // pinned to (auto-next/NEXT always reuse this same server).
+                    if (serverName != null) {
+                        Spacer(Modifier.width(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Color(0xFF00BFFF).copy(0.2f),
+                            border = BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Dns, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(16.dp))
+                                Text(serverName, color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
                 }
 
                 Row(modifier = Modifier.fillMaxWidth().align(Alignment.Center), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    // Previous episode (remote PREV equivalent) — visible when the
+                    // binge session has an earlier episode.
+                    if (bingeSession != null && bingeSession.currentIndex > 0) {
+                        var prevFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { onPrev() }, shape = CircleShape,
+                            color = if (prevFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                            border = if (prevFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                            modifier = Modifier.size(56.dp).onFocusChanged { prevFocused = it.isFocused }
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(16.dp))
+                    }
+
                     var ppFocused by remember { mutableStateOf(false) }
                     Surface(
                         onClick = { playerTogglePlay() }, shape = CircleShape,
@@ -323,6 +480,23 @@ fun TvPlayerScreen(
                             Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(36.dp))
                         }
                     }
+
+                    // Next episode (remote NEXT equivalent) — visible when the
+                    // binge session has a later episode.
+                    if (bingeSession != null && bingeSession.hasNext) {
+                        Spacer(Modifier.width(16.dp))
+                        var nextFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { onNext() }, shape = CircleShape,
+                            color = if (nextFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                            border = if (nextFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                            modifier = Modifier.size(56.dp).onFocusChanged { nextFocused = it.isFocused }
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.SkipNext, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                            }
+                        }
+                    }
                 }
 
                 Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
@@ -332,6 +506,29 @@ fun TvPlayerScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime(currentPosition), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                         Text(formatTime(duration), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    // Resume control — lets the user jump straight back to the
+                    // saved position after a power loss / app kill.
+                    if (resumeMs > 0 && !hasAppliedResume) {
+                        Spacer(Modifier.height(10.dp))
+                        var resumeFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { playerResume() },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (resumeFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.2f),
+                            border = if (resumeFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.6f)),
+                            modifier = Modifier.align(Alignment.CenterHorizontally).onFocusChanged { resumeFocused = it.isFocused }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Replay, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                Text("Resume ${formatTime(resumeMs)}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
                     }
                 }
             }

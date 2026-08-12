@@ -84,7 +84,7 @@ fun TvEmbedPlayer(
             } else if (playerPhase == PlayerPhase.STABILIZING) {
                 playerPhase = PlayerPhase.READY
                 phaseMessage = ""
-                webViewRef?.evaluateJavascript(STABILIZATION_END_JS, null)
+                webViewRef?.evaluateJavascript(STABILIZATION_IDLE_JS, null)
             }
         }
     }
@@ -422,6 +422,39 @@ private const val STABILIZATION_START_JS = """
         });
     }
     clickPlayButtons();
+})();
+"""
+
+/**
+ * JS injected when the player reaches READY.
+ *
+ * CRITICAL: does NOT auto-play. Embed autoplay without a user gesture is
+ * rejected by the browser, and the old STABILIZATION_END_JS left the UI
+ * showing "playing" while the <video> sat paused. We keep the video muted
+ * and paused; the user presses OK/Play (or the embed's own play button),
+ * which counts as a user gesture and actually starts playback.
+ *
+ * Also re-attaches inline/playsinline attributes on new video elements so
+ * they never pop out into a broken fullscreen layer on Android TV.
+ */
+private const val STABILIZATION_IDLE_JS = """
+(function() {
+    window.__STABILIZING = false;
+    function forceInlineVideos() {
+        document.querySelectorAll('video').forEach(function(v) {
+            v.setAttribute('playsinline', '');
+            v.setAttribute('webkit-playsinline', '');
+            v.setAttribute('x-webkit-airplay', 'allow');
+            if (v.muted === undefined || v.autoplay === true) {
+                v.autoplay = false;
+            }
+        });
+    }
+    forceInlineVideos();
+    try {
+        var observer = new MutationObserver(function() { forceInlineVideos(); });
+        observer.observe(document.body, { childList: true, subtree: true });
+    } catch(e) {}
 })();
 """
 

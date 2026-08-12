@@ -1521,6 +1521,33 @@ async function tmdbItems(type, query, page = 1) {
     });
 }
 
+async function tmdbSimilar(detailUrl, limit = 12) {
+    const match = /^tmdb:\/\/(movie|tv)\/(\d+)/.exec(String(detailUrl || ""));
+    if (!match) return [];
+    const mediaType = match[1];
+    const id = match[2];
+    const token = process.env.TMDB_READ_ACCESS_TOKEN || "";
+    const key = process.env.TMDB_API_KEY || "15d2ea6d0dc1d247f33e5405d4b507cc";
+    if (!token && !key) return [];
+    const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
+    const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
+    const payload = await fetchWithTimeout(
+        `https://api.themoviedb.org/3/${mediaType}/${id}/similar?language=en-US&page=1${apiSuffix}`,
+        { headers }
+    ).catch(() => null);
+    const results = (payload && Array.isArray(payload.results) ? payload.results : []).slice(0, limit);
+    return results.map((item) => contentItem({
+        id: `tmdb_${mediaType}_${item.id}`,
+        title: item.title || item.name || "Untitled",
+        subtitle: mediaType === "movie" ? "Movie" : "TV Series",
+        coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
+        detailUrl: `tmdb://${mediaType}/${item.id}`,
+        sourceName: "TMDB",
+        kind: mediaType === "movie" ? "movie" : "tv",
+        synopsis: item.overview || ""
+    }));
+}
+
 async function tmdbBestMatch(type, title) {
     const query = String(title || "").trim();
     if (!query) return null;
@@ -2659,6 +2686,12 @@ async function handleContentApi(request, response, pathname, url) {
       const query = String(url.searchParams.get("q") || "").trim();
       const page = Math.max(1, Number(url.searchParams.get("page") || 1));
       return sendApiData(response, 200, { items: await contentSearch(type, query, page) });
+    }
+
+    if (request.method === "GET" && pathname === "/api/content/similar") {
+      const detailUrl = String(url.searchParams.get("detailUrl") || "").trim();
+      const limit = Math.max(1, Math.min(24, Number(url.searchParams.get("limit") || 12) || 12));
+      return sendApiData(response, 200, { items: await tmdbSimilar(detailUrl, limit) });
     }
     if (request.method === "GET" && pathname === "/api/content/providers") {
       return sendApiData(response, 200, {

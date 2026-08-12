@@ -21,9 +21,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import com.alexleoreeves.novelapp.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.tv.data.TvBingeSession
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.tv.ui.components.TvMovieEndRail
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
@@ -40,23 +44,107 @@ fun TvEmbedPlayerScreen(
     previewLimitMs: Long? = null,
     isEpisodic: Boolean = false,
     episodicFraction: Double = TV_EPISODIC_FREE_FRACTION,
-    onUpgrade: () -> Unit = {}
+    onUpgrade: () -> Unit = {},
+    resumePositionMs: Long? = null,
+    onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
+    bingeSession: TvBingeSession? = null,
+    isMovieEnded: Boolean = false,
+    serverName: String? = null,
+    onNext: () -> Unit = {},
+    onPrev: () -> Unit = {},
+    onEnded: () -> Unit = {},
+    onOpenRecommendations: (UnifiedSearchResult) -> Unit = {}
 ) {
     var showControls by remember { mutableStateOf(true) }
-    var isPlaying by remember { mutableStateOf(true) }
+    // Start as paused: the embed starts paused and only plays after a real
+    // user gesture (OK/Play). Claiming "playing" before that left the UI
+    // showing a Pause icon while the video sat paused.
+    var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
     var previewExpired by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var webViewStartedAt by remember { mutableStateOf(0L) }
+    // Resume-once flag: seek back to the saved position the first time a
+    // real video becomes ready, even if the embed auto-plays.
+    // Keyed on embedUrl so navigating to a new episode resets the flag.
+    var hasAppliedResume by remember(embedUrl) { mutableStateOf(false) }
+    var lastSavedPosition by remember(embedUrl) { mutableStateOf(0L) }
+    // How many seek attempts remain when the resume seek reported "none"
+    // (video inside a cross-origin iframe JS can't reach yet). We retry a few
+    // times so a real resume is not silently lost.
+    var pendingResumeAttempts by remember(embedUrl) { mutableStateOf(0) }
+    // Set when a manual resume seek fails so we can show a notice instead of
+    // silently losing the user's saved position.
+    var resumeFailedNotice by remember(embedUrl) { mutableStateOf(false) }
+    val resumeMs = resumePositionMs?.takeIf { it > 30_000L } ?: 0L
+
+    // End-of-media detection: fires once per episode when the embed video
+    // reaches within 10 seconds of the end. Keyed on embedUrl so auto-next
+    // resets it for the next episode.
+    var endedFired by remember(embedUrl) { mutableStateOf(false) }
+    val currentOnEnded by rememberUpdatedState(onEnded)
 
     val isPremium = account?.isPremium == true
+
+    // Reset playback state when a new episode/title loads so the progress bar
+    // never shows the previous title's duration or position.
+    LaunchedEffect(embedUrl) {
+        isPlaying = false
+        currentPosition = 0L
+        duration = 0L
+        previewExpired = false
+        pendingResumeAttempts = 0
+        resumeFailedNotice = false
+        webViewStartedAt = System.currentTimeMillis()
+    }
 
     // Auto-hide controls
     LaunchedEffect(showControls) {
         if (showControls) {
             delay(5000)
             showControls = false
+        }
+    }
+
+    /**
+     * Seeks the first reachable <video> (top-level document plus any
+     * same-origin iframes). Reports "ok" when a seek landed, "none" when no
+     * reachable video exists (e.g. video inside a cross-origin iframe). The
+     * resume path uses the result to decide whether to retry.
+     *
+     * NOTE: declared before [playerSeekTo] — Kotlin local functions are not
+     * hoisted, so callers must come after the function they invoke.
+     */
+    fun playerSeekToChecked(positionMs: Long, onResult: ((String) -> Unit)?) {
+        webViewRef?.evaluateJavascript(
+            "(function(t){function seek(root){var v=root.querySelector('video');if(v){v.currentTime=t;return true;}var frames=root.querySelectorAll('iframe');for(var i=0;i<frames.length;i++){try{var doc=frames[i].contentDocument||frames[i].contentWindow.document;if(doc&&seek(doc))return true;}catch(e){}}return false;}return seek(document)?'ok':'none';})(${positionMs / 1000.0})",
+            onResult
+        )
+    }
+
+    /** Fire-and-forget seek (arrow rewind/forward keys). */
+    fun playerSeekTo(positionMs: Long) {
+        playerSeekToChecked(positionMs, null)
+    }
+
+    /**
+     * Manual "Resume": re-seek to the saved position on demand. Used when the
+     * automatic resume failed because the <video> wasn't reachable yet, so the
+     * user can retry with the OK button once playback has loaded.
+     */
+    fun playerResume() {
+        if (resumeMs <= 0) return
+        playerSeekToChecked(resumeMs) { rawResult ->
+            val seekResult = rawResult?.trim()?.trim('"') ?: "none"
+            if (seekResult == "ok") {
+                hasAppliedResume = true
+                pendingResumeAttempts = 0
+                resumeFailedNotice = false
+                currentPosition = resumeMs
+            } else {
+                resumeFailedNotice = true
+            }
         }
     }
 
@@ -76,9 +164,55 @@ fun TvEmbedPlayerScreen(
                     val positionMs = obj.optLong("currentTime", 0L)
                     val durationMs = obj.optLong("duration", 0L)
                     val paused = obj.optBoolean("paused", true)
-                    if (obj.optBoolean("ready", false)) duration = durationMs
+                    // Keep the longest duration ever seen so the progress bar /
+                    // total time never shrinks while the stream re-buffers
+                    // (embed players often report a smaller duration mid-load).
+                    if (obj.optBoolean("ready", false) && durationMs > duration) duration = durationMs
                     currentPosition = positionMs
                     isPlaying = !paused
+
+                    // End of media: within 10s of the end → fire onEnded ONCE
+                    // per episode (auto-next / movie-end recommendations).
+                    if (!endedFired && durationMs > 0 && positionMs > 0 && durationMs - positionMs <= 10_000L) {
+                        endedFired = true
+                        currentOnEnded()
+                    }
+
+                    // Resume-once: the first time a real video becomes ready,
+                    // jump back to the saved position (power loss / app kill).
+                    // If the seek reports "none" (cross-origin iframe not yet
+                    // reachable), keep the flag unset and retry a few times so
+                    // the resume is not silently lost.
+                    //
+                    // After 5 failed auto-attempts we stop retrying by
+                    // ourselves, but hasAppliedResume stays FALSE so the saved
+                    // position is never overwritten — the on-screen "Resume"
+                    // control lets the user re-trigger the seek manually once
+                    // the video has fully loaded.
+                    if (resumeMs > 0 && !hasAppliedResume && pendingResumeAttempts < 5 && obj.optBoolean("ready", false)) {
+                        playerSeekToChecked(resumeMs) { rawResult ->
+                            val seekResult = rawResult?.trim()?.trim('"') ?: "none"
+                            if (seekResult == "ok") {
+                                hasAppliedResume = true
+                                pendingResumeAttempts = 0
+                                resumeFailedNotice = false
+                                currentPosition = resumeMs
+                            } else {
+                                pendingResumeAttempts++
+                            }
+                        }
+                    }
+
+                    // Persist progress every ~5s so a power cut loses at most
+                    // a few seconds. Skipped before resume is applied so an
+                    // auto-playing embed can't overwrite the saved position.
+                    if (hasAppliedResume || resumeMs == 0L) {
+                        if (positionMs > 0 && positionMs - lastSavedPosition >= 5_000L) {
+                            lastSavedPosition = positionMs
+                            onProgress(positionMs, durationMs)
+                        }
+                    }
+
                     if (!isPremium && !previewExpired) {
                         val limit = if (isEpisodic && durationMs > 0) {
                             (durationMs * episodicFraction).toLong().coerceAtLeast(1)
@@ -95,13 +229,6 @@ fun TvEmbedPlayerScreen(
             }
             delay(1000)
         }
-    }
-
-    fun playerSeekTo(positionMs: Long) {
-        webViewRef?.evaluateJavascript(
-            "(function(){var v=document.querySelector('video');if(v){v.currentTime=${positionMs / 1000.0};}})()",
-            null
-        )
     }
 
     /**
@@ -151,7 +278,7 @@ fun TvEmbedPlayerScreen(
 
     BackHandler { onBack() }
 
-    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -189,6 +316,8 @@ fun TvEmbedPlayerScreen(
                                 Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
                                 Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
                                 Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
+                                Key.MediaNext -> { onNext(); true }
+                                Key.MediaPrevious -> { onPrev(); true }
                                 Key.Back -> { onBack(); true }
                                 else -> false
                             }
@@ -196,7 +325,8 @@ fun TvEmbedPlayerScreen(
                             // Intercept KeyDown for navigation keys so focus doesn't jump
                             when (event.key) {
                                 Key.DirectionLeft, Key.DirectionRight, Key.DirectionCenter, Key.Enter,
-                                Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause, Key.MediaFastForward, Key.MediaRewind -> true
+                                Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause, Key.MediaFastForward, Key.MediaRewind,
+                                Key.MediaNext, Key.MediaPrevious -> true
                                 else -> false
                             }
                         }
@@ -211,6 +341,29 @@ fun TvEmbedPlayerScreen(
             onWebViewCreated = { webView -> webViewRef = webView },
             onBack = onBack
         )
+
+        // Movie-end recommendations rail — shown when a movie reaches the end
+        // (isMovieEnded + endedFired). Loads similar titles from the backend;
+        // selecting one opens its detail screen (server picker) via
+        // onOpenRecommendations.
+        if (isMovieEnded && endedFired) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxHeight().background(Color.Black.copy(0.65f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Default.Movie, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(56.dp))
+                        Text("Movie finished", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Pick what to watch next", color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                TvMovieEndRail(
+                    item = bingeSession?.item,
+                    onSelect = { rec -> onOpenRecommendations(rec) }
+                )
+            }
+        }
 
         // Free preview ended gate
         if (previewExpired) {
@@ -259,10 +412,47 @@ fun TvEmbedPlayerScreen(
                     }
                     Spacer(Modifier.width(16.dp))
                     Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+
+                    // Server badge — shows which server the binge session is
+                    // pinned to (auto-next/NEXT always reuse this same server).
+                    if (serverName != null) {
+                        Spacer(Modifier.width(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Color(0xFF00BFFF).copy(0.2f),
+                            border = BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Dns, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(16.dp))
+                                Text(serverName, color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
                 }
 
-                // Center play/pause button
+                // Center controls: Previous | Play/Pause | Next
                 Row(modifier = Modifier.fillMaxWidth().align(Alignment.Center), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    // Previous episode (remote PREV equivalent) — visible when the
+                    // binge session has an earlier episode.
+                    if (bingeSession != null && bingeSession.currentIndex > 0) {
+                        var prevFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { onPrev() }, shape = CircleShape,
+                            color = if (prevFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                            border = if (prevFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                            modifier = Modifier.size(56.dp).onFocusChanged { prevFocused = it.isFocused }
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(16.dp))
+                    }
+
                     var ppFocused by remember { mutableStateOf(false) }
                     Surface(
                         onClick = { playerTogglePlay() }, shape = CircleShape,
@@ -272,6 +462,23 @@ fun TvEmbedPlayerScreen(
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
+                    }
+
+                    // Next episode (remote NEXT equivalent) — visible when the
+                    // binge session has a later episode.
+                    if (bingeSession != null && bingeSession.hasNext) {
+                        Spacer(Modifier.width(16.dp))
+                        var nextFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { onNext() }, shape = CircleShape,
+                            color = if (nextFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
+                            border = if (nextFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                            modifier = Modifier.size(56.dp).onFocusChanged { nextFocused = it.isFocused }
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.SkipNext, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                            }
                         }
                     }
                 }
@@ -285,21 +492,94 @@ fun TvEmbedPlayerScreen(
                         Text(formatEmbedTime(currentPosition), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                         Text(formatEmbedTime(duration), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                     }
+
+                    // Resume control — appears while a saved position exists and
+                    // hasn't been applied yet. Lets the user jump straight back
+                    // to the saved spot after a power loss / app kill, even when
+                    // the automatic resume couldn't reach the video.
+                    if (resumeMs > 0 && !hasAppliedResume) {
+                        Spacer(Modifier.height(10.dp))
+                        var resumeFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { playerResume() },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (resumeFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.2f),
+                            border = if (resumeFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.6f)),
+                            modifier = Modifier.align(Alignment.CenterHorizontally).onFocusChanged { resumeFocused = it.isFocused }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Replay, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                Text("Resume ${formatEmbedTime(resumeMs)}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                        if (resumeFailedNotice) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Auto-jump didn't reach this server's player yet. Press Resume again once the video shows, or use the embed's own seek bar.",
+                                color = Color.White.copy(0.7f),
+                                style = MaterialTheme.typography.labelSmall,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-private const val EMBED_VIDEO_STATE_JS =
-    "(function(){var v=document.querySelector('video');" +
-        "if(!v){return JSON.stringify({currentTime:0,duration:0,paused:true,ready:false});}" +
-        "var d=(v.duration&&isFinite(v.duration))?v.duration*1000:0;" +
-        "var c=(v.currentTime&&isFinite(v.currentTime))?v.currentTime*1000:0;" +
-        "return JSON.stringify({currentTime:c,duration:d,paused:v.paused,ready:d>0});})()"
+private const val EMBED_VIDEO_STATE_JS = """
+(function(){
+    function collectVideos(root) {
+        var out = [];
+        try { root.querySelectorAll('video').forEach(function(v){ out.push(v); }); } catch(e) {}
+        try {
+            root.querySelectorAll('iframe').forEach(function(f){
+                try {
+                    var doc = f.contentDocument || f.contentWindow.document;
+                    if (doc) out = out.concat(collectVideos(doc));
+                } catch(e) {}
+            });
+        } catch(e) {}
+        return out;
+    }
+    var videos = collectVideos(document);
+    var best = null;
+    for (var i = 0; i < videos.length; i++) {
+        var v = videos[i];
+        var hasSrc = !!(v.src && v.src.length > 4) || !!(v.currentSrc && v.currentSrc.length > 4);
+        if (!hasSrc) continue;
+        if (!best) best = v;
+        if ((v.readyState || 0) >= 2) { best = v; break; }
+    }
+    if (!best) return JSON.stringify({currentTime:0,duration:0,paused:true,ready:false});
+    var d = (best.duration && isFinite(best.duration)) ? best.duration * 1000 : 0;
+    var c = (best.currentTime && isFinite(best.currentTime)) ? best.currentTime * 1000 : 0;
+    return JSON.stringify({currentTime:c,duration:d,paused:best.paused !== false,ready:d>0});
+})()
+"""
 
-private const val EMBED_PAUSE_JS =
-    "(function(){var v=document.querySelector('video');if(v){v.pause();v.muted=true;}})()"
+private const val EMBED_PAUSE_JS = """
+(function(){
+    function pauseAll(root) {
+        try { root.querySelectorAll('video').forEach(function(v){ v.pause(); v.muted = true; }); } catch(e) {}
+        try {
+            root.querySelectorAll('iframe').forEach(function(f){
+                try {
+                    var doc = f.contentDocument || f.contentWindow.document;
+                    if (doc) pauseAll(doc);
+                } catch(e) {}
+            });
+        } catch(e) {}
+    }
+    pauseAll(document);
+})()
+"""
 
 /**
  * Toggle play/pause on reachable <video> elements — the top-level document

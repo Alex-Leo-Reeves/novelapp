@@ -92,16 +92,29 @@ suspend fun authLogin(email: String, password: String): SavedUserAccount {
     } finally { client.close() }
 }
 
+/**
+ * Verifies a saved session token. Returns the fresh account when the token
+ * is valid.
+ *
+ * Failure contract (THE CALLER MUST MATCH):
+ *  - Returns `null` ONLY for a genuine server rejection (401/403) — the
+ *    session is truly dead and must be cleared.
+ *  - Throws for transient errors (timeout, DNS, 5xx) so the caller can keep
+ *    the saved session and retry later. A TV boots before the network is up;
+ *    clearing the session on a transient failure is what caused the
+ *    "logged me out after 1 day" bug.
+ */
 suspend fun authMe(token: String): SavedUserAccount? {
     val client = platformHttpClient()
     return try {
         val resp = client.get("${ApiConfig.API_BASE_URL}/auth/me") {
             bearerAuth(token)
         }
-        if (resp.status != HttpStatusCode.OK) return null
+        if (resp.status == HttpStatusCode.Unauthorized || resp.status == HttpStatusCode.Forbidden) return null
+        if (resp.status != HttpStatusCode.OK) throw IllegalStateException("Auth check failed (${resp.status.value})")
         val body = resp.bodyAsText()
         val json = apiJson.parseToJsonElement(body).jsonObject
-        val user = json["user"]?.jsonObject ?: return null
+        val user = json["user"]?.jsonObject ?: throw IllegalStateException("Auth check returned no user")
         SavedUserAccount(
             id = user["id"]?.jsonPrimitive?.contentOrNull ?: "",
             username = user["username"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -211,6 +224,29 @@ suspend fun searchContent(type: String, query: String, page: Int = 1): List<Unif
             parameter("type", type)
             parameter("q", query)
             parameter("page", page)
+        }
+        val body = resp.bodyAsText()
+        val json = apiJson.parseToJsonElement(body).jsonObject
+        val data = json["data"]?.jsonObject ?: return emptyList()
+        val items = data["items"]?.jsonArray ?: return emptyList()
+        items.map { it.jsonObject.toUnifiedResult() }
+    } catch (_: Exception) { emptyList() }
+    finally { client.close() }
+}
+
+/**
+ * Fetches similar/recommended titles for a video (TMDB-backed
+ * /api/content/similar). Used by the TV movie-end rail: when a movie
+ * finishes, the player shows these on the right so the user can pick the
+ * next thing with the remote.
+ */
+suspend fun fetchSimilarContent(detailUrl: String, limit: Int = 12): List<UnifiedSearchResult> {
+    if (detailUrl.isBlank()) return emptyList()
+    val client = platformHttpClient()
+    return try {
+        val resp = client.get("${ApiConfig.API_BASE_URL}/content/similar") {
+            parameter("detailUrl", detailUrl)
+            parameter("limit", limit.coerceIn(1, 24))
         }
         val body = resp.bodyAsText()
         val json = apiJson.parseToJsonElement(body).jsonObject

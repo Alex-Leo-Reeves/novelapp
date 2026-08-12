@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
@@ -27,6 +28,7 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
 
 @Composable
 fun TvDonghuaScreen(
@@ -38,6 +40,8 @@ fun TvDonghuaScreen(
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; isLenient = true }) }
         }
     }
+    val context = LocalContext.current
+    val watchProgressStore = remember(context) { TvWatchProgressStore(context) }
     var items by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var selectedItem by remember { mutableStateOf<UnifiedSearchResult?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -61,9 +65,15 @@ fun TvDonghuaScreen(
             mediaKind = "donghua"
         ),
         account = null,
-        // Direct-stream route: the player's own position-based preview cap applies.
-        onPlayDirectStream = { url, title, _ -> onPlayStream(url, title) },
-        onPlayEmbed = { url, title, _ -> onPlayStream(url, title) },
+        watchProgressStore = watchProgressStore,
+        // Binge session: the first episode is resolved by TvDetailScreen; route
+        // its stream URL straight to the legacy onPlayStream handler.
+        onPlaySession = { session ->
+            session.current?.let { ep ->
+                onPlayStream(ep.url.ifBlank { session.item.detailPageUrl }, "${session.item.title} - ${ep.chapter.title}")
+            }
+        },
+        onOpenRecommendations = { _, _ -> },
         onReadNovel = { _, _ -> },
         onReadManga = { _, _ -> },
         onBack = { selectedItem = null }
