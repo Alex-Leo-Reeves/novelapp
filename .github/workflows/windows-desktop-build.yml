@@ -211,3 +211,45 @@ jobs:
             git commit -m "Publish Windows EXE release [skip ci]"
             git push origin "HEAD:${{ github.ref_name }}"
           }
+
+  release:
+    name: Create v1.41 Release
+    runs-on: ubuntu-latest
+    needs: windows-exe
+    if: github.ref_name == 'main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: novelapp-windows-exe
+          path: release-asset
+
+      - name: Rename binary to novelapp-android.exe
+        shell: bash
+        run: mv release-asset/novelapp-windows.exe release-asset/novelapp-android.exe
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create or update tag v1.41
+        run: |
+          git tag -f v1.41
+          git push origin v1.41 --force
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.41
+          name: NovelApp v1.41
+          body: |
+            NovelApp Windows desktop release v1.41
+          files: release-asset/novelapp-android.exe
+          fail_on_unmatched_files: true
