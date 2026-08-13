@@ -23,6 +23,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
+import com.alexleoreeves.novelapp.tv.mediacache.TvIndexedBundle
+import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.async
@@ -36,6 +38,10 @@ fun TvHomeScreen(
     account: SavedUserAccount?,
     config: TvRemoteConfig = TvRemoteConfigDefaults.default,
     selectedProfile: com.alexleoreeves.novelapp.tv.ui.TvProfile? = null,
+    mediaCache: TvMediaCacheController? = null,
+    onPlayLocalInternal: (taskId: String) -> Unit = {},
+    onPlayLocalUsb: (TvIndexedBundle) -> Unit = {},
+    onRemoveLocalUsb: (TvIndexedBundle) -> Unit = {},
     onSwitchProfile: () -> Unit = {},
     onMediaSelected: (UnifiedSearchResult) -> Unit,
     onSearch: (String) -> Unit,
@@ -223,7 +229,13 @@ fun TvHomeScreen(
                 onBack = onBackHome
             )
 
-            section == TvSection.DOWNLOADS -> TvDownloadsScreen(account)
+            section == TvSection.DOWNLOADS -> TvDownloadsScreen(
+                account = account,
+                mediaCache = mediaCache,
+                onPlayInternal = onPlayLocalInternal,
+                onPlayUsb = onPlayLocalUsb,
+                onRemoveUsb = onRemoveLocalUsb
+            )
 
             section == TvSection.YOU -> TvYouScreen(
                 account = account,

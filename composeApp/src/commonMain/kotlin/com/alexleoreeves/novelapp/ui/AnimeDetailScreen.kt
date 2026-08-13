@@ -563,7 +563,9 @@ fun AnimeDetailScreen(
                                                             episodeNumber = episode.episodeNumber,
                                                             episodeTitle = episode.title,
                                                             localFilePath = saved.localPath,
-                                                            fileSizeBytes = saved.fileSizeBytes
+                                                            fileSizeBytes = saved.fileSizeBytes,
+                                                            serverId = server.name,
+                                                            serverName = server.providerName
                                                         )
                                                     )
                                                     downloadRepo.recordMediaDownload(ContentType.ANIME)

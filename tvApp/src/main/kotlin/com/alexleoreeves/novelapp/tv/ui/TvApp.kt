@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
+import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.platform.AppUpdateTarget
@@ -78,14 +79,16 @@ data class NavigationState(
     val mangaTitle: String = "",
     val showSearch: Boolean = false,
     val account: SavedUserAccount? = null,
-    val selectedProfile: TvProfile? = null
+    val selectedProfile: TvProfile? = null,
+    val localSubtitlePath: String = ""
 )
 
 
 @Composable
 fun TvApp(
     sessionStore: UserSessionStore,
-    ttsEngine: TvTtsEngine
+    ttsEngine: TvTtsEngine,
+    mediaCache: TvMediaCacheController? = null
 ) {
     var nav by remember { mutableStateOf(NavigationState()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -154,11 +157,29 @@ fun TvApp(
         nav = when (nav.screen) {
             TvScreen.DETAIL -> nav.copy(screen = TvScreen.HOME, selectedItem = null)
             TvScreen.PLAYER, TvScreen.EMBED_PLAYER -> {
+                mediaCache?.stopPlayback()
                 val fromSection = nav.playerFromSection
-                if (fromSection == null) {
-                    nav.copy(screen = TvScreen.DETAIL, playUrl = "", playTitle = "", playPreviewLimitMs = null, playerFromSection = null)
-                } else {
-                    nav.copy(screen = TvScreen.HOME, selectedSection = fromSection, playUrl = "", playTitle = "", playPreviewLimitMs = null, playerFromSection = null, selectedItem = null)
+                val selectedItem = nav.selectedItem
+                when {
+                    fromSection != null -> nav.copy(
+                        screen = TvScreen.HOME,
+                        selectedSection = fromSection,
+                        playUrl = "", playTitle = "", playPreviewLimitMs = null,
+                        playerFromSection = null, selectedItem = null, localSubtitlePath = ""
+                    )
+                    // Local (downloaded) playback: no binge session/item → return
+                    // to the Downloads section instead of a blank DETAIL screen.
+                    selectedItem == null -> nav.copy(
+                        screen = TvScreen.HOME,
+                        selectedSection = TvSection.DOWNLOADS,
+                        playUrl = "", playTitle = "", playPreviewLimitMs = null,
+                        playerFromSection = null, bingeSession = null, localSubtitlePath = ""
+                    )
+                    else -> nav.copy(
+                        screen = TvScreen.DETAIL,
+                        playUrl = "", playTitle = "", playPreviewLimitMs = null,
+                        playerFromSection = null, localSubtitlePath = ""
+                    )
                 }
             }
             TvScreen.READER -> nav.copy(screen = TvScreen.DETAIL, readerText = "", readerTitle = "")
@@ -416,6 +437,43 @@ fun TvApp(
                                     account = nav.account,
                                     config = remoteConfig,
                                     selectedProfile = nav.selectedProfile,
+                                    mediaCache = mediaCache,
+                                    onPlayLocalInternal = { taskId ->
+                                        val source = mediaCache?.internalSourceFor(taskId) ?: return@TvHomeScreen
+                                        scope.launch {
+                                            val url = mediaCache?.playableUrlFor(source)
+                                            if (url != null) {
+                                                val subtitle = mediaCache.listCompletedInternal()
+                                                    .firstOrNull { it.taskId == taskId }
+                                                    ?.subtitleBundlePath ?: ""
+                                                nav = nav.copy(
+                                                    screen = TvScreen.PLAYER,
+                                                    playUrl = url,
+                                                    playTitle = mediaCache.listCompletedInternal()
+                                                        .firstOrNull { it.taskId == taskId }?.title ?: taskId,
+                                                    localSubtitlePath = subtitle
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onPlayLocalUsb = { bundle ->
+                                        val source = mediaCache?.usbSourceFor(bundle) ?: return@TvHomeScreen
+                                        scope.launch {
+                                            val url = mediaCache?.playableUrlFor(source)
+                                            if (url != null) {
+                                                val manifest = mediaCache.decodeUsbMetadata(bundle)
+                                                nav = nav.copy(
+                                                    screen = TvScreen.PLAYER,
+                                                    playUrl = url,
+                                                    playTitle = bundle.title,
+                                                    localSubtitlePath = manifest?.subtitleBundlePath ?: ""
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onRemoveLocalUsb = { bundle ->
+                                        mediaCache?.removeUsbBundle(bundle)
+                                    },
                                     onSwitchProfile = { nav = nav.copy(screen = TvScreen.PROFILE) },
                                     onMediaSelected = { item ->
                                         nav = nav.copy(screen = TvScreen.DETAIL, selectedItem = item)
@@ -496,6 +554,7 @@ fun TvApp(
                                     serverName = session?.serverName,
                                     onNext = { advanceBinge(1) },
                                     onPrev = { advanceBinge(-1) },
+                                    subtitlePath = nav.localSubtitlePath.ifBlank { null },
                                     onEnded = {
                                         if (session?.hasNext == true) {
                                             advanceBinge(1)

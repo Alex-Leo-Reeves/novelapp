@@ -1340,7 +1340,27 @@ class AnimeXinScraper(private val client: HttpClient) {
             .filter { it.startsWith("http", ignoreCase = true) }
             .filterNot { it.isNonPlayableAnimeProviderUrl() }
             .distinct()
+            .sortedBy { it.animeXinEmbedPriority() }
             .firstOrNull()
+    }
+
+    /**
+     * Ranks embed candidates by how well they play inside a plain WebView
+     * (MaServerPlayerScreen on Android/iOS/desktop and TvEmbedPlayer on TV).
+     * The first `<select class="mirror">` option is typically GDrivePlayer,
+     * whose embed is a JW-Player/JS-only page that exposes no direct .m3u8/.mp4
+     * (verified: 0 stream candidates, "This video file cannot be played").
+     * Dailymotion serves a native <video>-capable embed that plays without
+     * external JS, so it is preferred over GDrivePlayer.
+     */
+    private fun String.animeXinEmbedPriority(): Int {
+        val host = runCatching { Url(this).host.lowercase() }.getOrNull().orEmpty()
+        return when {
+            "dailymotion.com" in host -> 1
+            "fembed.com" in host || "femax20.com" in host || "mp4upload.com" in host ||
+                "streamtape.com" in host || "dood." in host -> 2
+            else -> 9
+        }
     }
 
     private suspend fun fetchHtml(url: String, referer: String): String =

@@ -108,7 +108,7 @@ fun MediaDetailScreen(
     // ── Server selector ──────────────────────────────────────────────
     // All 2 servers displayed inline. Default to Server 1 (VidLink).
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.ANIMEXIN) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
@@ -437,7 +437,17 @@ fun MediaDetailScreen(
                                                 episodeNumber = ep.episodeNumber,
                                                 episodeTitle = ep.title,
                                                 localFilePath = saved.localPath,
-                                                fileSizeBytes = saved.fileSizeBytes
+                                                fileSizeBytes = saved.fileSizeBytes,
+                                                serverId = when {
+                                                    isDonghuaItem -> selectedDonghuaServer.name
+                                                    isAnimeItem -> selectedAnimeServer.name
+                                                    else -> selectedServer.name
+                                                },
+                                                serverName = when {
+                                                    isDonghuaItem -> selectedDonghuaServer.displayName
+                                                    isAnimeItem -> selectedAnimeServer.displayName
+                                                    else -> selectedServer.displayName
+                                                }
                                             )
                                         )
                                         downloadRepo.recordMediaDownload(ct)
@@ -485,11 +495,20 @@ fun MediaDetailScreen(
 
         // Phase 1: Load episodes from the URL the item came from
         val initialEpisodes = when {
-            isDonghuaItem -> selectedDonghuaScraper().fetchEpisodes(
-                titleQuery = item.title,
-                alternateQueries = listOf(item.title.substringBefore(":")),
-                maxEpisodes = 300
-            )
+            isDonghuaItem -> {
+                if (selectedDonghuaServer == DonghuaServer.ANIMEXIN) {
+                    // AnimeXin (Server 1): fetch the episode list from animexin.dev
+                    // with its own scraper (search → series → eplister) so each
+                    // episode URL resolves through AnimeXinScraper at play time.
+                    animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                } else {
+                    selectedDonghuaScraper().fetchEpisodes(
+                        titleQuery = item.title,
+                        alternateQueries = listOf(item.title.substringBefore(":")),
+                        maxEpisodes = 300
+                    )
+                }
+            }
             isAnimeItem -> {
                 if (selectedAnimeServer.isAnivexa) {
                     // Anivexa-API provider: episodes keyed by AniList ID.
@@ -1060,7 +1079,25 @@ fun MediaDetailScreen(
                                                         statusText = "Downloading movie..."
                                                         val saved = saveDownloadedVideo(item.id, 1, finalUrl)
                                                         if (saved.success) {
-                                                            downloadRepo.addEpisode(DownloadedEpisode(item.id, 1, item.title, saved.localPath, saved.fileSizeBytes))
+                                                            downloadRepo.addEpisode(
+                                                            DownloadedEpisode(
+                                                                parentId = item.id,
+                                                                episodeNumber = 1,
+                                                                episodeTitle = item.title,
+                                                                localFilePath = saved.localPath,
+                                                                fileSizeBytes = saved.fileSizeBytes,
+                                                                serverId = when {
+                                                                    isDonghuaItem -> selectedDonghuaServer.name
+                                                                    isAnimeItem -> selectedAnimeServer.name
+                                                                    else -> selectedServer.name
+                                                                },
+                                                                serverName = when {
+                                                                    isDonghuaItem -> selectedDonghuaServer.displayName
+                                                                    isAnimeItem -> selectedAnimeServer.displayName
+                                                                    else -> selectedServer.displayName
+                                                                }
+                                                            )
+                                                        )
                                                             statusText = "Movie saved offline."
                                                         } else { 
                                                             statusText = saved.error.ifBlank { "Download failed." }

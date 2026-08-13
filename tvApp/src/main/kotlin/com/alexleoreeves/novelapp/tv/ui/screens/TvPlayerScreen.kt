@@ -62,7 +62,8 @@ fun TvPlayerScreen(
     onNext: () -> Unit = {},
     onPrev: () -> Unit = {},
     onEnded: () -> Unit = {},
-    onOpenRecommendations: (UnifiedSearchResult) -> Unit = {}
+    onOpenRecommendations: (UnifiedSearchResult) -> Unit = {},
+    subtitlePath: String? = null
 ) {
     val context = LocalContext.current
     var showControls by remember { mutableStateOf(true) }
@@ -119,6 +120,17 @@ fun TvPlayerScreen(
                 val media = Media(vlc, Uri.parse(resolvedUrl))
                 if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
                     media.addOption(":http-referrer=https://www.febbox.com/")
+                }
+                // Offline (downloaded) bundles may carry a bundled English .srt
+                // sidecar recorded in the manifest. Attach it as an external
+                // subtitle slave so downloaded episodes keep their subs.
+                if (!subtitlePath.isNullOrBlank()) {
+                    val srt = java.io.File(subtitlePath)
+                    if (srt.isFile) {
+                        // libVLC URL-encodes the path for file:// URIs.
+                        val uri = Uri.fromFile(srt)
+                        media.addSlave(Media.Slave.Type.Subtitle, uri, true)
+                    }
                 }
                 mp.media = media
                 media.release()

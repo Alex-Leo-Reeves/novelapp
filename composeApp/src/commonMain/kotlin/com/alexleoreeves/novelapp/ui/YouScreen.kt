@@ -113,6 +113,7 @@ fun YouScreen(
         DownloadsScreen(
             currentTheme = currentTheme,
             downloadRepo = downloadRepo,
+            isPremium = account.isPremium == true || billingStatus?.premium == true,
             onPlayEpisode = onPlayEpisode,
             onReadMangaChapter = onReadMangaChapter,
             onReadNovelChapter = onReadNovelChapter,

@@ -57,10 +57,16 @@ private fun sectionAccentColor(section: DownloadSection, currentTheme: AppTheme)
     DownloadSection.COMIC -> Color(0xFFFF6D00)
 }
 
+private fun mediaEpisodeTypes(): Set<String> = setOf(
+    ContentType.ANIME, ContentType.DONGHUA, ContentType.MOVIE,
+    ContentType.K_DRAMA, ContentType.CARTOON, ContentType.CLASSIC, ContentType.NIGERIAN
+)
+
 @Composable
 fun DownloadsScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
+    isPremium: Boolean = false,
     onPlayEpisode: (localPath: String, title: String) -> Unit,
     onReadMangaChapter: (localPath: String, title: String) -> Unit,
     onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
@@ -133,6 +139,7 @@ fun DownloadsScreen(
             else -> DownloadsRootScreen(
                 currentTheme = currentTheme,
                 downloadRepo = downloadRepo,
+                isPremium = isPremium,
                 onSectionClick = { activeSection = it },
                 onBack = onRootBack
             )
@@ -148,11 +155,13 @@ fun DownloadsScreen(
 private fun DownloadsRootScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
+    isPremium: Boolean = false,
     onSectionClick: (DownloadSection) -> Unit,
     onBack: (() -> Unit)? = null
 ) {
     // Get counts for all types dynamically
     val itemsByType = remember { downloadRepo.getItemsByType() }
+    val remainingToday = remember { if (isPremium) Int.MAX_VALUE else downloadRepo.remainingMediaDownloadsToday(false) }
 
     Column(
         modifier = Modifier
@@ -204,6 +213,50 @@ private fun DownloadsRootScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // ── Quota banner (mobile parity: surface the daily free limit) ──
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isPremium) Color(0xFF1B5E20).copy(0.35f)
+                        else if (remainingToday <= 0) Color(0xFFB71C1C).copy(0.35f)
+                        else NeonBlue.copy(0.15f)
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isPremium) Color(0xFF4CAF50).copy(0.5f)
+                        else if (remainingToday <= 0) Color(0xFFE57373).copy(0.5f)
+                        else NeonBlue.copy(0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            if (isPremium) Icons.Default.Star
+                            else if (remainingToday <= 0) Icons.Default.Info
+                            else Icons.Default.Download,
+                            null,
+                            tint = if (isPremium) Color(0xFF4CAF50)
+                            else if (remainingToday <= 0) Color(0xFFE57373)
+                            else NeonBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            if (isPremium) "Unlimited downloads • Premium active"
+                            else if (remainingToday <= 0)
+                                "Today's free download limit reached — come back tomorrow or go Premium for unlimited downloads."
+                            else "$remainingToday of 5 free downloads left today",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+            }
+
             // Show sections that have downloaded items
             if (sectionsWithContent.isNotEmpty()) {
                 item {
@@ -222,13 +275,10 @@ private fun DownloadsRootScreen(
                             DownloadTypeCard(
                                 icon = section.icon,
                                 title = section.label,
-                                subtitle = when (section) {
-                                    DownloadSection.ANIME, DownloadSection.DONGHUA, DownloadSection.MOVIE,
-                                    DownloadSection.K_DRAMA, DownloadSection.CARTOON,
-                                    DownloadSection.CLASSIC, DownloadSection.NIGERIAN ->
-                                        "$count series downloaded"
-                                    else -> "$count titles downloaded"
-                                },
+                                subtitle = if (section.type.uppercase() in mediaEpisodeTypes())
+                                    "$count series downloaded"
+                                else
+                                    "$count titles downloaded",
                                 accentColor = sectionAccentColor(section, currentTheme),
                                 currentTheme = currentTheme,
                                 onClick = { onSectionClick(section) }
@@ -511,7 +561,7 @@ private fun DownloadedItemsListScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    "${item.totalItems} ${if (section in listOf(DownloadSection.ANIME, DownloadSection.DONGHUA, DownloadSection.MOVIE, DownloadSection.K_DRAMA, DownloadSection.CARTOON, DownloadSection.CLASSIC, DownloadSection.NIGERIAN)) "episodes" else "chapters"}",
+                                    "${item.totalItems} ${if (section.type.uppercase() in mediaEpisodeTypes()) "episodes" else "chapters"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = currentTheme.subTextColor()
                                 )
@@ -579,6 +629,9 @@ private fun DownloadedEpisodesScreen(
         } else {
             LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(episodes) { ep ->
+                    // P9: surface the server the episode was saved from, when recorded.
+                    val serverLabel = ep.serverName.takeIf { it.isNotBlank() }
+                        ?: ep.serverId.takeIf { it.isNotBlank() }
                     Card(
                         onClick = { onPlay(ep.localFilePath, "${item.title} – EP ${ep.episodeNumber}") },
                         shape = RoundedCornerShape(12.dp),
@@ -610,7 +663,10 @@ private fun DownloadedEpisodesScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    "Offline · ${formatFileSize(ep.fileSizeBytes)}",
+                                    buildString {
+                                        append("Offline · ${formatFileSize(ep.fileSizeBytes)}")
+                                        if (serverLabel != null) append(" · $serverLabel")
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = currentTheme.subTextColor()
                                 )

@@ -118,13 +118,13 @@ enum class DonghuaServer(
     val providerName: String,
     val serverOrder: Int
 ) {
-    NONTONGO("Server 1", "Nontongo", 1),
-    AUTOEMBED("Server 2", "AutoEmbed", 2),
-    DONGHUA_STREAM("Server 3", "DonghuaStream", 3),
-    EMBEDSU("Server 4", "EmbedSu", 4),
-    LUCIFER_DONGHUA("Server 5", "Lucifer Donghua", 5),
-    VIDSRC("Server 6", "VidSrc", 6),
-    ANIMEXIN("Server 7", "AnimeXin", 7);
+    ANIMEXIN("Server 1", "AnimeXin", 1),
+    NONTONGO("Server 2", "Nontongo", 2),
+    AUTOEMBED("Server 3", "AutoEmbed", 3),
+    DONGHUA_STREAM("Server 4", "DonghuaStream", 4),
+    EMBEDSU("Server 5", "EmbedSu", 5),
+    LUCIFER_DONGHUA("Server 6", "Lucifer Donghua", 6),
+    VIDSRC("Server 7", "VidSrc", 7);
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }

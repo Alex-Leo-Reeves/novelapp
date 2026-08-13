@@ -3,6 +3,24 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Offline media cache: dual-target downloads (internal + USB).
+         Legacy: broad storage read (<=32) / write (<=28).
+         Modern: MANAGE_EXTERNAL_STORAGE (30+) gives the TV "All files
+         access" so the engine can read/write encrypted bundles at
+         /storage/<UUID>/NovelReadCache/ on FAT32/exFAT/NTFS USB drives
+         (same special-access model Kodi uses on Android TV). Media-permission
+         fallbacks keep scanning working on 33+. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- Required for in-app updates: lets the TV app download the new APK and
          hand it to the Android package installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
