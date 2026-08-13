@@ -1,16 +1,16 @@
 {
-  "name": "novelapp-server",
-  "version": "1.40.0",
-  "private": true,
-  "type": "commonjs",
-  "scripts": {
-    "start": "node server/index.js",
-    "check": "node --check server/index.js"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "@consumet/extensions": "^1.8.8"
-  }
+    "name": "novelapp-server",
+    "version": "1.43.0",
+    "private": true,
+    "type": "commonjs",
+    "scripts": {
+        "start": "node server/index.js",
+        "check": "node --check server/index.js"
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "dependencies": {
+        "@consumet/extensions": "^1.8.8"
+    }
 }

@@ -91,7 +91,7 @@ class MediaTaskRunner(
         }
 
         val writer = storage.openBundleForWrite(bundlePath)
-        try {
+        return try {
             var completed = manifest.chunks.count { it.verified }
             emitProgress(manifest, completed)
             val mutableChunks = manifest.chunks.toMutableList()

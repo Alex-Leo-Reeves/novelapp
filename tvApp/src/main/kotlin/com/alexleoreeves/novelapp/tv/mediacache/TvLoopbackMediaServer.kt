@@ -8,6 +8,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.runBlocking
 
 /**
  * Minimal loopback HTTP server that serves the decrypted bytes of a
@@ -212,7 +213,7 @@ class TvLoopbackMediaServer {
                 // shrink (copy) for the final partial read so the Content-Length
                 // header stays accurate.
                 val dst = if (want == buffer.size) buffer else buffer.copyOf(want)
-                val read = stream.readAt(offset, dst)
+                val read = runBlocking { stream.readAt(offset, dst) }
                 if (read <= 0) break
                 outputStream.write(dst, 0, read)
                 offset += read

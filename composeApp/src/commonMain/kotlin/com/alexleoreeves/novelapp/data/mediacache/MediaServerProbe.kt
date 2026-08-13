@@ -3,7 +3,6 @@ package com.alexleoreeves.novelapp.data.mediacache
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlin.system.getTimeMillis
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Media Server Selection & Health Check
@@ -81,10 +80,10 @@ class MediaServerProbe(
                 status = MediaServerProbeStatus.EMPTY
             )
         }
-        val started = getTimeMillis()
+        val started = monotonicMs()
         return try {
             val probe = transport.probe(candidate.url)
-            val latency = (getTimeMillis() - started).coerceAtLeast(0L)
+            val latency = (monotonicMs() - started).coerceAtLeast(0L)
             when {
                 !probe.supportsRanges -> MediaServerProbeResult(
                     candidate.serverId, candidate.serverName, candidate.url,

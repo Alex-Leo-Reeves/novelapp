@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.interfaces.IMedia
 import org.videolan.libvlc.util.VLCVideoLayout
 
 /** Hard cap copied from the backend so free users can NEVER finish a full title on TV. */
@@ -129,7 +130,9 @@ fun TvPlayerScreen(
                     if (srt.isFile) {
                         // libVLC URL-encodes the path for file:// URIs.
                         val uri = Uri.fromFile(srt)
-                        media.addSlave(Media.Slave.Type.Subtitle, uri, true)
+                        media.addSlave(
+                            IMedia.Slave(IMedia.Slave.Type.Subtitle, 0, uri.toString())
+                        )
                     }
                 }
                 mp.media = media
