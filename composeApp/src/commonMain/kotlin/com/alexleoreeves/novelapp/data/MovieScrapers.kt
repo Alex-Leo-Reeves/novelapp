@@ -540,15 +540,30 @@ class YouTubeNollywoodScraper(private val httpClient: HttpClient) {
     private fun formatDuration(duration: String): String {
         val secs = duration.toLongOrNull() ?: return ""
         return when {
-            secs >= 3600 -> String.format("%d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60)
-            secs >= 60 -> String.format("%d:%02d", secs / 60, secs % 60)
+            secs >= 3600 -> {
+                val h = secs / 3600
+                val m = (secs % 3600) / 60
+                val s = secs % 60
+                "$h:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
+            }
+            secs >= 60 -> {
+                val m = secs / 60
+                val s = secs % 60
+                "$m:${s.toString().padStart(2, '0')}"
+            }
             else -> "${secs}s"
         }
     }
 
     private fun formatViews(views: Long): String = when {
-        views >= 1_000_000 -> String.format("%.1fM", views / 1_000_000.0)
-        views >= 1_000 -> String.format("%.1fK", views / 1_000.0)
+        views >= 1_000_000 -> {
+            val tenths = views / 100_000 // e.g. 12.3M -> 123
+            "${tenths / 10}.${tenths % 10}M"
+        }
+        views >= 1_000 -> {
+            val tenths = views / 100 // e.g. 12.3K -> 123
+            "${tenths / 10}.${tenths % 10}K"
+        }
         else -> views.toString()
     }
 }

@@ -42,6 +42,7 @@ fun AnimeDetailScreen(
     downloadRepo: LocalDownloadRepository,
     isPremium: Boolean = false,
     onPlayEpisode: (streamUrl: String, episodeTitle: String) -> Unit,
+    onPlayMaEmbed: (embedUrl: String, episodeTitle: String) -> Unit = { _, _ -> },
     onBack: () -> Unit,
     requireAuth: (() -> Unit) -> Unit
 ) {
@@ -52,35 +53,20 @@ fun AnimeDetailScreen(
     var downloadingEpisodes by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var refreshTrigger by remember { mutableStateOf(0) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
-    var selectedServer by remember { mutableStateOf(0) }
+    // Default to ANINEKO (most reliable Anivexa provider); VidLink stays last.
+    var selectedServer by remember {
+        mutableStateOf(AnimeServer.ALL_IN_ORDER.indexOf(AnimeServer.ANINEKO).coerceAtLeast(0))
+    }
     var seasonChoices by remember(anime.id) { mutableStateOf(listOf(anime.toInitialSeasonChoice())) }
     var selectedSeasonId by remember(anime.id) { mutableStateOf(anime.id) }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
-    val serverNames = listOf(
-        "Anineko",
-        "Gogoanime",
-        "AnimePahe",
-        "HiAnime",
-        "AnimeKai",
-        "KickAssAnime",
-        "AnimeSaturn",
-        "AnimeUnity",
-        "AnimeSama",
-        "Consumet Pahe"
-    )
-    val serverKeys = listOf(
-        "anineko",
-        "gogoanime",
-        "animepahe",
-        "hianime",
-        "animekai",
-        "kickassanime",
-        "animesaturn",
-        "animeunity",
-        "animesama",
-        "consumetpahe"
-    )
+    // Anime-only selector: 13 Anivexa-API providers (keyed by AniList ID)
+    // + VidLink LAST. Content detection is structural — this screen only serves
+    // anime, and the movie/K-drama/cartoon/classic/Nigerian tabs never touch
+    // this list (that's StreamServer/DonghuaServer in MediaDetailScreen).
+    val animeServers = AnimeServer.ALL_IN_ORDER
+    val currentAnimeServer = animeServers.getOrElse(selectedServer) { animeServers.first() }
     val selectedSeason = seasonChoices.firstOrNull { it.id == selectedSeasonId }
         ?: seasonChoices.first()
 
@@ -96,26 +82,36 @@ fun AnimeDetailScreen(
     LaunchedEffect(anime.id, selectedServer, selectedSeason.id) {
         isLoadingEpisodes = true
         try {
-            val rawTitles = selectedSeason.searchQueries
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-            val titleQueries = (rawTitles + rawTitles.flatMap { title ->
-                listOf(
-                    title.cleanAnimeSearchTitle(),
-                    title.removeAnimeSeasonSuffix()
+            val server = currentAnimeServer
+            val loadedEpisodes = if (server.isAnivexa) {
+                // Anivexa providers are keyed by AniList ID (the season id).
+                repository.fetchAnivexaEpisodes(
+                    provider = server.anivexaProviderKey.orEmpty(),
+                    anilistId = selectedSeason.id.toString()
                 )
-            })
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .distinctBy { it.lowercase() }
-            val provider = serverKeys.getOrElse(selectedServer) { "anineko" }
-            val loadedEpisodes = repository.fetchEpisodesFromAnimeProvider(
-                provider = provider,
-                animeTitleQuery = titleQueries.firstOrNull() ?: selectedSeason.displayTitle,
-                alternateQueries = titleQueries.drop(1),
-                episodeCount = selectedSeason.episodeCount.takeIf { it > 0 } ?: anime.episodeCount,
-                preferredAninekoSlug = selectedSeason.aninekoSlug
-            )
+            } else {
+                // VidLink (LAST server): reuse the Anineko list for episode
+                // numbering; playback routes through the VidLink embed instead.
+                val rawTitles = selectedSeason.searchQueries
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                val titleQueries = (rawTitles + rawTitles.flatMap { title ->
+                    listOf(
+                        title.cleanAnimeSearchTitle(),
+                        title.removeAnimeSeasonSuffix()
+                    )
+                })
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinctBy { it.lowercase() }
+                repository.fetchEpisodesFromAnimeProvider(
+                    provider = "anineko",
+                    animeTitleQuery = titleQueries.firstOrNull() ?: selectedSeason.displayTitle,
+                    alternateQueries = titleQueries.drop(1),
+                    episodeCount = selectedSeason.episodeCount.takeIf { it > 0 } ?: anime.episodeCount,
+                    preferredAninekoSlug = selectedSeason.aninekoSlug
+                )
+            }
             episodes = loadedEpisodes
                 .distinctBy { it.url.ifBlank { "${it.episodeNumber}:${it.title}" } }
                 .sortedWith(compareBy<AnimeEpisode> { it.episodeNumber.coerceAtLeast(0) }.thenBy { it.title })
@@ -399,11 +395,11 @@ fun AnimeDetailScreen(
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 8.dp)
                 ) {
-                    serverNames.forEachIndexed { index, name ->
+                    animeServers.forEachIndexed { index, server ->
                         FilterChip(
                             selected = selectedServer == index,
                             onClick = { selectedServer = index },
-                            label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                            label = { Text(server.providerName, style = MaterialTheme.typography.labelSmall) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = currentTheme.accentColor(),
                                 selectedLabelColor = Color.White
@@ -475,20 +471,44 @@ fun AnimeDetailScreen(
                         isExtracting = extractingEpisode == episode.episodeNumber,
                         isDownloaded = isDownloaded,
                         isDownloading = isDownloading,
-                        sourceLabel = serverNames.getOrElse(selectedServer) { "Anineko" },
+                        sourceLabel = currentAnimeServer.providerName,
                         currentTheme = currentTheme,
                         onPlayClick = {
                             requireAuth {
                                 if (extractingEpisode != episode.episodeNumber) {
                                     scope.launch {
                                         extractingEpisode = episode.episodeNumber
-                                        val streamUrl = repository.extractStreamUrl(episode.url)
-                                        extractingEpisode = null
-                                        if (streamUrl != null) {
-                                            onPlayEpisode(
-                                                streamUrl,
-                                                "${selectedSeason.displayTitle} – EP ${episode.episodeNumber}"
+                                        val server = currentAnimeServer
+                                        val resolvedStream = if (server.isAnivexa) {
+                                            repository.resolveAnivexaStream(episode.url)
+                                        } else {
+                                            null
+                                        }
+                                        val embedRef = if (server == AnimeServer.VIDLINK) {
+                                            repository.resolveAnivexaVidLinkEmbed(
+                                                selectedSeason.id.toString(),
+                                                episode.episodeNumber
                                             )
+                                        } else {
+                                            null
+                                        }
+                                        val playUrl = resolvedStream?.url
+                                            ?: embedRef?.buildEmbedUrl()
+                                            ?: if (!server.isAnivexa && server != AnimeServer.VIDLINK) {
+                                                repository.extractStreamUrl(episode.url)
+                                            } else {
+                                                null
+                                            }
+                                        extractingEpisode = null
+                                        if (playUrl != null) {
+                                            // Direct HLS/MP4 → ExoPlayer; VidLink/embed → WebView player.
+                                            val isDirect = resolvedStream?.isDirect == true || embedRef == null
+                                            val playTitle = "${selectedSeason.displayTitle} – EP ${episode.episodeNumber}"
+                                            if (isDirect) {
+                                                onPlayEpisode(playUrl, playTitle)
+                                            } else {
+                                                onPlayMaEmbed(playUrl, playTitle)
+                                            }
                                         } else {
                                             snackMessage = "Stream unavailable for Episode ${episode.episodeNumber}. Try again later."
                                         }
@@ -523,7 +543,13 @@ fun AnimeDetailScreen(
                                                     sourceName = anime.sourceName
                                                 )
                                             )
-                                            val streamUrl = repository.extractStreamUrl(episode.url)
+                                            val server = currentAnimeServer
+                                            val streamUrl = if (server.isAnivexa) {
+                                                // Anivexa providers resolve to a direct HLS/MP4 via the backend.
+                                                repository.resolveAnivexaStream(episode.url)?.url
+                                            } else {
+                                                repository.extractStreamUrl(episode.url)
+                                            }
                                             if (streamUrl != null) {
                                                 val saved = saveDownloadedVideo(
                                                     parentId = anime.id,

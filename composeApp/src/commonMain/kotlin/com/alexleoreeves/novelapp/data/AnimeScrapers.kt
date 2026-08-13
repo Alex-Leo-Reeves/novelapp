@@ -1322,7 +1322,11 @@ class AnimeXinScraper(private val client: HttpClient) {
         val mirrorCandidates = doc.select("select.mirror option[value], .player-option[data-src], .server-item[data-iframe]")
             .mapNotNull { el ->
                 val raw = (el.attr("value") + el.attr("data-src") + el.attr("data-iframe")).decodeHtmlEntitiesLite()
-                raw.toDonghuaAbsoluteUrl(BASE_URL)
+                val decoded = decodeBase64Ascii(raw)?.decodeHtmlEntitiesLite() ?: raw
+                val src = if (decoded.contains("<iframe", ignoreCase = true)) {
+                    Ksoup.parse(decoded).select("iframe").attr("src").ifBlank { decoded }
+                } else decoded
+                src.toDonghuaAbsoluteUrl(BASE_URL)
             }
         val iframeCandidates = doc.select("iframe[src], iframe[data-src]")
             .flatMap { listOf(it.attr("src"), it.attr("data-src")) }
@@ -1338,6 +1342,149 @@ class AnimeXinScraper(private val client: HttpClient) {
             .distinct()
             .firstOrNull()
     }
+
+    private suspend fun fetchHtml(url: String, referer: String): String =
+        client.get(url) {
+            BROWSER_HEADERS.forEach { (k, v) -> header(k, v) }
+            header("Referer", referer)
+        }.body()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AnimeHeaven Scraper — animeheaven.me
+//  Stable WebView-friendly anime source. Own episode grid (no TMDB needed).
+//
+//  Verified structure (2026-08-13):
+//    Search:   https://animeheaven.me/search.php?s={query}
+//              → results are <a href='anime.php?{code}'> with obfuscated codes
+//    Anime:    https://animeheaven.me/anime.php?{code}
+//              Episode grid anchors: <a ... id="{md5}" href='gate.php'>
+//              Episode number in <div class=' watch2 bc '>{n}</div> (descending)
+//    Player:   https://animeheaven.me/gate.php?id={md5} — JS redirect page that
+//              forwards to the video player. Loads fine in the visible WebView
+//              player (MaServerPlayerScreen / TvEmbedPlayerScreen).
+// ─────────────────────────────────────────────────────────────────────────────
+class AnimeHeavenScraper(private val client: HttpClient) {
+
+    companion object {
+        private const val BASE_URL = "https://animeheaven.me"
+        private val BROWSER_HEADERS = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language" to "en-US,en;q=0.9"
+        )
+
+        fun isAnimeHeavenUrl(url: String): Boolean =
+            url.contains("animeheaven.me", ignoreCase = true)
+
+        /** Rewrite a stored animeheaven URL to the canonical domain. */
+        fun canonicalUrl(rawUrl: String): String = when {
+            rawUrl.startsWith("http") -> rawUrl
+            rawUrl.startsWith("//") -> "https:$rawUrl"
+            rawUrl.startsWith("/") -> "$BASE_URL$rawUrl"
+            else -> "$BASE_URL/${rawUrl.trimStart('/')}"
+        }
+    }
+
+    /**
+     * Search AnimeHeaven for an anime title and return its episode list.
+     * Each episode URL is the gate.php player page (id = md5 from the grid).
+     */
+    suspend fun fetchEpisodes(
+        titleQuery: String,
+        alternateQueries: List<String> = emptyList(),
+        maxEpisodes: Int = 300
+    ): List<AnimeEpisode> {
+        val queries = (listOf(titleQuery) + alternateQueries)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+
+        for (query in queries) {
+            val episodes = runCatching { fetchEpisodesForQuery(query, maxEpisodes) }
+                .getOrElse { error ->
+                    println("[AnimeHeaven] Episode fetch failed for '$query': ${error.message}")
+                    emptyList()
+                }
+            if (episodes.isNotEmpty()) return episodes
+        }
+        return emptyList()
+    }
+
+    private suspend fun fetchEpisodesForQuery(query: String, maxEpisodes: Int): List<AnimeEpisode> {
+        // Step 1: search → find the best anime.php?{code} page
+        val searchHtml = fetchHtml("$BASE_URL/search.php?s=${query.encodeURLQueryComponent()}", "$BASE_URL/")
+        if (searchHtml.isBlockedOrErrorPage()) return emptyList()
+
+        val searchDoc = Ksoup.parse(searchHtml)
+        val candidates = searchDoc.select("div.similarimg a[href], .similarimg a[href]")
+            .mapNotNull { link ->
+                val href = link.attr("href").trim().ifBlank { return@mapNotNull null }
+                val code = href.substringAfter("anime.php?").substringBefore("&")
+                if (code.isBlank() || !href.contains("anime.php")) return@mapNotNull null
+                val title = link.select("img").firstOrNull()?.attr("alt")
+                    ?.ifBlank { link.select("div.similarname, h3, .similarname").firstOrNull()?.text().orEmpty() }
+                    ?.ifBlank { link.text() }
+                    ?.decodeHtmlEntitiesLite()
+                    ?: return@mapNotNull null
+                if (title.isBlank()) return@mapNotNull null
+                animeTitleMatchScore(query, title) to code
+            }
+            .sortedByDescending { it.first }
+            .map { it.second }
+            .distinct()
+
+        // Step 2: open the best anime page, parse the gate.php episode grid
+        for (code in candidates) {
+            val animeUrl = "$BASE_URL/anime.php?$code"
+            val episodes = runCatching { parseEpisodeGrid(animeUrl, maxEpisodes) }
+                .getOrElse { error ->
+                    println("[AnimeHeaven] Grid parse failed for '$code': ${error.message}")
+                    emptyList()
+                }
+            if (episodes.isNotEmpty()) return episodes
+        }
+        return emptyList()
+    }
+
+    private suspend fun parseEpisodeGrid(animeUrl: String, maxEpisodes: Int): List<AnimeEpisode> {
+        val html = fetchHtml(animeUrl, "$BASE_URL/")
+        if (html.isBlockedOrErrorPage()) return emptyList()
+
+        val doc = Ksoup.parse(html)
+        val episodes = doc.select("a[href='gate.php'], a[href^='gate.php'], a[href*='gate.php']")
+            .mapNotNull { link ->
+                val gateId = link.attr("id").trim()
+                if (gateId.isBlank()) return@mapNotNull null
+                val label = link.select("div.watch2, .watch2").firstOrNull()?.text().orEmpty()
+                val episodeNumber = Regex("""\d+""").find(label)
+                    ?.value
+                    ?.toIntOrNull()
+                    ?: return@mapNotNull null
+                AnimeEpisode(
+                    episodeNumber = episodeNumber,
+                    title = "Episode $episodeNumber",
+                    url = "$BASE_URL/gate.php?id=$gateId",
+                    thumbnail = ""
+                )
+            }
+            .distinctBy { it.url }
+            .sortedBy { it.episodeNumber }
+
+        return if (maxEpisodes > 0) episodes.take(maxEpisodes) else episodes
+    }
+
+    /**
+     * Resolve the WebView player URL for an AnimeHeaven episode.
+     * gate.php pages are JS redirects that load fine in the visible WebView, so
+     * we return the canonical gate URL as-is (rewriting stale origins).
+     */
+    suspend fun resolvePlayerUrl(episodeUrl: String): String = runCatching {
+        val base = canonicalUrl(episodeUrl)
+        if (base.contains("/gate.php") || base.contains("?id=")) return@runCatching base
+        // Non-gate URL (e.g. anime.php page) — load it directly; the page shows the player.
+        base
+    }.getOrElse { canonicalUrl(episodeUrl) }
 
     private suspend fun fetchHtml(url: String, referer: String): String =
         client.get(url) {

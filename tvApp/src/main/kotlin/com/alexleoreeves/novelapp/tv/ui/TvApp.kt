@@ -228,8 +228,11 @@ fun TvApp(
                     context = ctx,
                     item = session.item,
                     chapter = current?.chapter,
-                    server = if (session.isDonghua) null else session.server,
+                    server = if (session.isDonghua) null
+                        else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
+                        else session.server,
                     donghuaServer = if (session.isDonghua) session.donghuaServer else null,
+                    animeServer = session.animeServer,
                     isDonghua = session.isDonghua
                 )
                 if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) {
@@ -282,8 +285,11 @@ fun TvApp(
                     context = context,
                     item = session.item,
                     chapter = target.chapter,
-                    server = if (session.isDonghua) null else session.server,
+                    server = if (session.isDonghua) null
+                        else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
+                        else session.server,
                     donghuaServer = if (session.isDonghua) session.donghuaServer else null,
+                    animeServer = session.animeServer,
                     isDonghua = session.isDonghua
                 )
                 if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) return@launch

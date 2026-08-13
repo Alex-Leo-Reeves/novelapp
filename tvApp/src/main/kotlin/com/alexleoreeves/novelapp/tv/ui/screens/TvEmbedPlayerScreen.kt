@@ -189,6 +189,7 @@ fun TvEmbedPlayerScreen(
                     // position is never overwritten — the on-screen "Resume"
                     // control lets the user re-trigger the seek manually once
                     // the video has fully loaded.
+                    /* DISABLED: Auto-resume breaks some embed servers on large skips. User must click Resume manually.
                     if (resumeMs > 0 && !hasAppliedResume && pendingResumeAttempts < 5 && obj.optBoolean("ready", false)) {
                         playerSeekToChecked(resumeMs) { rawResult ->
                             val seekResult = rawResult?.trim()?.trim('"') ?: "none"
@@ -202,11 +203,14 @@ fun TvEmbedPlayerScreen(
                             }
                         }
                     }
+                    */
 
-                    // Persist progress every ~5s so a power cut loses at most
-                    // a few seconds. Skipped before resume is applied so an
-                    // auto-playing embed can't overwrite the saved position.
-                    if (hasAppliedResume || resumeMs == 0L) {
+                    // Persist progress every ~5s.
+                    // When a saved position exists and the user hasn't manually
+                    // resumed yet, don't overwrite the saved position unless we
+                    // are past it (i.e. user is watching from ahead of the saved spot).
+                    val canSaveProgress = resumeMs == 0L || hasAppliedResume || positionMs > resumeMs
+                    if (canSaveProgress) {
                         if (positionMs > 0 && positionMs - lastSavedPosition >= 5_000L) {
                             lastSavedPosition = positionMs
                             onProgress(positionMs, durationMs)
@@ -386,9 +390,123 @@ fun TvEmbedPlayerScreen(
             }
         }
 
-        // Controls overlay (Back + Title + Progress)
+        // ── Prominent Resume Card ──────────────────────────────────────────────
+        // Shown as a centre-screen overlay when a saved position exists and the
+        // user hasn't chosen what to do yet. Replaces the old auto-seek that
+        // would jump the embed player to a random minute, breaking some servers.
+        // The player loads and buffers normally in the background while the user
+        // decides: Resume or Watch from Start.
         AnimatedVisibility(
-            visible = showControls && !previewExpired,
+            visible = resumeMs > 0 && !hasAppliedResume && !previewExpired,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(200))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(0.78f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF0E0E1A),
+                    border = BorderStroke(1.5.dp, Color(0xFF00BFFF).copy(0.45f)),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 48.dp, vertical = 40.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(22.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Replay,
+                            contentDescription = null,
+                            tint = Color(0xFF00BFFF),
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Continue Watching?",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                "You left off at ${formatEmbedTime(resumeMs)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(0.6f)
+                            )
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Watch from Start — dismiss card without seeking
+                            var startFocused by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = {
+                                    // Mark as applied so progress saving starts
+                                    // from position 0 and the card is dismissed.
+                                    hasAppliedResume = true
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (startFocused) Color(0xFF252535) else Color(0xFF1A1A2A),
+                                border = if (startFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.18f)),
+                                modifier = Modifier.onFocusChanged { startFocused = it.isFocused }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(Icons.Default.SkipPrevious, null, tint = Color.White.copy(0.75f), modifier = Modifier.size(22.dp))
+                                    Text("Watch from Start", color = Color.White.copy(0.85f), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+
+                            // Resume — seek to saved position, then dismiss
+                            var resumeCardFocused by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = { playerResume() },
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (resumeCardFocused) Color(0xFF00D4FF) else Color(0xFF00BFFF),
+                                border = if (resumeCardFocused) BorderStroke(2.dp, Color.White) else null,
+                                modifier = Modifier.onFocusChanged { resumeCardFocused = it.isFocused }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                    Text(
+                                        "Resume  ${formatEmbedTime(resumeMs)}",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                            }
+                        }
+
+                        if (resumeFailedNotice) {
+                            Text(
+                                "Seek didn't reach the player yet — let the video fully load, then try Resume again.",
+                                color = Color(0xFFFFB347),
+                                style = MaterialTheme.typography.labelSmall,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Controls overlay (Back + Title + Progress)
+        // Hidden while the resume card is showing so the user isn't confused.
+        AnimatedVisibility(
+            visible = showControls && !previewExpired && (resumeMs == 0L || hasAppliedResume),
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(300))
         ) {
@@ -491,45 +609,10 @@ fun TvEmbedPlayerScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatEmbedTime(currentPosition), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
                         Text(formatEmbedTime(duration), color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
-                    }
-
-                    // Resume control — appears while a saved position exists and
-                    // hasn't been applied yet. Lets the user jump straight back
-                    // to the saved spot after a power loss / app kill, even when
-                    // the automatic resume couldn't reach the video.
-                    if (resumeMs > 0 && !hasAppliedResume) {
-                        Spacer(Modifier.height(10.dp))
-                        var resumeFocused by remember { mutableStateOf(false) }
-                        Surface(
-                            onClick = { playerResume() },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (resumeFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.2f),
-                            border = if (resumeFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.6f)),
-                            modifier = Modifier.align(Alignment.CenterHorizontally).onFocusChanged { resumeFocused = it.isFocused }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(Icons.Default.Replay, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                Text("Resume ${formatEmbedTime(resumeMs)}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
-                        if (resumeFailedNotice) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Auto-jump didn't reach this server's player yet. Press Resume again once the video shows, or use the embed's own seek bar.",
-                                color = Color.White.copy(0.7f),
-                                style = MaterialTheme.typography.labelSmall,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
                 }
             }
         }
+    }
     }
 }
 

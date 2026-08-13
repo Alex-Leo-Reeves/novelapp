@@ -1,6 +1,7 @@
 package com.alexleoreeves.novelapp.tv.data
 
 import android.content.Context
+import com.alexleoreeves.novelapp.data.AnimeServer
 import com.alexleoreeves.novelapp.data.Chapter
 import com.alexleoreeves.novelapp.data.DonghuaServer
 import com.alexleoreeves.novelapp.data.StreamServer
@@ -54,6 +55,7 @@ data class TvBingeSession(
     val serverName: String = "",
     val server: StreamServer? = null,
     val donghuaServer: DonghuaServer? = null,
+    val animeServer: AnimeServer? = null,
     val currentIndex: Int = 0,
     val isDonghua: Boolean = false,
     val isPremium: Boolean = true,
@@ -157,9 +159,10 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
     chapter: Chapter?,
     server: StreamServer?,
     donghuaServer: DonghuaServer?,
+    animeServer: AnimeServer? = null,
     isDonghua: Boolean
 ): TvBingeEpisode? {
-    val resolved = resolveStreamUrl(item, chapter, server, donghuaServer) ?: return null
+    val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
 
     if (!isDonghua && server == StreamServer.VIDLINK_EXO) {
         val scraped = extractTvStreamFromEmbed(context, resolved)

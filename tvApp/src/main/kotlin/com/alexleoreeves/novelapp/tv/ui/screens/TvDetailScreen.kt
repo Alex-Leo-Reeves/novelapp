@@ -67,16 +67,21 @@ fun TvDetailScreen(
     val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
 
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.ANIMEXIN) }
+    var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
     var statusText by remember { mutableStateOf("") }
 
-    LaunchedEffect(item) {
+    LaunchedEffect(item, selectedAnimeServer) {
         isLoading = true
         errorMsg = null
         statusText = ""
         try {
             val fetched = if (isVideoTitle) {
-                mediaRepo.fetchVideoEpisodes(item)
+                if (item.isAnime && !isDonghua) {
+                    mediaRepo.fetchVideoEpisodes(item, selectedAnimeServer)
+                } else {
+                    mediaRepo.fetchVideoEpisodes(item)
+                }
             } else if (kind == "novel") {
                 novelRepo.fetchChapters(item.detailPageUrl.ifBlank { item.url }, item.sourceName)
             } else {
@@ -118,12 +123,20 @@ fun TvDetailScreen(
                 val startIndex = chapterList.indexOfFirst { it.url == startChapter.url }
                     .coerceAtLeast(0)
 
+                val isAnimeItem = item.isAnime && !isDonghua
+                val effectiveAnimeServer = if (isAnimeItem) selectedAnimeServer else null
+                // Anime (13 Anivexa providers + VidLink LAST) resolves through
+                // animeServer; never map it to a generic StreamServer embed on TV.
+                val effectiveStreamServer = if (isDonghua || isAnimeItem) null else selectedServer
+                val effectiveDonghuaServer = if (isDonghua) selectedDonghuaServer else null
+
                 val first = mediaRepo.resolveBingeEpisode(
                     context = context,
                     item = item,
                     chapter = startChapter,
-                    server = selectedServer,
-                    donghuaServer = selectedDonghuaServer,
+                    server = effectiveStreamServer,
+                    donghuaServer = effectiveDonghuaServer,
+                    animeServer = effectiveAnimeServer,
                     isDonghua = isDonghua
                 )
                 if (first == null || first.url.isBlank()) {
@@ -139,9 +152,14 @@ fun TvDetailScreen(
                 val session = TvBingeSession(
                     item = item,
                     episodes = episodes,
-                    serverName = if (isDonghua) selectedDonghuaServer.displayName else selectedServer.displayName,
-                    server = if (isDonghua) null else selectedServer,
-                    donghuaServer = if (isDonghua) selectedDonghuaServer else null,
+                    serverName = when {
+                        isDonghua -> selectedDonghuaServer.displayName
+                        isAnimeItem -> selectedAnimeServer.displayName
+                        else -> selectedServer.displayName
+                    },
+                    server = if (isDonghua || isAnimeItem) null else selectedServer,
+                    donghuaServer = effectiveDonghuaServer,
+                    animeServer = effectiveAnimeServer,
                     currentIndex = startIndex,
                     isDonghua = isDonghua,
                     isPremium = account?.isPremium == true
@@ -372,6 +390,24 @@ fun TvDetailScreen(
                                 var sFocused by remember { mutableStateOf(false) }
                                 Surface(
                                     onClick = { selectedDonghuaServer = server },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                    border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                    modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                        Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        } else if (item.isAnime) {
+                            // Anime uses its own 14-server list: 13 Anivexa-API
+                            // providers (keyed by AniList ID) + VidLink LAST.
+                            items(AnimeServer.ALL_IN_ORDER) { server ->
+                                val isSelected = selectedAnimeServer == server
+                                var sFocused by remember { mutableStateOf(false) }
+                                Surface(
+                                    onClick = { selectedAnimeServer = server },
                                     shape = RoundedCornerShape(20.dp),
                                     color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
                                     border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),

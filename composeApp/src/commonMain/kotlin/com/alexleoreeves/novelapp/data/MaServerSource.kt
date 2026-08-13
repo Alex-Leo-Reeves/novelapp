@@ -119,16 +119,71 @@ enum class DonghuaServer(
     val serverOrder: Int
 ) {
     NONTONGO("Server 1", "Nontongo", 1),
-    AUTOEMBED("Server 2", "AutoEmbed (Donghua & TMDB)", 2),
+    AUTOEMBED("Server 2", "AutoEmbed", 2),
     DONGHUA_STREAM("Server 3", "DonghuaStream", 3),
-    EMBEDSU("Server 4", "EmbedSu (Donghua & TMDB)", 4),
-    LUCIFER_DONGHUA("Server 5", "LuciferDonghua", 5),
-    VIDSRC("Server 6", "VidSrc.to", 6),
+    EMBEDSU("Server 4", "EmbedSu", 4),
+    LUCIFER_DONGHUA("Server 5", "Lucifer Donghua", 5),
+    VIDSRC("Server 6", "VidSrc", 6),
     ANIMEXIN("Server 7", "AnimeXin", 7);
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
     }
+}
+
+/**
+ * Anime-only servers — the content-aware anime selector.
+ *
+ * When the app detects anime content it shows ONLY this list, never the
+ * generic [StreamServer] movie/TV list. Servers 1-13 are Anivexa-API providers
+ * (backed by server/anivexa on the app backend, keyed by AniList ID). Server 14
+ * (VIDLINK) is the TMDB-embed fallback and is intentionally the LAST server.
+ *
+ * [usesTmdbEpisodes] is true only for VIDLINK: its episode list is reloaded from
+ * TMDB so the embed URL resolves via the tmdb marker → `StreamServer.buildEmbedUrl`
+ * flow. The Anivexa providers use AniList ID-based episode lists instead.
+ */
+enum class AnimeServer(
+    val displayName: String,
+    val providerName: String,
+    val usesTmdbEpisodes: Boolean,
+    val serverOrder: Int,
+    val anivexaProviderKey: String?
+) {
+    MKISSA("Server 1", "MKissa", false, 1, "mkissa"),
+    REANIME("Server 2", "Reanime", false, 2, "reanime"),
+    ANIKOTO("Server 3", "AniKoto", false, 3, "anikoto"),
+    ANIMEGG("Server 4", "AnimeGG", false, 4, "animegg"),
+    ANINEKO("Server 5", "AniNeko", false, 5, "anineko"),
+    ANIDBAPP("Server 6", "AniDB App", false, 6, "anidbapp"),
+    TWO_DHIVE("Server 7", "2DHive", false, 7, "2dhive"),
+    ANIMENOSUB("Server 8", "AnimeNoSub", false, 8, "animenosub"),
+    ANIZONE("Server 9", "AniZone", false, 9, "anizone"),
+    ANIBD("Server 10", "AniBD", false, 10, "anibd"),
+    SENSHI("Server 11", "Senshi", false, 11, "senshi"),
+    KAA("Server 12", "KickAssAnime", false, 12, "kaa"),
+    ANIMEDUNYA("Server 13", "AnimeDunya", false, 13, "animedunya"),
+    VIDLINK("Server 14", "VidLink", true, 14, null);
+
+    /** True for the 13 Anivexa-API provider servers (all except VIDLINK). */
+    val isAnivexa: Boolean get() = anivexaProviderKey != null
+
+    companion object {
+        /** All anime servers in display order: Anivexa providers first, VidLink last. */
+        val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
+    }
+}
+
+/** Only the last anime server (VIDLINK) maps to the generic StreamServer embed. */
+fun AnimeServer.toStreamServer(): StreamServer? = when (this) {
+    AnimeServer.VIDLINK -> StreamServer.VIDLINK
+    else -> null
+}
+
+/** Convert a StreamServer into the anime server slot (only VidLink maps). */
+fun StreamServer.toAnimeServer(): AnimeServer? = when (this) {
+    StreamServer.VIDLINK -> AnimeServer.VIDLINK
+    else -> null
 }
 
 /**

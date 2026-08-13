@@ -9,6 +9,7 @@ const wweHandlers = require("./wwe-handlers");
 const youtubeHandlers = require("./youtube-handlers");
 const supabaseAuthHandlers = require("./supabase-auth-handlers");
 const tvPairHandlers = require("./tv-pair-handlers");
+const anivexaHandlers = require("./anivexa-handlers");
 const { createMangaUnified } = require("./manga-unified");
 // Merges MangaDex + WeebCentral + Webtoon so no single provider dominates
 // the manga grid on Android/TV. contentItem/fetchWithAbort are hoisted.
@@ -4392,6 +4393,12 @@ async function handleApi(request, response, pathname) {
 
     if (pathname.startsWith("/api/content/")) {
       return await handleContentApi(request, response, pathname, requestUrl);
+    }
+    // ── Anivexa Anime API (13 dedicated anime servers) ───────────────
+    // Mobile/TV anime detail screens hit these routes; the worker lives
+    // in-process at server/anivexa (githubanime/Anivexa-API).
+    if (pathname.startsWith("/api/anivexa/")) {
+      return await anivexaHandlers.handleAnivexa(request, response, pathname, requestUrl);
     }
     if (request.method === "POST" && pathname === "/api/auth/register") {
       return await handleRegister(request, response);

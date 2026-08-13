@@ -91,6 +91,7 @@ class NovelSearchRepository(
     internal val aninekoScraper = AninekoScraper(httpClient)
     internal val animePaheScraper = AnimePaheScraper(httpClient)
     internal val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
+    internal val anivexaApi = AnivexaApi(httpClient)
     internal val tmdbSource = TmdbSource(
         client = httpClient,
         readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
@@ -967,6 +968,10 @@ class NovelSearchRepository(
     }
 
     suspend fun extractStreamUrl(episodePageUrl: String): String? {
+        if (AnivexaApi.isAnivexaEpisodeUrl(episodePageUrl)) {
+            return anivexaApi.resolveStream(episodePageUrl)?.url
+                ?.takeIf { it.isDirectPlayableAnimeStream() }
+        }
         if (ConsumetAnimeScraper.isConsumetEpisodeUrl(episodePageUrl)) {
             return consumetAnimeScraper.extractStreamUrl(episodePageUrl)
                 ?.takeIf { it.isDirectPlayableAnimeStream() }
@@ -981,6 +986,27 @@ class NovelSearchRepository(
         return extracted?.takeIf { it.isDirectPlayableAnimeStream() }
     }
 
+
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Anivexa anime API (server-side aggregator, 13 providers keyed by AniList ID)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Fetch the sub/dub episode list for an Anivexa provider by AniList ID. */
+    suspend fun fetchAnivexaEpisodes(provider: String, anilistId: String): List<AnimeEpisode> =
+        anivexaApi.fetchEpisodes(provider, anilistId)
+
+    /** Resolve an `anivexa://` episode marker to a playable stream (HLS/MP4/embed). */
+    suspend fun resolveAnivexaStream(episodeUrl: String): AnivexaStream? =
+        anivexaApi.resolveStream(episodeUrl)
+
+    /** Resolve the VidLink (TMDB) embed reference for the LAST anime server. */
+    suspend fun resolveAnivexaVidLinkEmbed(anilistId: String, episode: Int): VidLinkEmbedRef? =
+        anivexaApi.resolveVidLinkEmbed(anilistId, episode)
+
+    /** Bridge a TMDB-sourced anime title to its AniList ID via the backend. */
+    suspend fun findAniListIdByTitle(title: String): String? =
+        anivexaApi.searchAnilistId(title)
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Novel / Manga helpers (unchanged from before)

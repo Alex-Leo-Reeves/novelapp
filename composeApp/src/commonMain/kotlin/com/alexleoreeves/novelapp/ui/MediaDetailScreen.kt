@@ -59,6 +59,7 @@ fun MediaDetailScreen(
     val donghuaStreamScraper = remember { DonghuaSiteScraper.donghuaStream(httpClient) }
     val luciferDonghuaScraper = remember { DonghuaSiteScraper.luciferDonghua(httpClient) }
     val animeXinScraper = remember { AnimeXinScraper(httpClient) }
+    val anivexaApi = remember { AnivexaApi(httpClient) }
 
     val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
@@ -69,6 +70,7 @@ fun MediaDetailScreen(
     var statusText by remember { mutableStateOf("") }
     var providerTmdbId by remember(item.detailPageUrl) { mutableStateOf("") }
     var providerTmdbType by remember(item.detailPageUrl) { mutableStateOf("tv") }
+    var providerAnilistId by remember(item.detailPageUrl) { mutableStateOf("") }
 
     var isMovieContent by remember(mediaType) { mutableStateOf(mediaType == "movie") }
     val isYouTubeNollywood = item.id.startsWith("youtube_nollywood_")
@@ -89,6 +91,15 @@ fun MediaDetailScreen(
         item.title.contains("Xian Ni", ignoreCase = true) ||
         item.title.contains("Stellar Transformation", ignoreCase = true) ||
         item.title.contains("Martial Universe", ignoreCase = true)
+    // Content-aware anime detection: TMDB-sourced Japanese anime shows the
+    // anime-only selector (13 Anivexa providers + VidLink LAST), never the
+    // generic movie/TV server list. Donghua stays on its own DonghuaServer.
+    val isAnimeItem = !isDonghuaItem && (
+        item.mediaKind.equals(VideoCategory.ANIME.name, ignoreCase = true) ||
+        item.isAnime ||
+        item.genre.contains("Anime", ignoreCase = true) ||
+        item.genre.contains("Japanese Animation", ignoreCase = true)
+        )
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
@@ -98,6 +109,7 @@ fun MediaDetailScreen(
     // All 2 servers displayed inline. Default to Server 1 (VidLink).
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
     var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
+    var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
 
@@ -119,6 +131,29 @@ fun MediaDetailScreen(
             DonghuaServer.VIDSRC -> donghuaStreamScraper // URL built directly, scraper not used
             DonghuaServer.ANIMEXIN -> donghuaStreamScraper // AnimeXin has its own scraper; episodes loaded separately
         }
+
+    /** Resolve the AniList ID for anime-only servers (Anivexa providers). */
+    suspend fun resolveAnimeAnilistId(): String? {
+        if (providerAnilistId.isNotBlank()) return providerAnilistId
+        val detailUrl = item.detailPageUrl.ifBlank { item.url }
+        if (detailUrl.startsWith("anilist:")) {
+            val directId = detailUrl.removePrefix("anilist:").trim()
+            if (directId.isNotBlank() && directId.all { it.isDigit() }) {
+                providerAnilistId = directId
+                return directId
+            }
+        }
+        item.animeResult?.let {
+            val directId = it.id.trim()
+            if (directId.isNotBlank() && directId.all { c -> c.isDigit() }) {
+                providerAnilistId = directId
+                return directId
+            }
+        }
+        val bridged = runCatching { anivexaApi.searchAnilistId(item.title) }.getOrNull()
+        if (bridged != null) providerAnilistId = bridged
+        return bridged
+    }
 
     fun buildDonghuaAutoEmbedUrl(ep: MediaEpisode): String? {
         val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
@@ -313,6 +348,20 @@ fun MediaDetailScreen(
 
                         val sourceUrl = when {
                             isDonghuaItem -> resolveDonghuaEpisodeUrl(ep)
+                            isAnimeItem -> {
+                                if (selectedAnimeServer.isAnivexa) {
+                                    anivexaApi.resolveStream(ep.url)?.url
+                                        ?.takeIf { it.isDirectPlayableStreamUrl() }
+                                } else {
+                                    // VidLink (LAST): TMDB marker → vidlink embed,
+                                    // scraped by resolveDownloadableQualities below.
+                                    val urlParts = ep.url.split(":")
+                                    val tvId = urlParts.getOrNull(1) ?: tmdbId
+                                    val s = urlParts.getOrNull(2) ?: "1"
+                                    val e = urlParts.getOrNull(3) ?: "1"
+                                    StreamServer.VIDLINK.buildEmbedUrl(tvId, "tv", s, e)
+                                }
+                            }
                             isTmdbDetail -> {
                                 val urlParts = ep.url.split(":")
                                 val tvId = urlParts.getOrNull(1) ?: tmdbId
@@ -429,7 +478,7 @@ fun MediaDetailScreen(
         }
     }
 
-    LaunchedEffect(item.detailPageUrl, selectedDonghuaServer) {
+    LaunchedEffect(item.detailPageUrl, selectedDonghuaServer, selectedAnimeServer) {
         providerTmdbId = ""
         providerTmdbType = "tv"
         isLoadingEpisodes = true
@@ -441,6 +490,28 @@ fun MediaDetailScreen(
                 alternateQueries = listOf(item.title.substringBefore(":")),
                 maxEpisodes = 300
             )
+            isAnimeItem -> {
+                if (selectedAnimeServer.isAnivexa) {
+                    // Anivexa-API provider: episodes keyed by AniList ID.
+                    val anilistId = resolveAnimeAnilistId()
+                    if (anilistId == null) {
+                        emptyList()
+                    } else {
+                        anivexaApi.fetchEpisodes(
+                            provider = selectedAnimeServer.anivexaProviderKey.orEmpty(),
+                            anilistId = anilistId
+                        ).map { ep ->
+                            MediaEpisode(episodeNumber = ep.episodeNumber, title = ep.title, url = ep.url)
+                        }
+                    }
+                } else if (mediaType == "tv") {
+                    // VidLink (LAST anime server): reload episodes from TMDB so
+                    // the numbered markers resolve through StreamServer.VIDLINK.
+                    tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
+                } else {
+                    emptyList()
+                }
+            }
             isTmdbDetail -> {
                 if (mediaType == "tv") {
                     tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
@@ -530,10 +601,10 @@ fun MediaDetailScreen(
 
     val playEpisode: (MediaEpisode) -> Unit = { ep ->
         scope.launch {
-            val serverLabel = if (isDonghuaItem) {
-                "${selectedDonghuaServer.displayName} (${selectedDonghuaServer.providerName})"
-            } else {
-                selectedServer.displayName
+            val serverLabel = when {
+                isDonghuaItem -> "${selectedDonghuaServer.displayName} (${selectedDonghuaServer.providerName})"
+                isAnimeItem -> selectedAnimeServer.displayName
+                else -> selectedServer.displayName
             }
             statusText = "Resolving stream via $serverLabel..."
 
@@ -591,6 +662,27 @@ fun MediaDetailScreen(
                         return@launch
                     }
                     resolved
+                }
+                isAnimeItem -> {
+                    if (selectedAnimeServer.isAnivexa && AnivexaApi.isAnivexaEpisodeUrl(ep.url)) {
+                        val stream = anivexaApi.resolveStream(ep.url)
+                        if (stream == null) {
+                            statusText = "Stream unavailable for this episode. Try a different server."
+                            return@launch
+                        }
+                        if (stream.isDirect) {
+                            onPlayStream(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs, null)
+                            return@launch
+                        }
+                        onPlayMaEmbedWithLimit(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs)
+                        return@launch
+                    }
+                    // VidLink (LAST anime server): TMDB marker → vidlink embed.
+                    val urlParts = ep.url.split(":")
+                    val tvId = urlParts.getOrNull(1) ?: tmdbId
+                    val s = urlParts.getOrNull(2) ?: "1"
+                    val e = urlParts.getOrNull(3) ?: "1"
+                    StreamServer.VIDLINK.buildEmbedUrl(tvId, "tv", s, e)
                 }
                 isTmdbDetail -> {
                     val urlParts = ep.url.split(":")
@@ -762,6 +854,33 @@ fun MediaDetailScreen(
                             shape = RoundedCornerShape(20.dp)
                         )
                     }
+                } else if (isAnimeItem) {
+                    // Anime-only selector: 13 Anivexa providers + VidLink LAST.
+                    AnimeServer.ALL_IN_ORDER.forEach { server ->
+                        val isSelected = selectedAnimeServer == server
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedAnimeServer = server },
+                            label = {
+                                Text(
+                                    server.displayName,
+                                    color = if (isSelected) Color.White else currentTheme.subTextColor(),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = currentTheme.accentColor(),
+                                containerColor = currentTheme.cardColor(),
+                                labelColor = currentTheme.subTextColor()
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true, selected = isSelected,
+                                selectedBorderColor = currentTheme.accentColor(),
+                                borderColor = currentTheme.subTextColor().copy(0.3f)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
                 } else {
                     StreamServer.ALL_IN_ORDER.forEach { server ->
                         val isSelected = selectedServer == server
@@ -826,7 +945,7 @@ fun MediaDetailScreen(
             }
 
             // Movie: Single Play button
-            val hasMovieId = !isDonghuaItem &&
+            val hasMovieId = !isDonghuaItem && !isAnimeItem &&
                 ((isTmdbDetail && mediaType == "movie") || (providerTmdbType == "movie" && providerTmdbId.isNotBlank()))
             if (hasMovieId) {
                 if (!isPremium) {

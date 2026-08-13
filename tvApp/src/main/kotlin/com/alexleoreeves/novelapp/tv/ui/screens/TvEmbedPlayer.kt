@@ -102,6 +102,29 @@ fun TvEmbedPlayer(
         }
     }
 
+    // Synthetic touch gesture on READY to allow unmuted autoplay
+    LaunchedEffect(playerPhase) {
+        if (playerPhase == PlayerPhase.READY) {
+            delay(500L) // Wait for UI layout and JS injection
+            val view = webViewRef ?: return@LaunchedEffect
+            val x = (view.width / 2f).coerceAtLeast(1f)
+            val y = (view.height / 2f).coerceAtLeast(1f)
+            val eventTime = android.os.SystemClock.uptimeMillis()
+            val downEvent = android.view.MotionEvent.obtain(
+                eventTime, eventTime, android.view.MotionEvent.ACTION_DOWN,
+                x, y, 0
+            )
+            val upEvent = android.view.MotionEvent.obtain(
+                eventTime, eventTime + 100, android.view.MotionEvent.ACTION_UP,
+                x, y, 0
+            )
+            view.dispatchTouchEvent(downEvent)
+            view.dispatchTouchEvent(upEvent)
+            downEvent.recycle()
+            upEvent.recycle()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { ctx ->
@@ -119,7 +142,7 @@ fun TvEmbedPlayer(
                         userAgentString = MA_SERVER_USER_AGENT
                         allowContentAccess = true
                         allowFileAccess = false
-                        cacheMode = WebSettings.LOAD_NO_CACHE
+                        cacheMode = WebSettings.LOAD_DEFAULT
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         builtInZoomControls = false
@@ -431,24 +454,7 @@ private const val STABILIZATION_END_JS = """
 (function() {
     window.__STABILIZING = false;
     
-    // Unmute and play videos — both at the top level and inside same-origin
-    // iframes (VidLink, Nontongo, etc. render their player in an iframe, so
-    // top-level-only search left playback muted).
-    function collectVideos(root) {
-        var out = [];
-        try { root.querySelectorAll('video').forEach(function(v){ out.push(v); }); } catch(e) {}
-        try {
-            root.querySelectorAll('iframe').forEach(function(f){
-                try {
-                    var doc = f.contentDocument || f.contentWindow.document;
-                    if (doc) out = out.concat(collectVideos(doc));
-                } catch(e) {}
-            });
-        } catch(e) {}
-        return out;
-    }
-
-    function clickPlayButtons(root) {
+    function forcePlay() {
         var selectors = [
             '.play-button', '.jw-icon-display', '.vjs-big-play-button',
             '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
@@ -456,27 +462,25 @@ private const val STABILIZATION_END_JS = """
         ];
         selectors.forEach(function(sel) {
             try {
-                var el = root.querySelector(sel);
+                var el = document.querySelector(sel);
                 if (el && el.tagName !== 'VIDEO') el.click();
             } catch(e) {}
         });
-    }
-    
-    function forcePlay() {
-        clickPlayButtons(document);
-        collectVideos(document).forEach(function(v) {
+
+        document.querySelectorAll('video').forEach(function(v) {
             try {
                 v.muted = false;
                 v.volume = 1.0;
-                var p = v.play();
-                if (p) p.catch(function() {});
+                if (v.paused) {
+                    var p = v.play();
+                    if (p) p.catch(function() {});
+                }
             } catch(e) {}
         });
     }
 
     forcePlay();
-    setTimeout(forcePlay, 500);
-    setTimeout(forcePlay, 1500);
+    setTimeout(forcePlay, 1000);
 })();
 """
 
@@ -501,7 +505,7 @@ private const val INLINE_VIDEO_JS = """
 private const val IFRAME_EXTRACTION_JS = """
 (function() {
     var host = window.location.hostname;
-    if (host.includes('luciferdonghua') || host.includes('donghuastream')) {
+    if (host.includes('luciferdonghua') || host.includes('donghuastream') || host.includes('animexin')) {
         if (window.__iframeExtracted) return;
         
         var attempts = 0;
@@ -545,7 +549,7 @@ private const val IFRAME_EXTRACTION_JS = """
 private const val FULLSCREEN_CSS_JS = """
 (function() {
     var host = window.location.hostname;
-    if (!host.includes('luciferdonghua') && !host.includes('donghuastream')) {
+    if (!host.includes('luciferdonghua') && !host.includes('donghuastream') && !host.includes('animexin')) {
         return;
     }
     var style = document.createElement('style');

@@ -490,6 +490,7 @@ fun App(
                 selectedAnime.value != null -> AnimeDetailScreen(selectedAnime.value!!, repository, appTheme.value, downloadRepo,
                     isPremium = account?.isPremium == true,
                     { u, t -> animeStreamUrl.value = u; animeEpisodeTitle.value = t; animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0; animePreviewLimitMs.value = null; animeContentKind.value = "anime" },
+                    { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = null },
                     { selectedAnime.value = null }, requireAuth)
 
                 selectedChapterUrl.value != null -> {
