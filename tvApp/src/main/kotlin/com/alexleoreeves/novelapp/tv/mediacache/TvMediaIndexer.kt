@@ -31,7 +31,6 @@ data class TvIndexedBundle(
     val completedAtMs: Long,
     val indexedAtMs: Long
 )
-</｜｜DSML｜｜_command>
 
 /**
  * Background media scanner for Smart TV dual-target storage.
@@ -105,7 +104,6 @@ class TvMediaIndexer(private val scope: CoroutineScope) {
                 completedAtMs = manifest.completedAtMs,
                 indexedAtMs = stamped
             )
-</｜｜DSML｜｜_command>
         }.sortedBy { it.title.lowercase() }
     }
 

@@ -2,7 +2,6 @@
 
 package com.alexleoreeves.novelapp.audio
 
-import kotlinx.cinterop.ObjCSignatureOverride
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,8 +18,6 @@ import platform.AVFAudio.AVSpeechSynthesisVoice
 import platform.AVFAudio.AVSpeechSynthesizer
 import platform.AVFAudio.AVSpeechSynthesizerDelegateProtocol
 import platform.AVFAudio.AVSpeechUtterance
-import platform.AVFAudio.setActive
-import platform.AVFAudio.setCategory
 import platform.Foundation.NSRange
 import platform.Foundation.NSUserDefaults
 import platform.darwin.NSObject
@@ -180,7 +177,7 @@ actual class SherpaNarrationController actual constructor() {
             if (paragraph.isBlank()) continue
             currentParagraphToSpeak = i
             val utterance = AVSpeechUtterance.speechUtteranceWithString(paragraph)
-            utterance.voice = AVSpeechSynthesisVoice.speechSynthesisVoiceWithLanguage("en-US")
+            utterance.voice = AVSpeechSynthesisVoice.voiceWithLanguage("en-US")
             utterance.rate = 0.48f
             utterance.pitchMultiplier = 1.0f
             utterance.volume = volume
@@ -190,14 +187,14 @@ actual class SherpaNarrationController actual constructor() {
 
     actual fun testVoice(voiceId: Int) {
         val utterance = AVSpeechUtterance.speechUtteranceWithString("This is a test of the selected voice.")
-        utterance.voice = AVSpeechSynthesisVoice.speechSynthesisVoiceWithLanguage("en-US")
+        utterance.voice = AVSpeechSynthesisVoice.voiceWithLanguage("en-US")
         utterance.rate = 0.48f
         utterance.volume = _settings.value.narratorVolume.coerceIn(0f, 1f)
         synthesizer.speakUtterance(utterance)
     }
 
     actual fun pause() {
-        if (synthesizer.isSpeaking) {
+        if (synthesizer.isSpeaking()) {
             synthesizer.pauseSpeakingAtBoundary(AVSpeechBoundary.AVSpeechBoundaryImmediate)
         }
         _isPlaying.value = false
@@ -205,7 +202,7 @@ actual class SherpaNarrationController actual constructor() {
     }
 
     actual fun resume() {
-        if (synthesizer.isPaused) {
+        if (synthesizer.isPaused()) {
             synthesizer.continueSpeaking()
             _isPlaying.value = true
         } else if (!_isPlaying.value && paragraphs.isNotEmpty()) {
@@ -221,9 +218,13 @@ actual class SherpaNarrationController actual constructor() {
     }
 
     actual fun stop() {
-        if (synthesizer.isSpeaking || synthesizer.isPaused) {
+        if (synthesizer.isSpeaking() || synthesizer.isPaused()) {
             synthesizer.stopSpeakingAtBoundary(AVSpeechBoundary.AVSpeechBoundaryImmediate)
         }
+        // Cancel/stop does NOT fire didFinishSpeechUtterance, so without this
+        // reset the delegate's active index drifts after every skip/seek/stop,
+        // corrupting paragraph highlighting for the next play.
+        delegate.resetUtteranceIndex()
         navigationJob?.cancel()
         finishPlayback()
     }
@@ -309,7 +310,18 @@ private class NarrationDelegate(
 
     private var activeUtteranceIndex = 0
 
-    @ObjCSignatureOverride
+    /** Reset the internal utterance counter (stop/cancel path). */
+    fun resetUtteranceIndex() {
+        activeUtteranceIndex = 0
+    }
+
+    override fun speechSynthesizer(
+        synthesizer: AVSpeechSynthesizer,
+        didStartSpeechUtterance: AVSpeechUtterance
+    ) {
+        // Nothing to advance here — didFinishSpeechUtterance drives the index.
+    }
+
     override fun speechSynthesizer(synthesizer: AVSpeechSynthesizer, didFinishSpeechUtterance: AVSpeechUtterance) {
         // The synthesizer queues utterances; after one finishes the next
         // becomes active, so advance the active index to map paragraphs.
@@ -317,12 +329,10 @@ private class NarrationDelegate(
         onDidFinishUtterance()
     }
 
-    @ObjCSignatureOverride
     override fun speechSynthesizer(synthesizer: AVSpeechSynthesizer, didCancelSpeechUtterance: AVSpeechUtterance) {
         onDidCancel()
     }
 
-    @ObjCSignatureOverride
     override fun speechSynthesizer(
         synthesizer: AVSpeechSynthesizer,
         willSpeakRangeOfSpeechString: NSRange,

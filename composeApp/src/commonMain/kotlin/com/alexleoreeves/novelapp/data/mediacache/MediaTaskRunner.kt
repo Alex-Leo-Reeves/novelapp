@@ -197,7 +197,6 @@ class MediaTaskRunner(
         manifests.saveMetadata(stamped)
         manifests.delete(stamped.taskId)
     }
-</｜｜DSML｜｜_command>
 
     private fun bundlePathFor(request: MediaDownloadRequest, volume: MediaVolumePath): String =
         if (request.target == StorageTarget.USB) {

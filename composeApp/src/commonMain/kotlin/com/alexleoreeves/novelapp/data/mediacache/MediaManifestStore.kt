@@ -97,7 +97,6 @@ class MediaManifestStore(
      */
     fun listCompletedBundlesSince(sinceMs: Long): List<DownloadManifest> =
         listCompletedBundles().filter { it.completedAtMs <= 0L || it.completedAtMs >= sinceMs }
-</｜｜DSML｜｜_command>
 
     /**
      * Ciphertext bundles with no WAL and no metadata sidecar — abandoned partials

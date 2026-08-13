@@ -68,7 +68,6 @@ class DownloadEngine(
      */
     fun completedDownloadsSince(sinceMs: Long): Int =
         manifests.listCompletedBundlesSince(sinceMs).size
-</｜｜DSML｜｜_command>
 
     /** Load a completed task's metadata sidecar (bundle path, subtitle path). */
     fun loadCompletedMetadata(taskId: String): DownloadManifest? = manifests.loadMetadata(taskId)

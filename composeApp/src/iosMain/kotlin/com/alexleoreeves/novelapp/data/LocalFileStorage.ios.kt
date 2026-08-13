@@ -89,7 +89,24 @@ actual fun deleteDownloadedText(localPath: String) {
             .map { it.trim().removePrefix("file://") }
             .filter { it.isNotBlank() }
             .forEach { path ->
-                NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+                val fileName = path.substringAfterLast("/", path)
+                if (fileName.equals("playlist.m3u8", ignoreCase = true)) {
+                    // HLS download: wipe the whole episode directory so segments,
+                    // decryption keys, and any bundled .srt are removed too.
+                    val parent = path.substringBeforeLast("/", path)
+                    if (parent.isNotBlank() && parent != path) {
+                        NSFileManager.defaultManager.removeItemAtPath(parent, error = null)
+                    } else {
+                        NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+                    }
+                } else {
+                    // Single-file download: remove the media file plus any bundled subtitle.
+                    NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+                    val subtitlePath = path.substringBeforeLast(".") + ".srt"
+                    if (subtitlePath != path) {
+                        NSFileManager.defaultManager.removeItemAtPath(subtitlePath, error = null)
+                    }
+                }
             }
     }
 }
@@ -245,8 +262,12 @@ private suspend fun iosSelectMediaPlaylist(client: HttpClient, sourceUrl: String
 }
 
 private fun iosResolveUrl(baseUrl: String, value: String): String {
+    // ObjC selector is `+[NSURL URLWithString:relativeToURL:]`. Kotlin/Native
+    // binds it as the class factory `NSURL.URLWithString(value, relativeToURL = base)`;
+    // there is NO one-arg instance method `URLWithString(String)` in the platform
+    // bindings, so the old call was a Kotlin/Native compile error on macOS CI.
     val base = NSURL.URLWithString(baseUrl) ?: return value
-    return base.URLWithString(value)?.absoluteString ?: value
+    return NSURL.URLWithString(value, relativeToURL = base)?.absoluteString ?: value
 }
 
 private suspend fun iosFetchText(client: HttpClient, url: String): String =

@@ -76,7 +76,10 @@ data class DownloadedEpisode(
     val episodeTitle: String,
     val localFilePath: String,         // absolute path to .mp4 / .m3u8 cache
     val downloadedAt: Long = 0L,
-    val fileSizeBytes: Long = 0L
+    val fileSizeBytes: Long = 0L,
+    val serverId: String = "",         // selected server key (anime_server_3, stream_server_5…)
+    val serverName: String = "",       // human label ("Server 3 (AniKoto)")
+    val subtitleUrl: String = ""       // candidate English .srt URL bundled on download
 )
 
 @Serializable

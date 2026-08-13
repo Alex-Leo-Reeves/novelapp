@@ -66,8 +66,9 @@ actual fun AnimePlayerScreen(
     subtitlesJson: String?,
     onBack: () -> Unit
 ) {
+    val isLocalPath = remember(streamUrl) { streamUrl.isIosLocalMediaPath() }
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
-    var isLoading by remember(streamUrl, retryKey) { mutableStateOf(true) }
+    var isLoading by remember(streamUrl, retryKey) { mutableStateOf(!isLocalPath) }
     var errorMessage by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     val providerName = streamUrl.providerName()
 
@@ -92,35 +93,43 @@ actual fun AnimePlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        key(retryKey) {
-            UIKitView(
-                factory = {
-                    val config = WKWebViewConfiguration().apply {
-                        allowsInlineMediaPlayback = true
-                        mediaTypesRequiringUserActionForPlayback = 0u
-                    }
-                    WKWebView(frame = CGRectZero.readValue(), configuration = config).apply {
-                        setOpaque(false)
-                        backgroundColor = platform.UIKit.UIColor.blackColor
-                        customUserAgent = PLAYER_USER_AGENT
-                        navigationDelegate = PlayerNavigationDelegate(
-                            onStarted = {
-                                isLoading = true
-                                errorMessage = null
-                            },
-                            onFinished = {
-                                isLoading = false
-                            },
-                            onFailed = { message ->
-                                isLoading = false
-                                errorMessage = message
-                            }
-                        )
-                        loadRequest(streamUrl.toPlayerRequest())
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
+        if (isLocalPath) {
+            IosOfflinePlayer(
+                localPath = streamUrl,
+                modifier = Modifier.fillMaxSize(),
+                onPlaybackEnded = onPreviewFinished
             )
+        } else {
+            key(retryKey) {
+                UIKitView(
+                    factory = {
+                        val config = WKWebViewConfiguration().apply {
+                            allowsInlineMediaPlayback = true
+                            mediaTypesRequiringUserActionForPlayback = 0u
+                        }
+                        WKWebView(frame = CGRectZero.readValue(), configuration = config).apply {
+                            setOpaque(false)
+                            backgroundColor = platform.UIKit.UIColor.blackColor
+                            customUserAgent = PLAYER_USER_AGENT
+                            navigationDelegate = PlayerNavigationDelegate(
+                                onStarted = {
+                                    isLoading = true
+                                    errorMessage = null
+                                },
+                                onFinished = {
+                                    isLoading = false
+                                },
+                                onFailed = { message ->
+                                    isLoading = false
+                                    errorMessage = message
+                                }
+                            )
+                            loadRequest(streamUrl.toPlayerRequest())
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -267,6 +276,10 @@ private class PlayerNavigationDelegate(
         }
     }
 }
+
+private fun String.isIosLocalMediaPath(): Boolean =
+    startsWith("file://", ignoreCase = true) ||
+        (startsWith("/") && !contains("://"))
 
 private fun String.toPlayerRequest(): NSMutableURLRequest {
     val fallbackUrl = NSURL.URLWithString("https://vidsrc.to")

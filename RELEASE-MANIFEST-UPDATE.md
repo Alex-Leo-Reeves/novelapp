@@ -32,5 +32,3 @@ Update only:
 - [x] Update site/app-version.json (hashes + sizes + tvReleaseNotes)
 - [x] Validate JSON parses (tmp/validate_manifest.py → deleted after use)
 - [x] Save task progress to knowledge graph
-</｜｜DSML｜｜>
-</write_to_file>

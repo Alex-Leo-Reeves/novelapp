@@ -182,7 +182,7 @@ data class DownloadManifest(
     val subtitleBundlePath: String = "", // absolute path of the bundled .srt sidecar
     val completedAtMs: Long = 0L       // epoch ms when the bundle finished (0 = not yet completed)
 )
-</｜｜DSML｜｜_command>
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Engine commands (typed so the UI can't send garbage)
