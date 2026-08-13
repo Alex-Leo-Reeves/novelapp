@@ -25,9 +25,9 @@ val apiJson = Json { ignoreUnknownKeys = true; isLenient = true }
 fun platformHttpClient(): HttpClient = HttpClient(OkHttp) {
     install(ContentNegotiation) { json(apiJson) }
     install(HttpTimeout) {
-        connectTimeoutMillis = 10_000
-        requestTimeoutMillis = 20_000
-        socketTimeoutMillis = 20_000
+        connectTimeoutMillis = 30_000
+        requestTimeoutMillis = 90_000
+        socketTimeoutMillis = 90_000
     }
 }
 

@@ -72,13 +72,25 @@ class TvMediaRepository {
                         // through the app backend, which mounts the Anivexa worker.
                         val anilistId = resolveAnilistId(item)
                         if (anilistId == null) {
-                            emptyList()
+                            // No AniList id → can't key an Anivexa provider. Fall back
+                            // to TMDB chapters so the title still shows a playable
+                            // episode list (resolution degrades to VidLink).
+                            fetchTmdbChaptersForAnime(item)
                         } else {
-                            anivexaApi.fetchEpisodes(
+                            val anivexaEpisodes = anivexaApi.fetchEpisodes(
                                 provider = effectiveAnimeServer.anivexaProviderKey.orEmpty(),
                                 anilistId = anilistId
                             ).map { ep ->
                                 Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                            }
+                            if (anivexaEpisodes.isNotEmpty()) {
+                                anivexaEpisodes
+                            } else {
+                                // The provider returned nothing (site down / rate
+                                // limited). Fall back to TMDB chapters so the user
+                                // still gets an episode list instead of "no content";
+                                // resolution degrades to VidLink (Server 14).
+                                fetchTmdbChaptersForAnime(item)
                             }
                         }
                     } else {
