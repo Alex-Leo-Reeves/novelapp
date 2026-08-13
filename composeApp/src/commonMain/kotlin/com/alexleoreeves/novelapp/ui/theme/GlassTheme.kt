@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alexleoreeves.novelapp.BottomTab
+import kotlin.math.absoluteValue
+import kotlin.math.roundToLong
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Glassmorphism Design Tokens & Shared Composables
@@ -333,10 +335,29 @@ fun GlassStarRating(
         }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = String.format("%.1f", rating),
+            text = formatRating1(rating),
             color = Color.White.copy(alpha = 0.6f),
             fontSize = 12.sp
         )
+    }
+}
+
+/**
+ * Format a rating to one decimal place — KMP-safe replacement for
+ * String.format("%.1f", rating), which is unavailable on Kotlin/Native.
+ * Uses HALF_UP rounding on the absolute value so the sign is applied to
+ * the integer part, matching Java's Formatter for both positive and
+ * negative inputs (e.g. -3.25 -> "-3.3").
+ */
+private fun formatRating1(rating: Float): String {
+    val isNegative = rating < 0f
+    val tenths = (rating.absoluteValue * 10).roundToLong()
+    val whole = tenths / 10
+    val fraction = tenths % 10
+    return if (isNegative && whole > 0) {
+        "-$whole.$fraction"
+    } else {
+        "$whole.$fraction"
     }
 }
 

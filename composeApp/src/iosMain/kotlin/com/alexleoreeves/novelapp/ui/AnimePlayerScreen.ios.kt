@@ -269,20 +269,17 @@ private class PlayerNavigationDelegate(
 }
 
 private fun String.toPlayerRequest(): NSMutableURLRequest {
-    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidsrc.to")!!
+    val fallbackUrl = NSURL.URLWithString("https://vidsrc.to")
+        ?: error("Unable to create vidsrc.to fallback URL")
+    val url = NSURL.URLWithString(this) ?: fallbackUrl
     return NSMutableURLRequest.requestWithURL(url).apply {
-        allHTTPHeaderFields = playerHeaders()
+        setValue(PLAYER_USER_AGENT, forHTTPHeaderField = "User-Agent")
+        setValue(playerReferer(), forHTTPHeaderField = "Referer")
+        setValue(playerOrigin(), forHTTPHeaderField = "Origin")
+        setValue("*/*", forHTTPHeaderField = "Accept")
+        setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
     }
 }
-
-private fun String.playerHeaders(): Map<String, String> =
-    mapOf(
-        "User-Agent" to PLAYER_USER_AGENT,
-        "Referer" to playerReferer(),
-        "Origin" to playerOrigin(),
-        "Accept" to "*/*",
-        "Accept-Language" to "en-US,en;q=0.9"
-    )
 
 private fun String.playerReferer(): String = "${playerOrigin()}/"
 

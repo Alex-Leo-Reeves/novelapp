@@ -21,13 +21,60 @@ private fun extractInnerUrlFromProxy(proxyUrl: String): String? {
     return try {
         val dataParam = proxyUrl.substringAfter("data=", "")
         if (dataParam.isBlank()) return null
-        val decoded = java.net.URLDecoder.decode(dataParam.substringBefore("&"), "UTF-8")
+        // Percent-decode the data parameter. The CinePro proxy encodes its
+        // JSON payload with URL encoding; this KMP-safe decoder replaces
+        // java.net.URLDecoder which is unavailable on Kotlin/Native.
+        val decoded = dataParam.substringBefore("&").percentDecodeUtf8()
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
         val element = json.parseToJsonElement(decoded)
         element.jsonObject["url"]?.jsonPrimitive?.contentOrNull
     } catch (_: Exception) {
         null
     }
+}
+
+/**
+ * Minimal UTF-8 percent-decoder (KMP-safe replacement for
+ * java.net.URLDecoder.decode(s, "UTF-8")).
+ * Decodes %XX sequences and converts '+' back to a space, matching
+ * application/x-www-form-urlencoded semantics.
+ */
+private fun String.percentDecodeUtf8(): String {
+    if (isEmpty()) return ""
+    val bytes = ArrayList<Byte>(length)
+    var i = 0
+    while (i < length) {
+        val c = this[i]
+        when {
+            c == '%' && i + 2 < length -> {
+                val hi = this[i + 1].hexNibble()
+                val lo = this[i + 2].hexNibble()
+                if (hi >= 0 && lo >= 0) {
+                    bytes.add(((hi shl 4) or lo).toByte())
+                    i += 3
+                } else {
+                    bytes.add(c.code.toByte())
+                    i++
+                }
+            }
+            c == '+' -> {
+                bytes.add(' '.code.toByte())
+                i++
+            }
+            else -> {
+                bytes.add(c.code.toByte())
+                i++
+            }
+        }
+    }
+    return bytes.toByteArray().decodeToString()
+}
+
+private fun Char.hexNibble(): Int = when (this) {
+    in '0'..'9' -> this - '0'
+    in 'a'..'f' -> this - 'a' + 10
+    in 'A'..'F' -> this - 'A' + 10
+    else -> -1
 }
 
 /**

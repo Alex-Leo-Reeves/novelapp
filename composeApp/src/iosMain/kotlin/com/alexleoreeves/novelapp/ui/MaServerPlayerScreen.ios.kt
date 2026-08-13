@@ -246,21 +246,17 @@ private class MaEmbedNavigationDelegate(
 }
 
 private fun String.toEmbedRequest(): NSMutableURLRequest {
-    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://vidsrc.to")!!
-    return NSMutableURLRequest.requestWithURL(url).apply {
-        allHTTPHeaderFields = embedHeaders()
-    }
-}
-
-private fun String.embedHeaders(): Map<String, String> {
+    val fallbackUrl = NSURL.URLWithString("https://vidsrc.to")
+        ?: error("Unable to create vidsrc.to fallback URL")
+    val url = NSURL.URLWithString(this) ?: fallbackUrl
     val origin = embedOrigin()
-    return mapOf(
-        "User-Agent" to MA_EMBED_USER_AGENT,
-        "Referer" to "$origin/",
-        "Origin" to origin,
-        "Accept" to "*/*",
-        "Accept-Language" to "en-US,en;q=0.9"
-    )
+    return NSMutableURLRequest.requestWithURL(url).apply {
+        setValue(MA_EMBED_USER_AGENT, forHTTPHeaderField = "User-Agent")
+        setValue("$origin/", forHTTPHeaderField = "Referer")
+        setValue(origin, forHTTPHeaderField = "Origin")
+        setValue("*/*", forHTTPHeaderField = "Accept")
+        setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    }
 }
 
 private fun String.embedOrigin(): String {

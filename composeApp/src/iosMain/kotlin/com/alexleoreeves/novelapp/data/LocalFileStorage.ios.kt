@@ -161,7 +161,7 @@ private fun String.isIosHlsLikeUrl(): Boolean {
         Regex("""/(playlist|manifest|hls)(/|$)""").containsMatchIn(clean)
 }
 
-private fun downloadIosToFile(client: HttpClient, url: String, filePath: String) {
+private suspend fun downloadIosToFile(client: HttpClient, url: String, filePath: String) {
     val response = client.get(url) {
         header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
         header("Accept", "*/*")
@@ -176,7 +176,7 @@ private fun downloadIosToFile(client: HttpClient, url: String, filePath: String)
     }
 }
 
-private fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, dir: String): DownloadedVideoFile {
+private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, dir: String): DownloadedVideoFile {
     val masterText = iosFetchText(client, sourceUrl)
     val (playlistUrl, playlistText) = iosSelectMediaPlaylist(client, sourceUrl, masterText)
     val playlistPath = "$dir/playlist.m3u8"
@@ -219,7 +219,7 @@ private fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, dir: Strin
     return DownloadedVideoFile(playlistPath, totalBytes + iosFileSize(playlistPath))
 }
 
-private fun iosDownloadBytesToFile(client: HttpClient, url: String, filePath: String) {
+private suspend fun iosDownloadBytesToFile(client: HttpClient, url: String, filePath: String) {
     val bytes = client.get(url) {
         header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
         header("Accept", "*/*")
@@ -228,7 +228,7 @@ private fun iosDownloadBytesToFile(client: HttpClient, url: String, filePath: St
     bytes.toNSData().writeToFile(filePath, atomically = false)
 }
 
-private fun iosSelectMediaPlaylist(client: HttpClient, sourceUrl: String, playlistText: String): Pair<String, String> {
+private suspend fun iosSelectMediaPlaylist(client: HttpClient, sourceUrl: String, playlistText: String): Pair<String, String> {
     if (!playlistText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) return sourceUrl to playlistText
     val lines = playlistText.lines()
     var nextUriIsVariant = false

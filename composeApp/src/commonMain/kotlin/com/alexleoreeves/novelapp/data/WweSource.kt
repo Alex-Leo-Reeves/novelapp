@@ -3,6 +3,7 @@ package com.alexleoreeves.novelapp.data
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import io.ktor.http.encodeURLParameter
 import com.fleeksoft.ksoup.Ksoup
 import kotlinx.serialization.json.*
 import com.alexleoreeves.novelapp.platform.AppReleaseConfig
@@ -213,7 +214,7 @@ class WweSource(private val httpClient: HttpClient) {
     }
 
     private suspend fun fetchMatchesFromServer(eventId: String): List<WweMatch> = runCatching {
-        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/matches?eventId=${java.net.URLEncoder.encode(eventId, "UTF-8")}"
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/matches?eventId=${eventId.encodeURLParameter()}"
         val response = httpClient.get(url) {
             header("Accept", "application/json")
         }.bodyAsText()
@@ -252,7 +253,7 @@ class WweSource(private val httpClient: HttpClient) {
     }.getOrElse { emptyList() }
 
     suspend fun searchEvents(query: String): List<WweEvent> = runCatching {
-        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/search?q=${query.encodeURLParameter()}"
         val response = httpClient.get(url) {
             header("Accept", "application/json")
         }.bodyAsText()
@@ -309,7 +310,7 @@ class WweSource(private val httpClient: HttpClient) {
      * Returns embed URLs suitable for MaServerPlayerScreen (WebView).
      */
     suspend fun resolveEmbedUrls(eventId: String, eventTitle: String = ""): List<String> = runCatching {
-        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/stream?event=${java.net.URLEncoder.encode(eventId, "UTF-8")}&title=${java.net.URLEncoder.encode(eventTitle, "UTF-8")}"
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/stream?event=${eventId.encodeURLParameter()}&title=${eventTitle.encodeURLParameter()}"
         val response = httpClient.get(url) {
             header("Accept", "application/json")
             header("User-Agent", "NovelApp/1.0")

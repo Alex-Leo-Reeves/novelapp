@@ -256,13 +256,13 @@ private class YouTubeNavigationDelegate(
 }
 
 private fun String.toYouTuBeRequest(): NSMutableURLRequest {
-    val url = NSURL.URLWithString(this) ?: NSURL.URLWithString("https://www.youtube.com")!!
+    val fallbackUrl = NSURL.URLWithString("https://www.youtube.com")
+        ?: error("Unable to create youtube.com fallback URL")
+    val url = NSURL.URLWithString(this) ?: fallbackUrl
     return NSMutableURLRequest.requestWithURL(url).apply {
-        allHTTPHeaderFields = mapOf(
-            "User-Agent" to YOUTUBE_USER_AGENT,
-            "Accept" to "*/*",
-            "Accept-Language" to "en-US,en;q=0.9"
-        )
+        setValue(YOUTUBE_USER_AGENT, forHTTPHeaderField = "User-Agent")
+        setValue("*/*", forHTTPHeaderField = "Accept")
+        setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
     }
 }
 
