@@ -21,11 +21,13 @@ internal fun String.toPlayerRequest(): NSMutableURLRequest {
     val url = NSURL.URLWithString(this) ?: fallbackUrl
     val request = NSMutableURLRequest()
     request.setURL(url)
-    request.setValue(PLAYER_USER_AGENT, forHTTPHeaderField = "User-Agent")
-    request.setValue(playerReferer(), forHTTPHeaderField = "Referer")
-    request.setValue(playerOrigin(), forHTTPHeaderField = "Origin")
-    request.setValue("*/*", forHTTPHeaderField = "Accept")
-    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    request.allHTTPHeaderFields = mapOf<Any?, String>(
+        "User-Agent" to PLAYER_USER_AGENT,
+        "Referer" to playerReferer(),
+        "Origin" to playerOrigin(),
+        "Accept" to "*/*",
+        "Accept-Language" to "en-US,en;q=0.9"
+    )
     return request
 }
 
@@ -36,11 +38,13 @@ internal fun String.toEmbedRequest(): NSMutableURLRequest {
     val origin = embedOrigin()
     val request = NSMutableURLRequest()
     request.setURL(url)
-    request.setValue(MA_EMBED_USER_AGENT, forHTTPHeaderField = "User-Agent")
-    request.setValue("$origin/", forHTTPHeaderField = "Referer")
-    request.setValue(origin, forHTTPHeaderField = "Origin")
-    request.setValue("*/*", forHTTPHeaderField = "Accept")
-    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    request.allHTTPHeaderFields = mapOf<Any?, String>(
+        "User-Agent" to MA_EMBED_USER_AGENT,
+        "Referer" to "$origin/",
+        "Origin" to origin,
+        "Accept" to "*/*",
+        "Accept-Language" to "en-US,en;q=0.9"
+    )
     return request
 }
 
@@ -50,9 +54,11 @@ internal fun String.toYouTuBeRequest(): NSMutableURLRequest {
     val url = NSURL.URLWithString(this) ?: fallbackUrl
     val request = NSMutableURLRequest()
     request.setURL(url)
-    request.setValue(YOUTUBE_USER_AGENT, forHTTPHeaderField = "User-Agent")
-    request.setValue("*/*", forHTTPHeaderField = "Accept")
-    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    request.allHTTPHeaderFields = mapOf<Any?, String>(
+        "User-Agent" to YOUTUBE_USER_AGENT,
+        "Accept" to "*/*",
+        "Accept-Language" to "en-US,en;q=0.9"
+    )
     return request
 }
 
