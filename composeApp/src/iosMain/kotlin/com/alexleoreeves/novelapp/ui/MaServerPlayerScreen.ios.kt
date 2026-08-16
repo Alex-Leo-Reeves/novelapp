@@ -245,28 +245,6 @@ private class MaEmbedNavigationDelegate(
     }
 }
 
-private fun String.toEmbedRequest(): NSMutableURLRequest {
-    val fallbackUrl = NSURL.URLWithString("https://vidsrc.to")
-        ?: error("Unable to create vidsrc.to fallback URL")
-    val url = NSURL.URLWithString(this) ?: fallbackUrl
-    val origin = embedOrigin()
-    val request = NSMutableURLRequest()
-    request.setURL(url)
-    request.setValue(MA_EMBED_USER_AGENT, forHTTPHeaderField = "User-Agent")
-    request.setValue("$origin/", forHTTPHeaderField = "Referer")
-    request.setValue(origin, forHTTPHeaderField = "Origin")
-    request.setValue("*/*", forHTTPHeaderField = "Accept")
-    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
-    return request
-}
-
-private fun String.embedOrigin(): String {
-    val url = NSURL.URLWithString(this)
-    val scheme = url?.scheme ?: "https"
-    val host = url?.host ?: "vidsrc.to"
-    return "$scheme://$host"
-}
-
 private fun String.providerDisplayName(): String {
     val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded server"
     return when {
@@ -280,6 +258,3 @@ private fun String.providerDisplayName(): String {
     }
 }
 
-private const val MA_EMBED_USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
