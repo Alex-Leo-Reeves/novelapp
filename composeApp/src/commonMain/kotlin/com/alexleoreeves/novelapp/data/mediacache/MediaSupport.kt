@@ -24,8 +24,8 @@ fun ByteArray.toHex(): String = buildString(size * 2) {
 fun String.hexToBytes(): ByteArray {
     require(length % 2 == 0) { "Hex string must have an even length" }
     return ByteArray(length / 2) { i ->
-        val hi = Character.digit(this[i * 2], 16)
-        val lo = Character.digit(this[i * 2 + 1], 16)
+        val hi = this[i * 2].digitToIntOrNull(16) ?: -1
+        val lo = this[i * 2 + 1].digitToIntOrNull(16) ?: -1
         require(hi >= 0 && lo >= 0) { "Invalid hex character" }
         ((hi shl 4) or lo).toByte()
     }

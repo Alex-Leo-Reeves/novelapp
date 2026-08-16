@@ -250,13 +250,13 @@ private fun String.toEmbedRequest(): NSMutableURLRequest {
         ?: error("Unable to create vidsrc.to fallback URL")
     val url = NSURL.URLWithString(this) ?: fallbackUrl
     val origin = embedOrigin()
-    return NSMutableURLRequest.requestWithURL(url).apply {
-        setValue(MA_EMBED_USER_AGENT, forHTTPHeaderField = "User-Agent")
-        setValue("$origin/", forHTTPHeaderField = "Referer")
-        setValue(origin, forHTTPHeaderField = "Origin")
-        setValue("*/*", forHTTPHeaderField = "Accept")
-        setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
-    }
+    val request = NSMutableURLRequest.requestWithURL(url)
+    request.setValue(MA_EMBED_USER_AGENT, forHTTPHeaderField = "User-Agent")
+    request.setValue("$origin/", forHTTPHeaderField = "Referer")
+    request.setValue(origin, forHTTPHeaderField = "Origin")
+    request.setValue("*/*", forHTTPHeaderField = "Accept")
+    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    return request
 }
 
 private fun String.embedOrigin(): String {

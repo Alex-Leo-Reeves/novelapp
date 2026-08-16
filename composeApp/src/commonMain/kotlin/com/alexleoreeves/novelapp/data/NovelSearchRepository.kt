@@ -1255,7 +1255,7 @@ class NovelSearchRepository(
     }
 }
 
-private fun String.isDirectPlayableAnimeStream(): Boolean {
+fun String.isDirectPlayableAnimeStream(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
     return clean.endsWith(".m3u8") ||
         clean.endsWith(".mp4") ||

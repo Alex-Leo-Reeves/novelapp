@@ -4,6 +4,7 @@ import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
+import kotlin.concurrent.Volatile
 import kotlinx.serialization.json.*
 
 /**

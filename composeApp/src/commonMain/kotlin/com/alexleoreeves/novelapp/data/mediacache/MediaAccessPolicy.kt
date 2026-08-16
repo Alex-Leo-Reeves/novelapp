@@ -116,7 +116,7 @@ object MediaAccessPolicy {
         (millis / 86_400_000L) * 86_400_000L
 
     // ── helpers (no kotlinx-datetime dependency in tvApp) ───────────────────
-    private fun nowUtcMs(): Long = System.currentTimeMillis()
+    private fun nowUtcMs(): Long = com.alexleoreeves.novelapp.platform.currentTimeMillis()
 
     private fun epochOfUtc(year: Int, month: Int, day: Int): Long {
         // Days from civil to Unix epoch: 1970-01-01 = day 0.

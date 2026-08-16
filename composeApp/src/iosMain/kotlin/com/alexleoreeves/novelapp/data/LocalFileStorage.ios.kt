@@ -16,8 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
-import platform.Foundation.NSFileHandle
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSMutableData
 import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSString
@@ -200,38 +200,41 @@ private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, di
     var totalBytes = 0L
     var segmentIndex = 0
     var keyIndex = 0
-    val rewritten = playlistText
-        .lineSequence()
-        .map { line ->
-            val trimmed = line.trim()
-            when {
-                trimmed.startsWith("#EXT-X-KEY", ignoreCase = true) && "URI=\"" in trimmed -> {
-                    val keyUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
-                    if (keyUri.isNullOrBlank()) line else {
-                        val keyUrl = iosResolveUrl(playlistUrl, keyUri)
-                        val keyPath = "$dir/key_${keyIndex++}.bin"
-                        iosDownloadBytesToFile(client, keyUrl, keyPath)
-                        totalBytes += iosFileSize(keyPath)
-                        line.replace("""URI="$keyUri"""", """URI="${keyPath.substringAfterLast("/")}"""")
-                    }
-                }
-                trimmed.isBlank() || trimmed.startsWith("#") -> line
-                else -> {
-                    val segmentUrl = iosResolveUrl(playlistUrl, trimmed)
-                    val extension = segmentUrl.substringBefore("?")
-                        .substringBefore("#")
-                        .substringAfterLast(".", "ts")
-                        .takeIf { it.length in 2..5 }
-                        ?: "ts"
-                    val segmentPath = "$dir/seg_${segmentIndex.toString().padStart(5, '0')}.$extension"
-                    segmentIndex += 1
-                    iosDownloadBytesToFile(client, segmentUrl, segmentPath)
-                    totalBytes += iosFileSize(segmentPath)
-                    segmentPath.substringAfterLast("/")
+    val rewrittenLines = mutableListOf<String>()
+    for (line in playlistText.lines()) {
+        val trimmed = line.trim()
+        when {
+            trimmed.startsWith("#EXT-X-KEY", ignoreCase = true) && "URI=\"" in trimmed -> {
+                val keyUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
+                if (keyUri.isNullOrBlank()) {
+                    rewrittenLines.add(line)
+                } else {
+                    val keyUrl = iosResolveUrl(playlistUrl, keyUri)
+                    val keyPath = "$dir/key_${keyIndex++}.bin"
+                    iosDownloadBytesToFile(client, keyUrl, keyPath)
+                    totalBytes += iosFileSize(keyPath)
+                    rewrittenLines.add(line.replace("""URI="$keyUri"""", """URI="${keyPath.substringAfterLast("/")}""""))
                 }
             }
+            trimmed.isBlank() || trimmed.startsWith("#") -> {
+                rewrittenLines.add(line)
+            }
+            else -> {
+                val segmentUrl = iosResolveUrl(playlistUrl, trimmed)
+                val extension = segmentUrl.substringBefore("?")
+                    .substringBefore("#")
+                    .substringAfterLast(".", "ts")
+                    .takeIf { it.length in 2..5 }
+                    ?: "ts"
+                val segmentPath = "$dir/seg_${segmentIndex.toString().padStart(5, '0')}.$extension"
+                segmentIndex += 1
+                iosDownloadBytesToFile(client, segmentUrl, segmentPath)
+                totalBytes += iosFileSize(segmentPath)
+                rewrittenLines.add(segmentPath.substringAfterLast("/"))
+            }
         }
-        .joinToString("\n")
+    }
+    val rewritten = rewrittenLines.joinToString("\n")
     iosWriteUtf8(playlistPath, rewritten)
     return DownloadedVideoFile(playlistPath, totalBytes + iosFileSize(playlistPath))
 }
@@ -278,16 +281,14 @@ private suspend fun iosFetchText(client: HttpClient, url: String): String =
 
 private fun iosAppendBytes(filePath: String, bytes: ByteArray) {
     if (bytes.isEmpty()) return
-    if (NSFileManager.defaultManager.fileExistsAtPath(filePath)) {
-        val handle = NSFileHandle.fileHandleForWritingAtPath(filePath)
-        if (handle != null) {
-            handle.seekToEndOfFile()
-            handle.writeData(bytes.toNSData())
-            handle.closeFile()
-            return
-        }
+    val existing = NSData.dataWithContentsOfFile(filePath)
+    if (existing != null) {
+        val combined = NSMutableData.dataWithData(existing)
+        combined.appendData(bytes.toNSData())
+        combined.writeToFile(filePath, atomically = false)
+    } else {
+        bytes.toNSData().writeToFile(filePath, atomically = false)
     }
-    bytes.toNSData().writeToFile(filePath, atomically = false)
 }
 
 private fun iosWriteUtf8(filePath: String, text: String) {

@@ -2,6 +2,9 @@
 
 package com.alexleoreeves.novelapp.audio
 
+import kotlinx.cinterop.CValue
+import kotlinx.cinterop.ObjCSignatureOverride
+import kotlinx.cinterop.useContents
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,12 +37,10 @@ import kotlin.math.roundToInt
  */
 actual class SherpaNarrationController actual constructor() {
 
-    private val synthesizer = AVSpeechSynthesizer()
+    private val prefs = NSUserDefaults.standardUserDefaults
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var sleepTimerJob: Job? = null
     private var navigationJob: Job? = null
-
-    private val prefs = NSUserDefaults.standardUserDefaults
 
     private val _isPlaying = MutableStateFlow(false)
     actual val isPlaying: StateFlow<Boolean> = _isPlaying
@@ -115,9 +116,10 @@ actual class SherpaNarrationController actual constructor() {
 
     private fun activateAudioSession() {
         val session = AVAudioSession.sharedInstance()
-        runCatching {
+        try {
             session.setCategory(AVAudioSessionCategoryPlayback, error = null)
             session.setActive(true, error = null)
+        } catch (_: Throwable) {
         }
     }
 
@@ -315,6 +317,7 @@ private class NarrationDelegate(
         activeUtteranceIndex = 0
     }
 
+    @ObjCSignatureOverride
     override fun speechSynthesizer(
         synthesizer: AVSpeechSynthesizer,
         didStartSpeechUtterance: AVSpeechUtterance
@@ -322,6 +325,7 @@ private class NarrationDelegate(
         // Nothing to advance here — didFinishSpeechUtterance drives the index.
     }
 
+    @ObjCSignatureOverride
     override fun speechSynthesizer(synthesizer: AVSpeechSynthesizer, didFinishSpeechUtterance: AVSpeechUtterance) {
         // The synthesizer queues utterances; after one finishes the next
         // becomes active, so advance the active index to map paragraphs.
@@ -329,13 +333,15 @@ private class NarrationDelegate(
         onDidFinishUtterance()
     }
 
+    @ObjCSignatureOverride
     override fun speechSynthesizer(synthesizer: AVSpeechSynthesizer, didCancelSpeechUtterance: AVSpeechUtterance) {
         onDidCancel()
     }
 
+    @ObjCSignatureOverride
     override fun speechSynthesizer(
         synthesizer: AVSpeechSynthesizer,
-        willSpeakRangeOfSpeechString: NSRange,
+        willSpeakRangeOfSpeechString: CValue<NSRange>,
         utterance: AVSpeechUtterance
     ) {
         // willSpeakRange fires for the currently-speaking utterance. The
@@ -343,12 +349,16 @@ private class NarrationDelegate(
         // next utterance begins, so this maps to the right paragraph.
         val paragraphIndex = activeUtteranceIndex
 
-        val text = utterance.speechString?.toString() ?: return
+        val text = utterance.speechString ?: return
         val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (words.isEmpty()) return
 
-        val charStart = willSpeakRangeOfSpeechString.location.toInt().coerceAtLeast(0)
-        val charLength = willSpeakRangeOfSpeechString.length.toInt().coerceAtLeast(0)
+        var charStart = 0
+        var charLength = 0
+        willSpeakRangeOfSpeechString.useContents {
+            charStart = location.toInt().coerceAtLeast(0)
+            charLength = length.toInt().coerceAtLeast(0)
+        }
         val charEnd = (charStart + charLength).coerceAtMost(text.length)
 
         var wordIndex = 0

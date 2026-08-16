@@ -130,11 +130,6 @@ fun NmcHomeScreen(
 
     val isSearchActive = searchQuery.length >= 2
 
-    // ── Auto-append when the user nears the end of the browse feed ────────
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore && !isSearchActive) loadMoreContent()
-    }
-
     fun loadMoreContent() {
         if (hasMoreNovels && !isLoadingMoreNovels) {
             isLoadingMoreNovels = true
@@ -187,6 +182,11 @@ fun NmcHomeScreen(
                 }
             }
         }
+    }
+
+    // ── Auto-append when the user nears the end of the browse feed ────────
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore && !isSearchActive) loadMoreContent()
     }
 
     Column(

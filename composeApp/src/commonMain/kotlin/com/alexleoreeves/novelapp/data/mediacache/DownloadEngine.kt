@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.data.mediacache
 
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
