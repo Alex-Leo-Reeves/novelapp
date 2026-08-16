@@ -117,10 +117,9 @@ actual class SherpaNarrationController actual constructor() {
     }
 
     private fun activateAudioSession() {
-        val session = AVAudioSession.sharedInstance()
         try {
-            session.setCategory(AVAudioSessionCategoryPlayback, error = null)
-            session.setActive(true, withOptions = 0u, error = null)
+            val session = AVAudioSession.sharedInstance()
+            session.setCategory(AVAudioSessionCategoryPlayback, null)
         } catch (_: Throwable) {
         }
     }

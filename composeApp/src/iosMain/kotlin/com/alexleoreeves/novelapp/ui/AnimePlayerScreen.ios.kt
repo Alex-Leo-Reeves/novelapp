@@ -285,12 +285,13 @@ private fun String.toPlayerRequest(): NSMutableURLRequest {
     val fallbackUrl = NSURL.URLWithString("https://vidsrc.to")
         ?: error("Unable to create vidsrc.to fallback URL")
     val url = NSURL.URLWithString(this) ?: fallbackUrl
-    val request = NSMutableURLRequest.requestWithURL(url)
-    request.addValue(PLAYER_USER_AGENT, forHTTPHeaderField = "User-Agent")
-    request.addValue(playerReferer(), forHTTPHeaderField = "Referer")
-    request.addValue(playerOrigin(), forHTTPHeaderField = "Origin")
-    request.addValue("*/*", forHTTPHeaderField = "Accept")
-    request.addValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    val request = NSMutableURLRequest()
+    request.setURL(url)
+    request.setValue(PLAYER_USER_AGENT, forHTTPHeaderField = "User-Agent")
+    request.setValue(playerReferer(), forHTTPHeaderField = "Referer")
+    request.setValue(playerOrigin(), forHTTPHeaderField = "Origin")
+    request.setValue("*/*", forHTTPHeaderField = "Accept")
+    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
     return request
 }
 

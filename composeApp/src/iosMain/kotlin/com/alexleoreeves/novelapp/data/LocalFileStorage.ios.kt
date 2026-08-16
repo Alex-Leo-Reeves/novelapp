@@ -179,18 +179,7 @@ private fun String.isIosHlsLikeUrl(): Boolean {
 }
 
 private suspend fun downloadIosToFile(client: HttpClient, url: String, filePath: String) {
-    val response = client.get(url) {
-        header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
-        header("Accept", "*/*")
-        header("Accept-Encoding", "identity")
-    }
-    val channel = response.bodyAsChannel()
-    val buffer = ByteArray(64 * 1024)
-    while (true) {
-        val read = channel.readAvailable(buffer)
-        if (read <= 0) break
-        iosAppendBytes(filePath, buffer.copyOf(read))
-    }
+    iosDownloadBytesToFile(client, url, filePath)
 }
 
 private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, dir: String): DownloadedVideoFile {
@@ -278,19 +267,6 @@ private suspend fun iosFetchText(client: HttpClient, url: String): String =
         header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
         header("Accept", "*/*")
     }.bodyAsText()
-
-private fun iosAppendBytes(filePath: String, bytes: ByteArray) {
-    if (bytes.isEmpty()) return
-    val newData = bytes.toNSData()
-    val existing = NSData.create(contentsOfFile = filePath)
-    if (existing != null) {
-        val combined = NSMutableData.create(data = existing)
-        combined?.appendData(newData)
-        combined?.writeToFile(filePath, atomically = false)
-    } else {
-        newData.writeToFile(filePath, atomically = false)
-    }
-}
 
 private fun iosWriteUtf8(filePath: String, text: String) {
     NSString.create(string = text).writeToFile(
