@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.animation.AnimatedVisibility
@@ -52,11 +54,14 @@ import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
 
+private const val YOUTUBE_USER_AGENT =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
 /**
  * iOS actual — YouTube player backed by WKWebView navigating to
  * https://www.youtube.com/embed/<videoId> with autoplay and muted=false.
  */
-@OptIn(ExperimentalForeignApi::class)
 @Composable
 actual fun YouTubePlayerScreen(
     videoId: String,
@@ -111,7 +116,9 @@ actual fun YouTubePlayerScreen(
                                 errorMessage = message
                             }
                         )
-                        loadRequest(embedUrl.toYouTuBeRequest())
+                        val url = NSURL.URLWithString(embedUrl)
+                            ?: NSURL.URLWithString("https://www.youtube.com")!!
+                        loadRequest(NSURLRequest.requestWithURL(url)!!)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -246,7 +253,7 @@ private class YouTubeNavigationDelegate(
     ) {
         val host = decidePolicyForNavigationAction.request.URL?.host?.lowercase() ?: ""
         if ("youtube.com" in host || "youtube-nocookie.com" in host ||
-            "googlevideo.com" in host || "ytimg.com" in host
+            "googlevideo.com" in host || "ytimg.com" in host || host.isEmpty()
         ) {
             decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
         } else {
@@ -254,9 +261,3 @@ private class YouTubeNavigationDelegate(
         }
     }
 }
-
-private const val YOUTUBE_USER_AGENT =
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
-        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-
-

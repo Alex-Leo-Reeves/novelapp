@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.animation.AnimatedVisibility
@@ -52,7 +54,10 @@ import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
 
-@OptIn(ExperimentalForeignApi::class)
+private const val PLAYER_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
 @Composable
 actual fun AnimePlayerScreen(
     streamUrl: String,
@@ -70,7 +75,7 @@ actual fun AnimePlayerScreen(
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
     var isLoading by remember(streamUrl, retryKey) { mutableStateOf(!isLocalPath) }
     var errorMessage by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
-    val providerName = streamUrl.providerName()
+    val providerName = streamUrl.animeProviderName()
 
     LaunchedEffect(streamUrl, retryKey, isLoading) {
         if (isLoading) {
@@ -111,7 +116,7 @@ actual fun AnimePlayerScreen(
                             setOpaque(false)
                             backgroundColor = platform.UIKit.UIColor.blackColor
                             customUserAgent = PLAYER_USER_AGENT
-                            navigationDelegate = PlayerNavigationDelegate(
+                            navigationDelegate = AnimePlayerNavigationDelegate(
                                 onStarted = {
                                     isLoading = true
                                     errorMessage = null
@@ -124,7 +129,9 @@ actual fun AnimePlayerScreen(
                                     errorMessage = message
                                 }
                             )
-                            loadRequest(streamUrl.toPlayerRequest())
+                            val url = NSURL.URLWithString(streamUrl)
+                                ?: NSURL.URLWithString("https://vidsrc.to")!!
+                            loadRequest(NSURLRequest.requestWithURL(url)!!)
                         }
                     },
                     modifier = Modifier.fillMaxSize()
@@ -137,7 +144,7 @@ actual fun AnimePlayerScreen(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            PlayerLoadingOverlay(
+            AnimePlayerLoadingOverlay(
                 title = episodeTitle,
                 providerName = providerName,
                 message = errorMessage ?: "Loading secure player...",
@@ -164,7 +171,7 @@ actual fun AnimePlayerScreen(
 }
 
 @Composable
-private fun PlayerLoadingOverlay(
+private fun AnimePlayerLoadingOverlay(
     title: String,
     providerName: String,
     message: String,
@@ -229,7 +236,7 @@ private fun PlayerLoadingOverlay(
     }
 }
 
-private class PlayerNavigationDelegate(
+private class AnimePlayerNavigationDelegate(
     private val onStarted: () -> Unit,
     private val onFinished: () -> Unit,
     private val onFailed: (String) -> Unit
@@ -260,19 +267,15 @@ private class PlayerNavigationDelegate(
         decidePolicyForNavigationAction: platform.WebKit.WKNavigationAction,
         decisionHandler: (platform.WebKit.WKNavigationActionPolicy) -> Unit
     ) {
-        val url = decidePolicyForNavigationAction.request.URL?.absoluteString ?: ""
         val host = decidePolicyForNavigationAction.request.URL?.host?.lowercase() ?: ""
-        
-        // Let it start with some initial host logic if needed, but for simplicity we just allow whitelist.
-        val allowedDomains = listOf(
-            "vidsrc", "nontongo", "multiembed", "streamingnow", "vidlink", 
-            "youtube.com", "vimeo.com", "dailymotion.com"
+        val allowed = listOf(
+            "vidsrc", "nontongo", "multiembed", "streamingnow", "vidlink",
+            "youtube.com", "vimeo.com", "dailymotion.com", "autoembed"
         )
-        
-        if (allowedDomains.any { host.contains(it) }) {
+        if (allowed.any { host.contains(it) } || host.isEmpty()) {
             decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
         } else {
-            decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
+            decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
         }
     }
 }
@@ -281,7 +284,7 @@ private fun String.isIosLocalMediaPath(): Boolean =
     startsWith("file://", ignoreCase = true) ||
         (startsWith("/") && !contains("://"))
 
-private fun String.providerName(): String {
+private fun String.animeProviderName(): String {
     val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded provider"
     return when {
         "vidlink" in host -> "VidLink"

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.animation.AnimatedVisibility
@@ -52,11 +54,14 @@ import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
 
+private const val MA_EMBED_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
 /**
  * iOS actual — MA Server embed player using a WKWebView with ad-domain blocking
  * and full-screen playback, mirroring the Android WebView experience.
  */
-@OptIn(ExperimentalForeignApi::class)
 @Composable
 actual fun MaServerPlayerScreen(
     embedUrl: String,
@@ -68,7 +73,7 @@ actual fun MaServerPlayerScreen(
     var retryKey by remember(embedUrl) { mutableStateOf(0) }
     var isLoading by remember(embedUrl, retryKey) { mutableStateOf(true) }
     var errorMessage by remember(embedUrl, retryKey) { mutableStateOf<String?>(null) }
-    val providerName = embedUrl.providerDisplayName()
+    val providerName = embedUrl.maProviderDisplayName()
 
     LaunchedEffect(embedUrl, retryKey, isLoading) {
         if (isLoading) {
@@ -115,7 +120,9 @@ actual fun MaServerPlayerScreen(
                                 errorMessage = message
                             }
                         )
-                        loadRequest(embedUrl.toEmbedRequest())
+                        val url = NSURL.URLWithString(embedUrl)
+                            ?: NSURL.URLWithString("https://vidsrc.to")!!
+                        loadRequest(NSURLRequest.requestWithURL(url)!!)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -245,7 +252,7 @@ private class MaEmbedNavigationDelegate(
     }
 }
 
-private fun String.providerDisplayName(): String {
+private fun String.maProviderDisplayName(): String {
     val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded server"
     return when {
         "vidsrc" in host -> "VidSrc"
@@ -257,9 +264,3 @@ private fun String.providerDisplayName(): String {
         else -> host
     }
 }
-
-private const val MA_EMBED_USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-
-
