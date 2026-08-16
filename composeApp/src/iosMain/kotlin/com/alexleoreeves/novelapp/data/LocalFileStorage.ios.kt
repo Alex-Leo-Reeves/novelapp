@@ -281,13 +281,14 @@ private suspend fun iosFetchText(client: HttpClient, url: String): String =
 
 private fun iosAppendBytes(filePath: String, bytes: ByteArray) {
     if (bytes.isEmpty()) return
-    val existing = NSData.dataWithContentsOfFile(filePath)
+    val newData = bytes.toNSData()
+    val existing = NSData.create(contentsOfFile = filePath)
     if (existing != null) {
-        val combined = NSMutableData.dataWithData(existing)
-        combined.appendData(bytes.toNSData())
-        combined.writeToFile(filePath, atomically = false)
+        val combined = NSMutableData.create(data = existing)
+        combined?.appendData(newData)
+        combined?.writeToFile(filePath, atomically = false)
     } else {
-        bytes.toNSData().writeToFile(filePath, atomically = false)
+        newData.writeToFile(filePath, atomically = false)
     }
 }
 

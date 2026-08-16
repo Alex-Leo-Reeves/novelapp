@@ -109,6 +109,8 @@ actual class SherpaNarrationController actual constructor() {
         }
     )
 
+    private val synthesizer = AVSpeechSynthesizer()
+
     init {
         synthesizer.setDelegate(delegate)
         activateAudioSession()
@@ -118,7 +120,7 @@ actual class SherpaNarrationController actual constructor() {
         val session = AVAudioSession.sharedInstance()
         try {
             session.setCategory(AVAudioSessionCategoryPlayback, error = null)
-            session.setActive(true, error = null)
+            session.setActive(true, withOptions = 0u, error = null)
         } catch (_: Throwable) {
         }
     }

@@ -260,9 +260,9 @@ private fun String.toYouTuBeRequest(): NSMutableURLRequest {
         ?: error("Unable to create youtube.com fallback URL")
     val url = NSURL.URLWithString(this) ?: fallbackUrl
     val request = NSMutableURLRequest.requestWithURL(url)
-    request.setValue(YOUTUBE_USER_AGENT, forHTTPHeaderField = "User-Agent")
-    request.setValue("*/*", forHTTPHeaderField = "Accept")
-    request.setValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
+    request.addValue(YOUTUBE_USER_AGENT, forHTTPHeaderField = "User-Agent")
+    request.addValue("*/*", forHTTPHeaderField = "Accept")
+    request.addValue("en-US,en;q=0.9", forHTTPHeaderField = "Accept-Language")
     return request
 }
 
