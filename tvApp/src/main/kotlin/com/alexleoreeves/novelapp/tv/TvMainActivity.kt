@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.alexleoreeves.novelapp.nodebridge.NodeBridgeRuntime
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
@@ -25,6 +26,12 @@ class TvMainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+
+        // Boot the embedded nodejs-mobile runtime so the 13 Anivexa anime
+        // providers scrape from this device's residential IP (the repo owner's
+        // trick) instead of Render's datacenter egress. Degrades silently to
+        // the backend if the embedded runtime can't start.
+        NodeBridgeRuntime.start(applicationContext)
 
         // Boot the offline media cache: DownloadEngine + USB monitor + indexer.
         val cache = TvMediaCacheController(applicationContext).also { mediaCache = it }

@@ -10,6 +10,7 @@ const youtubeHandlers = require("./youtube-handlers");
 const supabaseAuthHandlers = require("./supabase-auth-handlers");
 const tvPairHandlers = require("./tv-pair-handlers");
 const anivexaHandlers = require("./anivexa-handlers");
+const anivaultHandlers = require("./anivault-handlers");
 const { createMangaUnified } = require("./manga-unified");
 // Merges MangaDex + WeebCentral + Webtoon so no single provider dominates
 // the manga grid on Android/TV. contentItem/fetchWithAbort are hoisted.
@@ -1533,8 +1534,7 @@ async function tmdbSimilar(detailUrl, limit = 12) {
     const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
     const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
     const payload = await fetchWithTimeout(
-        `https://api.themoviedb.org/3/${mediaType}/${id}/similar?language=en-US&page=1${apiSuffix}`,
-        { headers }
+        `https://api.themoviedb.org/3/${mediaType}/${id}/similar?language=en-US&page=1${apiSuffix}`, { headers }
     ).catch(() => null);
     const results = (payload && Array.isArray(payload.results) ? payload.results : []).slice(0, limit);
     return results.map((item) => contentItem({
@@ -4399,6 +4399,12 @@ async function handleApi(request, response, pathname) {
     // in-process at server/anivexa (githubanime/Anivexa-API).
     if (pathname.startsWith("/api/anivexa/")) {
       return await anivexaHandlers.handleAnivexa(request, response, pathname, requestUrl);
+    }
+    // AnimeHeaven / AnimePahe / AniDao bridge (Anivault trick) — dependency-free
+    // scrapers + stream proxy with Referer/Origin + HLS key rewrite so popular
+    // anime that the 13 Anivexa providers can't resolve still play (e.g. DBS).
+    if (pathname.startsWith("/api/anivault/")) {
+      return await anivaultHandlers.handleAnivault(request, response, pathname, requestUrl);
     }
     if (request.method === "POST" && pathname === "/api/auth/register") {
       return await handleRegister(request, response);

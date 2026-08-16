@@ -7,7 +7,6 @@ import com.alexleoreeves.novelapp.data.DonghuaServer
 import com.alexleoreeves.novelapp.data.StreamServer
 import com.alexleoreeves.novelapp.data.TvMediaRepository
 import com.alexleoreeves.novelapp.data.UnifiedSearchResult
-import com.alexleoreeves.novelapp.data.extractTvStreamFromEmbed
 import com.alexleoreeves.novelapp.data.isTvPlayableStreamUrl
 
 /**
@@ -127,9 +126,12 @@ fun deriveBingeKind(
 
 /**
  * Classifies a resolved stream URL into the right TV player:
- *  - Server 5 (VidLink Exo): scrape the embed for a direct .m3u8/.mp4 first.
  *  - Direct stream URL (.m3u8/.mp4/.mpd/...) → LibVLC TvPlayerScreen.
  *  - Everything else (embed page / CinePro page / Donghua) → TvEmbedPlayerScreen.
+ *
+ * NOTE: every embed-style server (VidLink, VidLink Exo, vidsrc, Nontongo,
+ * AnimeHeaven, ...) routes through the SAME WebView embed player so behavior
+ * is consistent across servers. Only true direct media streams go to LibVLC.
  */
 fun buildTvBingeEpisode(
     chapter: Chapter,
@@ -150,8 +152,9 @@ fun buildTvBingeEpisode(
 /**
  * Resolves one episode's playback route on the session's chosen server.
  *
- * @param scrapeExo when true (Server 5), scrapes the VidLink page for a direct
- *                  stream via the hidden WebView. Requires [context].
+ * Every server resolves through [resolveStreamUrl] and is classified by
+ * [buildTvBingeEpisode] — no server gets special-cased into a hidden WebView
+ * scrape. This keeps webplayer behavior identical across all tabs/servers.
  */
 suspend fun TvMediaRepository.resolveBingeEpisode(
     context: Context,
@@ -163,23 +166,20 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
     isDonghua: Boolean
 ): TvBingeEpisode? {
     val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
-
-    if (!isDonghua && server == StreamServer.VIDLINK_EXO) {
-        val scraped = extractTvStreamFromEmbed(context, resolved)
-        if (scraped != null) {
-            return TvBingeEpisode(
-                chapter = chapter ?: Chapter(item.title, item.detailPageUrl, 0),
-                url = scraped.url,
-                kind = deriveBingeKind(item, chapter, isDonghua),
-                isDirect = true
-            )
-        }
-        // Fall through — the embed page itself is still playable.
-    }
     return buildTvBingeEpisode(
         chapter = chapter ?: Chapter(item.title, item.detailPageUrl, 0),
         rawUrl = resolved,
         kind = deriveBingeKind(item, chapter, isDonghua),
         isDonghua = isDonghua
     )
+}
+
+/**
+ * Watch-progress key shared by TvDetailScreen (Resume button), TvApp
+ * (player read/save) and the binge navigation. Blank chapter titles are
+ * handled so the Continue-Watching UI always appears consistently.
+ */
+fun tvBingeProgressKey(item: UnifiedSearchResult, chapterTitle: String): String {
+    val suffix = chapterTitle.takeIf { it.isNotBlank() }?.let { " - $it" } ?: ""
+    return "${item.id}::${item.title}$suffix"
 }

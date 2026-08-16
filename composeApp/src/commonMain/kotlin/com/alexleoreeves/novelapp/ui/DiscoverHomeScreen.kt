@@ -68,7 +68,104 @@ fun DiscoverHomeScreen(
     var isLoadingManga by remember { mutableStateOf(false) }
     var isLoadingComics by remember { mutableStateOf(false) }
 
+    // ── Infinite scrolling state (per-section rows) ───────────────────────
+    var animePage by remember { mutableStateOf(2) }
+    var moviePage by remember { mutableStateOf(2) }
+    var nollywoodPage by remember { mutableStateOf(2) }
+    var kdramaPage by remember { mutableStateOf(2) }
+    var cartoonPage by remember { mutableStateOf(2) }
+    var classicPage by remember { mutableStateOf(2) }
+    var donghuaPage by remember { mutableStateOf(2) }
+    var novelPage by remember { mutableStateOf(2) }
+    var mangaPage by remember { mutableStateOf(2) }
+    var comicPage by remember { mutableStateOf(2) }
+
+    var isLoadingMoreAnime by remember { mutableStateOf(false) }
+    var isLoadingMoreMovies by remember { mutableStateOf(false) }
+    var isLoadingMoreNollywood by remember { mutableStateOf(false) }
+    var isLoadingMoreKDrama by remember { mutableStateOf(false) }
+    var isLoadingMoreCartoon by remember { mutableStateOf(false) }
+    var isLoadingMoreClassic by remember { mutableStateOf(false) }
+    var isLoadingMoreDonghua by remember { mutableStateOf(false) }
+    var isLoadingMoreNovels by remember { mutableStateOf(false) }
+    var isLoadingMoreManga by remember { mutableStateOf(false) }
+    var isLoadingMoreComics by remember { mutableStateOf(false) }
+
+    var hasMoreAnime by remember { mutableStateOf(true) }
+    var hasMoreMovies by remember { mutableStateOf(true) }
+    var hasMoreNollywood by remember { mutableStateOf(true) }
+    var hasMoreKDrama by remember { mutableStateOf(true) }
+    var hasMoreCartoon by remember { mutableStateOf(true) }
+    var hasMoreClassic by remember { mutableStateOf(true) }
+    var hasMoreDonghua by remember { mutableStateOf(true) }
+    var hasMoreNovels by remember { mutableStateOf(true) }
+    var hasMoreManga by remember { mutableStateOf(true) }
+    var hasMoreComics by remember { mutableStateOf(true) }
+
     val scope = rememberCoroutineScope()
+
+    // ── Load-more helpers (append next page on row end) ──────────────────
+    fun loadMoreSection(
+        category: VideoCategory,
+        page: Int,
+        current: List<UnifiedSearchResult>,
+        setter: (List<UnifiedSearchResult>) -> Unit,
+        setPage: (Int) -> Unit,
+        isLoading: Boolean,
+        setLoading: (Boolean) -> Unit,
+        hasMore: Boolean,
+        setHasMore: (Boolean) -> Unit
+    ) {
+        if (isLoading || !hasMore) return
+        setLoading(true)
+        scope.launch {
+            try {
+                val repo = com.alexleoreeves.novelapp.data.NovelSearchRepository(
+                    rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
+                    rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
+                )
+                val more = repo.fetchVideo(category, page)
+                if (more.isNotEmpty()) {
+                    setter((current + more).distinctBy { it.id })
+                    setPage(page + 1)
+                } else {
+                    setHasMore(false)
+                }
+            } catch (_: Exception) {
+            } finally {
+                setLoading(false)
+            }
+        }
+    }
+
+    fun loadMoreMixed(
+        fetch: suspend (Int) -> List<UnifiedSearchResult>,
+        page: Int,
+        current: List<UnifiedSearchResult>,
+        setter: (List<UnifiedSearchResult>) -> Unit,
+        setPage: (Int) -> Unit,
+        isLoading: Boolean,
+        setLoading: (Boolean) -> Unit,
+        hasMore: Boolean,
+        setHasMore: (Boolean) -> Unit
+    ) {
+        if (isLoading || !hasMore) return
+        setLoading(true)
+        scope.launch {
+            try {
+                val more = fetch(page)
+                if (more.isNotEmpty()) {
+                    setter((current + more).distinctBy { it.id })
+                    setPage(page + 1)
+                } else {
+                    setHasMore(false)
+                }
+            } catch (_: Exception) {
+            } finally {
+                setLoading(false)
+            }
+        }
+    }
 
     // ── Load all sections on mount ────────────────────────────────────────
     fun loadSection(category: VideoCategory, setter: (List<UnifiedSearchResult>) -> Unit, loadingSetter: (Boolean) -> Unit) {
@@ -273,14 +370,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(animeItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = animeItems,
+                            isLoadingMore = isLoadingMoreAnime,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.ANIME,
+                                    page = animePage,
+                                    current = animeItems,
+                                    setter = { animeItems = it },
+                                    setPage = { animePage = it },
+                                    isLoading = isLoadingMoreAnime,
+                                    setLoading = { isLoadingMoreAnime = it },
+                                    hasMore = hasMoreAnime,
+                                    setHasMore = { hasMoreAnime = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -289,14 +396,29 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(popularNovelItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = popularNovelItems,
+                            isLoadingMore = isLoadingMoreNovels,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreMixed(
+                                    fetch = { page ->
+                                        com.alexleoreeves.novelapp.data.NovelSearchRepository(
+                                            rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
+                                            rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
+                                        ).fetchPopularNovels(page)
+                                    },
+                                    page = novelPage,
+                                    current = popularNovelItems,
+                                    setter = { popularNovelItems = it },
+                                    setPage = { novelPage = it },
+                                    isLoading = isLoadingMoreNovels,
+                                    setLoading = { isLoadingMoreNovels = it },
+                                    hasMore = hasMoreNovels,
+                                    setHasMore = { hasMoreNovels = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -305,14 +427,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(movieItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = movieItems,
+                            isLoadingMore = isLoadingMoreMovies,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.MOVIES,
+                                    page = moviePage,
+                                    current = movieItems,
+                                    setter = { movieItems = it },
+                                    setPage = { moviePage = it },
+                                    isLoading = isLoadingMoreMovies,
+                                    setLoading = { isLoadingMoreMovies = it },
+                                    hasMore = hasMoreMovies,
+                                    setHasMore = { hasMoreMovies = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -321,14 +453,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(nollywoodItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = nollywoodItems,
+                            isLoadingMore = isLoadingMoreNollywood,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.NIGERIAN,
+                                    page = nollywoodPage,
+                                    current = nollywoodItems,
+                                    setter = { nollywoodItems = it },
+                                    setPage = { nollywoodPage = it },
+                                    isLoading = isLoadingMoreNollywood,
+                                    setLoading = { isLoadingMoreNollywood = it },
+                                    hasMore = hasMoreNollywood,
+                                    setHasMore = { hasMoreNollywood = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -337,14 +479,29 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(popularMangaItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = popularMangaItems,
+                            isLoadingMore = isLoadingMoreManga,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreMixed(
+                                    fetch = { page ->
+                                        com.alexleoreeves.novelapp.data.NovelSearchRepository(
+                                            rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
+                                            rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
+                                        ).fetchPopularManga(page)
+                                    },
+                                    page = mangaPage,
+                                    current = popularMangaItems,
+                                    setter = { popularMangaItems = it },
+                                    setPage = { mangaPage = it },
+                                    isLoading = isLoadingMoreManga,
+                                    setLoading = { isLoadingMoreManga = it },
+                                    hasMore = hasMoreManga,
+                                    setHasMore = { hasMoreManga = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -353,14 +510,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(kdramaItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = kdramaItems,
+                            isLoadingMore = isLoadingMoreKDrama,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.K_DRAMA,
+                                    page = kdramaPage,
+                                    current = kdramaItems,
+                                    setter = { kdramaItems = it },
+                                    setPage = { kdramaPage = it },
+                                    isLoading = isLoadingMoreKDrama,
+                                    setLoading = { isLoadingMoreKDrama = it },
+                                    hasMore = hasMoreKDrama,
+                                    setHasMore = { hasMoreKDrama = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -369,14 +536,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(cartoonItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = cartoonItems,
+                            isLoadingMore = isLoadingMoreCartoon,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.CARTOON,
+                                    page = cartoonPage,
+                                    current = cartoonItems,
+                                    setter = { cartoonItems = it },
+                                    setPage = { cartoonPage = it },
+                                    isLoading = isLoadingMoreCartoon,
+                                    setLoading = { isLoadingMoreCartoon = it },
+                                    hasMore = hasMoreCartoon,
+                                    setHasMore = { hasMoreCartoon = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -385,14 +562,29 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(popularComicItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = popularComicItems,
+                            isLoadingMore = isLoadingMoreComics,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreMixed(
+                                    fetch = { page ->
+                                        com.alexleoreeves.novelapp.data.NovelSearchRepository(
+                                            rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
+                                            rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
+                                        ).fetchPopularComics(page)
+                                    },
+                                    page = comicPage,
+                                    current = popularComicItems,
+                                    setter = { popularComicItems = it },
+                                    setPage = { comicPage = it },
+                                    isLoading = isLoadingMoreComics,
+                                    setLoading = { isLoadingMoreComics = it },
+                                    hasMore = hasMoreComics,
+                                    setHasMore = { hasMoreComics = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -401,14 +593,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(classicItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = classicItems,
+                            isLoadingMore = isLoadingMoreClassic,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.CLASSIC,
+                                    page = classicPage,
+                                    current = classicItems,
+                                    setter = { classicItems = it },
+                                    setPage = { classicPage = it },
+                                    isLoading = isLoadingMoreClassic,
+                                    setLoading = { isLoadingMoreClassic = it },
+                                    hasMore = hasMoreClassic,
+                                    setHasMore = { hasMoreClassic = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
 
@@ -417,14 +619,24 @@ fun DiscoverHomeScreen(
                     item { SectionShimmerHorizontal() }
                 } else {
                     item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(donghuaItems) { item ->
-                                VideoPosterItem(item = item, onClick = { onNovelSelected(item) })
+                        DiscoverPosterRow(
+                            items = donghuaItems,
+                            isLoadingMore = isLoadingMoreDonghua,
+                            onItemClick = onNovelSelected,
+                            onLoadMore = {
+                                loadMoreSection(
+                                    category = VideoCategory.DONGHUA,
+                                    page = donghuaPage,
+                                    current = donghuaItems,
+                                    setter = { donghuaItems = it },
+                                    setPage = { donghuaPage = it },
+                                    isLoading = isLoadingMoreDonghua,
+                                    setLoading = { isLoadingMoreDonghua = it },
+                                    hasMore = hasMoreDonghua,
+                                    setHasMore = { hasMoreDonghua = it }
+                                )
                             }
-                        }
+                        )
                     }
                 }
             }
@@ -604,6 +816,56 @@ private fun VideoCardItem(
                             fontWeight = FontWeight.SemiBold
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoverPosterRow(
+    items: List<UnifiedSearchResult>,
+    isLoadingMore: Boolean,
+    onItemClick: (UnifiedSearchResult) -> Unit,
+    onLoadMore: () -> Unit
+) {
+    val rowState = remember { LazyListState() }
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = rowState.layoutInfo
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisible >= layoutInfo.totalItemsCount - 4
+        }
+    }
+    LaunchedEffect(shouldLoadMore) {
+        // Auto-fetch the next page when the user reaches the end of this row
+        // (short rows trigger immediately so the row keeps filling up).
+        if (shouldLoadMore && items.isNotEmpty()) onLoadMore()
+    }
+
+    LazyRow(
+        state = rowState,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(items, key = { it.id }) { item ->
+            VideoPosterItem(item = item, onClick = { onItemClick(item) })
+        }
+        if (isLoadingMore) {
+            item(key = "__row_loading_more__") {
+                Box(
+                    modifier = Modifier
+                        .width(130.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(GlassShimmerColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 3.dp,
+                        color = NeonBlue
+                    )
                 }
             }
         }

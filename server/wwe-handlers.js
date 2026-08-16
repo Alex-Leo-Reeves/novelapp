@@ -20,6 +20,28 @@ const WWE_BRANDS = [
     { id: "ppv", name: "Premium Live Event", logo: "" }
 ];
 
+function sendJson(response, statusCode, payload) {
+    const body = JSON.stringify(payload);
+    if (!response.headersSent) {
+        response.writeHead(statusCode, {
+            "content-type": "application/json; charset=utf-8",
+            "content-length": Buffer.byteLength(body),
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "access-control-allow-headers": "Content-Type, Authorization"
+        });
+    }
+    response.end(body);
+}
+
+function sendApiData(response, statusCode, data) {
+    return sendJson(response, statusCode, { ok: true, data });
+}
+
+function sendApiError(response, statusCode, message) {
+    return sendJson(response, statusCode, { ok: false, data: null, error: message });
+}
+
 let wweCache = { events: [], matches: {}, fetchedAt: 0, ttl: 120000 };
 const wweStreamCache = { embedUrls: {}, directUrls: {}, fetchedAt: 0, ttl: 180000 };
 
@@ -542,10 +564,8 @@ async function handleWweDirectStream(request, response) {
             urls: directUrls,
             embedUrls: embedUrls,
             message: directUrls.length > 0 ?
-                `Found ${directUrls.length} direct stream(s) and ${embedUrls.length} embed(s).` :
-                embedUrls.length > 0 ?
-                `No direct streams found. ${embedUrls.length} embed(s) available.` :
-                "No streams found for this event. Try again closer to showtime."
+                `Found ${directUrls.length} direct stream(s) and ${embedUrls.length} embed(s).` : embedUrls.length > 0 ?
+                `No direct streams found. ${embedUrls.length} embed(s) available.` : "No streams found for this event. Try again closer to showtime."
         });
     } catch (e) {
         console.error("[WWE] Direct stream:", e.message || e);
@@ -588,5 +608,7 @@ module.exports = {
     handleWweBrands,
     handleWweSearch,
     handleWweStream,
-    handleWweDirectStream
+    handleWweDirectStream,
+    sendApiError,
+    sendApiData
 };

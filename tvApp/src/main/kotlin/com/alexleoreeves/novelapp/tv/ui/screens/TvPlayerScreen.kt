@@ -56,6 +56,10 @@ fun TvPlayerScreen(
     episodicFraction: Double = TV_EPISODIC_FREE_FRACTION,
     onUpgrade: () -> Unit = {},
     resumePositionMs: Long? = null,
+    // True when the pre-player resume dialog already decided (Continue or
+    // Watch-from-Beginning). Hides the in-player resume bar; the auto-resume
+    // loop applies the seek once playback starts.
+    resumeDecided: Boolean = false,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     bingeSession: TvBingeSession? = null,
     isMovieEnded: Boolean = false,
@@ -336,7 +340,13 @@ fun TvPlayerScreen(
                 } else false
             }
     ) {
-        // LibVLC Surface View
+        // LibVLC Surface View.
+        // The AndroidView factory runs ONCE; a binge NEXT/PREV swaps the
+        // streamUrl and re-creates the player in place, so the surface must be
+        // re-attached when the player changes (otherwise direct-stream episode
+        // swaps black-screen). The layout ref is stored after composition and
+        // re-attached in LaunchedEffect(vlcMediaPlayer).
+        var vlcLayoutRef by remember { mutableStateOf<VLCVideoLayout?>(null) }
         if (errorMsg == null) {
             AndroidView(
                 factory = { ctx ->
@@ -345,6 +355,7 @@ fun TvPlayerScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        vlcLayoutRef = this
                         vlcMediaPlayer?.let { player ->
                             player.attachViews(this, null, false, false)
                             if (!player.isPlaying) player.play()
@@ -353,6 +364,17 @@ fun TvPlayerScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+        }
+
+        // Re-attach the surface whenever the player instance changes (episode
+        // swap). Without this the new LibVLC player has no surface → black screen.
+        LaunchedEffect(vlcMediaPlayer) {
+            val layout = vlcLayoutRef ?: return@LaunchedEffect
+            val player = vlcMediaPlayer ?: return@LaunchedEffect
+            runCatching {
+                player.attachViews(layout, null, false, false)
+                if (!player.isPlaying) player.play()
+            }
         }
 
         // Error overlay
@@ -524,8 +546,9 @@ fun TvPlayerScreen(
                     }
 
                     // Resume control — lets the user jump straight back to the
-                    // saved position after a power loss / app kill.
-                    if (resumeMs > 0 && !hasAppliedResume) {
+                    // saved position after a power loss / app kill. Hidden when
+                    // the pre-player dialog already made the decision.
+                    if (resumeMs > 0 && !hasAppliedResume && !resumeDecided) {
                         Spacer(Modifier.height(10.dp))
                         var resumeFocused by remember { mutableStateOf(false) }
                         Surface(

@@ -276,16 +276,16 @@ actual fun MaServerPlayerScreen(
                                 val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") || 
                                                     embedUrl.contains("footybite") || embedUrl.contains("sportsurge") || 
                                                     embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
-                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su") || embedUrl.contains("vidlink") || embedUrl.contains("vidsrc") || embedUrl.contains("smashystream") || embedUrl.contains("2embed")
+                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su") || embedUrl.contains("vidlink") || embedUrl.contains("vidsrc") || embedUrl.contains("smashystream") || embedUrl.contains("2embed") || embedUrl.contains("nontongo")
                                 
                                 // ALWAYS allow Cloudflare challenge pages to proceed
                                 val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
                                 if (isCloudflare) return false
                                 
                                 // If the page has already loaded (STABILIZING or READY), block ALL top-level navigations
-                                // EXCEPT if we are on a wrapper/router site or the URL contains "embed"
-                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !request.url.toString().contains("embed")) {
-                                    return true // Block click-triggered navigations completely
+                                // EXCEPT if we are on a wrapper/router site or the URL contains "embed" or "player"
+                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !lowerUrl.contains("embed") && !lowerUrl.contains("player") && !lowerUrl.contains("stream")) {
+                                    return true // Block click-triggered website navigations
                                 }
 
                                 val reqHost = request.url?.host?.lowercase() ?: ""
@@ -873,19 +873,51 @@ private const val STABILIZATION_END_JS = """
  */
 private const val INLINE_VIDEO_JS = """
 (function() {
-    window.open = function() { return null; };
-    window.onbeforeunload = null;
-    function forceInline() {
-        const videos = document.querySelectorAll('video');
-        videos.forEach(v => {
-            v.setAttribute('playsinline', '');
-            v.setAttribute('webkit-playsinline', '');
-            v.setAttribute('x-webkit-airplay', 'allow');
-        });
+    try {
+        window.open = function() { return null; };
+        window.alert = function() {};
+        window.confirm = function() { return true; };
+        window.prompt = function() { return null; };
+        window.onbeforeunload = null;
+    } catch(e) {}
+
+    function neutralizeOverlays() {
+        try {
+            // Remove full-screen clickjackers / transparent ad covers
+            const elements = document.querySelectorAll('div, a, span');
+            elements.forEach(el => {
+                const style = window.getComputedStyle(el);
+                const zIndex = parseInt(style.zIndex, 10);
+                if (zIndex > 100 && (style.opacity === '0' || style.background === 'transparent' || style.backgroundColor === 'rgba(0, 0, 0, 0)')) {
+                    if (el.tagName === 'A' || el.onclick || el.getAttribute('onclick')) {
+                        el.style.pointerEvents = 'none';
+                    }
+                }
+            });
+        } catch(e) {}
     }
+
+    function forceInline() {
+        try {
+            const videos = document.querySelectorAll('video');
+            videos.forEach(v => {
+                v.setAttribute('playsinline', '');
+                v.setAttribute('webkit-playsinline', '');
+                v.setAttribute('x-webkit-airplay', 'allow');
+                v.setAttribute('autoplay', '');
+            });
+        } catch(e) {}
+    }
+
     forceInline();
-    const observer = new MutationObserver(() => forceInline());
-    observer.observe(document.body, { childList: true, subtree: true });
+    neutralizeOverlays();
+    const observer = new MutationObserver(() => {
+        forceInline();
+        neutralizeOverlays();
+    });
+    if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
 })();
 """
 

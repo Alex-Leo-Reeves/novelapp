@@ -184,6 +184,16 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    // Embedded nodejs-mobile runtime: arm64 libnode.so + JNI bridge + the
+    // nodebridge worker assets ship in the APK so the 13 Anivexa providers
+    // scrape from the device's residential IP (the repo owner's trick) instead
+    // of Render's datacenter egress.
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir("../nodebridge/jniLibs")
+            assets.srcDir("../nodebridge/assets")
+        }
+    }
 }
 
 room {

@@ -229,13 +229,37 @@ fun TvYouScreen(
 
             Spacer(Modifier.height(24.dp))
 
+            // Switch / Manage Profiles
+            var switchProfileFocused by remember { mutableStateOf(false) }
+            Surface(
+                onClick = onSwitchProfile,
+                shape = RoundedCornerShape(10.dp),
+                color = if (switchProfileFocused) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E),
+                border = if (switchProfileFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { switchProfileFocused = it.isFocused }
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Default.People, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Switch / Manage Profiles", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // Sign out
             var signOutFocused by remember { mutableStateOf(false) }
             Surface(
                 onClick = onSignOut,
                 shape = RoundedCornerShape(10.dp),
-                color = if (signOutFocused) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E),
-                border = if (signOutFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
+                color = if (signOutFocused) Color(0xFFFF5252).copy(0.2f) else Color(0xFF14141E),
+                border = if (signOutFocused) BorderStroke(2.dp, Color(0xFFFF5252)) else null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .onFocusChanged { signOutFocused = it.isFocused }
@@ -245,9 +269,9 @@ fun TvYouScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(Icons.Default.Logout, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Logout, null, tint = Color(0xFFFF5252), modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Sign Out", color = Color(0xFF00BFFF), fontWeight = FontWeight.Bold)
+                    Text("Sign Out", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
                 }
             }
 

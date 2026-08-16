@@ -46,6 +46,11 @@ fun TvEmbedPlayerScreen(
     episodicFraction: Double = TV_EPISODIC_FREE_FRACTION,
     onUpgrade: () -> Unit = {},
     resumePositionMs: Long? = null,
+    // True when the user already chose "Continue" in the pre-player resume
+    // dialog (TvApp). Skips the in-player resume card and lets the poll
+    // AUTO-seek once the video is ready. False = no decision yet → the
+    // in-player card handles the choice.
+    resumeDecided: Boolean = false,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     bingeSession: TvBingeSession? = null,
     isMovieEnded: Boolean = false,
@@ -77,6 +82,11 @@ fun TvEmbedPlayerScreen(
     // Set when a manual resume seek fails so we can show a notice instead of
     // silently losing the user's saved position.
     var resumeFailedNotice by remember(embedUrl) { mutableStateOf(false) }
+    // Stall auto-recovery counters: consecutive polls where the video claims
+    // "playing" but the playhead isn't advancing. After ~8s → synthetic center
+    // tap; max 2 per episode so we never fight the user.
+    var stallStreak by remember(embedUrl) { mutableStateOf(0) }
+    var stallRecoveries by remember(embedUrl) { mutableStateOf(0) }
     val resumeMs = resumePositionMs?.takeIf { it > 30_000L } ?: 0L
 
     // End-of-media detection: fires once per episode when the embed video
@@ -96,6 +106,8 @@ fun TvEmbedPlayerScreen(
         previewExpired = false
         pendingResumeAttempts = 0
         resumeFailedNotice = false
+        stallStreak = 0
+        stallRecoveries = 0
         webViewStartedAt = System.currentTimeMillis()
     }
 
@@ -117,10 +129,11 @@ fun TvEmbedPlayerScreen(
      * hoisted, so callers must come after the function they invoke.
      */
     fun playerSeekToChecked(positionMs: Long, onResult: ((String) -> Unit)?) {
-        webViewRef?.evaluateJavascript(
-            "(function(t){function seek(root){var v=root.querySelector('video');if(v){v.currentTime=t;return true;}var frames=root.querySelectorAll('iframe');for(var i=0;i<frames.length;i++){try{var doc=frames[i].contentDocument||frames[i].contentWindow.document;if(doc&&seek(doc))return true;}catch(e){}}return false;}return seek(document)?'ok':'none';})(${positionMs / 1000.0})",
-            onResult
-        )
+        // Targets the REAL (longest) video via __novelAppFindBestVideo, not the
+        // first <video> (which may be a short ad).
+        val js = FIND_BEST_VIDEO_JS +
+            "(function(t){var v=__novelAppFindBestVideo();if(v){try{v.currentTime=t;return 'ok';}catch(e){return 'none';}}return 'none';})(${positionMs / 1000.0})"
+        webViewRef?.evaluateJavascript(js, onResult)
     }
 
     /** Fire-and-forget seek (arrow rewind/forward keys). */
@@ -157,19 +170,37 @@ fun TvEmbedPlayerScreen(
                 delay(200)
                 continue
             }
-            webView.evaluateJavascript(EMBED_VIDEO_STATE_JS) { raw ->
+            // CRITICAL: EMBED_VIDEO_STATE_JS calls __novelAppFindBestVideo(),
+            // so FIND_BEST_VIDEO_JS MUST be injected together on EVERY poll.
+            // Without it, every poll throws a ReferenceError, the JS returns
+            // nothing, and the UI never updates (says "playing" while frozen,
+            // resume never works, the progress bar never moves).
+            webView.evaluateJavascript(FIND_BEST_VIDEO_JS + EMBED_VIDEO_STATE_JS) { raw ->
                 val value = raw?.trim()?.trim('"')?.replace("\\\"", "\"") ?: return@evaluateJavascript
                 runCatching {
                     val obj = JSONObject(value)
                     val positionMs = obj.optLong("currentTime", 0L)
                     val durationMs = obj.optLong("duration", 0L)
                     val paused = obj.optBoolean("paused", true)
+                    val stalled = obj.optBoolean("stalled", false)
                     // Keep the longest duration ever seen so the progress bar /
                     // total time never shrinks while the stream re-buffers
                     // (embed players often report a smaller duration mid-load).
                     if (obj.optBoolean("ready", false) && durationMs > duration) duration = durationMs
                     currentPosition = positionMs
                     isPlaying = !paused
+
+                    // Stall recovery: "playing" but the playhead is frozen for
+                    // ~8s → the embed's own black/white play button is likely
+                    // blocking inside a cross-origin iframe JS can't reach. A
+                    // synthetic center tap dismisses it. Max 2 recoveries per
+                    // episode so we never fight the user.
+                    if (stalled && !paused) stallStreak++ else stallStreak = 0
+                    if (stallStreak >= 8 && stallRecoveries < 2) {
+                        stallStreak = 0
+                        stallRecoveries++
+                        dispatchCenterTouch(webView)
+                    }
 
                     // End of media: within 10s of the end → fire onEnded ONCE
                     // per episode (auto-next / movie-end recommendations).
@@ -189,8 +220,17 @@ fun TvEmbedPlayerScreen(
                     // position is never overwritten — the on-screen "Resume"
                     // control lets the user re-trigger the seek manually once
                     // the video has fully loaded.
-                    /* DISABLED: Auto-resume breaks some embed servers on large skips. User must click Resume manually.
-                    if (resumeMs > 0 && !hasAppliedResume && pendingResumeAttempts < 5 && obj.optBoolean("ready", false)) {
+                    // Auto-resume: only when the user already chose "Continue"
+                    // in the pre-player dialog (resumeDecided). Gated on the
+                    // video being ready + the playhead still near 0, so we seek
+                    // ONLY after the video has actually loaded and never fight
+                    // live playback. If the seek reports "none" (cross-origin
+                    // iframe not reachable yet), retry up to 5 times — the
+                    // saved position is never overwritten in the meantime.
+                    if (resumeDecided && resumeMs > 0 && !hasAppliedResume &&
+                        pendingResumeAttempts < 5 && obj.optBoolean("ready", false) &&
+                        positionMs < 10_000L
+                    ) {
                         playerSeekToChecked(resumeMs) { rawResult ->
                             val seekResult = rawResult?.trim()?.trim('"') ?: "none"
                             if (seekResult == "ok") {
@@ -203,7 +243,6 @@ fun TvEmbedPlayerScreen(
                             }
                         }
                     }
-                    */
 
                     // Persist progress every ~5s.
                     // When a saved position exists and the user hasn't manually
@@ -235,37 +274,14 @@ fun TvEmbedPlayerScreen(
         }
     }
 
-    /**
-     * Injects a real center tap into the WebView. Used as a fallback when the
-     * <video> lives inside a cross-origin iframe that injected JS cannot reach.
-     */
-    fun dispatchCenterTouch(webView: WebView) {
-        val w = webView.width.takeIf { it > 0 } ?: 1920
-        val h = webView.height.takeIf { it > 0 } ?: 1080
-        val downTime = android.os.SystemClock.uptimeMillis()
-        val eventDown = android.view.MotionEvent.obtain(
-            downTime, downTime,
-            android.view.MotionEvent.ACTION_DOWN,
-            w / 2f, h / 2f, 0
-        )
-        val eventUp = android.view.MotionEvent.obtain(
-            downTime, downTime + 100,
-            android.view.MotionEvent.ACTION_UP,
-            w / 2f, h / 2f, 0
-        )
-        webView.dispatchTouchEvent(eventDown)
-        webView.dispatchTouchEvent(eventUp)
-        eventDown.recycle()
-        eventUp.recycle()
-    }
-
     fun playerTogglePlay() {
         val wv = webViewRef ?: return
-        // Prefer direct JS play/pause — reliable even when the embed has hidden
-        // its controls, and it also unmutes when (re)starting playback.
-        // Falls back to a synthetic center tap only when the <video> is inside
-        // a cross-origin iframe that JS cannot reach.
-        wv.evaluateJavascript(EMBED_TOGGLE_PLAY_JS) { raw ->
+        // Prefer direct JS play/pause on the REAL (longest) video — reliable
+        // even when the embed has hidden its controls (also unmutes). The
+        // toggle script calls __novelAppFindBestVideo(), so FIND_BEST_VIDEO_JS
+        // must be injected alongside it. Falls back to a synthetic center tap
+        // only when the <video> is inside a cross-origin iframe JS can't reach.
+        wv.evaluateJavascript(FIND_BEST_VIDEO_JS + EMBED_TOGGLE_PLAY_JS) { raw ->
             val result = raw?.trim()?.trim('"') ?: "none"
             if (result == "none") dispatchCenterTouch(wv)
         }
@@ -273,11 +289,12 @@ fun TvEmbedPlayerScreen(
 
     fun playerUnmute() {
         val wv = webViewRef ?: return
-        // Unmute via JS when the video is reachable. No touch fallback here —
-        // a center tap could accidentally toggle play/pause while the user is
-        // only adjusting volume. The volume keys return false below, so the
-        // system TV volume still changes normally.
-        wv.evaluateJavascript(EMBED_UNMUTE_JS, null)
+        // Unmute via JS when the video is reachable. EMBED_UNMUTE_JS uses
+        // __novelAppFindBestVideo(), so FIND_BEST_VIDEO_JS is injected first.
+        // No touch fallback here — a center tap could accidentally toggle
+        // play/pause while the user is only adjusting volume. The volume keys
+        // return false below, so the system TV volume still changes normally.
+        wv.evaluateJavascript(FIND_BEST_VIDEO_JS + EMBED_UNMUTE_JS, null)
     }
 
     BackHandler { onBack() }
@@ -311,6 +328,12 @@ fun TvEmbedPlayerScreen(
                             Key.Back -> { onBack(); true }
                             else -> true
                         }
+                    } else if (resumeMs > 0 && !hasAppliedResume) {
+                        // Resume card is showing: let the remote's OK/Enter/dpad
+                        // reach the focused Resume / Watch-from-Start Surface
+                        // instead of stealing them for playback. Only Back is
+                        // handled here so the user can still leave.
+                        if (event.key == Key.Back) { onBack(); true } else false
                     } else {
                         showControls = true
                         if (event.type == KeyEventType.KeyUp) {
@@ -397,7 +420,7 @@ fun TvEmbedPlayerScreen(
         // The player loads and buffers normally in the background while the user
         // decides: Resume or Watch from Start.
         AnimatedVisibility(
-            visible = resumeMs > 0 && !hasAppliedResume && !previewExpired,
+            visible = resumeMs > 0 && !hasAppliedResume && !previewExpired && !resumeDecided,
             enter = fadeIn(tween(300)),
             exit = fadeOut(tween(200))
         ) {
@@ -506,7 +529,7 @@ fun TvEmbedPlayerScreen(
         // Controls overlay (Back + Title + Progress)
         // Hidden while the resume card is showing so the user isn't confused.
         AnimatedVisibility(
-            visible = showControls && !previewExpired && (resumeMs == 0L || hasAppliedResume),
+            visible = showControls && !previewExpired && (resumeMs == 0L || hasAppliedResume || resumeDecided),
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(300))
         ) {
@@ -616,34 +639,70 @@ fun TvEmbedPlayerScreen(
     }
 }
 
-private const val EMBED_VIDEO_STATE_JS = """
-(function(){
-    function collectVideos(root) {
+/**
+ * Picks the REAL content video across the top document and every reachable
+ * (same-origin) iframe. Embed pages commonly carry MULTIPLE <video> elements:
+ * a short pre-roll ad on top and the real stream below. Targeting the FIRST
+ * video made the app report "playing" (paused=false) while the user stared at
+ * a frozen frame. The longest-duration video is the real content — ads are
+ * seconds long, episodes are minutes. Tie-break by largest area, then
+ * readyState. Cross-origin iframe videos are not reachable via JS; the
+ * synthetic center-touch fallback handles those.
+ */
+private const val FIND_BEST_VIDEO_JS = """
+function __novelAppFindBestVideo() {
+    function collect(root) {
         var out = [];
         try { root.querySelectorAll('video').forEach(function(v){ out.push(v); }); } catch(e) {}
         try {
             root.querySelectorAll('iframe').forEach(function(f){
                 try {
                     var doc = f.contentDocument || f.contentWindow.document;
-                    if (doc) out = out.concat(collectVideos(doc));
+                    if (doc) out = out.concat(collect(doc));
                 } catch(e) {}
             });
         } catch(e) {}
         return out;
     }
-    var videos = collectVideos(document);
+    var videos = collect(document);
     var best = null;
+    var bestScore = -1;
     for (var i = 0; i < videos.length; i++) {
         var v = videos[i];
         var hasSrc = !!(v.src && v.src.length > 4) || !!(v.currentSrc && v.currentSrc.length > 4);
         if (!hasSrc) continue;
-        if (!best) best = v;
-        if ((v.readyState || 0) >= 2) { best = v; break; }
+        var d = (v.duration && isFinite(v.duration)) ? v.duration : 0;
+        var w = v.videoWidth || 0;
+        var h = v.videoHeight || 0;
+        var area = w * h;
+        var ready = (v.readyState || 0);
+        // Real content: long duration, big canvas, ready. Ads are short + often
+        // small. Duration dominates; area breaks ties; readyState breaks those.
+        var score = d * 1000 + area + ready;
+        if (score > bestScore) { bestScore = score; best = v; }
     }
+    return best;
+}
+"""
+
+private const val EMBED_VIDEO_STATE_JS = """
+(function(){
+    var best = __novelAppFindBestVideo();
     if (!best) return JSON.stringify({currentTime:0,duration:0,paused:true,ready:false});
     var d = (best.duration && isFinite(best.duration)) ? best.duration * 1000 : 0;
     var c = (best.currentTime && isFinite(best.currentTime)) ? best.currentTime * 1000 : 0;
-    return JSON.stringify({currentTime:c,duration:d,paused:best.paused !== false,ready:d>0});
+    // Stall detection: report `stalled` when the video claims to be playing but
+    // currentTime is NOT advancing across polls (> ~1.5s per 1s poll). The
+    // Kotlin poll clears it by nudging the playhead — see auto-stall-recover.
+    var now = c;
+    var key = '__novelAppLastT_' + (best.currentSrc || best.src || 'v');
+    var last = window[key] || -1;
+    var stalled = false;
+    if (!best.paused && last >= 0 && now <= last && d > 0) {
+        stalled = now === last;
+    }
+    window[key] = now;
+    return JSON.stringify({currentTime:c,duration:d,paused:best.paused !== false,ready:d>0,stalled:stalled});
 })()
 """
 
@@ -665,10 +724,12 @@ private const val EMBED_PAUSE_JS = """
 """
 
 /**
- * Toggle play/pause on reachable <video> elements — the top-level document
- * plus any same-origin iframes (VidLink, Nontongo and friends render their
- * player in a same-origin iframe). Unmutes + restores volume when resuming,
- * so OK never resumes into silence.
+ * Toggle play/pause on the REAL (longest) content video via
+ * __novelAppFindBestVideo(), which walks the top document + any same-origin
+ * iframes (VidLink, Nontongo and friends render their player in a same-origin
+ * iframe). Unmutes + restores volume when resuming, so OK never resumes into
+ * silence. The Kotlin call site prepends FIND_BEST_VIDEO_JS so the helper
+ * always exists.
  *
  * Returns "toggled" when a video was toggled, "none" when no reachable video
  * exists. "none" triggers the synthetic center-touch fallback for videos that
@@ -676,30 +737,19 @@ private const val EMBED_PAUSE_JS = """
  */
 private const val EMBED_TOGGLE_PLAY_JS = """
 (function(){
-    function tryToggle(root) {
-        var v = root.querySelector('video,audio');
-        if (!v) return false;
-        try {
-            if (v.paused) {
-                v.muted = false;
-                v.volume = 1.0;
-                var p = v.play();
-                if (p && p.catch) p.catch(function(){});
-            } else {
-                v.pause();
-            }
-            return true;
-        } catch(e) { return false; }
-    }
-    if (tryToggle(document)) return 'toggled';
-    var frames = document.querySelectorAll('iframe');
-    for (var i = 0; i < frames.length; i++) {
-        try {
-            var doc = frames[i].contentDocument || frames[i].contentWindow.document;
-            if (doc && tryToggle(doc)) return 'toggled';
-        } catch(e) {}
-    }
-    return 'none';
+    var v = __novelAppFindBestVideo();
+    if (!v) return 'none';
+    try {
+        if (v.paused) {
+            v.muted = false;
+            v.volume = 1.0;
+            var p = v.play();
+            if (p && p.catch) p.catch(function(){});
+        } else {
+            v.pause();
+        }
+        return 'toggled';
+    } catch(e) { return 'none'; }
 })()
 """
 
@@ -739,6 +789,30 @@ private const val EMBED_UNMUTE_JS = """
     } catch(e) {}
 })();
 """
+
+/** Injects a real center tap into the WebView. Used as a fallback when the
+ * <video> lives inside a cross-origin iframe that injected JS cannot reach.
+ * File-level so both the poll (stall recovery) and playerTogglePlay can use
+ * it without Kotlin's no-forward-reference rule for local functions. */
+private fun dispatchCenterTouch(webView: WebView) {
+    val w = webView.width.takeIf { it > 0 } ?: 1920
+    val h = webView.height.takeIf { it > 0 } ?: 1080
+    val downTime = android.os.SystemClock.uptimeMillis()
+    val eventDown = android.view.MotionEvent.obtain(
+        downTime, downTime,
+        android.view.MotionEvent.ACTION_DOWN,
+        w / 2f, h / 2f, 0
+    )
+    val eventUp = android.view.MotionEvent.obtain(
+        downTime, downTime + 100,
+        android.view.MotionEvent.ACTION_UP,
+        w / 2f, h / 2f, 0
+    )
+    webView.dispatchTouchEvent(eventDown)
+    webView.dispatchTouchEvent(eventUp)
+    eventDown.recycle()
+    eventUp.recycle()
+}
 
 private fun formatEmbedTime(millis: Long): String {
     if (millis <= 0) return "0:00"

@@ -45,25 +45,36 @@ object TvUpdateInstaller {
     fun start(context: Context, url: String, sha256: String, bytes: Long) {
         val appContext = context.applicationContext
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            !appContext.packageManager.canRequestPackageInstalls()
-        ) {
-            AppUpdateProgressBus.update(
-                AppUpdateProgressState(
-                    isActive = true,
-                    phase = AppUpdatePhase.Error,
-                    message = "Allow NovaRead TV to install updates, then try again.",
-                    canDismiss = true,
-                    isError = true
-                )
-            )
-            toast(appContext, "Allow NovaRead TV to install updates, then try again.", Toast.LENGTH_LONG)
-            val settingsIntent = Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:${appContext.packageName}")
-            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            appContext.startActivity(settingsIntent)
-            return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val canInstall = runCatching { appContext.packageManager.canRequestPackageInstalls() }.getOrDefault(true)
+                if (!canInstall) {
+                    AppUpdateProgressBus.update(
+                        AppUpdateProgressState(
+                            isActive = true,
+                            phase = AppUpdatePhase.Error,
+                            message = "Allow NovaRead TV to install updates, then try again.",
+                            canDismiss = true,
+                            isError = true
+                        )
+                    )
+                    toast(appContext, "Allow NovaRead TV to install updates, then try again.", Toast.LENGTH_LONG)
+                    val settingsIntent = Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:${appContext.packageName}")
+                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    val launched = runCatching {
+                        appContext.startActivity(settingsIntent)
+                        true
+                    }.getOrElse {
+                        runCatching {
+                            appContext.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                            true
+                        }.getOrDefault(false)
+                    }
+                    if (launched) return
+                }
+            }
         }
 
         AppUpdateProgressBus.update(
@@ -225,19 +236,35 @@ object TvUpdateInstaller {
         )
 
         mainHandler.post {
-            val installIntent = installerIntent(context, apkUri)
-            grantInstallerReadPermission(context, installIntent)
-            AppUpdateProgressBus.update(
-                AppUpdateProgressState(
-                    isActive = true,
-                    phase = AppUpdatePhase.Installing,
-                    message = "Android installer is open. Finish the install to complete the update.",
-                    receivedBytes = downloadedBytes,
-                    totalBytes = expectedBytes.coerceAtLeast(downloadedBytes),
-                    canDismiss = true
+            runCatching {
+                val installIntent = installerIntent(context, apkUri)
+                grantInstallerReadPermission(context, installIntent)
+                AppUpdateProgressBus.update(
+                    AppUpdateProgressState(
+                        isActive = true,
+                        phase = AppUpdatePhase.Installing,
+                        message = "Android installer is open. Finish the install to complete the update.",
+                        receivedBytes = downloadedBytes,
+                        totalBytes = expectedBytes.coerceAtLeast(downloadedBytes),
+                        canDismiss = true
+                    )
                 )
-            )
-            context.startActivity(installIntent)
+                context.startActivity(installIntent)
+            }.onFailure { err ->
+                val fallbackIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { context.startActivity(fallbackIntent) }
+                AppUpdateProgressBus.update(
+                    AppUpdateProgressState(
+                        isActive = true,
+                        phase = AppUpdatePhase.Error,
+                        message = "Could not open installer (${err.message}). Opened download link in browser.",
+                        canDismiss = true,
+                        isError = true
+                    )
+                )
+            }
         }
     }
 

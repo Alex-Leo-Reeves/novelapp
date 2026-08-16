@@ -89,6 +89,31 @@ fun AnimeDetailScreen(
                     provider = server.anivexaProviderKey.orEmpty(),
                     anilistId = selectedSeason.id.toString()
                 )
+            } else if (server.usesClientScraper) {
+                // Anivault trio (AnimeHeaven / AnimePahe / AniDao): episode list is
+                // scraped DEVICE-SIDE so the request originates from the user's
+                // residential IP — the repo owner's trick (datacenter egress is
+                // blocked by these CDNs, which is why Servers 1-13 return 0 streams
+                // for popular anime like Dragon Ball).
+                val rawTitles = selectedSeason.searchQueries
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                val titleQueries = (rawTitles + rawTitles.flatMap { title ->
+                    listOf(
+                        title.cleanAnimeSearchTitle(),
+                        title.removeAnimeSeasonSuffix()
+                    )
+                })
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinctBy { it.lowercase() }
+                repository.fetchEpisodesFromAnimeProvider(
+                    provider = server.clientScraperKey.orEmpty(),
+                    animeTitleQuery = titleQueries.firstOrNull() ?: selectedSeason.displayTitle,
+                    alternateQueries = titleQueries.drop(1),
+                    episodeCount = selectedSeason.episodeCount.takeIf { it > 0 } ?: anime.episodeCount,
+                    preferredAninekoSlug = selectedSeason.aninekoSlug
+                )
             } else {
                 // VidLink (LAST server): reuse the Anineko list for episode
                 // numbering; playback routes through the VidLink embed instead.
@@ -479,10 +504,10 @@ fun AnimeDetailScreen(
                                     scope.launch {
                                         extractingEpisode = episode.episodeNumber
                                         val server = currentAnimeServer
-                                        val resolvedStream = if (server.isAnivexa) {
-                                            repository.resolveAnivexaStream(episode.url)
-                                        } else {
-                                            null
+                                        val resolvedStream = when {
+                                            server.isAnivexa -> repository.resolveAnivexaStream(episode.url)
+                                            server.usesClientScraper -> repository.resolveAnimeServerStream(server, episode.url)
+                                            else -> null
                                         }
                                         val embedRef = if (server == AnimeServer.VIDLINK) {
                                             repository.resolveAnivexaVidLinkEmbed(
@@ -494,15 +519,15 @@ fun AnimeDetailScreen(
                                         }
                                         val playUrl = resolvedStream?.url
                                             ?: embedRef?.buildEmbedUrl()
-                                            ?: if (!server.isAnivexa && server != AnimeServer.VIDLINK) {
+                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK) {
                                                 repository.extractStreamUrl(episode.url)
                                             } else {
                                                 null
                                             }
                                         extractingEpisode = null
                                         if (playUrl != null) {
-                                            // Direct HLS/MP4 → ExoPlayer; VidLink/embed → WebView player.
-                                            val isDirect = resolvedStream?.isDirect == true || embedRef == null
+                                            // Direct HLS/MP4 → ExoPlayer; embed/WebView player pages → WebView.
+                                            val isDirect = resolvedStream?.isDirect == true || (embedRef == null && !server.usesClientScraper)
                                             val playTitle = "${selectedSeason.displayTitle} – EP ${episode.episodeNumber}"
                                             if (isDirect) {
                                                 onPlayEpisode(playUrl, playTitle)
@@ -544,11 +569,20 @@ fun AnimeDetailScreen(
                                                 )
                                             )
                                             val server = currentAnimeServer
-                                            val streamUrl = if (server.isAnivexa) {
-                                                // Anivexa providers resolve to a direct HLS/MP4 via the backend.
-                                                repository.resolveAnivexaStream(episode.url)?.url
-                                            } else {
-                                                repository.extractStreamUrl(episode.url)
+                                            val streamUrl = when {
+                                                server.isAnivexa -> {
+                                                    // Anivexa providers resolve to a direct HLS/MP4 via the backend.
+                                                    repository.resolveAnivexaStream(episode.url)?.url
+                                                        ?.takeIf { it.isDirectPlayableAnimeStream() }
+                                                }
+                                                server.usesClientScraper -> {
+                                                    // Anivault: AnimePahe exposes a direct MP4/HLS; AnimeHeaven/AniDao
+                                                    // are WebView player pages → fall back to the Anineko/Pahe extractor.
+                                                    repository.resolveAnimeServerStream(server, episode.url)?.url
+                                                        ?.takeIf { it.isDirectPlayableAnimeStream() }
+                                                        ?: repository.extractStreamUrl(episode.url)
+                                                }
+                                                else -> repository.extractStreamUrl(episode.url)
                                             }
                                             if (streamUrl != null) {
                                                 val saved = saveDownloadedVideo(

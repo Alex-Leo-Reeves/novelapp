@@ -62,6 +62,29 @@ fun NmcHomeScreen(
     var isLoadingManga by remember { mutableStateOf(false) }
     var isLoadingComics by remember { mutableStateOf(false) }
 
+    // ── Infinite scrolling state ──────────────────────────────────────────
+    var novelPage by remember { mutableStateOf(2) }
+    var mangaPage by remember { mutableStateOf(2) }
+    var comicPage by remember { mutableStateOf(2) }
+    var isLoadingMoreNovels by remember { mutableStateOf(false) }
+    var isLoadingMoreManga by remember { mutableStateOf(false) }
+    var isLoadingMoreComics by remember { mutableStateOf(false) }
+    var hasMoreNovels by remember { mutableStateOf(true) }
+    var hasMoreManga by remember { mutableStateOf(true) }
+    var hasMoreComics by remember { mutableStateOf(true) }
+
+    val listState = rememberLazyListState()
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            if (layoutInfo.visibleItemsInfo.isEmpty()) false
+            else {
+                val lastVisible = layoutInfo.visibleItemsInfo.last().index
+                lastVisible >= layoutInfo.totalItemsCount - 6
+            }
+        }
+    }
+
     val scope = rememberCoroutineScope()
 
     // ── Load popular content ──────────────────────────────────────────────
@@ -106,6 +129,65 @@ fun NmcHomeScreen(
     }
 
     val isSearchActive = searchQuery.length >= 2
+
+    // ── Auto-append when the user nears the end of the browse feed ────────
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore && !isSearchActive) loadMoreContent()
+    }
+
+    fun loadMoreContent() {
+        if (hasMoreNovels && !isLoadingMoreNovels) {
+            isLoadingMoreNovels = true
+            scope.launch {
+                try {
+                    val more = repository.fetchPopularNovels(novelPage)
+                    if (more.isNotEmpty()) {
+                        novelItems = (novelItems + more).distinctBy { it.id }
+                        novelPage++
+                    } else {
+                        hasMoreNovels = false
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    isLoadingMoreNovels = false
+                }
+            }
+        }
+        if (hasMoreManga && !isLoadingMoreManga) {
+            isLoadingMoreManga = true
+            scope.launch {
+                try {
+                    val more = repository.fetchPopularManga(mangaPage)
+                    if (more.isNotEmpty()) {
+                        mangaItems = (mangaItems + more).distinctBy { it.id }
+                        mangaPage++
+                    } else {
+                        hasMoreManga = false
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    isLoadingMoreManga = false
+                }
+            }
+        }
+        if (hasMoreComics && !isLoadingMoreComics) {
+            isLoadingMoreComics = true
+            scope.launch {
+                try {
+                    val more = repository.fetchPopularComics(comicPage)
+                    if (more.isNotEmpty()) {
+                        comicItems = (comicItems + more).distinctBy { it.id }
+                        comicPage++
+                    } else {
+                        hasMoreComics = false
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    isLoadingMoreComics = false
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -179,6 +261,7 @@ fun NmcHomeScreen(
 
         // ── Content feed ──────────────────────────────────────────────────
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
@@ -274,7 +357,7 @@ fun NmcHomeScreen(
                 if (isLoadingNovels) {
                     item { LoadingShimmer() }
                 } else {
-                    items(novelItems.take(6)) { item ->
+                    items(novelItems) { item ->
                         NmcCardItem(
                             item = item,
                             isFavorite = favorites.any { it.id == item.id },
@@ -300,7 +383,7 @@ fun NmcHomeScreen(
                 if (isLoadingManga) {
                     item { LoadingShimmer() }
                 } else {
-                    items(mangaItems.take(6)) { item ->
+                    items(mangaItems) { item ->
                         NmcCardItem(
                             item = item,
                             isFavorite = favorites.any { it.id == item.id },
@@ -326,7 +409,7 @@ fun NmcHomeScreen(
                 if (isLoadingComics) {
                     item { LoadingShimmer() }
                 } else {
-                    items(comicItems.take(6)) { item ->
+                    items(comicItems) { item ->
                         NmcCardItem(
                             item = item,
                             isFavorite = favorites.any { it.id == item.id },
@@ -345,6 +428,21 @@ fun NmcHomeScreen(
                                 )
                             }
                         )
+                    }
+                }
+
+                if (isLoadingMoreNovels || isLoadingMoreManga || isLoadingMoreComics) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 3.dp,
+                                color = NeonBlue
+                            )
+                        }
                     }
                 }
             }

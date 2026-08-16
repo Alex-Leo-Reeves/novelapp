@@ -49,11 +49,25 @@ fun TvEmbedPlayer(
         }.getOrNull() ?: "https://vidlink.pro"
     }
 
+    // Back-to-back binge fix: the AndroidView factory runs ONCE, so a changed
+    // embedUrl (auto-next / NEXT / PREV) must explicitly reload the SAME
+    // WebView, otherwise the previous episode's page stays on screen.
+    // State resets here happen for both the first load and every episode swap;
+    // the reload below is skipped on the first composition (webViewRef is null
+    // until the factory runs anyway).
     LaunchedEffect(embedUrl) {
         hasError = false
         playerPhase = PlayerPhase.LOADING
         phaseMessage = "Loading player..."
         stabilizeAttempts = 0
+        if (webViewRef != null) {
+            val headers = embedRequestHeaders(embedUrl)
+            if (headers.isNotEmpty()) {
+                webViewRef?.loadUrl(embedUrl, headers)
+            } else {
+                webViewRef?.loadUrl(embedUrl)
+            }
+        }
     }
 
     // Stabilization timer: enforce minimum 3s in STABILIZING.
@@ -102,13 +116,17 @@ fun TvEmbedPlayer(
         }
     }
 
-    // Synthetic touch gesture on READY to allow unmuted autoplay
+    // Synthetic touch gesture on READY to allow unmuted autoplay.
+    // Deliberately at the TOP-LEFT CORNER (20,20), not the center: it only
+    // needs to count as a user activation for AudioContext.resume(), and a
+    // center tap can toggle play/pause on players that auto-pause on first
+    // touch — leaving the video stuck paused.
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.READY) {
             delay(500L) // Wait for UI layout and JS injection
             val view = webViewRef ?: return@LaunchedEffect
-            val x = (view.width / 2f).coerceAtLeast(1f)
-            val y = (view.height / 2f).coerceAtLeast(1f)
+            val x = 20f
+            val y = 20f
             val eventTime = android.os.SystemClock.uptimeMillis()
             val downEvent = android.view.MotionEvent.obtain(
                 eventTime, eventTime, android.view.MotionEvent.ACTION_DOWN,
@@ -122,6 +140,21 @@ fun TvEmbedPlayer(
             view.dispatchTouchEvent(upEvent)
             downEvent.recycle()
             upEvent.recycle()
+            // Auto volume boost — the READY touch is also the user gesture the
+            // AudioContext needs for `resume()`, so chain the boost right here.
+            view.evaluateJavascript(AUDIO_BOOST_JS, null)
+        }
+    }
+
+    // Auto volume booster re-application: embeds frequently rebuild their
+    // <video> element mid-playback (ad roll, quality switch, HLS reload), which
+    // drops the Web Audio boost graph. Re-inject every 3s for the first 90s of
+    // the episode so the boost always lands, with zero user interaction.
+    LaunchedEffect(embedUrl) {
+        repeat(30) { attempt ->
+            delay(3_000L * (attempt + 1))
+            val view = webViewRef ?: return@repeat
+            view.evaluateJavascript(AUDIO_BOOST_JS, null)
         }
     }
 
@@ -341,23 +374,7 @@ fun TvEmbedPlayer(
                     webViewRef = this
                     onWebViewCreated(this)
 
-                    val extraHeaders = mutableMapOf<String, String>()
-                    if (embedUrl.contains("embed.su")) {
-                        extraHeaders["Referer"] = "https://embed.su/"
-                        extraHeaders["Origin"] = "https://embed.su"
-                    } else if (embedUrl.contains("autoembed")) {
-                        extraHeaders["Referer"] = "https://player.autoembed.cc/"
-                        extraHeaders["Origin"] = "https://player.autoembed.cc"
-                    } else if (embedUrl.contains("vidsrc.cc")) {
-                        extraHeaders["Referer"] = "https://vidsrc.cc/"
-                        extraHeaders["Origin"] = "https://vidsrc.cc"
-                    } else if (embedUrl.contains("vidsrc.to")) {
-                        extraHeaders["Referer"] = "https://vidsrc.to/"
-                        extraHeaders["Origin"] = "https://vidsrc.to"
-                    } else if (embedUrl.contains("smashystream")) {
-                        extraHeaders["Referer"] = "https://embed.smashystream.com/"
-                    }
-
+                    val extraHeaders = embedRequestHeaders(embedUrl)
                     if (extraHeaders.isNotEmpty()) {
                         loadUrl(embedUrl, extraHeaders)
                     } else {
@@ -400,6 +417,30 @@ fun TvEmbedPlayer(
 }
 
 private const val MA_SERVER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+/**
+ * Referer/Origin headers for embed hosts that require them. Shared by the
+ * initial load and the reload-on-episode-change path so both behave identically.
+ */
+private fun embedRequestHeaders(embedUrl: String): Map<String, String> {
+    val extraHeaders = mutableMapOf<String, String>()
+    if (embedUrl.contains("embed.su")) {
+        extraHeaders["Referer"] = "https://embed.su/"
+        extraHeaders["Origin"] = "https://embed.su"
+    } else if (embedUrl.contains("autoembed")) {
+        extraHeaders["Referer"] = "https://player.autoembed.cc/"
+        extraHeaders["Origin"] = "https://player.autoembed.cc"
+    } else if (embedUrl.contains("vidsrc.cc")) {
+        extraHeaders["Referer"] = "https://vidsrc.cc/"
+        extraHeaders["Origin"] = "https://vidsrc.cc"
+    } else if (embedUrl.contains("vidsrc.to")) {
+        extraHeaders["Referer"] = "https://vidsrc.to/"
+        extraHeaders["Origin"] = "https://vidsrc.to"
+    } else if (embedUrl.contains("smashystream")) {
+        extraHeaders["Referer"] = "https://embed.smashystream.com/"
+    }
+    return extraHeaders
+}
 
 private const val STABILIZATION_START_JS = """
 (function() {
@@ -486,19 +527,50 @@ private const val STABILIZATION_END_JS = """
 
 private const val INLINE_VIDEO_JS = """
 (function() {
-    window.open = function() { return null; };
-    window.onbeforeunload = null;
-    function forceInline() {
-        const videos = document.querySelectorAll('video');
-        videos.forEach(v => {
-            v.setAttribute('playsinline', '');
-            v.setAttribute('webkit-playsinline', '');
-            v.setAttribute('x-webkit-airplay', 'allow');
-        });
+    try {
+        window.open = function() { return null; };
+        window.alert = function() {};
+        window.confirm = function() { return true; };
+        window.prompt = function() { return null; };
+        window.onbeforeunload = null;
+    } catch(e) {}
+
+    function neutralizeOverlays() {
+        try {
+            const elements = document.querySelectorAll('div, a, span');
+            elements.forEach(el => {
+                const style = window.getComputedStyle(el);
+                const zIndex = parseInt(style.zIndex, 10);
+                if (zIndex > 100 && (style.opacity === '0' || style.background === 'transparent' || style.backgroundColor === 'rgba(0, 0, 0, 0)')) {
+                    if (el.tagName === 'A' || el.onclick || el.getAttribute('onclick')) {
+                        el.style.pointerEvents = 'none';
+                    }
+                }
+            });
+        } catch(e) {}
     }
+
+    function forceInline() {
+        try {
+            const videos = document.querySelectorAll('video');
+            videos.forEach(v => {
+                v.setAttribute('playsinline', '');
+                v.setAttribute('webkit-playsinline', '');
+                v.setAttribute('x-webkit-airplay', 'allow');
+                v.setAttribute('autoplay', '');
+            });
+        } catch(e) {}
+    }
+
     forceInline();
-    const observer = new MutationObserver(() => forceInline());
-    observer.observe(document.body, { childList: true, subtree: true });
+    neutralizeOverlays();
+    const observer = new MutationObserver(() => {
+        forceInline();
+        neutralizeOverlays();
+    });
+    if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
 })();
 """
 
@@ -573,5 +645,101 @@ private const val FULLSCREEN_CSS_JS = """
         }
     `;
     document.head.appendChild(style);
+})();
+"""
+
+private const val AUDIO_BOOST_JS = """
+(function() {
+    // Auto volume booster: routes the <video> element through a Web Audio
+    // gain node (MediaElementSource -> DynamicsCompressor -> Gain 1.75x ->
+    // destination). This actually amplifies audio past the 1.0 volume cap,
+    // player-agnostically, with zero user interaction. The soft-knee
+    // compressor in front of the gain prevents clipping on loud peaks.
+    //
+    // Safety: cross-origin media whose element lacks `crossOrigin` would go
+    // silent through createMediaElementSource (tainted output). We skip those
+    // and let the regular 1.0 volume apply — no harm. Same-origin embeds
+    // (vidlink, vidsrc, embed.su, nontongo, smashystream, autoembed) and HLS
+    // blob: streams route cleanly.
+
+    function getCtx(doc) {
+        var w = doc.defaultView || window;
+        if (w.__NOVEL_BOOST_CTX) return w.__NOVEL_BOOST_CTX;
+        try {
+            var AC = w.AudioContext || w.webkitAudioContext;
+            if (!AC) return null;
+            var ctx = new AC();
+            w.__NOVEL_BOOST_CTX = ctx;
+            var resume = function() {
+                try {
+                    if (ctx.state !== 'running') ctx.resume().catch(function() {});
+                } catch(e) {}
+            };
+            ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function(evt) {
+                try { doc.addEventListener(evt, resume, { once: true, passive: true }); } catch(e) {}
+            });
+            try { if (ctx.state !== 'running') ctx.resume().catch(function() {}); } catch(e) {}
+            return ctx;
+        } catch(e) { return null; }
+    }
+
+    function isSafeToRoute(src) {
+        if (!src) return true;
+        var lower = String(src).toLowerCase();
+        // blob:/data: media is same-origin by construction (HLS hls.js output)
+        if (lower.indexOf('blob:') === 0 || lower.indexOf('data:') === 0) return true;
+        try {
+            var s = new URL(String(src), window.location.href);
+            return s.origin === window.location.origin;
+        } catch(e) {
+            // Protocol-relative or bare path -> same origin unless explicitly http(s)
+            return lower.indexOf('http') !== 0;
+        }
+    }
+
+    function boostIn(doc) {
+        var videos = doc.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            try {
+                v.muted = false;
+                v.volume = 1.0;
+                if (v.__novelAppBoosted) continue;
+                var src = v.currentSrc || v.src || '';
+                if (src && !isSafeToRoute(src)) continue;
+                var ctx = getCtx(doc);
+                if (!ctx) continue;
+                var source = ctx.createMediaElementSource(v);
+                var compressor = ctx.createDynamicsCompressor();
+                compressor.threshold.value = -12;
+                compressor.knee.value = 20;
+                compressor.ratio.value = 12;
+                compressor.attack.value = 0.003;
+                compressor.release.value = 0.25;
+                var gain = ctx.createGain();
+                gain.gain.value = 1.75;
+                source.connect(compressor);
+                compressor.connect(gain);
+                gain.connect(ctx.destination);
+                v.__novelAppBoosted = true;
+            } catch(e) {}
+        }
+    }
+
+    // Walk the top document and every reachable (same-origin) iframe.
+    function walk(doc) {
+        boostIn(doc);
+        try {
+            var frames = doc.querySelectorAll('iframe');
+            for (var i = 0; i < frames.length; i++) {
+                try {
+                    var inner = frames[i].contentDocument;
+                    if (inner) walk(inner);
+                } catch(e) {}
+            }
+        } catch(e) {}
+    }
+
+    walk(document);
 })();
 """

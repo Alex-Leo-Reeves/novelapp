@@ -109,22 +109,20 @@ enum class StreamServer(
 }
 
 /**
- * Donghua-only servers. These are intentionally separate from [StreamServer]
- * so the movie/anime/K-drama/cartoon/classic/Nigerian tabs keep their normal
- * Server 1 and Server 2 behavior.
+ * Donghua-only servers. Intentionally separate from [StreamServer] so the
+ * movie/anime/K-drama/cartoon/classic/Nigerian tabs keep their normal Server 1
+ * and Server 2 behavior. Only AnimeXin is kept — the other TMDB-embed donghua
+ * servers (Nontongo/AutoEmbed/DonghuaStream/EmbedSu/LuciferDonghua/VidSrc)
+ * were removed per user request; donghua plays through AnimeXin's device-side
+ * scraper, which extracts embed/direct streams that load in the WebView player
+ * (same trick as AnimeHeaven/AniDao for anime).
  */
 enum class DonghuaServer(
     val displayName: String,
     val providerName: String,
     val serverOrder: Int
 ) {
-    ANIMEXIN("Server 1", "AnimeXin", 1),
-    NONTONGO("Server 2", "Nontongo", 2),
-    AUTOEMBED("Server 3", "AutoEmbed", 3),
-    DONGHUA_STREAM("Server 4", "DonghuaStream", 4),
-    EMBEDSU("Server 5", "EmbedSu", 5),
-    LUCIFER_DONGHUA("Server 6", "Lucifer Donghua", 6),
-    VIDSRC("Server 7", "VidSrc", 7);
+    ANIMEXIN("Server 1", "AnimeXin", 1);
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
@@ -136,19 +134,33 @@ enum class DonghuaServer(
  *
  * When the app detects anime content it shows ONLY this list, never the
  * generic [StreamServer] movie/TV list. Servers 1-13 are Anivexa-API providers
- * (backed by server/anivexa on the app backend, keyed by AniList ID). Server 14
- * (VIDLINK) is the TMDB-embed fallback and is intentionally the LAST server.
+ * (backed by server/anivexa on the app backend, keyed by AniList ID). Servers
+ * 14-16 (AnimeHeaven / AnimePahe / AniDao) are the three Anivault servers —
+ * they are DESCRIBED in the Anivault-Scraper repo but here run through the
+ * DEVICE-SIDE scrapers (AnimeScrapers.kt), which is exactly how the repo
+ * owner's site works: the scraping runs on the user's residential IP inside
+ * the app, so CDNs/Cloudflare that block datacenter egress (Render/Vercel
+ * probes) let these play — Dragon Ball Super included. VIDLINK (Server 17)
+ * is the TMDB-embed fallback and is intentionally the LAST server.
  *
  * [usesTmdbEpisodes] is true only for VIDLINK: its episode list is reloaded from
  * TMDB so the embed URL resolves via the tmdb marker → `StreamServer.buildEmbedUrl`
  * flow. The Anivexa providers use AniList ID-based episode lists instead.
+ *
+ * [isAnivexa] is true for the 13 backend providers (resolved via server/anivexa).
+ * [usesClientScraper] is true for the 3 Anivault servers — resolved via the
+ * device-side scrapers that run on the user's IP (AnimeHeavenScraper,
+ * AnimePaheScraper, AniDaoScraper). [clientScraperKey] maps to the provider key
+ * used by NovelSearchRepository.fetchEpisodesFromAnimeProvider /
+ * resolveAnimeServerStream.
  */
 enum class AnimeServer(
     val displayName: String,
     val providerName: String,
     val usesTmdbEpisodes: Boolean,
     val serverOrder: Int,
-    val anivexaProviderKey: String?
+    val anivexaProviderKey: String?,
+    val clientScraperKey: String? = null
 ) {
     MKISSA("Server 1", "MKissa", false, 1, "mkissa"),
     REANIME("Server 2", "Reanime", false, 2, "reanime"),
@@ -163,13 +175,21 @@ enum class AnimeServer(
     SENSHI("Server 11", "Senshi", false, 11, "senshi"),
     KAA("Server 12", "KickAssAnime", false, 12, "kaa"),
     ANIMEDUNYA("Server 13", "AnimeDunya", false, 13, "animedunya"),
-    VIDLINK("Server 14", "VidLink", true, 14, null);
+    // ── Anivault trio (device-side scrapers → residential IP, mirrors the
+    //    repo owner's working play-by-page-in-browser trick) ──────────────
+    ANIMEHEAVEN("Server 14", "AnimeHeaven", false, 14, null, "animeheaven"),
+    ANIMEPAHE("Server 15", "AnimePahe", false, 15, null, "animepahe"),
+    ANIDAO("Server 16", "AniDao", false, 16, null, "anidao"),
+    VIDLINK("Server 17", "VidLink", true, 17, null);
 
-    /** True for the 13 Anivexa-API provider servers (all except VIDLINK). */
+    /** True for the 13 Anivexa-API provider servers (backend, AniList-keyed). */
     val isAnivexa: Boolean get() = anivexaProviderKey != null
 
+    /** True for the 3 Anivault servers resolved by device-side scrapers. */
+    val usesClientScraper: Boolean get() = clientScraperKey != null
+
     companion object {
-        /** All anime servers in display order: Anivexa providers first, VidLink last. */
+        /** All anime servers in display order: Anivexa first, then Anivault, VidLink last. */
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
     }
 }

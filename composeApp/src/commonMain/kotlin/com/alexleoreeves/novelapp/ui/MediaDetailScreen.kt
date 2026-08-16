@@ -123,13 +123,9 @@ fun MediaDetailScreen(
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
         when (selectedDonghuaServer) {
-            DonghuaServer.NONTONGO -> donghuaStreamScraper
-            DonghuaServer.AUTOEMBED -> donghuaStreamScraper
-            DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
-            DonghuaServer.EMBEDSU -> donghuaStreamScraper
-            DonghuaServer.LUCIFER_DONGHUA -> luciferDonghuaScraper
-            DonghuaServer.VIDSRC -> donghuaStreamScraper // URL built directly, scraper not used
-            DonghuaServer.ANIMEXIN -> donghuaStreamScraper // AnimeXin has its own scraper; episodes loaded separately
+            // Only AnimeXin remains — the TMDB-embed donghua servers were
+            // removed per user request. Episodes are loaded via animeXinScraper.
+            DonghuaServer.ANIMEXIN -> donghuaStreamScraper
         }
 
     /** Resolve the AniList ID for anime-only servers (Anivexa providers). */
@@ -192,57 +188,12 @@ fun MediaDetailScreen(
     }
 
     suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? {
+        // Only AnimeXin remains (the TMDB-embed donghua servers were removed).
+        // Resolve the episode page URL to extract the best embed player URL —
+        // animexin.dev hosts Donghua with direct iframe embed extraction that
+        // loads in the visible WebView player.
         return when (selectedDonghuaServer) {
-            DonghuaServer.NONTONGO -> {
-                val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
-                val detailType = detailParts.getOrNull(0).orEmpty()
-                val detailTmdbId = detailParts.getOrNull(1).orEmpty()
-                if (!item.detailPageUrl.startsWith("tmdb://") || detailTmdbId.isBlank()) return null
-
-                val urlParts = ep.url.split(":")
-                val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
-                val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: ep.episodeNumber.coerceAtLeast(1).toString()
-
-                if (detailType == "movie") {
-                    "https://nontongo.win/embed/movie/$detailTmdbId"
-                } else {
-                    "https://nontongo.win/embed/tv/$detailTmdbId/$s/$e"
-                }
-            }
-            DonghuaServer.AUTOEMBED -> {
-                buildDonghuaAutoEmbedUrl(ep) ?: ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.DONGHUA_STREAM -> {
-                ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.EMBEDSU -> {
-                buildDonghuaEmbedSuUrl(ep) ?: ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.LUCIFER_DONGHUA -> {
-                // Resolve the episode page URL via the LuciferDonghua scraper to get
-                // an embed/player URL that MaServerPlayerScreen can open directly.
-                // The WebView already has luciferdonghua.in iframe-extraction JS built in,
-                // so the page loads fullscreen video just like DonghuaStream (Server 3).
-                val playerUrl = luciferDonghuaScraper.resolveEpisodePlayerUrl(ep.url)
-                playerUrl ?: ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.VIDSRC -> {
-                // VidSrc.to: build the embed URL directly from the TMDB ID — no scraping,
-                // no bot-protection risk. Widest Donghua/anime TMDB coverage.
-                val detailParts = item.detailPageUrl.removePrefix("tmdb://").split("/")
-                val detailType = detailParts.getOrNull(0).orEmpty()
-                val detailTmdbId = detailParts.getOrNull(1).orEmpty()
-                if (item.detailPageUrl.startsWith("tmdb://") && detailTmdbId.isNotBlank()) {
-                    val urlParts = ep.url.split(":")
-                    val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
-                    val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: ep.episodeNumber.coerceAtLeast(1).toString()
-                    if (detailType == "movie") "https://vidsrc.to/embed/movie/$detailTmdbId"
-                    else "https://vidsrc.to/embed/tv/$detailTmdbId/$s/$e"
-                } else ep.url.takeIf { it.isNotBlank() }
-            }
             DonghuaServer.ANIMEXIN -> {
-                // AnimeXin: resolve the episode page URL to extract the best embed player URL.
-                // animexin.dev hosts Donghua and Anime with direct iframe embed extraction.
                 val playerUrl = animeXinScraper.resolveEpisodePlayerUrl(ep.url)
                 playerUrl ?: ep.url.takeIf { it.isNotBlank() }
             }

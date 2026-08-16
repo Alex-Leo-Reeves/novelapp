@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
+import com.alexleoreeves.novelapp.data.mediacache.DownloadPhase
+import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import androidx.activity.compose.BackHandler
 
 @Composable
@@ -39,6 +41,7 @@ fun TvDetailScreen(
     item: UnifiedSearchResult,
     account: SavedUserAccount?,
     watchProgressStore: TvWatchProgressStore,
+    mediaCache: TvMediaCacheController? = null,
     onPlaySession: (TvBingeSession) -> Unit,
     onOpenRecommendations: (recItem: UnifiedSearchResult, fromItem: UnifiedSearchResult?) -> Unit,
     onReadNovel: (text: String, title: String) -> Unit,
@@ -66,18 +69,63 @@ fun TvDetailScreen(
         
     val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
 
+    // Whether the header shows a single "Watch Now" (movie / full-movie) vs an
+    // episode list. Hoisted here so BOTH the left panel (Download button) and
+    // the right panel (per-episode download icons) can use it. The boolean
+    // `isSingleContent` drives whether the Download button appears once in the
+    // header (movie) or once per episode in the grid (series).
+    val primaryChapter = chapters.firstOrNull()
+    val isSingleContent = when {
+        !isVideoTitle -> false
+        primaryChapter?.url?.startsWith("tmdb-movie://", ignoreCase = true) == true -> true
+        kind == "movie" || item.mediaKind.equals("movies", ignoreCase = true) -> true
+        primaryChapter?.title?.equals("Full Movie", ignoreCase = true) == true -> true
+        else -> false
+    }
+    val watchLabel = if (isSingleContent || chapters.isEmpty()) "Watch Now" else "Watch Episode 1"
+
+    // ── Download state ────────────────────────────────────────────────────
+    // The media cache engine notifies via StateFlow; we snapshot it so the
+    // download buttons can show task progress + a "Downloaded" state once a
+    // task COMPLETES (TvDownloadsScreen lists finished bundles). Live progress
+    // is shown inline per-episode; cancel/pause is managed from Downloads.
+    val cacheTasks by mediaCache?.tasks?.collectAsState() ?: remember { mutableStateOf(emptyMap()) }
+    val completedTasks by remember(cacheTasks) {
+        mutableStateOf(cacheTasks.values.filter { it.isTerminal && it.phase == DownloadPhase.COMPLETED }.map { it.request.taskId }.toSet())
+    }
+
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
     var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.ANIMEXIN) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
+    // Tracks whether the user picked an AnimeServer chip for a donghua title.
+    // When false (the default), donghua routes through AnimeXin (DonghuaServer
+    // row) exactly as before; when true, donghua rides the 13 Anivexa providers /
+    // Anivault trio / VidLink via selectedAnimeServer.
+    var useAnimeServerForDonghua by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
+    // Anime misroute escape hatch: when an item flagged as anime returns no
+    // episodes from ANY anime provider, fall back to the generic TV/movie
+    // server path so live-action shows that got filtered into the anime tab
+    // (e.g. Legend of the Seeker) still play on the movie/TV servers.
+    var animeFallbackActive by remember { mutableStateOf(false) }
 
-    LaunchedEffect(item, selectedAnimeServer) {
+    LaunchedEffect(item, selectedAnimeServer, selectedDonghuaServer, useAnimeServerForDonghua) {
         isLoading = true
         errorMsg = null
         statusText = ""
+        animeFallbackActive = false
         try {
             val fetched = if (isVideoTitle) {
-                if (item.isAnime && !isDonghua) {
+                if (isDonghua) {
+                    // Donghua: when the user picked an AnimeServer chip
+                    // (useAnimeServerForDonghua=true) ride that provider's episode
+                    // list (13 Anivexa / Anivault trio / VidLink). Otherwise keep
+                    // the original AnimeXin path (animeServer=null → default).
+                    mediaRepo.fetchVideoEpisodes(
+                        item,
+                        if (useAnimeServerForDonghua) selectedAnimeServer else null
+                    )
+                } else if (item.isAnime) {
                     mediaRepo.fetchVideoEpisodes(item, selectedAnimeServer)
                 } else {
                     mediaRepo.fetchVideoEpisodes(item)
@@ -93,6 +141,17 @@ fun TvDetailScreen(
                 )
             }
             chapters = fetched
+            // Anime fallback: anime-tagged item with ZERO episodes → re-fetch via
+            // the generic TV/movie path (TMDB / drama / etc). If that yields a
+            // list, treat it as a live-action misroute and route playback through
+            // the StreamServer (movie) row instead of the anime providers.
+            if (item.isAnime && !isDonghua && fetched.isEmpty()) {
+                val generic = mediaRepo.fetchVideoEpisodes(item)
+                if (generic.isNotEmpty()) {
+                    chapters = generic
+                    animeFallbackActive = true
+                }
+            }
         } catch (e: Exception) {
             errorMsg = e.message
         }
@@ -106,6 +165,58 @@ fun TvDetailScreen(
                 initialFocusRequester.requestFocus() 
             }
         } catch (e: Exception) {}
+    }
+
+    /**
+     * Enqueue an episode/movie for offline download through the media cache.
+     * The task shows up live in TvDownloadsScreen (active queue → completed),
+     * and the per-episode button flips to "Downloaded" once the bundle lands.
+     */
+    fun enqueueDownload(chapter: Chapter? = null) {
+        val cache = mediaCache ?: run {
+            statusText = "Downloads unavailable on this build."
+            return
+        }
+        val ch = chapter ?: chapters.firstOrNull()
+            ?: Chapter(item.title, item.detailPageUrl, 0)
+        val title = ch.title.ifBlank { item.title }
+        val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        val containerExtension = "mp4"
+        statusText = "Downloading \"$title\"..."
+        scope.launch {
+            val sourceUrl = mediaRepo.resolveStreamUrl(
+                item = item,
+                chapter = ch,
+                server = when {
+                    animeFallbackActive -> selectedServer
+                    isDonghua || item.isAnime -> null
+                    else -> selectedServer
+                },
+                donghuaServer = if (isDonghua && !useAnimeServerForDonghua) selectedDonghuaServer else null,
+                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer
+                    else if (isDonghua && useAnimeServerForDonghua) selectedAnimeServer
+                    else null
+            )
+            if (sourceUrl.isNullOrBlank()) {
+                statusText = "Could not resolve a download link. Try another server."
+                return@launch
+            }
+            cache.enqueueInternal(
+                taskId = taskId,
+                sourceUrl = sourceUrl,
+                title = title,
+                parentId = item.id,
+                episodeNumber = ch.chapterNumber,
+                containerExtension = containerExtension,
+                serverId = if (isDonghua) selectedDonghuaServer.name
+                    else if (item.isAnime) selectedAnimeServer.name
+                    else selectedServer.name,
+                serverName = if (isDonghua) selectedDonghuaServer.displayName
+                    else if (item.isAnime) selectedAnimeServer.displayName
+                    else selectedServer.displayName
+            )
+            statusText = "Download started — see Downloads (active queue)."
+        }
     }
 
     fun playMedia(chapter: Chapter? = null) {
@@ -124,11 +235,26 @@ fun TvDetailScreen(
                     .coerceAtLeast(0)
 
                 val isAnimeItem = item.isAnime && !isDonghua
-                val effectiveAnimeServer = if (isAnimeItem) selectedAnimeServer else null
+                // Anime misroute escape hatch: when the anime-tagged title had no
+                // episodes from any anime provider and fell back to the generic
+                // TV/movie list, route playback through the movie/TV StreamServer
+                // row (TMDB markers) — NOT the anime providers, which can't
+                // resolve TMDB chapters. This is what makes misclassified
+                // live-action shows (e.g. Legend of the Seeker) play normally.
+                val effectiveAnimeServer = when {
+                    animeFallbackActive -> null
+                    isAnimeItem -> selectedAnimeServer
+                    isDonghua && useAnimeServerForDonghua -> selectedAnimeServer
+                    else -> null
+                }
                 // Anime (13 Anivexa providers + VidLink LAST) resolves through
                 // animeServer; never map it to a generic StreamServer embed on TV.
-                val effectiveStreamServer = if (isDonghua || isAnimeItem) null else selectedServer
-                val effectiveDonghuaServer = if (isDonghua) selectedDonghuaServer else null
+                val effectiveStreamServer = when {
+                    animeFallbackActive -> selectedServer
+                    isDonghua || isAnimeItem -> null
+                    else -> selectedServer
+                }
+                val effectiveDonghuaServer = if (isDonghua && !useAnimeServerForDonghua) selectedDonghuaServer else null
 
                 val first = mediaRepo.resolveBingeEpisode(
                     context = context,
@@ -153,11 +279,13 @@ fun TvDetailScreen(
                     item = item,
                     episodes = episodes,
                     serverName = when {
-                        isDonghua -> selectedDonghuaServer.displayName
+                        animeFallbackActive -> selectedServer.displayName
                         isAnimeItem -> selectedAnimeServer.displayName
+                        isDonghua && useAnimeServerForDonghua -> selectedAnimeServer.displayName
+                        isDonghua -> selectedDonghuaServer.displayName
                         else -> selectedServer.displayName
                     },
-                    server = if (isDonghua || isAnimeItem) null else selectedServer,
+                    server = if (animeFallbackActive) selectedServer else if (isDonghua || isAnimeItem) null else selectedServer,
                     donghuaServer = effectiveDonghuaServer,
                     animeServer = effectiveAnimeServer,
                     currentIndex = startIndex,
@@ -286,33 +414,66 @@ fun TvDetailScreen(
 
                 if (isVideoTitle) {
                     val primaryChapter = chapters.firstOrNull()
-                    val watchLabel = when {
-                        primaryChapter?.url?.startsWith("tmdb-movie://", ignoreCase = true) == true -> "Watch Now"
-                        kind == "movie" || item.mediaKind.equals("movies", ignoreCase = true) -> "Watch Now"
-                        primaryChapter?.title?.equals("Full Movie", ignoreCase = true) == true -> "Watch Now"
-                        chapters.isNotEmpty() -> "Watch Episode 1"
-                        else -> "Watch Now"
-                    }
                     var watchFocused by remember { mutableStateOf(false) }
-                    Surface(
-                        onClick = { playMedia(chapters.firstOrNull()) },
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (watchFocused) Color(0xFF00BFFF) else Color(0xFF00BFFF).copy(0.15f),
-                        border = if (watchFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.4f)),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                            .onFocusChanged { watchFocused = it.isFocused }
+                    val isSingleDownload = isSingleContent ||
+                        primaryChapter?.title?.equals("Full Movie", ignoreCase = true) == true
+                    val movieDownloaded = remember(completedTasks) {
+                        cacheTasks.values.any { it.request.parentId == item.id && it.isTerminal && it.phase == DownloadPhase.COMPLETED }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                        Surface(
+                            onClick = { playMedia(chapters.firstOrNull()) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (watchFocused) Color(0xFF00BFFF) else Color(0xFF00BFFF).copy(0.15f),
+                            border = if (watchFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.4f)),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                                .onFocusChanged { watchFocused = it.isFocused }
                         ) {
-                            Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                watchLabel,
-                                color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    watchLabel,
+                                    color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                        }
+
+                        if (isSingleDownload && mediaCache != null) {
+                            var downloadFocused by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = { enqueueDownload(primaryChapter) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (downloadFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.12f),
+                                border = if (downloadFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.4f)),
+                                modifier = Modifier.width(180.dp).height(48.dp)
+                                    .onFocusChanged { downloadFocused = it.isFocused }
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        if (movieDownloaded) Icons.Default.OfflinePin else Icons.Default.Download,
+                                        null,
+                                        tint = if (movieDownloaded) Color(0xFF06D6A0) else Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        if (movieDownloaded) "Downloaded" else "Download",
+                                        color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -379,17 +540,27 @@ fun TvDetailScreen(
                 )
 
                 if (isVideoTitle && !item.id.startsWith("youtube_nollywood_")) {
-                    // Server Selection Row
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-                    ) {
-                        if (isDonghua) {
+                    // Donghua shows TWO rows: the DonghuaServer row (AnimeXin
+                    // device scraper, the original donghua path) AND the anime
+                    // 17-server row (13 Anivexa providers + Anivault trio +
+                    // VidLink LAST — the Android donghua parity selector).
+                    if (isDonghua) {
+                        // Row 1: DonghuaServer (AnimeXin) — device scraper default.
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
                             items(DonghuaServer.ALL_IN_ORDER) { server ->
                                 val isSelected = selectedDonghuaServer == server
                                 var sFocused by remember { mutableStateOf(false) }
                                 Surface(
-                                    onClick = { selectedDonghuaServer = server },
+                                    onClick = {
+                                        selectedDonghuaServer = server
+                                        selectedAnimeServer = AnimeServer.ANINEKO
+                                        // DonghuaServer row = AnimeXin device-scraper
+                                        // path; clear the anime-server routing flag.
+                                        useAnimeServerForDonghua = false
+                                    },
                                     shape = RoundedCornerShape(20.dp),
                                     color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
                                     border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
@@ -400,9 +571,46 @@ fun TvDetailScreen(
                                     }
                                 }
                             }
-                        } else if (item.isAnime) {
-                            // Anime uses its own 14-server list: 13 Anivexa-API
-                            // providers (keyed by AniList ID) + VidLink LAST.
+                        }
+                        // Row 2: AnimeServer (13 Anivexa + 3 Anivault + VidLink).
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                        ) {
+                            items(AnimeServer.ALL_IN_ORDER) { server ->
+                                val isSelected = selectedAnimeServer == server
+                                var sFocused by remember { mutableStateOf(false) }
+                                Surface(
+                                    onClick = {
+                                        selectedAnimeServer = server
+                                        // Picking an anime server switches the active
+                                        // route to the Anivexa/Anivault/VidLink path;
+                                        // the DonghuaServer row remains available but is
+                                        // no longer the driving selection.
+                                        selectedDonghuaServer = DonghuaServer.ANIMEXIN
+                                        // Donghua now rides the 13 Anivexa providers /
+                                        // Anivault trio / VidLink via this chip.
+                                        useAnimeServerForDonghua = true
+                                    },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                    border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                    modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                        Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                    } else if (item.isAnime && !animeFallbackActive) {
+                        // Anime uses its own 17-server list: 13 Anivexa-API
+                        // providers (keyed by AniList ID) + 3 Anivault +
+                        // VidLink LAST.
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                        ) {
                             items(AnimeServer.ALL_IN_ORDER) { server ->
                                 val isSelected = selectedAnimeServer == server
                                 var sFocused by remember { mutableStateOf(false) }
@@ -418,7 +626,25 @@ fun TvDetailScreen(
                                     }
                                 }
                             }
-                        } else {
+                        }
+                    } else {
+                        // Normal TV/movie server row — ALSO shown when an anime
+                        // misroute was detected (animeFallbackActive): the title
+                        // had zero anime episodes and fell back to the generic
+                        // TV/movie list, so these are the servers that can
+                        // actually play it.
+                        if (animeFallbackActive) {
+                            Text(
+                                "This title may not be anime — the app found no anime episodes. Try a server below.",
+                                color = Color(0xFFFFB347),
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                        ) {
                             items(StreamServer.ALL_IN_ORDER) { server ->
                                 val isSelected = selectedServer == server
                                 var sFocused by remember { mutableStateOf(false) }
@@ -467,6 +693,14 @@ fun TvDetailScreen(
                         items(chapterList.size) { index ->
                             val ch = chapterList[index]
                             var chFocused by remember { mutableStateOf(false) }
+                            val isSingle = watchLabel == "Watch Now"
+                            val chDownloaded = remember(completedTasks) {
+                                cacheTasks.values.any {
+                                    it.request.parentId == item.id &&
+                                        it.request.episodeNumber == ch.chapterNumber &&
+                                        it.isTerminal && it.phase == DownloadPhase.COMPLETED
+                                }
+                            }
                             Surface(
                                 onClick = { playMedia(ch) },
                                 shape = RoundedCornerShape(8.dp),
@@ -478,14 +712,57 @@ fun TvDetailScreen(
                                     .then(if (index == 0) Modifier.focusRequester(firstEpisodeFocusRequester) else Modifier)
                                     .onFocusChanged { chFocused = it.isFocused }
                             ) {
-                                Box(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                                Row(
+                                    Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
                                         ch.title.ifBlank { "Chapter ${ch.chapterNumber}" },
                                         color = Color.White,
                                         fontWeight = if (chFocused) FontWeight.Bold else FontWeight.Normal,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    if (!isSingle && mediaCache != null) {
+                                        if (chDownloaded) {
+                                            Icon(
+                                                Icons.Default.OfflinePin,
+                                                null,
+                                                tint = Color(0xFF06D6A0),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        } else if (ch.chapterNumber in cacheTasks.keys.mapNotNull { key ->
+                                            cacheTasks[key]?.request?.episodeNumber?.takeIf { taskNum ->
+                                                taskNum == ch.chapterNumber &&
+                                                    cacheTasks[key]?.request?.parentId == item.id &&
+                                                    !cacheTasks[key]!!.isTerminal
+                                            }
+                                        }.toSet()
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = Color(0xFF00BFFF)
+                                            )
+                                        } else {
+                                            Surface(
+                                                onClick = { enqueueDownload(ch) },
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (chFocused) Color(0xFF06D6A0).copy(0.25f) else Color(0xFF06D6A0).copy(0.12f),
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        Icons.Default.Download,
+                                                        null,
+                                                        tint = if (chFocused) Color(0xFF06D6A0) else Color.White.copy(0.6f),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

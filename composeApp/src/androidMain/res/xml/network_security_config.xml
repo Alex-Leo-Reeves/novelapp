@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allows cleartext HTTP ONLY to the loopback nodebridge worker
+  (http://127.0.0.1:<port>) that runs the embedded Anivexa 13-provider
+  scraper inside the app. Nothing else gets cleartext — the default
+  Android 9+ block still forbids plain http to remote hosts.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

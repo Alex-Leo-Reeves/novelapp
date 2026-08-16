@@ -7,13 +7,20 @@ import io.ktor.client.request.*
 import kotlinx.serialization.json.*
 
 /**
- * Anivexa Anime API client — talks to the app's own backend
- * (https://novelapp1.onrender.com/api/anivexa/) which mounts the Anivexa-API
- * worker in-process (server/anivexa). The worker aggregates 13 anime scraping
- * providers keyed by AniList ID.
+ * Anivexa Anime API client — talks to a loopback Node.js worker running
+ * INSIDE the app on the device's residential IP (nodejs-mobile), falling back
+ * to the app backend (which mounts the same Anivexa worker server-side).
  *
- * Providers: mkissa, reanime, anikoto, animegg, anineko, anidbapp, 2dhive,
- * animenosub, anizone, anibd, senshi, kaa, animedunya.
+ * The worker aggregates 13 anime scraping providers keyed by AniList ID:
+ * mkissa, reanime, anikoto, animegg, anineko, anidbapp, 2dhive, animenosub,
+ * anizone, anibd, senshi, kaa, animedunya.
+ *
+ * Why the loopback worker matters: the provider CDNs (anineko, animegg,
+ * anikoto, senshi, mkissa, ...) block DATACENTER egress (Render/Vercel →
+ * streams=0 for popular anime like Dragon Ball), but allow residential IPs.
+ * The repo owner's site works because its browser scrapes from the user's own
+ * network. Running the same unmodified worker on-device replicates that exact
+ * behavior — zero porting drift, all 13 providers.
  *
  * Episode URLs are stored as `anivexa://{episodeId}` where episodeId is the
  * Anivexa episode `id` (e.g. `watch/anineko/151807/sub/anineko-1`). That same
@@ -28,6 +35,24 @@ class AnivexaApi(private val client: HttpClient) {
 
         fun isAnivexaEpisodeUrl(url: String): Boolean =
             url.startsWith(MARKER_PREFIX, ignoreCase = true)
+
+        /**
+         * Base URL of the in-app Anivexa worker when the embedded Node.js
+         * runtime is available. The Android/TV platform layer calls
+         * [setEmbeddedBaseUrl] once the nodebridge background server boots.
+         */
+        @Volatile
+        var embeddedBaseUrl: String? = null
+            private set
+
+        /** Called by the Android/TV nodebridge starter after the worker boots. */
+        fun setEmbeddedBaseUrl(url: String) {
+            embeddedBaseUrl = url.trimEnd('/').takeIf { it.isNotBlank() }
+        }
+
+        /** Loopback URL when the embedded worker is up, else the app backend. */
+        internal fun baseUrl(): String =
+            embeddedBaseUrl ?: AppReleaseConfig.API_BASE_URL + "/anivexa"
     }
 
     /**
@@ -36,7 +61,7 @@ class AnivexaApi(private val client: HttpClient) {
      */
     suspend fun fetchEpisodes(provider: String, anilistId: String): List<AnimeEpisode> {
         return runCatching {
-            val raw: String = client.get("${AppReleaseConfig.API_BASE_URL}/anivexa/episodes/$provider/$anilistId").body()
+            val raw: String = client.get("${baseUrl()}/episodes/$provider/$anilistId").body()
             val root = json.parseToJsonElement(raw).jsonObject
             if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return emptyList()
             val data = root["data"]?.jsonObject ?: return emptyList()
@@ -80,7 +105,7 @@ class AnivexaApi(private val client: HttpClient) {
         if (episodeId.isBlank()) return null
 
         return runCatching {
-            val raw: String = client.get("${AppReleaseConfig.API_BASE_URL}/anivexa/$episodeId").body()
+            val raw: String = client.get("${baseUrl()}/$episodeId").body()
             val root = json.parseToJsonElement(raw).jsonObject
             if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return null
             val data = root["data"]?.jsonObject ?: return null
@@ -104,7 +129,7 @@ class AnivexaApi(private val client: HttpClient) {
     /** Resolve the VidLink (TMDB) embed reference for the LAST anime server. */
     suspend fun resolveVidLinkEmbed(anilistId: String, episode: Int): VidLinkEmbedRef? {
         return runCatching {
-            val raw: String = client.get("${AppReleaseConfig.API_BASE_URL}/anivexa/embed/$anilistId") {
+            val raw: String = client.get("${baseUrl()}/embed/$anilistId") {
                 parameter("ep", episode)
             }.body()
             val root = json.parseToJsonElement(raw).jsonObject
@@ -122,12 +147,36 @@ class AnivexaApi(private val client: HttpClient) {
         }
     }
 
+    /**
+     * Resolve the TMDB id mapped to an AniList id via the worker's `/map` route.
+     *
+     * Exists on BOTH the embedded loopback worker and the backend fallback, so
+     * it works regardless of which Anivexa egress path is active. Used to VERIFY
+     * a title-bridged AniList id for a `tmdb://` item: if the mapped TMDB id
+     * differs from the item's own TMDB id, the bridge matched the WRONG show —
+     * the caller must reject the id instead of keying the 13 providers off it.
+     */
+    suspend fun resolveTmdbIdForAnilist(anilistId: String): String? {
+        return runCatching {
+            val raw: String = client.get("${baseUrl()}/map/$anilistId").body()
+            val root = json.parseToJsonElement(raw).jsonObject
+            val mappings = root["mappings"]?.jsonObject
+                ?: root["data"]?.jsonObject?.get("mappings")?.jsonObject
+                ?: return null
+            mappings["themoviedbId"]?.jsonPrimitive?.contentOrNull
+                ?: mappings["tmdbId"]?.jsonPrimitive?.contentOrNull
+        }.getOrElse { error ->
+            println("[Anivexa] TMDB mapping resolve failed for $anilistId: ${error.message}")
+            null
+        }
+    }
+
     /** Bridge a TMDB-sourced anime item → AniList ID via backend title search. */
     suspend fun searchAnilistId(title: String): String? {
-        val query = title.trim()
+        val query = normalizeSearchTitle(title)
         if (query.isBlank()) return null
         return runCatching {
-            val raw: String = client.get("${AppReleaseConfig.API_BASE_URL}/anivexa/search") {
+            val raw: String = client.get("${baseUrl()}/search") {
                 parameter("q", query)
             }.body()
             val root = json.parseToJsonElement(raw).jsonObject
@@ -137,6 +186,19 @@ class AnivexaApi(private val client: HttpClient) {
             println("[Anivexa] Search failed for '$query': ${error.message}")
             null
         }
+    }
+
+    /**
+     * Strips parenthetical qualifiers like `(TV)`, `(Dub)`, `(Sub)` and year
+     * suffixes from a TMDB-style title so the AniList title search finds the
+     * base show instead of failing on the qualifier.
+     */
+    private fun normalizeSearchTitle(title: String): String {
+        val clean = title
+            .replace(Regex("""\s*\((TV|Dub|Sub|Dubs|Subs|Movie|Film)\)""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s*\(\d{4}\)$"""), "")
+            .trim()
+        return clean.ifBlank { title.trim() }
     }
 
     private fun parseEpisodeNumber(value: JsonElement?): Int? {

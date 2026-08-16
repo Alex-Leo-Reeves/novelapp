@@ -10,19 +10,49 @@ import kotlinx.serialization.json.*
 private const val CINEPRO_BASE_URL = "https://cinepro-core-esmh.onrender.com"
 
 class TvMediaRepository {
+    /**
+     * Retries a suspend resolution call up to [times] attempts with a short
+     * backoff (800ms, 1600ms). Provider CDNs / Anivexa rate limits / Render
+     * cold starts fail transiently — one shot surfaces "cannot find content"
+     * even though the content is fine and loads on a later retry.
+     */
+    private suspend fun <T> retryNullable(times: Int = 3, block: suspend () -> T?): T? {
+        var lastError: Throwable? = null
+        repeat(times) { attempt ->
+            try {
+                val result = block()
+                if (result != null) return result
+            } catch (e: Throwable) {
+                lastError = e
+            }
+            if (attempt < times - 1) {
+                kotlinx.coroutines.delay(800L * (attempt + 1))
+            }
+        }
+        return null
+    }
+
     private val httpClient = platformHttpClient()
     private val tmdbScraper = TMDBMovieScraper(httpClient)
     private val dramaScraper = DramaCoolScraper(httpClient)
     private val cartoonScraper = KimCartoonScraper(httpClient)
     private val wcoStreamScraper = WcoStreamScraper(httpClient)
-    private val donghuaStreamScraper = DonghuaSiteScraper.donghuaStream(httpClient)
-    private val luciferDonghuaScraper = DonghuaSiteScraper.luciferDonghua(httpClient)
     private val animeXinScraper = AnimeXinScraper(httpClient)
     private val aninekoScraper = AninekoScraper(httpClient)
     private val animePaheScraper = AnimePaheScraper(httpClient)
+    private val animeHeavenScraper = AnimeHeavenScraper(httpClient)
+    private val aniDaoScraper = AniDaoScraper(httpClient)
     private val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
     private val anivexaApi = AnivexaApi(httpClient)
     private val youtubeNollywoodScraper = YouTubeNollywoodScraper(httpClient)
+
+    /**
+     * Resolved AniList IDs memoized by item id (fallback: title) so switching
+     * between the 13 Anivexa providers, or binge-NEXT across episodes, reuses
+     * the same AniList ID instead of re-running the slow backend title bridge
+     * on every server switch.
+     */
+    private val anilistIdCache = mutableMapOf<String, String?>()
 
     /**
      * Fetch the episode list for a video title.
@@ -40,11 +70,25 @@ class TvMediaRepository {
         val isTmdb = item.detailPageUrl.startsWith("tmdb://")
 
         return try {
-            // When an Anivexa provider (Servers 1-13) is selected, load its own
-            // AniList-keyed episode list — never the backend/TMDB chapters, whose
-            // numbered markers can't resolve through an Anivexa provider.
-            val useBackendForAnime = animeServer?.isAnivexa != true
-            val backendChapters = if (item.isAnime && useBackendForAnime || isTmdb && !item.isAnime) {
+            // When an Anivexa provider (Servers 1-13) or one of the Anivault
+            // client-scraper servers (14-16) is selected, load that server's own
+            // episode list — never the backend/TMDB chapters, whose numbered
+            // markers can't resolve through these providers. This gate applies
+            // to donghua too: a backend TMDB chapter list must NOT short-circuit
+            // when an Anivexa/Anivault server is active for a donghua title.
+            val useBackendForAnime = animeServer?.isAnivexa != true && animeServer?.usesClientScraper != true
+            val backendChapters = if (isDonghua) {
+                if (useBackendForAnime) {
+                    fetchChapters(
+                        kind.ifBlank { "movie" },
+                        item.detailPageUrl.ifBlank { item.url },
+                        item.title,
+                        item.sourceName
+                    )
+                } else {
+                    emptyList()
+                }
+            } else if (item.isAnime && useBackendForAnime || isTmdb && !item.isAnime) {
                 fetchChapters(
                     if (item.isAnime) "anime" else kind.ifBlank { "movie" },
                     item.detailPageUrl.ifBlank { item.url },
@@ -57,12 +101,86 @@ class TvMediaRepository {
             if (backendChapters.isNotEmpty()) return backendChapters
 
             val episodes = when {
-                isDonghua -> donghuaStreamScraper.fetchEpisodes(
-                    titleQuery = item.title,
-                    alternateQueries = listOf(item.title.substringBefore(":")),
-                    maxEpisodes = 300
-                ).map { ep ->
-                    Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                isDonghua -> {
+                    // Donghua can now ride the 13 Anivexa providers (AniList-keyed),
+                    // the Anivault trio (device-side scrapers) and VidLink — the
+                    // SAME 17-server AnimeServer list the Android app uses for
+                    // AniList-sourced donghua. AnimeXin remains the default when
+                    // no AnimeServer chip is active (selectedAnimeServer == null).
+                    val effectiveAnimeServer = animeServer
+                    if (effectiveAnimeServer?.isAnivexa == true) {
+                        val anilistId = resolveAnilistId(item)
+                        if (anilistId == null) {
+                            animeXinScraper.fetchEpisodes(
+                                titleQuery = item.title,
+                                maxEpisodes = 300
+                            ).map { ep ->
+                                Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                            }
+                        } else {
+                            val anivexaEpisodes = anivexaApi.fetchEpisodes(
+                                provider = effectiveAnimeServer.anivexaProviderKey.orEmpty(),
+                                anilistId = anilistId
+                            ).map { ep ->
+                                Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                            }
+                            if (anivexaEpisodes.isNotEmpty()) {
+                                anivexaEpisodes
+                            } else {
+                                // Provider returned nothing (site down / rate
+                                // limited) → fall back to AnimeXin so the user
+                                // still gets an episode list.
+                                animeXinScraper.fetchEpisodes(
+                                    titleQuery = item.title,
+                                    maxEpisodes = 300
+                                ).map { ep ->
+                                    Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                                }
+                            }
+                        }
+                    } else if (effectiveAnimeServer?.usesClientScraper == true) {
+                        // Anivault trio (Servers 14-16) for donghua — scraped
+                        // DEVICE-SIDE on the TV's residential IP.
+                        val queries = listOf(
+                            item.title,
+                            item.title.substringBefore(":").trim(),
+                            item.title.removeAnimeSeasonSuffixForTv()
+                        ).filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+
+                        val providerKey = effectiveAnimeServer.clientScraperKey.orEmpty()
+                        val clientEpisodes = queries.firstNotNullOfOrNull { query ->
+                            when (providerKey) {
+                                "animeheaven" -> animeHeavenScraper.fetchEpisodes(query, maxEpisodes = 300)
+                                "animepahe" -> animePaheScraper.fetchEpisodes(query)
+                                "anidao" -> aniDaoScraper.fetchEpisodes(query, maxEpisodes = 300)
+                                else -> emptyList()
+                            }.takeIf { it.isNotEmpty() }
+                        }.orEmpty().map { ep ->
+                            Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                        }
+                        if (clientEpisodes.isNotEmpty()) {
+                            clientEpisodes
+                        } else {
+                            animeXinScraper.fetchEpisodes(
+                                titleQuery = item.title,
+                                maxEpisodes = 300
+                            ).map { ep ->
+                                Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                            }
+                        }
+                    } else if (effectiveAnimeServer == AnimeServer.VIDLINK) {
+                        // VidLink (Server 17, LAST): reload TMDB chapters so the
+                        // numbered markers (`tv:{id}:{s}:{e}`) resolve via VidLink.
+                        fetchTmdbChaptersForAnime(item)
+                    } else {
+                        // AnimeXin default — unchanged.
+                        animeXinScraper.fetchEpisodes(
+                            titleQuery = item.title,
+                            maxEpisodes = 300
+                        ).map { ep ->
+                            Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                        }
+                    }
                 }
                 item.isAnime -> {
                     val effectiveAnimeServer = animeServer ?: AnimeServer.ANINEKO
@@ -89,12 +207,44 @@ class TvMediaRepository {
                                 // The provider returned nothing (site down / rate
                                 // limited). Fall back to TMDB chapters so the user
                                 // still gets an episode list instead of "no content";
-                                // resolution degrades to VidLink (Server 14).
+                                // resolution degrades to VidLink (Server 17).
                                 fetchTmdbChaptersForAnime(item)
                             }
                         }
+                    } else if (effectiveAnimeServer.usesClientScraper) {
+                        // Anivault trio (Servers 14-16: AnimeHeaven / AnimePahe /
+                        // AniDao): episode lists are scraped DEVICE-SIDE so the
+                        // request originates from the TV's residential IP — the repo
+                        // owner's trick. Datacenter egress (Render) is blocked by
+                        // these CDNs, which is why Servers 1-13 return 0 streams for
+                        // popular anime like Dragon Ball.
+                        val queries = listOf(
+                            item.title,
+                            item.title.substringBefore(":").trim(),
+                            item.title.removeAnimeSeasonSuffixForTv()
+                        ).filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+
+                        val providerKey = effectiveAnimeServer.clientScraperKey.orEmpty()
+                        val clientEpisodes = queries.firstNotNullOfOrNull { query ->
+                            when (providerKey) {
+                                "animeheaven" -> animeHeavenScraper.fetchEpisodes(query, maxEpisodes = 300)
+                                "animepahe" -> animePaheScraper.fetchEpisodes(query)
+                                "anidao" -> aniDaoScraper.fetchEpisodes(query, maxEpisodes = 300)
+                                else -> emptyList()
+                            }.takeIf { it.isNotEmpty() }
+                        }.orEmpty().map { ep ->
+                            Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                        }
+                        if (clientEpisodes.isNotEmpty()) {
+                            clientEpisodes
+                        } else {
+                            // The site returned nothing for this server — fall back to
+                            // TMDB chapters so the user still gets a playable list
+                            // (resolution degrades to VidLink).
+                            fetchTmdbChaptersForAnime(item)
+                        }
                     } else {
-                        // VIDLINK (Server 14, LAST): reload episodes from TMDB so the
+                        // VIDLINK (Server 17, LAST): reload episodes from TMDB so the
                         // numbered markers (`tv:{id}:{s}:{e}`) resolve via VidLink.
                         fetchTmdbChaptersForAnime(item)
                     }
@@ -174,49 +324,78 @@ class TvMediaRepository {
     }
 
     /**
-     * Resolve the AniList ID for an anime item.
+     * Resolve the AniList ID for an anime/donghua item.
+     *  - `anilist_<digits>` ids (e.g. `anilist_151807`) return the id directly.
      *  - `anilist:{id}` detail URLs return the id directly.
+     *  - `item.url` with `anilist:` prefix returns the id directly.
      *  - `animeResult` (AniList-sourced search results) provides it as a fallback.
-     *  - TMDB-sourced anime bridge through the backend AniList title search.
+     *  - TMDB-sourced titles bridge through the backend AniList title search.
+     *
+     * Resolved IDs are memoized per item so switching between the 13 Anivexa
+     * providers (or binge-NEXT across episodes) reuses the same AniList ID
+     * instead of re-running the slow backend title bridge on every switch.
      */
     private suspend fun resolveAnilistId(item: UnifiedSearchResult): String? {
+        val cacheKey = item.id.ifBlank { item.title.lowercase() }
+        anilistIdCache[cacheKey]?.let { return it }
+
+        val resolved = resolveAnilistIdUncached(item)
+        anilistIdCache[cacheKey] = resolved
+        return resolved
+    }
+
+    private suspend fun resolveAnilistIdUncached(item: UnifiedSearchResult): String? {
+        // Fast path 1: `anilist_<digits>` item id (e.g. fetched from the
+        // Android/backend AniList feed).
+        val idPrefix = "anilist_"
+        if (item.id.startsWith(idPrefix)) {
+            val digits = item.id.removePrefix(idPrefix).trim()
+            if (digits.isNotBlank() && digits.all { it.isDigit() }) return digits
+        }
+
         val detailUrl = item.detailPageUrl.ifBlank { item.url }
         if (detailUrl.startsWith("anilist:")) {
             val id = detailUrl.removePrefix("anilist:").trim()
             if (id.isNotBlank() && id.all { it.isDigit() }) return id
         }
+
+        // Fast path 2: `item.url` (the convenience alias) carrying an anilist: ref.
+        if (!item.url.startsWith("anilist:")) {
+            val urlRef = item.url.trim()
+            if (urlRef.startsWith("anilist:")) {
+                val id = urlRef.removePrefix("anilist:").trim()
+                if (id.isNotBlank() && id.all { it.isDigit() }) return id
+            }
+        }
+
         item.animeResult?.let {
             val directId = it.id.trim()
             if (directId.isNotBlank() && directId.all { c -> c.isDigit() }) return directId
         }
-        return runCatching { anivexaApi.searchAnilistId(item.title) }.getOrNull()
-    }
 
-    /**
-     * Build a TMDB-based embed page for the WebView donghua servers
-     * (Nontongo / AutoEmbed / EmbedSu / VidSrc). Returns null when the item
-     * has no resolvable tmdb://tv id, so the caller falls back to the raw
-     * episode URL.
-     */
-    private fun resolveDonghuaTmdbEmbed(
-        server: DonghuaServer,
-        item: UnifiedSearchResult,
-        chapter: Chapter
-    ): String? {
-        val tmdbId = item.detailPageUrl
-            .removePrefix("tmdb://tv/")
-            .substringBefore("/")
-            .trim()
-            .takeIf { it.isNotBlank() && it.all { c -> c.isDigit() } }
-            ?: return null
-        val ep = chapter.chapterNumber.coerceAtLeast(1)
-        return when (server) {
-            DonghuaServer.NONTONGO -> "https://nontongo.win/embed/tv/$tmdbId/1/$ep"
-            DonghuaServer.AUTOEMBED -> "https://autoembed.co/tv/tmdb/$tmdbId-1-$ep"
-            DonghuaServer.EMBEDSU -> "https://embed.su/embed/tv/$tmdbId/1/$ep"
-            DonghuaServer.VIDSRC -> "https://vidsrc.cc/v2/embed/tv/$tmdbId/1/$ep"
-            else -> null
+        // TMDB-sourced item (donghua feed, TMDB anime): the title bridge is the
+        // only way to reach an AniList id. VERIFY the bridged id actually maps
+        // back to the SAME TMDB title — the worker's /map route is authoritative.
+        // If the mapped TMDB id differs, the bridge matched the WRONG show; we
+        // reject the id so the 13 Anivexa providers never key off another show's
+        // episode list (the mis-keyed-episodes bug). Non-TMDB items are trusted.
+        val tmdbMatch = Regex("""^tmdb://(?:movie|tv)/(\d+)""").find(detailUrl)
+        if (tmdbMatch != null) {
+            val expectedTmdbId = tmdbMatch.groupValues[1]
+            val bridged = runCatching { anivexaApi.searchAnilistId(item.title) }.getOrNull()
+            if (bridged.isNullOrBlank()) return null
+            val mappedTmdbId = anivexaApi.resolveTmdbIdForAnilist(bridged)
+            val mappedMatch = mappedTmdbId
+                ?.trim()
+                ?.let { it.ifBlank { null } }
+            if (mappedMatch != expectedTmdbId) {
+                println("[Anivexa] Rejected mis-matched AniList id $bridged for TMDB $expectedTmdbId (mapped $mappedMatch)")
+                return null
+            }
+            return bridged
         }
+
+        return runCatching { anivexaApi.searchAnilistId(item.title) }.getOrNull()
     }
 
     suspend fun resolveStreamUrl(
@@ -252,23 +431,54 @@ class TvMediaRepository {
         }
 
         if (isDonghua && chapter != null) {
+            // Donghua rides the anime-server row when an AnimeServer chip is
+            // active (13 Anivexa providers / Anivault trio / VidLink). The
+            // DonghuaServer row (AnimeXin) is the device-scraper fallback.
+            val effectiveAnimeServer = animeServer
+            when {
+                effectiveAnimeServer?.isAnivexa == true && AnivexaApi.isAnivexaEpisodeUrl(chapter.url) -> {
+                    // Anivexa-API provider: resolve the direct HLS/MP4/embed via
+                    // the app backend / on-device nodebridge worker. Transient
+                    // rate-limit / cold-start blips are retried so "cannot find
+                    // content" no longer surfaces for good content.
+                    return retryNullable { anivexaApi.resolveStream(chapter.url)?.url }
+                }
+                effectiveAnimeServer?.usesClientScraper == true -> {
+                    // Anivault trio (Servers 14-16) for donghua — resolved
+                    // DEVICE-SIDE on the TV's residential IP.
+                    return retryNullable {
+                        when (effectiveAnimeServer.clientScraperKey) {
+                            "animeheaven" -> animeHeavenScraper.resolvePlayerUrl(chapter.url)
+                            "anidao" -> aniDaoScraper.resolvePlayerUrl(chapter.url)
+                            "animepahe" -> animePaheScraper.extractStreamUrl(chapter.url)
+                                ?: chapter.url
+                            else -> null
+                        }
+                    }
+                }
+                effectiveAnimeServer == AnimeServer.VIDLINK -> {
+                    // VidLink (Server 17, LAST): resolve the TMDB marker into the
+                    // VidLink embed. parseTmdbPlaybackMarker handles `tv:{id}:{s}:{e}`
+                    // chapter markers; if it returns null the AnimeXin fallback runs.
+                    parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
+                        return StreamServer.VIDLINK.buildEmbedUrl(
+                            marker.tmdbId,
+                            marker.mediaType,
+                            marker.season,
+                            marker.episode
+                        )
+                    }
+                }
+            }
+            // AnimeXin default (DonghuaServer row or no anime chip) — unchanged.
             val targetServer = donghuaServer ?: DonghuaServer.ANIMEXIN
             return when (targetServer) {
-                // AnimeXin (Server 7): resolve the episode page to its embed player URL.
+                // Only AnimeXin remains — resolve the episode page to its embed
+                // player URL; animexin.dev hosts donghua embeds that load fine
+                // in the visible WebView player (TvEmbedPlayerScreen).
                 DonghuaServer.ANIMEXIN -> {
                     animeXinScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
                 }
-                // DonghuaStream (Server 3): the episode URL is already a direct HLS
-                // player page (or direct stream) — play as-is.
-                DonghuaServer.DONGHUA_STREAM -> chapter.url
-                // Lucifer Donghua (Server 5): episode pages are HTML players that
-                // load fine in the visible WebView player.
-                DonghuaServer.LUCIFER_DONGHUA -> chapter.url
-                // WebView embed servers (Nontongo/AutoEmbed/EmbedSu/VidSrc): build
-                // the TMDB-based embed page; fall back to the raw episode URL.
-                DonghuaServer.NONTONGO, DonghuaServer.AUTOEMBED,
-                DonghuaServer.EMBEDSU, DonghuaServer.VIDSRC ->
-                    resolveDonghuaTmdbEmbed(targetServer, item, chapter) ?: chapter.url
             }
         }
 
@@ -278,9 +488,27 @@ class TvMediaRepository {
                 // Anivexa-API provider: resolve the direct HLS/MP4/embed via the
                 // app backend. Direct URLs play in LibVLC (TvPlayerScreen); embed
                 // pages open in the visible WebView (TvEmbedPlayerScreen).
-                return anivexaApi.resolveStream(chapter.url)?.url
+                // Retried: provider CDNs rate-limit / cold-start transiently.
+                return retryNullable { anivexaApi.resolveStream(chapter.url)?.url }
             }
-            // VIDLINK (Server 14, LAST): falls through — the numbered-marker logic
+            if (effectiveAnimeServer.usesClientScraper) {
+                // Anivault trio (Servers 14-16: AnimeHeaven / AnimePahe / AniDao).
+                // Resolution runs DEVICE-SIDE on the TV's residential IP — the repo
+                // owner's trick. AnimeHeaven gate.php and AniDao watch-online pages
+                // load fine in the visible WebView (TvEmbedPlayerScreen); AnimePahe
+                // returns a direct .m3u8/.mp4 that plays in LibVLC (TvPlayerScreen),
+                // falling back to the play page for the WebView when kwik embeds only.
+                return retryNullable {
+                    when (effectiveAnimeServer.clientScraperKey) {
+                        "animeheaven" -> animeHeavenScraper.resolvePlayerUrl(chapter.url)
+                        "anidao" -> aniDaoScraper.resolvePlayerUrl(chapter.url)
+                        "animepahe" -> animePaheScraper.extractStreamUrl(chapter.url)
+                            ?: chapter.url
+                        else -> null
+                    }
+                }
+            }
+            // VIDLINK (Server 17, LAST): falls through — the numbered-marker logic
             // below resolves it via StreamServer.VIDLINK (server is null → default).
         }
         val tmdbParts = item.detailPageUrl.removePrefix("tmdb://").split("/")

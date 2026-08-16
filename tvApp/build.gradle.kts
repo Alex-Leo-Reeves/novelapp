@@ -59,7 +59,14 @@ android {
         }
 
         release {
-            isMinifyEnabled = false
+            // R8 code shrinking: cuts DEX size substantially. JNI/native and
+            // reflection entry points are pinned in proguard-rules.pro
+            // (nodebridge, Sherpa-ONNX, LibVLC, kotlinx.serialization, ZXing).
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfigs.findByName("release")?.let {
                 signingConfig = it
             }
@@ -96,11 +103,21 @@ kotlin {
     sourceSets {
         getByName("main") {
             kotlin.srcDir("../composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data")
+            kotlin.srcDir("../composeApp/src/androidMain/kotlin/com/alexleoreeves/novelapp/nodebridge")
             kotlin.exclude(
                 "LocalDownloadRepository.kt",
                 "LocalFileStorage.kt",
                 "MangaPageCache.kt"
             )
+        }
+    }
+}
+
+android {
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir("../nodebridge/jniLibs")
+            assets.srcDir("../nodebridge/assets")
         }
     }
 }

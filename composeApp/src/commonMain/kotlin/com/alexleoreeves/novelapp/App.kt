@@ -36,7 +36,11 @@ sealed class OtpFlowState {
 fun App(
     userSessionStore: UserSessionStore = EmptyUserSessionStore,
     linkOpener: ExternalLinkOpener = NoOpExternalLinkOpener,
-    updateTarget: AppUpdateTarget = AppUpdateTarget.ANDROID
+    updateTarget: AppUpdateTarget = AppUpdateTarget.ANDROID,
+    // Non-null when the Android nodebridge (embedded anime engine) reports a
+    // user-facing start failure. Shown as a dismissible info dialog. Desktop
+    // and iOS call sites omit it → default null → nothing shown.
+    nodeBridgeMessage: String? = null
 ) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
@@ -686,6 +690,25 @@ fun App(
         )
 
         subscriptionMessage?.let { m -> AlertDialog(onDismissRequest = { subscriptionMessage = null }, title = { Text("Premium") }, text = { Text(m) }, confirmButton = { Button(onClick = { beginPremiumCheckout("premium_3_devices") }) { Text("Subscribe") } }, dismissButton = { TextButton(onClick = { subscriptionMessage = null }) { Text("Close") } }) }
+
+        var nodeBridgeDialogDismissed by remember { mutableStateOf(false) }
+        val effectiveBridgeMessage = nodeBridgeMessage?.takeIf { it.isNotBlank() }?.takeIf { !nodeBridgeDialogDismissed }
+        if (effectiveBridgeMessage != null) AlertDialog(
+            onDismissRequest = { nodeBridgeDialogDismissed = true },
+            icon = { Icon(Icons.Default.Warning, null, tint = appTheme.value.accentColor()) },
+            title = { Text("Anime engine unavailable") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(effectiveBridgeMessage)
+                    Text(
+                        "Some anime servers may be limited — the app is using the backup servers instead.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = appTheme.value.subTextColor()
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { nodeBridgeDialogDismissed = true }) { Text("Got it") } }
+        )
 
         if (updateProgress.isActive) AlertDialog(
             onDismissRequest = { if (updateProgress.canDismiss) AppUpdateProgressBus.clear() },

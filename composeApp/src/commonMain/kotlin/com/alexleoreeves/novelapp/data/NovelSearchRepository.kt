@@ -90,6 +90,8 @@ class NovelSearchRepository(
     internal val aniListSource = AniListSource(httpClient)
     internal val aninekoScraper = AninekoScraper(httpClient)
     internal val animePaheScraper = AnimePaheScraper(httpClient)
+    internal val animeHeavenScraper = AnimeHeavenScraper(httpClient)
+    internal val aniDaoScraper = AniDaoScraper(httpClient)
     internal val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
     internal val anivexaApi = AnivexaApi(httpClient)
     internal val tmdbSource = TmdbSource(
@@ -935,6 +937,26 @@ class NovelSearchRepository(
                     .sortedByDescending { it.episodeNumber }
                     .takeIf { it.isNotEmpty() }
             }.orEmpty()
+            "animeheaven" -> queries.firstNotNullOfOrNull { query ->
+                animeHeavenScraper.fetchEpisodes(
+                    titleQuery = query,
+                    alternateQueries = queries.drop(1),
+                    maxEpisodes = maxEpisodes
+                )
+                    .distinctBy { it.url }
+                    .sortedBy { it.episodeNumber }
+                    .takeIf { it.isNotEmpty() }
+            }.orEmpty()
+            "anidao" -> queries.firstNotNullOfOrNull { query ->
+                aniDaoScraper.fetchEpisodes(
+                    titleQuery = query,
+                    alternateQueries = queries.drop(1),
+                    maxEpisodes = maxEpisodes
+                )
+                    .distinctBy { it.url }
+                    .sortedBy { it.episodeNumber }
+                    .takeIf { it.isNotEmpty() }
+            }.orEmpty()
             "hianime", "animekai", "kickassanime", "animesaturn", "animeunity", "animesama", "consumetpahe", "zoro" ->
                 consumetAnimeScraper.fetchEpisodes(
                     provider = normalizedProvider,
@@ -1003,6 +1025,55 @@ class NovelSearchRepository(
     /** Resolve the VidLink (TMDB) embed reference for the LAST anime server. */
     suspend fun resolveAnivexaVidLinkEmbed(anilistId: String, episode: Int): VidLinkEmbedRef? =
         anivexaApi.resolveVidLinkEmbed(anilistId, episode)
+
+    /**
+     * Resolve a playable URL for an Anivault server episode (device-side).
+     *
+     * Mirrors the repo owner's trick: the scraping runs on the user's
+     * residential IP inside the app, so the CDN/Cloudflare checks that block
+     * datacenter egress (Render/Vercel probes → 0 streams) let these play.
+     *
+     * - animeheaven → the gate.php player page, loaded in the visible WebView
+     *   (MaServerPlayerScreen / TvEmbedPlayerScreen).
+     * - anidao      → the watch-online player page, loaded in the visible WebView.
+     * - animepahe   → tries to extract the direct .m3u8/.mp4 first (ExoPlayer);
+     *   falls back to the play page for the WebView if kwik embeds only.
+     */
+    suspend fun resolveAnimeServerStream(server: AnimeServer, episodeUrl: String): AnivexaStream? {
+        val provider = server.clientScraperKey ?: return null
+        return when (provider) {
+            "animeheaven" -> runCatching {
+                val playerUrl = animeHeavenScraper.resolvePlayerUrl(episodeUrl)
+                AnivexaStream(url = playerUrl, type = "embed")
+            }.getOrElse { e ->
+                println("[AnimeHeaven] Player resolve failed: ${e.message}")
+                null
+            }
+            "anidao" -> runCatching {
+                val playerUrl = aniDaoScraper.resolvePlayerUrl(episodeUrl)
+                AnivexaStream(url = playerUrl, type = "embed")
+            }.getOrElse { e ->
+                println("[AniDao] Player resolve failed: ${e.message}")
+                null
+            }
+            "animepahe" -> runCatching {
+                val direct = animePaheScraper.extractStreamUrl(episodeUrl)
+                if (!direct.isNullOrBlank()) {
+                    AnivexaStream(
+                        url = direct,
+                        type = if (direct.contains(".m3u8", ignoreCase = true)) "hls" else "mp4"
+                    )
+                } else {
+                    // kwik embeds only — the play page hosts the player, load it in the WebView.
+                    AnivexaStream(url = episodeUrl, type = "embed")
+                }
+            }.getOrElse { e ->
+                println("[AnimePahe] Stream resolve failed: ${e.message}")
+                null
+            }
+            else -> null
+        }
+    }
 
     /** Bridge a TMDB-sourced anime title to its AniList ID via the backend. */
     suspend fun findAniListIdByTitle(title: String): String? =

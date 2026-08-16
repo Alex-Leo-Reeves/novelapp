@@ -218,13 +218,62 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
     });
 }
 
-/** /api/anivexa/search?q={title} — AniList GraphQL search -> first ANIME id. */
+/**
+ * Rank AniList candidates against the queried title and pick the strongest,
+ * well-matched one. Returns null when NO candidate is a good match.
+ *
+ * This is the fix for "some contents showing the WRONG episodes": the old
+ * handler took AniList's first SEARCH_MATCH hit with zero validation. For
+ * sequels ("Bleach: Thousand-Year Blood War"), romanized titles, or broad
+ * names, that first hit is a DIFFERENT show — which then mis-keyed all 13
+ * Anivexa providers. We now fetch the top candidates and require a real
+ * normalized-title match before returning an id.
+ */
+function pickBestAnilistCandidate(query, mediaList) {
+    const normalized = (value) => String(value || "")
+        .toLowerCase()
+        .replace("&", "and")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+        .replace(/\s+/g, " ");
+    const q = normalized(query);
+    if (!q) return null;
+
+    const candidates = (mediaList || []).map((media) => {
+            const titleObj = (media && media.title) || {};
+            const raw = titleObj.english || titleObj.romaji || "";
+            const title = String(raw || "").trim();
+            if (!title) return null;
+            const t = normalized(title);
+            if (!t) return null;
+
+            const sequelPenalty = /(\bseason\s+[2-9]\b|\b\d+(st|nd|rd|th)\s+season\b|\bcour\s+[2-9]\b|\b(part|movie|special|ova|ona|recap)\b)/.test(t) ? 900 : 0;
+            const score = t === q ? 10000 : t.startsWith(q + " ") ? 8000 - sequelPenalty : t.includes(q) ? 5000 - sequelPenalty : 0;
+            return { media, title, score };
+        })
+        .filter((item) => item && item.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    const best = candidates[0];
+    if (!best) return null;
+    return best;
+}
+
+/** /api/anivexa/search?q={title} — AniList GraphQL search -> validated ANIME id. */
 async function handleAnivexaSearch(response, requestUrl) {
     const query = String(requestUrl.searchParams.get("q") || "").trim();
     if (!query) return sendApiError(response, 400, "Anime title query is required.");
-    const key = query.toLowerCase();
+    // Strip qualifiers like "(TV)", "(Dub)", "(Sub)" and trailing years so the
+    // search finds the base show instead of failing on the qualifier.
+    const cleanQuery = query
+        .replace(/\s*\((TV|Dub|Sub|Dubs|Subs|Movie|Film)\)/gi, "")
+        .replace(/\s*\(\d{4}\)$/, "")
+        .trim();
+    if (!cleanQuery) return sendApiError(response, 400, "Anime title query is required.");
+    const baseKey = cleanQuery.toLowerCase();
+    const searchKey = "q:" + baseKey;
 
-    const cached = freshFrom(searchCache, key, SEARCH_CACHE_TTL_MS);
+    const cached = freshFrom(searchCache, searchKey, SEARCH_CACHE_TTL_MS);
     if (cached) return sendApiData(response, 200, { anilistId: cached.anilistId, title: cached.title });
 
     try {
@@ -234,8 +283,8 @@ async function handleAnivexaSearch(response, requestUrl) {
             method: "POST",
             headers: { "content-type": "application/json", accept: "application/json" },
             body: JSON.stringify({
-                query: "query ($search: String) { Page(page: 1, perPage: 1) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id title { romaji english } } } }",
-                variables: { search: query }
+                query: "query ($search: String) { Page(page: 1, perPage: 12) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id title { romaji english } } } }",
+                variables: { search: cleanQuery }
             }),
             signal: controller.signal
         });
@@ -244,17 +293,23 @@ async function handleAnivexaSearch(response, requestUrl) {
         const payload = await res.json();
         const page = payload && payload.data && payload.data.Page;
         const mediaList = page && Array.isArray(page.media) ? page.media : [];
-        const media = mediaList[0];
-        if (!media || !media.id) return sendApiData(response, 200, { anilistId: null, title: "" });
 
-        const titleObj = media.title || {};
-        const title = titleObj.english || titleObj.romaji || query;
-        searchCache.set(key, {
-            anilistId: String(media.id),
+        const best = pickBestAnilistCandidate(cleanQuery, mediaList);
+        if (!best) {
+            // No candidate matched well enough — return null so the app falls
+            // back to AnimeXin / TMDB instead of keying the 13 providers to the
+            // wrong show's episodes.
+            searchCache.set(searchKey, { anilistId: null, title: query, cachedAt: Date.now() });
+            return sendApiData(response, 200, { anilistId: null, title: "" });
+        }
+
+        const title = best.title;
+        searchCache.set(searchKey, {
+            anilistId: String(best.media.id),
             title: title,
             cachedAt: Date.now()
         });
-        return sendApiData(response, 200, { anilistId: String(media.id), title: title });
+        return sendApiData(response, 200, { anilistId: String(best.media.id), title: title });
     } catch (error) {
         console.warn("[anivexa] Search failed:", error.message || error);
         return sendApiError(response, 502, error.message || "AniList search failed.");

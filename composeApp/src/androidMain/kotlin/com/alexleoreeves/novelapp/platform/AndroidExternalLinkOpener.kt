@@ -40,25 +40,36 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
     //  installApkUpdate — entry point with retry loop
     // ─────────────────────────────────────────────────────────────────────────
     private fun installApkUpdate(url: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            !appContext.packageManager.canRequestPackageInstalls()
-        ) {
-            AppUpdateProgressBus.update(
-                AppUpdateProgressState(
-                    isActive = true,
-                    phase = AppUpdatePhase.Error,
-                    message = "Allow NovelApp to install updates, then tap update again.",
-                    canDismiss = true,
-                    isError = true
-                )
-            )
-            Toast.makeText(appContext, "Allow NovelApp to install updates, then tap update again.", Toast.LENGTH_LONG).show()
-            val settingsIntent = Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:${appContext.packageName}")
-            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            appContext.startActivity(settingsIntent)
-            return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val canInstall = runCatching { appContext.packageManager.canRequestPackageInstalls() }.getOrDefault(true)
+                if (!canInstall) {
+                    AppUpdateProgressBus.update(
+                        AppUpdateProgressState(
+                            isActive = true,
+                            phase = AppUpdatePhase.Error,
+                            message = "Allow NovelApp to install updates, then tap update again.",
+                            canDismiss = true,
+                            isError = true
+                        )
+                    )
+                    Toast.makeText(appContext, "Allow NovelApp to install updates, then tap update again.", Toast.LENGTH_LONG).show()
+                    val settingsIntent = Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:${appContext.packageName}")
+                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    val launched = runCatching {
+                        appContext.startActivity(settingsIntent)
+                        true
+                    }.getOrElse {
+                        runCatching {
+                            appContext.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                            true
+                        }.getOrDefault(false)
+                    }
+                    if (launched) return
+                }
+            }
         }
 
         AppUpdateProgressBus.update(
@@ -249,19 +260,35 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
             apkFile
         )
         mainHandler.post {
-            val installIntent = installerIntent(apkUri)
-            grantInstallerReadPermission(installIntent)
-            AppUpdateProgressBus.update(
-                AppUpdateProgressState(
-                    isActive = true,
-                    phase = AppUpdatePhase.Installing,
-                    message = "Android installer is open. Finish the install to complete the update.",
-                    receivedBytes = downloadedBytes,
-                    totalBytes = expectedBytes.coerceAtLeast(downloadedBytes),
-                    canDismiss = true
+            runCatching {
+                val installIntent = installerIntent(apkUri)
+                grantInstallerReadPermission(installIntent)
+                AppUpdateProgressBus.update(
+                    AppUpdateProgressState(
+                        isActive = true,
+                        phase = AppUpdatePhase.Installing,
+                        message = "Android installer is open. Finish the install to complete the update.",
+                        receivedBytes = downloadedBytes,
+                        totalBytes = expectedBytes.coerceAtLeast(downloadedBytes),
+                        canDismiss = true
+                    )
                 )
-            )
-            appContext.startActivity(installIntent)
+                appContext.startActivity(installIntent)
+            }.onFailure { err ->
+                val fallbackIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { appContext.startActivity(fallbackIntent) }
+                AppUpdateProgressBus.update(
+                    AppUpdateProgressState(
+                        isActive = true,
+                        phase = AppUpdatePhase.Error,
+                        message = "Could not open installer (${err.message}). Opened download in browser.",
+                        canDismiss = true,
+                        isError = true
+                    )
+                )
+            }
         }
     }
 

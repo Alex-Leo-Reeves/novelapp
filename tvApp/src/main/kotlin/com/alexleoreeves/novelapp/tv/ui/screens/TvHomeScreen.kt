@@ -59,6 +59,21 @@ fun TvHomeScreen(
     val scope = rememberCoroutineScope()
     val novelRepo = remember { TvNovelSearchRepository() }
 
+    // ── Infinite scrolling state (section grid) ──────────────────────────
+    // Section tabs (Anime, Manga, Movies, …) load additional pages when the
+    // user scrolls near the bottom of the LazyVerticalGrid. The Home feed
+    // (rows) pages independently inside TvHomeFeed.
+    var nextPage by remember { mutableStateOf(2) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    val sectionGridState = rememberLazyGridState()
+    val shouldLoadMore by remember { derivedStateOf {
+        val layoutInfo = sectionGridState.layoutInfo
+        if (layoutInfo.visibleItemsInfo.isEmpty()) false
+        else {
+            val lastVisible = layoutInfo.visibleItemsInfo.last().index
+            lastVisible >= layoutInfo.totalItemsCount - 6
+        }
+    } }
     fun loadContent() {
         scope.launch {
             if (!searchPerformed) {
@@ -80,9 +95,52 @@ fun TvHomeScreen(
                     TvSection.DOWNLOADS -> emptyList()
                     TvSection.YOU -> emptyList()
                 }
+                nextPage = 2
                 isLoading = false
             }
         }
+    }
+
+    fun loadMoreContent() {
+        if (isLoadingMore) return
+        isLoadingMore = true
+        scope.launch {
+            try {
+                val more = when (section) {
+                    TvSection.NOVELS -> novelRepo.fetchPopularNovels(nextPage)
+                    TvSection.HOME, TvSection.CREATION, TvSection.SPORTS,
+                    TvSection.DOWNLOADS, TvSection.YOU -> emptyList()
+                    else -> fetchContentHome(
+                        when (section) {
+                            TvSection.ANIME -> "anime"
+                            TvSection.MANGA -> "manga"
+                            TvSection.COMICS -> "comic"
+                            TvSection.DONGHUA -> "donghua"
+                            TvSection.K_DRAMA -> "kdrama"
+                            TvSection.CARTOON -> "cartoon"
+                            TvSection.CLASSIC -> "classic"
+                            TvSection.MOVIES -> "movie"
+                            else -> "nigerian"
+                        },
+                        nextPage
+                    )
+                }
+                if (more.isNotEmpty()) {
+                    items = (items + more).distinctBy { it.id }
+                    nextPage++
+                }
+            } catch (e: Exception) {
+                // Keep current list; a later scroll retriggers the load.
+            } finally {
+                isLoadingMore = false
+            }
+        }
+    }
+
+    // Auto-append when the user nears the end of the section grid.
+    // (Declared after loadMoreContent so the local function resolves.)
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore) loadMoreContent()
     }
 
     LaunchedEffect(section) { loadContent() }
@@ -259,6 +317,7 @@ fun TvHomeScreen(
                     }
                 } else {
                     LazyVerticalGrid(
+                        state = sectionGridState,
                         columns = GridCells.Adaptive(180.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -270,6 +329,19 @@ fun TvHomeScreen(
                                 item = item,
                                 onClick = { onMediaSelected(item) }
                             )
+                        }
+                        if (isLoadingMore) {
+                            item(key = "__loading_more__") {
+                                Box(
+                                    Modifier.fillMaxWidth().height(180.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Purple500,
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -352,9 +424,13 @@ private fun TvHomeFeed(
     onMediaSelected: (UnifiedSearchResult) -> Unit
 ) {
     var rowData by remember { mutableStateOf<Map<String, List<UnifiedSearchResult>>>(emptyMap()) }
+    var rowNextPage by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var rowLoadingMore by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var rowExhausted by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isLoading by remember { mutableStateOf(true) }
 
     val novelRepo = remember { TvNovelSearchRepository() }
+    val rowScope = rememberCoroutineScope()
 
     LaunchedEffect(config.version) {
         isLoading = true
@@ -371,7 +447,38 @@ private fun TvHomeFeed(
             }
         }.awaitAll()
         rowData = fetched.toMap()
+        // Every row starts at page 2; rows whose page-1 fetch failed will retry
+        // when the user swipes to their end.
+        rowNextPage = rows.associate { it.key to 2 }
+        rowExhausted = emptySet()
         isLoading = false
+    }
+
+    fun loadMoreRow(rowKey: String, rowType: String) {
+        if (rowKey in rowExhausted) return
+        val page = rowNextPage[rowKey] ?: return
+        if (rowKey in rowLoadingMore) return
+        rowLoadingMore = rowLoadingMore + rowKey
+        rowScope.launch {
+            try {
+                val more = if (rowType == "novel") {
+                    novelRepo.fetchPopularNovels(page)
+                } else {
+                    fetchContentHome(rowType, page)
+                }
+                if (more.isNotEmpty()) {
+                    val current = rowData[rowKey].orEmpty()
+                    rowData = rowData + (rowKey to (current + more).distinctBy { it.id })
+                    rowNextPage = rowNextPage + (rowKey to (page + 1))
+                } else {
+                    rowExhausted = rowExhausted + rowKey
+                }
+            } catch (e: Exception) {
+                // Keep current items; the next end-of-list visit retries.
+            } finally {
+                rowLoadingMore = rowLoadingMore - rowKey
+            }
+        }
     }
 
     Column(
@@ -400,9 +507,19 @@ private fun TvHomeFeed(
         } else {
             val rows = config.homeRows.ifEmpty { TvRemoteConfigDefaults.default.homeRows }
             rows.forEach { row ->
-                val list = rowData[row.key].orEmpty()
-                if (list.isNotEmpty()) {
-                    ContentRow(row.label.ifBlank { row.key }, list, onMediaSelected)
+                key(row.key) {
+                    val list = rowData[row.key].orEmpty()
+                    if (list.isNotEmpty()) {
+                        ContentRow(
+                            label = row.label.ifBlank { row.key },
+                            rowKey = row.key,
+                            rowType = row.type,
+                            items = list,
+                            isLoadingMore = row.key in rowLoadingMore,
+                            onLoadMore = ::loadMoreRow,
+                            onMediaSelected = onMediaSelected
+                        )
+                    }
                 }
             }
             if (rows.all { rowData[it.key].orEmpty().isEmpty() }) {
@@ -422,9 +539,27 @@ private fun TvHomeFeed(
 @Composable
 private fun ContentRow(
     label: String,
+    rowKey: String,
+    rowType: String,
     items: List<UnifiedSearchResult>,
+    isLoadingMore: Boolean,
+    onLoadMore: (String, String) -> Unit,
     onMediaSelected: (UnifiedSearchResult) -> Unit
 ) {
+    val rowState = remember { LazyListState() }
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = rowState.layoutInfo
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisible >= layoutInfo.totalItemsCount - 4
+        }
+    }
+    LaunchedEffect(shouldLoadMore) {
+        // Auto-fetch the next page when the user reaches the end of this row
+        // (short rows trigger immediately so the row keeps filling up).
+        if (shouldLoadMore && items.isNotEmpty()) onLoadMore(rowKey, rowType)
+    }
+
     Column {
         Text(
             label,
@@ -434,10 +569,24 @@ private fun ContentRow(
             modifier = Modifier.padding(bottom = 12.dp)
         )
         LazyRow(
+            state = rowState,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(items.take(12), key = { it.id }) { item ->
+            items(items, key = { it.id }) { item ->
                 TvMediaCard(item = item, onClick = { onMediaSelected(item) }, compact = true)
+            }
+            if (isLoadingMore) {
+                item(key = "__row_loading_more__") {
+                    Box(
+                        Modifier.width(120.dp).height(210.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = Purple500,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
             }
         }
     }

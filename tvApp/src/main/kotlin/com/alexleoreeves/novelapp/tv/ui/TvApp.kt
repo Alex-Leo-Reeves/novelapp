@@ -30,6 +30,7 @@ import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.platform.AppUpdateTarget
+import com.alexleoreeves.novelapp.nodebridge.NodeBridgeStatus
 
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
@@ -80,7 +81,22 @@ data class NavigationState(
     val showSearch: Boolean = false,
     val account: SavedUserAccount? = null,
     val selectedProfile: TvProfile? = null,
-    val localSubtitlePath: String = ""
+    val localSubtitlePath: String = "",
+    // Set when the user picked "Continue" in the pre-player resume dialog:
+    // the player auto-seeks to this position once the video has loaded, and
+    // the in-player resume card is skipped.
+    val resumePositionMs: Long? = null,
+    // True when the resume decision was made BEFORE the player loaded (either
+    // Continue or Watch-from-Beginning). The player respects this instead of
+    // showing its own resume card.
+    val resumeDecided: Boolean = false
+)
+
+/** Pending pre-player "Continue Watching?" choice awaiting user input. */
+private data class PendingResumeChoice(
+    val session: TvBingeSession,
+    val progressKey: String,
+    val resumeMs: Long
 )
 
 
@@ -93,6 +109,17 @@ fun TvApp(
     var nav by remember { mutableStateOf(NavigationState()) }
     var isLoading by remember { mutableStateOf(true) }
     var remoteConfig by remember { mutableStateOf(TvRemoteConfigDefaults.default) }
+    // User-facing nodebridge (embedded anime engine) failure reason. Non-blank
+    // only when the engine failed to boot; the app keeps working via backend
+    // fallback but tells the user why some anime servers may be limited.
+    val nodeBridgeMessage by NodeBridgeStatus.message.collectAsState()
+    var nodeBridgeDialogDismissed by remember { mutableStateOf(false) }
+    // Pre-player "Continue Watching?" dialog — shown BEFORE any player loads
+    // (per the user's request) when the clicked episode has a saved position.
+    // The video does NOT start loading behind it; the choice routes to the
+    // player via routePlaybackSession (Continue) or clears progress and starts
+    // from the beginning (Watch from Beginning).
+    var pendingResumeChoice by remember { mutableStateOf<PendingResumeChoice?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -165,7 +192,8 @@ fun TvApp(
                         screen = TvScreen.HOME,
                         selectedSection = fromSection,
                         playUrl = "", playTitle = "", playPreviewLimitMs = null,
-                        playerFromSection = null, selectedItem = null, localSubtitlePath = ""
+                        playerFromSection = null, selectedItem = null, localSubtitlePath = "",
+                        resumePositionMs = null, resumeDecided = false
                     )
                     // Local (downloaded) playback: no binge session/item → return
                     // to the Downloads section instead of a blank DETAIL screen.
@@ -173,12 +201,14 @@ fun TvApp(
                         screen = TvScreen.HOME,
                         selectedSection = TvSection.DOWNLOADS,
                         playUrl = "", playTitle = "", playPreviewLimitMs = null,
-                        playerFromSection = null, bingeSession = null, localSubtitlePath = ""
+                        playerFromSection = null, bingeSession = null, localSubtitlePath = "",
+                        resumePositionMs = null, resumeDecided = false
                     )
                     else -> nav.copy(
                         screen = TvScreen.DETAIL,
                         playUrl = "", playTitle = "", playPreviewLimitMs = null,
-                        playerFromSection = null, localSubtitlePath = ""
+                        playerFromSection = null, localSubtitlePath = "",
+                        resumePositionMs = null, resumeDecided = false
                     )
                 }
             }
@@ -193,60 +223,45 @@ fun TvApp(
     }
 
     /**
-     * Launches a binge session: resolves the first episode (if the session is
-     * lazy), records the resume key, and routes to PLAYER or EMBED_PLAYER.
+     * Routes an already-decided session to the right player. Shared by the
+     * initial episode click and the pre-player resume dialog's buttons, so
+     * both paths behave identically (resolved → direct nav, lazy → resolve on
+     * the session's server).
      */
-    fun playBingeEpisode(
+    fun routePlaybackSession(
         currentNav: NavigationState,
         session: TvBingeSession,
-        progressStore: TvWatchProgressStore,
-        ctx: android.content.Context,
+        targetIndex: Int,
+        resumeMs: Long?,
+        resumeDecided: Boolean,
         onResult: (NavigationState) -> Unit
     ) {
         if (session.episodes.isEmpty()) {
             onResult(currentNav)
             return
         }
-        val current = session.current
-        val targetIndex = session.currentIndex
-        val progressKey = "${session.item.id}::${session.item.title} - ${current?.chapter?.title}"
-        val resumeMs = progressStore.loadResumeKey(progressKey) ?: 0L
-
         val resolved = session.episodes.getOrNull(targetIndex)
-        if (resolved != null && resolved.url.isNotBlank() && !resolved.isDirect) {
-            // Already resolved → route to embed player.
-            val title = "${session.item.title} - ${resolved.chapter.title}"
+        if (resolved != null && resolved.url.isNotBlank()) {
             onResult(
                 currentNav.copy(
-                    screen = TvScreen.EMBED_PLAYER,
+                    screen = if (resolved.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
                     selectedItem = session.item,
                     playUrl = resolved.url,
-                    playTitle = title,
+                    playTitle = "${session.item.title} - ${resolved.chapter.title}",
                     playPreviewLimitMs = null,
                     playerFromSection = null,
-                    bingeSession = session
-                )
-            )
-        } else if (resolved != null && resolved.url.isNotBlank() && resolved.isDirect) {
-            // Already resolved → direct LibVLC player.
-            val title = "${session.item.title} - ${resolved.chapter.title}"
-            onResult(
-                currentNav.copy(
-                    screen = TvScreen.PLAYER,
-                    selectedItem = session.item,
-                    playUrl = resolved.url,
-                    playTitle = title,
-                    playPreviewLimitMs = null,
-                    playerFromSection = null,
-                    bingeSession = session
+                    bingeSession = session,
+                    resumePositionMs = resumeMs,
+                    resumeDecided = resumeDecided
                 )
             )
         } else {
             // Lazy episode → resolve now on the session's server.
+            val current = session.current
             scope.launch {
                 val repo = TvMediaRepository()
                 val resolvedEpisode = repo.resolveBingeEpisode(
-                    context = ctx,
+                    context = context,
                     item = session.item,
                     chapter = current?.chapter,
                     server = if (session.isDonghua) null
@@ -261,20 +276,55 @@ fun TvApp(
                     return@launch
                 }
                 val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
-                val title = "${session.item.title} - ${resolvedEpisode.chapter.title}"
                 onResult(
                     currentNav.copy(
                         screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
                         selectedItem = session.item,
                         playUrl = resolvedEpisode.url,
-                        playTitle = title,
+                        playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
                         playPreviewLimitMs = null,
                         playerFromSection = null,
-                        bingeSession = updatedSession
+                        bingeSession = updatedSession,
+                        resumePositionMs = resumeMs,
+                        resumeDecided = resumeDecided
                     )
                 )
             }
         }
+    }
+
+    /**
+     * Launches a binge session. When the clicked episode has a saved position
+     * (power loss / app kill / earlier partial watch), shows the PRE-PLAYER
+     * "Continue Watching?" dialog FIRST — the user's requested flow. The
+     * player does NOT start loading until the choice is made; after the
+     * choice, [routePlaybackSession] resolves and routes like a fresh click
+     * (Continue → auto-seek once loaded, Beginning → start at 0).
+     */
+    fun playBingeEpisode(
+        currentNav: NavigationState,
+        session: TvBingeSession,
+        progressStore: TvWatchProgressStore,
+        ctx: android.content.Context,
+        onResult: (NavigationState) -> Unit
+    ) {
+        if (session.episodes.isEmpty()) {
+            onResult(currentNav)
+            return
+        }
+        val current = session.current
+        val targetIndex = session.currentIndex
+        val progressKey = tvBingeProgressKey(session.item, current?.chapter?.title ?: "")
+        val resumeMs = progressStore.loadResumeKey(progressKey) ?: 0L
+
+        // Pre-player Continue dialog — the user's suggested flow. The video
+        // has not started loading yet (no player composed), so the "Continue"
+        // seek can only ever run AFTER the video is ready.
+        if (resumeMs > 0L) {
+            pendingResumeChoice = PendingResumeChoice(session, progressKey, resumeMs)
+            return
+        }
+        routePlaybackSession(currentNav, session, targetIndex, resumeMs = null, resumeDecided = false, onResult = onResult)
     }
 
     /**
@@ -293,11 +343,23 @@ fun TvApp(
             bingeSession = session.withIndex(targetIndex)
         )
 
+        // If the TARGET episode has a saved position, show the pre-player
+        // Continue dialog for it too (auto-next / remote NEXT). The dialog's
+        // buttons route through routePlaybackSession on the same server.
+        val targetKey = tvBingeProgressKey(session.item, target.chapter.title)
+        val targetResumeMs = watchProgressStore.loadResumeKey(targetKey)
+        if (targetResumeMs != null) {
+            pendingResumeChoice = PendingResumeChoice(targetNav.bingeSession ?: session, targetKey, targetResumeMs)
+            return
+        }
+
         if (target.url.isNotBlank()) {
             nav = targetNav.copy(
                 screen = if (target.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
                 playUrl = target.url,
-                playTitle = targetTitle
+                playTitle = targetTitle,
+                resumePositionMs = null,
+                resumeDecided = false
             )
         } else {
             scope.launch {
@@ -319,7 +381,9 @@ fun TvApp(
                     bingeSession = updatedSession,
                     screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
                     playUrl = resolvedEpisode.url,
-                    playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}"
+                    playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
+                    resumePositionMs = null,
+                    resumeDecided = false
                 )
             }
         }
@@ -509,6 +573,7 @@ fun TvApp(
                                     TvDetailScreen(
                                         item = item,
                                         account = nav.account,
+                                        mediaCache = mediaCache,
                                         onPlaySession = { session ->
                                             playBingeEpisode(nav, session, watchProgressStore, context) { updatedNav ->
                                                 nav = updatedNav
@@ -545,7 +610,10 @@ fun TvApp(
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
                                     isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
-                                    resumePositionMs = watchProgressStore.loadResumeKey(progressKey),
+                                    // Prefer the position the user chose in the
+                                    // pre-player dialog; fall back to the store.
+                                    resumePositionMs = nav.resumePositionMs ?: watchProgressStore.loadResumeKey(progressKey),
+                                    resumeDecided = nav.resumeDecided,
                                     onProgress = { positionMs, durationMs ->
                                         watchProgressStore.save(progressKey, positionMs, durationMs)
                                     },
@@ -594,7 +662,10 @@ fun TvApp(
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
                                     isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
-                                    resumePositionMs = watchProgressStore.loadResumeKey(progressKey),
+                                    // Prefer the position the user chose in the
+                                    // pre-player dialog; fall back to the store.
+                                    resumePositionMs = nav.resumePositionMs ?: watchProgressStore.loadResumeKey(progressKey),
+                                    resumeDecided = nav.resumeDecided,
                                     onProgress = { positionMs, durationMs ->
                                         watchProgressStore.save(progressKey, positionMs, durationMs)
                                     },
@@ -654,6 +725,110 @@ fun TvApp(
                     }
                 }
             }
+        }
+
+        // ── Pre-player "Continue Watching?" dialog ─────────────────────────
+        // Shown BEFORE any player composes when the clicked episode has a saved
+        // position (the user's requested flow). The video is not loading behind
+        // it; the seek on "Continue" runs only after the video becomes ready in
+        // the player (resumeDecided=true → auto-seek once loaded).
+        pendingResumeChoice?.let { choice ->
+            AlertDialog(
+                onDismissRequest = {
+                    // Dismiss = stay where you are; nothing starts loading.
+                    pendingResumeChoice = null
+                },
+                title = { Text("Continue Watching?") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            choice.session.item.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val current = choice.session.current
+                        if (current != null) {
+                            Text(
+                                current.chapter.title.ifBlank { "" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TvSubtext,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            "You left off at ${formatTvResumeTime(choice.resumeMs)}. Continue from there, or start from the beginning.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TvSubtext
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val session = choice.session
+                            val key = choice.progressKey
+                            val resumeMs = choice.resumeMs
+                            pendingResumeChoice = null
+                            watchProgressStore.save(key, resumeMs, 0L)
+                            routePlaybackSession(
+                                currentNav = nav,
+                                session = session,
+                                targetIndex = session.currentIndex,
+                                resumeMs = resumeMs,
+                                resumeDecided = true,
+                                onResult = { updatedNav -> nav = updatedNav }
+                            )
+                        }
+                    ) { Text("Continue") }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            val session = choice.session
+                            val key = choice.progressKey
+                            pendingResumeChoice = null
+                            // Watch from Beginning: clear the saved spot so the
+                            // player starts at 0 and progress saving resumes.
+                            watchProgressStore.clear(key)
+                            routePlaybackSession(
+                                currentNav = nav,
+                                session = session,
+                                targetIndex = session.currentIndex,
+                                resumeMs = null,
+                                resumeDecided = true,
+                                onResult = { updatedNav -> nav = updatedNav }
+                            )
+                        }
+                    ) { Text("Watch from Beginning") }
+                }
+            )
+        }
+
+        // ── Nodebridge (embedded anime engine) failure ─────────────────────
+        // Informational only — the app keeps working via backend fallback.
+        val effectiveBridgeMessage = nodeBridgeMessage
+            ?.takeIf { it.isNotBlank() && !nodeBridgeDialogDismissed }
+        if (effectiveBridgeMessage != null) {
+            AlertDialog(
+                onDismissRequest = { nodeBridgeDialogDismissed = true },
+                title = { Text("Anime engine unavailable") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(effectiveBridgeMessage)
+                        Text(
+                            "Some anime servers may be limited — the app is using the backup servers instead.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TvSubtext
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { nodeBridgeDialogDismissed = true }) { Text("Got it") }
+                }
+            )
         }
 
         // ── In-app update (Android TV APK channel) ─────────────────────────
@@ -716,12 +891,14 @@ fun TvApp(
                     confirmButton = {
                         Button(
                             onClick = {
-                                tvUpdateInstaller.start(
-                                    context,
-                                    url = u.tvApkUrl.ifBlank { AppUpdateTarget.ANDROID_TV.downloadUrl() },
-                                    sha256 = u.tvApkSha256,
-                                    bytes = u.tvApkBytes
-                                )
+                                runCatching {
+                                    tvUpdateInstaller.start(
+                                        context,
+                                        url = u.tvApkUrl.ifBlank { AppUpdateTarget.ANDROID_TV.downloadUrl() },
+                                        sha256 = u.tvApkSha256,
+                                        bytes = u.tvApkBytes
+                                    )
+                                }
                                 if (!u.forceUpdate) isStartupUpdateDismissed = true
                             }
                         ) { Text("Install update") }
@@ -886,4 +1063,13 @@ private fun iconForSection(section: TvSection): ImageVector? = when (section) {
     TvSection.SPORTS -> Icons.Default.SportsSoccer
     TvSection.DOWNLOADS -> Icons.Default.Download
     TvSection.YOU -> Icons.Default.AccountCircle
+}
+
+/** Formats a millisecond position for the pre-player Continue dialog. */
+private fun formatTvResumeTime(millis: Long): String {
+    if (millis <= 0) return "0:00"
+    val totalSeconds = millis / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "$minutes:${seconds.toString().padStart(2, '0')}"
 }

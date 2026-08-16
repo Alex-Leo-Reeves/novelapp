@@ -203,7 +203,8 @@ class MangaDexSource(
 // ─────────────────────────────────────────────────────────────────────────────
 //  WeebCentral Scraper  (successor to MangaSee123)
 //  Primary URL : https://weebcentral.com
-//  Domain auto-heals via DuckDuckGo resolver if the site hops.
+//  Targets the official domain DIRECTLY — no DuckDuckGo domain-hop resolver
+//  (the DDG hop was fragile and caused empty search/home results).
 // ─────────────────────────────────────────────────────────────────────────────
 class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
 
@@ -211,13 +212,11 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
 
     companion object {
         private const val FALLBACK_URL = "https://weebcentral.com"
-        private const val BRAND_QUERY  = "weebcentral manga official site"
         private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    /** Resolves (and caches for 6 h) the live WeebCentral domain via DDG. */
-    private suspend fun liveBase(): String =
-        resolveLiveDomain(httpClient, BRAND_QUERY, FALLBACK_URL)
+    /** WeebCentral is always reached via its official domain directly. */
+    private suspend fun liveBase(): String = FALLBACK_URL
 
     override suspend fun searchManga(query: String): List<UnifiedSearchResult> {
         return try {
