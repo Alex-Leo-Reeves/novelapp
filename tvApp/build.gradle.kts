@@ -146,8 +146,6 @@ dependencies {
     implementation(libs.jsoup)
     implementation(libs.ksoup)
     implementation("com.google.zxing:core:3.5.3")
-    // Sherpa-ONNX offline neural TTS (same as the Android app)
-    implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 }
 
 secrets {

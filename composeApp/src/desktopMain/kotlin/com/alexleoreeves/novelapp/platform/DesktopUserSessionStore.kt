@@ -1,7 +1,7 @@
 package com.alexleoreeves.novelapp.platform
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
@@ -31,16 +31,16 @@ class DesktopUserSessionStore : UserSessionStore {
             val json = Json.parseToJsonElement(raw)
             val obj = json.jsonObject
             SavedUserAccount(
-                id = obj["id"]?.jsonPrimitive?.contentOrNull().orEmpty(),
-                username = obj["username"]?.jsonPrimitive?.contentOrNull() ?: "",
-                email = obj["email"]?.jsonPrimitive?.contentOrNull() ?: "",
-                authToken = obj["authToken"]?.jsonPrimitive?.contentOrNull() ?: "",
-                plan = obj["plan"]?.jsonPrimitive?.contentOrNull() ?: "free",
-                billingStatus = obj["billingStatus"]?.jsonPrimitive?.contentOrNull() ?: "none",
-                paidUntil = obj["paidUntil"]?.jsonPrimitive?.contentOrNull(),
-                createdAt = obj["createdAt"]?.jsonPrimitive?.contentOrNull() ?: "",
-                maxDevices = obj["maxDevices"]?.jsonPrimitive?.contentOrNull()?.toIntOrNull(),
-                isPremium = obj["isPremium"]?.jsonPrimitive?.contentOrNull()?.toBoolean() ?: false
+                id = obj["id"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                username = obj["username"]?.jsonPrimitive?.contentOrNull ?: "",
+                email = obj["email"]?.jsonPrimitive?.contentOrNull ?: "",
+                authToken = obj["authToken"]?.jsonPrimitive?.contentOrNull ?: "",
+                plan = obj["plan"]?.jsonPrimitive?.contentOrNull ?: "free",
+                billingStatus = obj["billingStatus"]?.jsonPrimitive?.contentOrNull ?: "none",
+                paidUntil = obj["paidUntil"]?.jsonPrimitive?.contentOrNull,
+                createdAt = obj["createdAt"]?.jsonPrimitive?.contentOrNull ?: "",
+                maxDevices = obj["maxDevices"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                isPremium = obj["isPremium"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
             )
         }.getOrNull()
     }
@@ -68,7 +68,11 @@ class DesktopUserSessionStore : UserSessionStore {
     }
 
     override fun clearAccount() {
-        runCatching { sessionFile.delete() }
+        runCatching {
+            if (sessionFile.exists()) {
+                sessionFile.delete()
+            }
+        }
     }
 
     private fun quote(value: String): String {
@@ -80,7 +84,4 @@ class DesktopUserSessionStore : UserSessionStore {
             .replace("\t", "\\t")
         return "\"$escaped\""
     }
-
-    private fun JsonElement?.contentOrNull(): String? =
-        this?.jsonPrimitive?.contentOrNull()
 }

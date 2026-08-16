@@ -137,8 +137,8 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
             href = resolveUrl(href, WEBCENTRAL_BASE);
             // The cover lives inside the anchor's own inner content.
             const coverMatch =
-                /<img[^>]*src="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i.exec(inner) ||
-                /<source[^>]*srcset="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i.exec(inner);
+                /<source[^>]*srcset=["']([^"']+)["']/i.exec(inner) ||
+                /<img[^>]*src=["']([^"']+)["']/i.exec(inner);
             results.push(contentItem({
                 id: `weebcentral_${href}`,
                 title: titleMatch,

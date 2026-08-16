@@ -11,11 +11,10 @@
 # silently and the bridge degrades to backend fallback.
 -keep class com.alexleoreeves.novelapp.nodebridge.NodeNativeBridge { *; }
 
-# ── Sherpa-ONNX offline TTS (JNI) ────────────────────────────────────────────
-# com.k2fsa.sherpa.onnx.* binds native methods from libsherpa-onnx-jni.so by
-# exact name. Obfuscating these classes crashes TTS with UnsatisfiedLinkError.
--keep class com.k2fsa.sherpa.onnx.** { *; }
--dontwarn com.k2fsa.sherpa.onnx.**
+# ── Android System TextToSpeech (TTS) ───────────────────────────────────────
+# TV app uses standard Android TextToSpeech (Sherpa removed to optimize TV build)
+-keepclassmembers class android.speech.tts.** { *; }
+-dontwarn android.speech.tts.**
 
 # ── VideoLAN LibVLC player (JNI) ─────────────────────────────────────────────
 # The media player loads native libVLC through native methods resolved by

@@ -103,32 +103,6 @@ fun TvNovelReaderScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Model extraction banner
-            if (ttsSettings.modelExtracting) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFF1A1A2A)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color(0xFF00BFFF),
-                            strokeWidth = 2.dp
-                        )
-                        Text(
-                            "Bundling Neural Voice Resources (${ttsSettings.extractionProgress}%)... System voice active in the meantime.",
-                            color = Color(0xFF00BFFF),
-                            fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-
             // Top bar
             Row(
                 modifier = Modifier
@@ -336,7 +310,7 @@ fun TvNovelReaderScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "TTS Playing \u2014 Speed: ${"%.1f".format(ttsSettings.speed)}x | Vol: ${(ttsSettings.volume * 100).toInt()}% | Voice: ${ttsSettings.voiceSpeakerId}",
+                                "TTS Playing \u2014 Speed: ${"%.1f".format(ttsSettings.speed)}x | Vol: ${(ttsSettings.volume * 100).toInt()}%",
                                 color = Color.White.copy(0.6f),
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -457,6 +431,9 @@ private fun TtsSettingsPanel(
     lineSpacing: Int,
     onLineSpacingChange: (Int) -> Unit
 ) {
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    var showPitchDialog by remember { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = Color(0xFF0C0C14),
@@ -467,23 +444,23 @@ private fun TtsSettingsPanel(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 32.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(32.dp),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Speed control
-            SettingControl(
+            // Speed Dropdown Button
+            RemoteDropdownButton(
                 label = "Speed",
-                value = "${"%.1f".format(ttsSettings.speed)}x",
-                onDecrease = { ttsEngine.updateSpeed(ttsSettings.speed - 0.1f) },
-                onIncrease = { ttsEngine.updateSpeed(ttsSettings.speed + 0.1f) }
+                currentValue = "${"%.2f".format(ttsSettings.speed).trimEnd('0').trimEnd('.')}x",
+                icon = Icons.Default.Speed,
+                onClick = { showSpeedDialog = true }
             )
 
-            // Pitch control
-            SettingControl(
+            // Pitch Dropdown Button
+            RemoteDropdownButton(
                 label = "Pitch",
-                value = "${"%.1f".format(ttsSettings.pitch)}x",
-                onDecrease = { ttsEngine.updatePitch(ttsSettings.pitch - 0.1f) },
-                onIncrease = { ttsEngine.updatePitch(ttsSettings.pitch + 0.1f) }
+                currentValue = "${"%.2f".format(ttsSettings.pitch).trimEnd('0').trimEnd('.')}x",
+                icon = Icons.Default.GraphicEq,
+                onClick = { showPitchDialog = true }
             )
 
             // Volume control
@@ -492,14 +469,6 @@ private fun TtsSettingsPanel(
                 value = "${(ttsSettings.volume * 100).toInt()}%",
                 onDecrease = { ttsEngine.updateVolume(ttsSettings.volume - 0.1f) },
                 onIncrease = { ttsEngine.updateVolume(ttsSettings.volume + 0.1f) }
-            )
-
-            // Voice Speaker ID (for Sherpa VITS, 0..108)
-            SettingControl(
-                label = "Voice",
-                value = "#${ttsSettings.voiceSpeakerId}",
-                onDecrease = { ttsEngine.updateVoiceSpeakerId(ttsSettings.voiceSpeakerId - 1) },
-                onIncrease = { ttsEngine.updateVoiceSpeakerId(ttsSettings.voiceSpeakerId + 1) }
             )
 
             // Font size
@@ -557,9 +526,168 @@ private fun TtsSettingsPanel(
             }
         }
     }
+
+    // Speed Selection Modal
+    if (showSpeedDialog) {
+        val speedOptions = listOf(
+            0.5f to "0.5x (Very Slow)",
+            0.75f to "0.75x (Slow)",
+            1.0f to "1.0x (Normal)",
+            1.25f to "1.25x (Fast)",
+            1.5f to "1.5x (Faster)",
+            1.75f to "1.75x (Very Fast)",
+            2.0f to "2.0x (Maximum)"
+        )
+        RemoteTtsOptionDialog(
+            title = "Speech Speed",
+            options = speedOptions,
+            currentValue = ttsSettings.speed,
+            onDismiss = { showSpeedDialog = false },
+            onSelect = { selectedSpeed ->
+                ttsEngine.updateSpeed(selectedSpeed)
+                showSpeedDialog = false
+            }
+        )
+    }
+
+    // Pitch Selection Modal
+    if (showPitchDialog) {
+        val pitchOptions = listOf(
+            0.5f to "0.5x (Deep / Low)",
+            0.75f to "0.75x (Bass)",
+            1.0f to "1.0x (Normal)",
+            1.25f to "1.25x (High Voice)",
+            1.5f to "1.5x (Higher)",
+            2.0f to "2.0x (Maximum)"
+        )
+        RemoteTtsOptionDialog(
+            title = "Voice Pitch",
+            options = pitchOptions,
+            currentValue = ttsSettings.pitch,
+            onDismiss = { showPitchDialog = false },
+            onSelect = { selectedPitch ->
+                ttsEngine.updatePitch(selectedPitch)
+                showPitchDialog = false
+            }
+        )
+    }
 }
 
-/** Reusable +/- control for a single TTS setting. */
+@Composable
+private fun RemoteDropdownButton(
+    label: String,
+    currentValue: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(label, color = Color.White.copy(0.6f), style = MaterialTheme.typography.labelMedium)
+        Surface(
+            onClick = onClick,
+            shape = RoundedCornerShape(10.dp),
+            color = if (isFocused) Color(0xFF00BFFF).copy(0.25f) else Color(0xFF1A1A2A),
+            border = if (isFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+            modifier = Modifier
+                .height(38.dp)
+                .onFocusChanged { isFocused = it.isFocused }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(icon, null, tint = if (isFocused) Color(0xFF00BFFF) else Color.White, modifier = Modifier.size(16.dp))
+                Text(
+                    currentValue,
+                    color = if (isFocused) Color(0xFF00BFFF) else Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Icon(Icons.Default.ArrowDropDown, null, tint = Color.White.copy(0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemoteTtsOptionDialog(
+    title: String,
+    options: List<Pair<Float, String>>,
+    currentValue: Float,
+    onDismiss: () -> Unit,
+    onSelect: (Float) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                title,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .width(320.dp)
+                    .heightIn(max = 350.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(options) { (value, label) ->
+                    val isSelected = kotlin.math.abs(currentValue - value) < 0.05f
+                    var itemFocused by remember { mutableStateOf(false) }
+
+                    Surface(
+                        onClick = { onSelect(value) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = when {
+                            itemFocused -> Color(0xFF00BFFF).copy(0.3f)
+                            isSelected -> Color(0xFF17172A)
+                            else -> Color(0xFF0F0F1A)
+                        },
+                        border = if (itemFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else if (isSelected) BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.5f)) else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { itemFocused = it.isFocused }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                label,
+                                color = if (isSelected || itemFocused) Color(0xFF00BFFF) else Color.White,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    null,
+                                    tint = Color(0xFF00BFFF),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF00BFFF), fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color(0xFF12121E)
+    )
+}
+
+/** Reusable +/- control for volume and other numeric settings. */
 @Composable
 private fun SettingControl(
     label: String,
