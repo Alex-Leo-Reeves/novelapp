@@ -71,9 +71,9 @@ object NodeBridgeRuntime {
                     return@launch
                 }
 
-                val libNode = File(context.applicationInfo.nativeLibraryDir, "libnode.so")
-                if (!libNode.exists()) {
-                    Log.w(TAG, "libnode.so missing in ${context.applicationInfo.nativeLibraryDir}")
+                val libNode = resolveLibNode(context)
+                if (libNode == null || !libNode.exists()) {
+                    Log.w(TAG, "libnode.so missing in ${context.applicationInfo.nativeLibraryDir} and could not be extracted from APK")
                     NodeBridgeStatus.reportFailure("The Node.js runtime is missing from this build.")
                     return@launch
                 }
@@ -160,4 +160,67 @@ object NodeBridgeRuntime {
         runCatching { stampFile.writeText(STAMP_VERSION) }
         return baseDir
     }
+
+    /**
+     * Resolves the path to libnode.so. Checks applicationInfo.nativeLibraryDir first
+     * (standard extracted location). If unextracted (due to extractNativeLibs=false or
+     * uncompressed native packaging), extracts libnode.so from the APK directly into filesDir.
+     */
+    private fun resolveLibNode(context: Context): File? {
+        val standard = File(context.applicationInfo.nativeLibraryDir, "libnode.so")
+        if (standard.exists() && standard.length() > 0) return standard
+
+        val extracted = File(context.filesDir, "libnode.so")
+        if (extracted.exists() && extracted.length() > 10_000_000L) {
+            return extracted
+        }
+
+        val sourceDir = context.applicationInfo.sourceDir ?: return null
+        val apkFile = File(sourceDir)
+        if (!apkFile.exists()) return null
+
+        try {
+            java.util.zip.ZipFile(apkFile).use { zip ->
+                val abis = android.os.Build.SUPPORTED_ABIS
+                var entry: java.util.zip.ZipEntry? = null
+                for (abi in abis) {
+                    val candidate = zip.getEntry("lib/$abi/libnode.so")
+                    if (candidate != null) {
+                        entry = candidate
+                        break
+                    }
+                }
+                if (entry == null) {
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val e = entries.nextElement()
+                        if (e.name.endsWith("/libnode.so")) {
+                            entry = e
+                            break
+                        }
+                    }
+                }
+
+                if (entry != null) {
+                    Log.i(TAG, "Extracting libnode.so from APK entry ${entry.name} to ${extracted.absolutePath}")
+                    extracted.parentFile?.mkdirs()
+                    zip.getInputStream(entry).use { input ->
+                        FileOutputStream(extracted).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    extracted.setReadable(true, false)
+                    extracted.setExecutable(true, false)
+                    if (extracted.exists() && extracted.length() > 0) {
+                        return extracted
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract libnode.so from APK", e)
+        }
+
+        return null
+    }
 }
+

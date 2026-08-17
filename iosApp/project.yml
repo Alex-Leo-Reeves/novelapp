@@ -50,8 +50,6 @@ targets:
           - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         OTHER_LDFLAGS:
           - "$(inherited)"
-          - "-framework"
-          - "ComposeApp"
     dependencies:
       - framework: "../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/ComposeApp.framework"
         embed: true

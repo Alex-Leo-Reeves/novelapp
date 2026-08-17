@@ -40,6 +40,7 @@
          player chrome, but the <video> surface never draws without GPU accel. -->
     <application
         android:allowBackup="true"
+        android:extractNativeLibs="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:banner="@drawable/tv_banner"
         android:icon="@drawable/ic_tv_launcher"

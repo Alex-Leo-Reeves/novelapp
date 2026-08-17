@@ -93,6 +93,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: "gradle"
+
+      - name: Cache Konan LLVM dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-konan-
 
       - name: Write API key xcconfig
         run: |
