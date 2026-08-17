@@ -118,6 +118,36 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         }.start()
     }
 
+    private fun openConnectionFollowingRedirects(initialUrl: String, userAgent: String): HttpURLConnection {
+        var currentUrl = initialUrl
+        var redirects = 0
+        while (redirects < 6) {
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 20000
+                readTimeout = 120000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", userAgent)
+                setRequestProperty("Accept", "*/*")
+            }
+            val status = conn.responseCode
+            if (status in 300..399) {
+                val newUrl = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (newUrl.isNullOrBlank()) error("Redirected with HTTP $status but no Location header")
+                currentUrl = if (newUrl.startsWith("http://") || newUrl.startsWith("https://")) newUrl
+                             else URL(URL(currentUrl), newUrl).toString()
+                redirects++
+                continue
+            }
+            if (status !in 200..299) {
+                conn.disconnect()
+                error("server returned HTTP $status")
+            }
+            return conn
+        }
+        error("Too many redirects ($redirects)")
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  downloadAndInstallApk — single download attempt (thrown on failure)
     // ─────────────────────────────────────────────────────────────────────────
@@ -129,15 +159,7 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         if (tmpFile.exists()) tmpFile.delete()
         val manifest = fetchUpdateManifest()
 
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15000
-            readTimeout = 120000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "NovelApp/${AppReleaseConfig.CURRENT_VERSION_NAME}")
-        }
-        if (connection.responseCode !in 200..299) {
-            error("server returned HTTP ${connection.responseCode}")
-        }
+        val connection = openConnectionFollowingRedirects(url, "NovelApp/${AppReleaseConfig.CURRENT_VERSION_NAME}")
         // expectedBytes: prefer manifest value, fall back to HTTP Content-Length.
         // Content-Length can be unreliable across CDN redirects used by GitHub Releases
         // (e.g. chunked encoding, missing Content-Length, or size differences from compression).
@@ -370,7 +392,7 @@ class AndroidExternalLinkOpener(context: Context) : ExternalLinkOpener {
         val candidate = packageInfo(apk.absolutePath) ?: return "Android could not read the downloaded APK"
         val installed = installedPackageInfo()
         if (candidate.packageName != appContext.packageName) return "downloaded APK package does not match NovelApp"
-        if (versionCodeOf(candidate) <= versionCodeOf(installed)) return "downloaded APK is not newer than the installed app"
+        if (versionCodeOf(candidate) < versionCodeOf(installed)) return "downloaded APK is older than the installed app"
         if (signaturesMatch(candidate, installed) == false) return "downloaded APK is signed with a different key"
         if (installerIntent(apkUri(apk)).resolveActivity(appContext.packageManager) == null) {
             return "Android could not find an app installer"

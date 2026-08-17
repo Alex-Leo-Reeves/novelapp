@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.BuildKonfig
+import com.alexleoreeves.novelapp.audio.SherpaNarrationController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.theme.*
 import kotlinx.coroutines.launch
@@ -44,6 +45,9 @@ fun NovelDetailScreen(
     var chapterQuery by remember { mutableStateOf("") }
     var newestFirst by remember { mutableStateOf(false) }
     var selectedChapterChunk by remember { mutableStateOf(0) }
+
+    // Download-with-audio dialog state
+    var pendingDownloadChapter by remember { mutableStateOf<Chapter?>(null) }
 
     val repository = remember {
         NovelSearchRepository(
@@ -217,7 +221,7 @@ fun NovelDetailScreen(
 
             // Chapter list header
             item {
-                Padding(horizontal = 16.dp, vertical = 12.dp) {
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -401,86 +405,26 @@ fun NovelDetailScreen(
                                         downloadRepo.deleteItem(novel.id)
                                     }
                                     refreshTrigger++
-                                } else {
+                                } else if (novel.isManga || novel.isComic) {
+                                    // Manga/comic: no audio choice needed, download images directly
                                     downloadingChapters = downloadingChapters + chapter.chapterNumber
                                     scope.launch {
-                                        try {
-                                            val contentType = when {
-                                                novel.isComic -> ContentType.COMIC
-                                                novel.isManga -> ContentType.MANGA
-                                                else -> ContentType.NOVEL
+                                        performNovelDownload(
+                                            chapter = chapter,
+                                            novel = novel,
+                                            withAudio = false,
+                                            repository = repository,
+                                            downloadRepo = downloadRepo,
+                                            ttsController = null,
+                                            onComplete = {
+                                                downloadingChapters = downloadingChapters - chapter.chapterNumber
+                                                refreshTrigger++
                                             }
-                                            downloadRepo.addItem(
-                                                DownloadedItem(
-                                                    id = novel.id,
-                                                    title = novel.title,
-                                                    coverUrl = novel.coverUrl,
-                                                    type = contentType,
-                                                    sourceName = novel.sourceName
-                                                )
-                                            )
-                                            if (novel.isManga || novel.isComic) {
-                                                val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
-                                                if (pages.isNotEmpty()) {
-                                                    val localPages = cacheMangaChapterPages(
-                                                        chapterKey = "${novel.sourceName}:${novel.id}:${chapter.chapterNumber}:${chapter.url}",
-                                                        pageUrls = pages,
-                                                        persistent = true,
-                                                        onProgress = { _, _ -> }
-                                                    )
-                                                    val offlinePages = localPages.filter { isDownloadedLocalFileAvailable(it) }
-                                                    if (offlinePages.size == pages.size) {
-                                                        downloadRepo.addChapter(
-                                                            DownloadedChapter(
-                                                                parentId = novel.id,
-                                                                chapterNumber = chapter.chapterNumber,
-                                                                chapterTitle = chapter.title,
-                                                                localFilePath = offlinePages.joinToString(","),
-                                                                pageCount = offlinePages.size
-                                                            )
-                                                        )
-                                                    } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
-                                                        downloadRepo.deleteItem(novel.id)
-                                                    }
-                                                } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
-                                                    downloadRepo.deleteItem(novel.id)
-                                                }
-                                            } else {
-                                                val text = repository.fetchChapterText(chapter.url, novel.sourceName)
-                                                if (text.isNotEmpty() && !text.startsWith("Failed")) {
-                                                    val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
-                                                    var audioPath = ""
-                                                    if (ttsController != null) {
-                                                        audioPath = ttsController.downloadChapterAudio(text, "${novel.id}_${chapter.chapterNumber}") ?: ""
-                                                    }
-                                                    
-                                                    val combinedPath = if (audioPath.isNotBlank()) "$path|$audioPath" else path
-                                                    
-                                                    if (path.isNotBlank() && isDownloadedLocalFileAvailable(path)) {
-                                                        downloadRepo.addChapter(
-                                                            DownloadedChapter(
-                                                                parentId = novel.id,
-                                                                chapterNumber = chapter.chapterNumber,
-                                                                chapterTitle = chapter.title,
-                                                                localFilePath = combinedPath
-                                                            )
-                                                        )
-                                                    } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
-                                                        downloadRepo.deleteItem(novel.id)
-                                                    }
-                                                } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
-                                                    downloadRepo.deleteItem(novel.id)
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
-                                                downloadRepo.deleteItem(novel.id)
-                                            }
-                                        } finally {
-                                            downloadingChapters = downloadingChapters - chapter.chapterNumber
-                                            refreshTrigger++
-                                        }
+                                        )
                                     }
+                                } else {
+                                    // Novel: show Text-Only vs Text+Audio dialog
+                                    pendingDownloadChapter = chapter
                                 }
                             }
                         }
@@ -488,6 +432,242 @@ fun NovelDetailScreen(
                 }
             }
         }
+    }
+
+
+    // ── Audio download choice dialog ──────────────────────────────────────────
+    val chapterToDownload = pendingDownloadChapter
+    if (chapterToDownload != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDownloadChapter = null },
+            containerColor = Color(0xFF12121E),
+            titleContentColor = Color.White,
+            title = {
+                Column {
+                    Text(
+                        "Download Chapter",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        chapterToDownload.title,
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "How would you like to download this chapter?",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 13.sp
+                    )
+                    // Option: Text Only
+                    Surface(
+                        onClick = {
+                            pendingDownloadChapter = null
+                            downloadingChapters = downloadingChapters + chapterToDownload.chapterNumber
+                            scope.launch {
+                                performNovelDownload(
+                                    chapter = chapterToDownload,
+                                    novel = novel,
+                                    withAudio = false,
+                                    repository = repository,
+                                    downloadRepo = downloadRepo,
+                                    ttsController = ttsController,
+                                    onComplete = {
+                                        downloadingChapters = downloadingChapters - chapterToDownload.chapterNumber
+                                        refreshTrigger++
+                                    }
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = currentTheme.cardColor(),
+                        border = BorderStroke(1.dp, currentTheme.accentColor().copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Article,
+                                null,
+                                tint = currentTheme.accentColor(),
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Column {
+                                Text(
+                                    "Text Only",
+                                    color = currentTheme.textColor(),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    "Fast · Lightweight · Instant",
+                                    color = currentTheme.subTextColor(),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                    // Option: Text + Audio
+                    if (ttsController != null) {
+                        Surface(
+                            onClick = {
+                                pendingDownloadChapter = null
+                                downloadingChapters = downloadingChapters + chapterToDownload.chapterNumber
+                                scope.launch {
+                                    performNovelDownload(
+                                        chapter = chapterToDownload,
+                                        novel = novel,
+                                        withAudio = true,
+                                        repository = repository,
+                                        downloadRepo = downloadRepo,
+                                        ttsController = ttsController,
+                                        onComplete = {
+                                            downloadingChapters = downloadingChapters - chapterToDownload.chapterNumber
+                                            refreshTrigger++
+                                        }
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = currentTheme.cardColor(),
+                            border = BorderStroke(1.dp, currentTheme.accentColor().copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Headphones,
+                                    null,
+                                    tint = currentTheme.accentColor(),
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Column {
+                                    Text(
+                                        "Text + Audio Narration",
+                                        color = currentTheme.textColor(),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        "Offline voice narration · Larger file",
+                                        color = currentTheme.subTextColor(),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { pendingDownloadChapter = null }) {
+                    Text("Cancel", color = currentTheme.accentColor())
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Shared suspend function that performs a chapter download.
+ * For manga/comic: caches image pages locally.
+ * For novel text: fetches text, saves locally, and optionally synthesizes audio.
+ * [onComplete] is called on the UI thread after the operation (success or failure).
+ */
+private suspend fun performNovelDownload(
+    chapter: Chapter,
+    novel: UnifiedSearchResult,
+    withAudio: Boolean,
+    repository: NovelSearchRepository,
+    downloadRepo: LocalDownloadRepository,
+    ttsController: SherpaNarrationController?,
+    onComplete: () -> Unit
+) {
+    try {
+        val contentType = when {
+            novel.isComic -> ContentType.COMIC
+            novel.isManga -> ContentType.MANGA
+            else -> ContentType.NOVEL
+        }
+        downloadRepo.addItem(
+            DownloadedItem(
+                id = novel.id,
+                title = novel.title,
+                coverUrl = novel.coverUrl,
+                type = contentType,
+                sourceName = novel.sourceName
+            )
+        )
+        if (novel.isManga || novel.isComic) {
+            val pages = repository.fetchMangaPages(chapter.url, novel.sourceName)
+            if (pages.isNotEmpty()) {
+                val localPages = cacheMangaChapterPages(
+                    chapterKey = "${novel.sourceName}:${novel.id}:${chapter.chapterNumber}:${chapter.url}",
+                    pageUrls = pages,
+                    persistent = true,
+                    onProgress = { _, _ -> }
+                )
+                val offlinePages = localPages.filter { isDownloadedLocalFileAvailable(it) }
+                if (offlinePages.size == pages.size) {
+                    downloadRepo.addChapter(
+                        DownloadedChapter(
+                            parentId = novel.id,
+                            chapterNumber = chapter.chapterNumber,
+                            chapterTitle = chapter.title,
+                            localFilePath = offlinePages.joinToString(","),
+                            pageCount = offlinePages.size
+                        )
+                    )
+                } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                    downloadRepo.deleteItem(novel.id)
+                }
+            } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                downloadRepo.deleteItem(novel.id)
+            }
+        } else {
+            val text = repository.fetchChapterText(chapter.url, novel.sourceName)
+            if (text.isNotEmpty() && !text.startsWith("Failed")) {
+                val path = saveDownloadedText(novel.id, chapter.chapterNumber, text)
+                val audioPath = if (withAudio && ttsController != null) {
+                    ttsController.downloadChapterAudio(text, "${novel.id}_${chapter.chapterNumber}") ?: ""
+                } else ""
+                val combinedPath = if (audioPath.isNotBlank()) "$path|$audioPath" else path
+                if (path.isNotBlank() && isDownloadedLocalFileAvailable(path)) {
+                    downloadRepo.addChapter(
+                        DownloadedChapter(
+                            parentId = novel.id,
+                            chapterNumber = chapter.chapterNumber,
+                            chapterTitle = chapter.title,
+                            localFilePath = combinedPath
+                        )
+                    )
+                } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                    downloadRepo.deleteItem(novel.id)
+                }
+            } else if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+                downloadRepo.deleteItem(novel.id)
+            }
+        }
+    } catch (e: Exception) {
+        if (downloadRepo.getChaptersFor(novel.id).isEmpty()) {
+            downloadRepo.deleteItem(novel.id)
+        }
+    } finally {
+        onComplete()
     }
 }
 

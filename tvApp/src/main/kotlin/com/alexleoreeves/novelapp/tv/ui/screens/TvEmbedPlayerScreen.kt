@@ -129,10 +129,25 @@ fun TvEmbedPlayerScreen(
      * hoisted, so callers must come after the function they invoke.
      */
     fun playerSeekToChecked(positionMs: Long, onResult: ((String) -> Unit)?) {
+        val maxAllowed = if (!isPremium && duration > 0) {
+            if (isEpisodic) (duration * episodicFraction).toLong().coerceAtLeast(1)
+            else (previewLimitMs ?: TV_MOVIE_FREE_PREVIEW_MS).coerceAtMost(TV_MOVIE_FREE_PREVIEW_MS)
+        } else if (!isPremium) {
+            (previewLimitMs ?: TV_MOVIE_FREE_PREVIEW_MS).coerceAtMost(TV_MOVIE_FREE_PREVIEW_MS)
+        } else Long.MAX_VALUE
+
+        val targetMs = if (!isPremium && positionMs >= maxAllowed) {
+            previewExpired = true
+            webViewRef?.evaluateJavascript(EMBED_PAUSE_JS, null)
+            maxAllowed
+        } else {
+            positionMs.coerceIn(0L, maxAllowed)
+        }
+
         // Targets the REAL (longest) video via __novelAppFindBestVideo, not the
         // first <video> (which may be a short ad).
         val js = FIND_BEST_VIDEO_JS +
-            "(function(t){var v=__novelAppFindBestVideo();if(v){try{v.currentTime=t;return 'ok';}catch(e){return 'none';}}return 'none';})(${positionMs / 1000.0})"
+            "(function(t){var v=__novelAppFindBestVideo();if(v){try{v.currentTime=t;return 'ok';}catch(e){return 'none';}}return 'none';})(${targetMs / 1000.0})"
         webViewRef?.evaluateJavascript(js, onResult)
     }
 

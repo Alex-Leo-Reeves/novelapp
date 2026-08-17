@@ -240,6 +240,8 @@ fun TvApp(
             onResult(currentNav)
             return
         }
+        val isMovie = session.item.mediaKind.equals("movie", ignoreCase = true) || session.episodes.size <= 1
+        val previewLimit = if (session.isPremium) null else if (isMovie) 20L * 60L * 1000L else 5L * 60L * 1000L
         val resolved = session.episodes.getOrNull(targetIndex)
         if (resolved != null && resolved.url.isNotBlank()) {
             onResult(
@@ -248,7 +250,7 @@ fun TvApp(
                     selectedItem = session.item,
                     playUrl = resolved.url,
                     playTitle = "${session.item.title} - ${resolved.chapter.title}",
-                    playPreviewLimitMs = null,
+                    playPreviewLimitMs = previewLimit,
                     playerFromSection = null,
                     bingeSession = session,
                     resumePositionMs = resumeMs,
@@ -282,7 +284,7 @@ fun TvApp(
                         selectedItem = session.item,
                         playUrl = resolvedEpisode.url,
                         playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
-                        playPreviewLimitMs = null,
+                        playPreviewLimitMs = previewLimit,
                         playerFromSection = null,
                         bingeSession = updatedSession,
                         resumePositionMs = resumeMs,

@@ -34,6 +34,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import com.alexleoreeves.novelapp.data.mediacache.DownloadPhase
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
+import com.alexleoreeves.novelapp.tv.mediacache.UsbVolume
 import androidx.activity.compose.BackHandler
 
 @Composable
@@ -109,6 +110,10 @@ fun TvDetailScreen(
     // (e.g. Legend of the Seeker) still play on the movie/TV servers.
     var animeFallbackActive by remember { mutableStateOf(false) }
 
+    // Storage destination dialog: set when a download is requested and USB is present
+    val mountedVolumes by mediaCache?.volumes?.collectAsState() ?: remember { mutableStateOf<List<UsbVolume>>(emptyList()) }
+    var pendingStorageChapter by remember { mutableStateOf<Chapter?>(null) }
+
     LaunchedEffect(item, selectedAnimeServer, selectedDonghuaServer, useAnimeServerForDonghua) {
         isLoading = true
         errorMsg = null
@@ -167,18 +172,7 @@ fun TvDetailScreen(
         } catch (e: Exception) {}
     }
 
-    /**
-     * Enqueue an episode/movie for offline download through the media cache.
-     * The task shows up live in TvDownloadsScreen (active queue → completed),
-     * and the per-episode button flips to "Downloaded" once the bundle lands.
-     */
-    fun enqueueDownload(chapter: Chapter? = null) {
-        val cache = mediaCache ?: run {
-            statusText = "Downloads unavailable on this build."
-            return
-        }
-        val ch = chapter ?: chapters.firstOrNull()
-            ?: Chapter(item.title, item.detailPageUrl, 0)
+    fun startDownloadToInternal(cache: TvMediaCacheController, ch: Chapter) {
         val title = ch.title.ifBlank { item.title }
         val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
         val containerExtension = "mp4"
@@ -216,6 +210,71 @@ fun TvDetailScreen(
                     else selectedServer.displayName
             )
             statusText = "Download started — see Downloads (active queue)."
+        }
+    }
+
+    fun startDownloadToUsb(cache: TvMediaCacheController, ch: Chapter, usbVolumeId: String, usbLabel: String) {
+        val title = ch.title.ifBlank { item.title }
+        val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        val containerExtension = "mp4"
+        statusText = "Downloading \"$title\" to $usbLabel..."
+        scope.launch {
+            val sourceUrl = mediaRepo.resolveStreamUrl(
+                item = item,
+                chapter = ch,
+                server = when {
+                    animeFallbackActive -> selectedServer
+                    isDonghua || item.isAnime -> null
+                    else -> selectedServer
+                },
+                donghuaServer = if (isDonghua && !useAnimeServerForDonghua) selectedDonghuaServer else null,
+                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer
+                    else if (isDonghua && useAnimeServerForDonghua) selectedAnimeServer
+                    else null
+            )
+            if (sourceUrl.isNullOrBlank()) {
+                statusText = "Could not resolve a download link. Try another server."
+                return@launch
+            }
+            val ok = cache.enqueueUsb(
+                taskId = taskId,
+                sourceUrl = sourceUrl,
+                title = title,
+                parentId = item.id,
+                episodeNumber = ch.chapterNumber,
+                containerExtension = containerExtension,
+                usbVolumeId = usbVolumeId,
+                serverId = if (isDonghua) selectedDonghuaServer.name
+                    else if (item.isAnime) selectedAnimeServer.name
+                    else selectedServer.name,
+                serverName = if (isDonghua) selectedDonghuaServer.displayName
+                    else if (item.isAnime) selectedAnimeServer.displayName
+                    else selectedServer.displayName
+            )
+            statusText = if (ok) "Download started — see Downloads (active queue)."
+                else "USB drive was removed. Download to internal storage instead."
+        }
+    }
+
+    /**
+     * Enqueue an episode/movie for offline download through the media cache.
+     * If a USB volume is mounted, shows a D-pad-friendly storage destination
+     * dialog before enqueueing. Otherwise routes directly to internal storage.
+     */
+    fun enqueueDownload(chapter: Chapter? = null) {
+        val cache = mediaCache ?: run {
+            statusText = "Downloads unavailable on this build."
+            return
+        }
+        val ch = chapter ?: chapters.firstOrNull()
+            ?: Chapter(item.title, item.detailPageUrl, 0)
+
+        if (mountedVolumes.isNotEmpty()) {
+            // USB detected — ask where to save
+            pendingStorageChapter = ch
+        } else {
+            // No USB — go straight to internal
+            startDownloadToInternal(cache, ch)
         }
     }
 
@@ -788,8 +847,100 @@ fun TvDetailScreen(
                 }
             }
         }
+
+        // ── USB Storage Selection Dialog ────────────────────────────────────────
+        val chapterForStorage = pendingStorageChapter
+        val cache = mediaCache
+        if (chapterForStorage != null && cache != null) {
+            AlertDialog(
+                onDismissRequest = { pendingStorageChapter = null },
+                containerColor = Color(0xFF0E0E18),
+                title = {
+                    Column {
+                        Text(
+                            "Choose Download Location",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            chapterForStorage.title.ifBlank { item.title },
+                            color = Color.White.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "A USB drive is connected. Where would you like to save?",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+
+                        // Internal storage option
+                        var internalFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = {
+                                pendingStorageChapter = null
+                                startDownloadToInternal(cache, chapterForStorage)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (internalFocused) Color(0xFF1C1C30) else Color(0xFF131320),
+                            border = BorderStroke(
+                                1.dp,
+                                if (internalFocused) Color(0xFF00BFFF) else Color.White.copy(0.12f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { internalFocused = it.isFocused }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(Icons.Default.PhoneAndroid, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(28.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Internal Storage", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    val freeInternal = remember {
+                                        runCatching {
+                                            val stat = android.os.StatFs(context.filesDir.absolutePath)
+                                            val free = stat.availableBlocksLong * stat.blockSizeLong
+                                            "%.1f GB free".format(free / (1024f * 1024f * 1024f))
+                                        }.getOrDefault("Space unknown")
+                                    }
+                                    Text(freeInternal, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.bodySmall)
+                                }
+                                Icon(Icons.Default.ChevronRight, null, tint = Color.White.copy(0.3f), modifier = Modifier.size(18.dp))
+                            }
+                        }
+
+                        // USB volume options
+                        for (volume in mountedVolumes) {
+                            UsbVolumeRow(
+                                volume = volume,
+                                onSelect = {
+                                    pendingStorageChapter = null
+                                    startDownloadToUsb(cache, chapterForStorage, volume.id, volume.label)
+                                }
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { pendingStorageChapter = null }) {
+                        Text("Cancel", color = Color(0xFF00BFFF))
+                    }
+                }
+            )
+        }
     }
 }
+
 
 /** Builds the exact watch-progress key the TvApp player uses for a chapter. */
 private fun resumeProgressKey(item: UnifiedSearchResult, chapter: Chapter): String {
@@ -803,4 +954,49 @@ private fun formatTvClock(millis: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "$minutes:${seconds.toString().padStart(2, '0')}"
+}
+
+@Composable
+private fun UsbVolumeRow(
+    volume: UsbVolume,
+    onSelect: () -> Unit
+) {
+    var usbFocused by remember { mutableStateOf(false) }
+    Surface(
+        onClick = onSelect,
+        shape = RoundedCornerShape(12.dp),
+        color = if (usbFocused) Color(0xFF1A1C30) else Color(0xFF131320),
+        border = BorderStroke(
+            1.dp,
+            if (usbFocused) Color(0xFF7B61FF) else Color.White.copy(0.12f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { usbFocused = it.isFocused }
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Default.Usb, null, tint = Color(0xFF7B61FF), modifier = Modifier.size(28.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    volume.label.ifBlank { "USB Drive" },
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                val freeUsb = remember(volume.id) {
+                    runCatching {
+                        val stat = android.os.StatFs(volume.root.absolutePath)
+                        val free = stat.availableBlocksLong * stat.blockSizeLong
+                        "%.1f GB free".format(free / (1024f * 1024f * 1024f))
+                    }.getOrDefault("Space unknown")
+                }
+                Text(freeUsb, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = Color.White.copy(0.3f), modifier = Modifier.size(18.dp))
+        }
+    }
 }

@@ -14,14 +14,15 @@ import kotlinx.serialization.Serializable
 /** Fixed logical chunk size in bytes (4 MiB). */
 const val MEDIA_CHUNK_SIZE: Long = 4L * 1024 * 1024
 
-/** Maximum simultaneous chunk transfers across the whole engine. */
-const val MEDIA_MAX_CONCURRENT_CHUNKS: Int = 3
+/** Maximum simultaneous chunk transfers across the whole engine.
+ *  6 parallel ranges fills most WiFi/LAN connections without over-subscribing. */
+const val MEDIA_MAX_CONCURRENT_CHUNKS: Int = 6
 
 /** Max automatic retries per chunk before the task fails. */
-const val MEDIA_MAX_CHUNK_RETRIES: Int = 5
+const val MEDIA_MAX_CHUNK_RETRIES: Int = 6
 
 /** Initial backoff before first retry (ms). Doubles with jitter on each retry. */
-const val MEDIA_RETRY_BASE_DELAY_MS: Long = 1_000L
+const val MEDIA_RETRY_BASE_DELAY_MS: Long = 800L
 
 /** Safety reserve: engine refuses to start a download unless this much free space
  *  remains after the file is allocated (2 × content size, see [reserveRequirement]). */

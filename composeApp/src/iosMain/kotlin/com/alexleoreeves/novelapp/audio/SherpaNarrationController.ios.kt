@@ -63,6 +63,9 @@ actual class SherpaNarrationController actual constructor() {
     private val _isBuffering = MutableStateFlow(false)
     actual val isBuffering: StateFlow<Boolean> = _isBuffering
 
+    private val _isTestingVoice = MutableStateFlow(false)
+    actual val isTestingVoice: StateFlow<Boolean> = _isTestingVoice
+
     private val _voiceSetupStatus = MutableStateFlow(
         VoiceSetupStatus(phase = VoiceSetupPhase.Ready, message = "iOS system voice ready.")
     )

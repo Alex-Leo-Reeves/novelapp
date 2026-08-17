@@ -72,6 +72,8 @@ expect class SherpaNarrationController() {
     val currentWordIndex: StateFlow<Int>
     val playbackProgress: StateFlow<Float>
     val isBuffering: StateFlow<Boolean>
+    /** True while a voice-preview sample is being synthesized. */
+    val isTestingVoice: StateFlow<Boolean>
     val voiceSetupStatus: StateFlow<VoiceSetupStatus>
     val lastError: StateFlow<String?>
     val settings: StateFlow<NarrationSettings>

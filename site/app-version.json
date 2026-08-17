@@ -1,51 +1,50 @@
 {
     "_instructions": "PERMANENT release-channel URLs — do NOT change apkUrl / tvApkUrl / desktopUrl / ipaUrl for a routine release. To ship a new build you REPLACE the binary behind each URL and update ONLY the version fields + release notes plus the matching sha256/bytes. Per-platform overrides (tvVersion*, desktopVersion*, iosVersion*) let TV, Windows EXE, and iOS ship on their OWN tracks; when null they fall back to the top-level Android values. ⚠️ Each per-platform versionCode MUST equal the versionCode that platform actually BUILDS with (tvApp/build.gradle.kts for TV, PlatformAppVersion.desktop.kt + composeApp packageVersion for EXE, iosApp/project.yml for iOS) — a mismatch makes that platform show a false 'update available'. AFTER BUILDING, fill in the sha256 + bytes for every platform (empty string / 0 = the app skips integrity verification for that platform until you provide them). Compute with: sha256sum <file>  and  stat --format=%s <file>",
-    "versionCode": 43,
-    "versionName": "1.43",
+    "versionCode": 44,
+    "versionName": "1.44",
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
-    "apkSha256": "b7359c953d4431ea7fe71fc32a97083d1a7caa6302914c1f7ab4a71c2807c8b3",
-    "apkBytes": 193254397,
+    "apkSha256": "",
+    "apkBytes": 0,
     "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
-    "tvApkSha256": "b00a23f3410ae71722d32979109a2151b08f00750f5583073bf7e3495b34c2e5",
-    "tvApkBytes": 231575661,
+    "tvApkSha256": "",
+    "tvApkBytes": 0,
     "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
     "desktopSha256": "",
     "desktopBytes": 0,
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "ipaSha256": "",
     "ipaBytes": 0,
-    "tvVersionCode": 43,
-    "tvVersionName": "1.43",
+    "tvVersionCode": 44,
+    "tvVersionName": "1.44",
     "tvReleaseNotes": [
-        "Android TV (TV): 13 Anivexa anime servers (MKissa, Reanime, AniKoto, AnimeGG, AniNeko, AniDB.app, 2DHive, AnimeNoSub, AniZone, AniBD, Senshi, KickAssAnime, AnimeDunya) + VidLink last-resort — switch servers per anime title",
-        "Android TV (TV): fix — anime servers no longer show 'No content found'; API timeout raised 20s→90s so cold Anivexa scrapes resolve",
-        "Android TV (TV): fix — when an Anivexa provider returns no episodes the app falls back to TMDB/VidLink episodes instead of an empty list",
-        "Android TV (TV): AnimeXin (Donghua & Anime) server playback stabilized through the visible WebView player",
-        "Android TV (TV): embed player stabilization — STABILIZATION_END_JS wired into player READY so all embed servers auto-play",
-        "Android TV (TV): media cache / download system v2 — download full videos/audio to internal storage or USB, serve them back through a loopback media server",
-        "Android TV (TV): binge playback — next episode auto-plays on the SAME server, selected per episode",
-        "Android TV (TV): phone-pair sign-in, full novels/manga/comics/anime/donghua/K-drama/cartoon/classic/movies/Nollywood/sports sections",
-        "Android TV (TV): in-app APK updates over the v1.40 permanent channel"
+        "Android TV (TV): v1.44 — Inescapable free-tier watch limits & clamped seek controls across direct LibVLC and embed players",
+        "Android TV (TV): USB external storage detection & download destination selection dialog with free space monitor",
+        "Android TV (TV): High-speed ordered download engine (6 parallel concurrent chunks) for movies, anime, donghua, cartoons & K-drama",
+        "Android TV (TV): In-app update installer resilience with automatic multi-hop HTTP redirect handling",
+        "Android TV (TV): Startup stability improvements and comprehensive ProGuard rules"
     ],
-    "desktopVersionCode": 42,
-    "desktopVersionName": "1.42",
+    "desktopVersionCode": 44,
+    "desktopVersionName": "1.44",
     "desktopReleaseNotes": [
-        "Windows (EXE): real in-app narration (SAPI voice, word/paragraph highlight, pause/skip/seek)",
-        "Windows (EXE): in-app video players for anime, MA server, and YouTube — no browser hop",
-        "Windows (EXE): offline video/audio downloads work in-app",
-        "Windows (EXE): update checker uses the desktop channel (desktopVersionCode 42) — no false prompts when only Android bumps"
+        "Windows (EXE): v1.44 — In-app update installer resilience with automated redirect resolution for .exe/.msi packages",
+        "Windows (EXE): High-speed media downloads with 6 parallel chunk workers",
+        "Windows (EXE): Enforced watching limits and clamped player scrubber",
+        "Windows (EXE): SAPI narration improvements & desktop player stability"
     ],
-    "iosVersionCode": 42,
-    "iosVersionName": "1.42",
+    "iosVersionCode": 44,
+    "iosVersionName": "1.44",
     "iosReleaseNotes": [
-        "iOS (IPA): same shared core as Android/Desktop — players, narration, downloads, accounts",
-        "iOS (IPA): manual sideload only — the in-app update button opens the IPA download, no auto-install",
-        "iOS (IPA): iOS now ships on its OWN release track so an Android-only bump never prompts iOS"
+        "iOS (IPA): v1.44 — Enforced watching limits and preview timer on all players",
+        "iOS (IPA): Multi-voice Sherpa/AVSpeech synthesizer integration with standalone preview",
+        "iOS (IPA): High-speed ordered downloads and strict daily quota enforcement",
+        "iOS (IPA): Sideload update link and IPA package metadata synchronization"
     ],
     "releaseNotes": [
-        "Android: version 1.43 — media download/cache system improvements, new Anivexa anime servers, WWE/sports sections, updated manga & comic sources, stability fixes",
-        "Android + iOS + Desktop: common app core with per-platform players and narration",
-        "TV, Windows EXE and iOS each ship on their own release tracks with per-platform version + notes; only the Android phone APK auto-prompts on the top-level bump"
+        "Android: version 1.44 — Sherpa-ONNX 20-voice multi-speaker TTS engine with non-blocking dedicated AudioTrack preview",
+        "Android: Inescapable watch limit enforcement with frame-accurate ExoPlayer position discontinuity listener and clamped scrubber",
+        "Android: High-speed media downloads with 6 parallel streams and strict daily quota checks",
+        "Android: Novel download options dialog (Text Only vs Text + Audio Narration)",
+        "Android: In-app APK updater reliability with automated redirect following for GitHub Releases"
     ],
     "forceUpdate": false
 }

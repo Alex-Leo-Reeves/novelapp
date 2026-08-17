@@ -12,8 +12,15 @@ class SherpaModelManager(private val context: Context) {
     // Using VCTK model as requested, which supports multiple speakers
     private val modelDirName = "vits-piper-en_GB-vctk-medium"
 
+    fun getResolvedModelDir(): File {
+        val nested = File(context.filesDir, modelDirName)
+        if (File(nested, "en_GB-vctk-medium.onnx").exists()) return nested
+        if (File(context.filesDir, "en_GB-vctk-medium.onnx").exists()) return context.filesDir
+        return nested
+    }
+
     fun isModelReady(): Boolean {
-        val targetDir = File(context.filesDir, modelDirName)
+        val targetDir = getResolvedModelDir()
         val modelFile = File(targetDir, "en_GB-vctk-medium.onnx")
         val tokensFile = File(targetDir, "tokens.txt")
         val dataDir = File(targetDir, "espeak-ng-data")
@@ -94,14 +101,14 @@ class SherpaModelManager(private val context: Context) {
     }
 
     fun getModelPath(): String {
-        return File(context.filesDir, "$modelDirName/en_GB-vctk-medium.onnx").absolutePath
+        return File(getResolvedModelDir(), "en_GB-vctk-medium.onnx").absolutePath
     }
 
     fun getTokensPath(): String {
-        return File(context.filesDir, "$modelDirName/tokens.txt").absolutePath
+        return File(getResolvedModelDir(), "tokens.txt").absolutePath
     }
 
     fun getDataDir(): String {
-        return File(context.filesDir, "$modelDirName/espeak-ng-data").absolutePath
+        return File(getResolvedModelDir(), "espeak-ng-data").absolutePath
     }
 }

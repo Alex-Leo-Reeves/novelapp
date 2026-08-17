@@ -112,13 +112,14 @@ fun MediaDetailScreen(
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
+    val freeEpisodePreviewMs = 5 * 60 * 1000L
 
     fun playWithServer(embedUrl: String, title: String, previewLimitMs: Long?) {
         onPlayStream(embedUrl, title, previewLimitMs, null)
     }
 
     fun playEpisodeWithServer(embedUrl: String, title: String) {
-        onPlayStream(embedUrl, title, null, null)
+        onPlayStream(embedUrl, title, if (isPremium) null else freeEpisodePreviewMs, null)
     }
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
@@ -593,7 +594,12 @@ fun MediaDetailScreen(
                         statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
                         if (source.url.isDirectPlayableStreamUrl()) {
                             statusText = ""
-                            onPlayStream(source.url, "${item.title} - ${ep.title}", null, subtitlesJson)
+                            onPlayStream(
+                                source.url,
+                                "${item.title} - ${ep.title}",
+                                if (isPremium) null else freeEpisodePreviewMs,
+                                subtitlesJson
+                            )
                             return@launch
                         }
                     }
@@ -605,7 +611,7 @@ fun MediaDetailScreen(
                 onPlayMaEmbedWithLimit(
                     fallbackEmbed,
                     "${item.title} - ${ep.title}",
-                    if (isPremium) null else freeMoviePreviewMs
+                    if (isPremium) null else freeEpisodePreviewMs
                 )
                 return@launch
             }
@@ -619,7 +625,12 @@ fun MediaDetailScreen(
                 val e = urlParts.getOrNull(3) ?: "1"
                 val embedUrl = StreamServer.VIDLINK_EXO.buildEmbedUrl(tvId, "tv", s, e)
                 statusText = ""
-                onPlayStream(embedUrl, "${item.title} - ${ep.title}", null, null)
+                onPlayStream(
+                    embedUrl,
+                    "${item.title} - ${ep.title}",
+                    if (isPremium) null else freeEpisodePreviewMs,
+                    null
+                )
                 return@launch
             }
 
@@ -898,7 +909,7 @@ fun MediaDetailScreen(
                             val videoId = item.id.removePrefix(prefix)
                             val streamUrl = youtubeNollywoodScraper.extractStreamUrl(videoId)
                             if (streamUrl != null) {
-                                onPlayStream(streamUrl, item.title, null, null)
+                                onPlayStream(streamUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null)
                             } else {
                                 statusText = "Could not resolve stream."
                             }

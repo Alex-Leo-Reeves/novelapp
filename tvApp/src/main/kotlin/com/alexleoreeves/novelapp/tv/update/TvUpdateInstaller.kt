@@ -122,6 +122,36 @@ object TvUpdateInstaller {
         }.start()
     }
 
+    private fun openConnectionFollowingRedirects(initialUrl: String, userAgent: String): HttpURLConnection {
+        var currentUrl = initialUrl
+        var redirects = 0
+        while (redirects < 6) {
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 20000
+                readTimeout = 120000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", userAgent)
+                setRequestProperty("Accept", "*/*")
+            }
+            val status = conn.responseCode
+            if (status in 300..399) {
+                val newUrl = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (newUrl.isNullOrBlank()) error("Redirected with HTTP $status but no Location header")
+                currentUrl = if (newUrl.startsWith("http://") || newUrl.startsWith("https://")) newUrl
+                             else URL(URL(currentUrl), newUrl).toString()
+                redirects++
+                continue
+            }
+            if (status !in 200..299) {
+                conn.disconnect()
+                error("server returned HTTP $status")
+            }
+            return conn
+        }
+        error("Too many redirects ($redirects)")
+    }
+
     private fun downloadAndInstall(context: Context, url: String, sha256: String, bytes: Long) {
         val updateDir = File(context.cacheDir, "updates").apply { mkdirs() }
         val apkFile = File(updateDir, "novelapp-tv-update.apk")
@@ -129,15 +159,7 @@ object TvUpdateInstaller {
         if (apkFile.exists()) apkFile.delete()
         if (tmpFile.exists()) tmpFile.delete()
 
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15000
-            readTimeout = 120000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "NovaReadTV/${AppReleaseConfig.CURRENT_VERSION_NAME}")
-        }
-        if (connection.responseCode !in 200..299) {
-            error("server returned HTTP ${connection.responseCode}")
-        }
+        val connection = openConnectionFollowingRedirects(url, "NovaReadTV/${AppReleaseConfig.CURRENT_VERSION_NAME}")
 
         val manifestBytes = bytes.takeIf { it > 0L }
         val contentLengthBytes = connection.contentLengthLong.takeIf { it > 0L }
@@ -321,8 +343,8 @@ object TvUpdateInstaller {
         if (candidate.packageName != context.packageName) {
             return "downloaded APK package does not match NovaRead TV"
         }
-        if (versionCodeOf(candidate) <= versionCodeOf(installed)) {
-            return "downloaded APK is not newer than the installed app"
+        if (versionCodeOf(candidate) < versionCodeOf(installed)) {
+            return "downloaded APK is older than the installed app"
         }
         if (signaturesMatch(candidate, installed) == false) {
             return "downloaded APK is signed with a different key"

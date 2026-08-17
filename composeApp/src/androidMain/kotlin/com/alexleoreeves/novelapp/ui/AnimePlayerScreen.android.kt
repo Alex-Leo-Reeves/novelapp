@@ -348,19 +348,38 @@ actual fun AnimePlayerScreen(
         if (playerError == null) playerError = "Video is taking too long to load. Please click on retry."
     }
 
-    // Progress tracking
-    LaunchedEffect(exoPlayer) {
-        if (exoPlayer != null) {
-            while (true) {
-                onProgress(exoPlayer.currentPosition)
-                if (previewLimitMs != null && exoPlayer.currentPosition >= previewLimitMs) {
-                    exoPlayer.pause()
+    // Progress tracking & hard preview enforcement
+    LaunchedEffect(exoPlayer, previewLimitMs) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        while (true) {
+            val pos = player.currentPosition
+            onProgress(pos)
+            if (previewLimitMs != null && pos >= previewLimitMs) {
+                player.pause()
+                onPreviewFinished()
+                break
+            }
+            delay(500)
+        }
+    }
+
+    // Attach immediate discontinuity listener to prevent seeking past preview limit
+    DisposableEffect(exoPlayer, previewLimitMs) {
+        val player = exoPlayer ?: return@DisposableEffect onDispose {}
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPositionDiscontinuity(
+                oldPosition: androidx.media3.common.Player.PositionInfo,
+                newPosition: androidx.media3.common.Player.PositionInfo,
+                reason: Int
+            ) {
+                if (previewLimitMs != null && newPosition.positionMs >= previewLimitMs) {
+                    player.pause()
                     onPreviewFinished()
-                    break
                 }
-                delay(2500)
             }
         }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
     }
 
     LaunchedEffect(showControls) {
@@ -476,7 +495,17 @@ actual fun AnimePlayerScreen(
                             IconButton(onClick = { if (player.isPlaying) player.pause() else player.play(); showControls = true }, modifier = Modifier.size(72.dp)) {
                                 Icon(if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle, null, tint = Color.White, modifier = Modifier.fillMaxSize())
                             }
-                            IconButton(onClick = { player.seekTo(player.currentPosition + 10_000L); showControls = true }, modifier = Modifier.size(56.dp)) {
+                            IconButton(onClick = {
+                                val target = player.currentPosition + 10_000L
+                                if (previewLimitMs != null && target >= previewLimitMs) {
+                                    player.seekTo(previewLimitMs)
+                                    player.pause()
+                                    onPreviewFinished()
+                                } else {
+                                    player.seekTo(target)
+                                }
+                                showControls = true
+                            }, modifier = Modifier.size(56.dp)) {
                                 Icon(Icons.Default.Forward10, null, tint = Color.White, modifier = Modifier.fillMaxSize())
                             }
                         }
@@ -484,8 +513,22 @@ actual fun AnimePlayerScreen(
                         Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
                             val position by produceState(initialValue = 0L) { while (true) { value = player.currentPosition; delay(500) } }
                             val duration = player.duration.takeIf { it > 0 } ?: 1L
-                            Slider(value = position.toFloat() / duration.toFloat(), onValueChange = { player.seekTo((it * duration).toLong()); showControls = true },
-                                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(0.3f)))
+                            val maxAllowedMs = previewLimitMs ?: duration
+                            Slider(
+                                value = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f),
+                                onValueChange = { fraction ->
+                                    val target = (fraction * duration).toLong()
+                                    if (previewLimitMs != null && target >= previewLimitMs) {
+                                        player.seekTo(previewLimitMs)
+                                        player.pause()
+                                        onPreviewFinished()
+                                    } else {
+                                        player.seekTo(target.coerceIn(0L, maxAllowedMs))
+                                    }
+                                    showControls = true
+                                },
+                                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(0.3f))
+                            )
 
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text("${formatMs(position)} / ${formatMs(duration)}", color = Color.White.copy(0.8f), style = MaterialTheme.typography.labelSmall)

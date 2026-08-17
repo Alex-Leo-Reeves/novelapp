@@ -3,29 +3,34 @@
 # and members reached through JNI, native libraries and whose names are
 # resolved reflectively at runtime, so R8 can shrink/rename the rest safely.
 
+# ── Compose & TV Foundation ────────────────────────────────────────────────
+-keep class androidx.compose.** { *; }
+-keep class androidx.tv.** { *; }
+-dontwarn androidx.compose.**
+-dontwarn androidx.tv.**
+
+# ── Coil 3 Image Loading ───────────────────────────────────────────────────
+-keep class coil3.** { *; }
+-dontwarn coil3.**
+
 # ── Embedded NodeBridge (JNI) ────────────────────────────────────────────────
-# The C++ shim resolves
-#   Java_com_alexleoreeves_novelapp_nodebridge_NodeNativeBridge_startNode
-# by the fully-qualified name at runtime. Renaming the class or its external
-# method (or stripping the symbol via obfuscation) makes the JNI lookup fail
-# silently and the bridge degrades to backend fallback.
--keep class com.alexleoreeves.novelapp.nodebridge.NodeNativeBridge { *; }
+-keep class com.alexleoreeves.novelapp.nodebridge.** { *; }
+-dontwarn com.alexleoreeves.novelapp.nodebridge.**
 
 # ── Android System TextToSpeech (TTS) ───────────────────────────────────────
-# TV app uses standard Android TextToSpeech (Sherpa removed to optimize TV build)
 -keepclassmembers class android.speech.tts.** { *; }
 -dontwarn android.speech.tts.**
 
 # ── VideoLAN LibVLC player (JNI) ─────────────────────────────────────────────
-# The media player loads native libVLC through native methods resolved by
-# class/method name; exact names must survive R8.
 -keep class org.videolan.** { *; }
+-keep class org.videolan.libvlc.** { *; }
 -dontwarn org.videolan.**
 
+# ── App Classes & Data Models ────────────────────────────────────────────────
+-keep class com.alexleoreeves.novelapp.tv.** { *; }
+-keep class com.alexleoreeves.novelapp.data.** { *; }
+
 # ── kotlinx.serialization models ─────────────────────────────────────────────
-# KSP generates *$$serializer classes and Companion serializer() methods that
-# the runtime looks up reflectively. Preserve the descriptor classes and the
-# serializer factory pattern for every model in the app package.
 -keepattributes *Annotation*, InnerClasses, EnclosingMethod, Signature
 -keep,includedescriptorclasses class com.alexleoreeves.novelapp.**$$serializer { *; }
 -keepclassmembers class com.alexleoreeves.novelapp.** { *** Companion; }
@@ -33,11 +38,12 @@
 -dontnote kotlinx.serialization.**
 
 # ── ZXing QR (phone/TV pairing payment flows) ────────────────────────────────
-# Decoders/encoders are registered through the reader/writer registry.
 -keep class com.google.zxing.** { *; }
 -dontwarn com.google.zxing.**
 
-# ── HTTP stack (OkHttp / Ktor) ───────────────────────────────────────────────
+# ── HTTP stack (OkHttp / Ktor / Coroutines) ─────────────────────────────────
+-keep class io.ktor.** { *; }
+-dontwarn io.ktor.**
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn javax.annotation.**
@@ -45,6 +51,8 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 -dontwarn org.slf4j.**
+-dontwarn org.jsoup.**
+-dontwarn com.fleeksoft.ksoup.**
 
 # ── Activity entry point (manifest already pins it; belt-and-braces) ────────
 -keep class com.alexleoreeves.novelapp.tv.TvMainActivity { *; }

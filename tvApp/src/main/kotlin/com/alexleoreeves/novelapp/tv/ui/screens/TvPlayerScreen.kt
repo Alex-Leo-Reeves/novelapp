@@ -272,7 +272,19 @@ fun TvPlayerScreen(
     }
 
     fun playerSeekTo(positionMs: Long) {
-        vlcMediaPlayer?.let { it.time = positionMs.coerceIn(0L, duration) }
+        val mp = vlcMediaPlayer ?: return
+        val currentDuration = mp.length.takeIf { it > 0 } ?: duration
+        val maxAllowed = if (!isPremium && currentDuration > 0) {
+            if (isEpisodic) (currentDuration * episodicFraction).toLong().coerceAtLeast(1)
+            else (previewLimitMs ?: TV_MOVIE_FREE_PREVIEW_MS).coerceAtMost(TV_MOVIE_FREE_PREVIEW_MS)
+        } else currentDuration
+        if (!isPremium && positionMs >= maxAllowed) {
+            previewExpired = true
+            mp.time = maxAllowed
+            runCatching { mp.pause() }
+        } else {
+            mp.time = positionMs.coerceIn(0L, maxAllowed)
+        }
     }
 
     fun playerTogglePlay() {

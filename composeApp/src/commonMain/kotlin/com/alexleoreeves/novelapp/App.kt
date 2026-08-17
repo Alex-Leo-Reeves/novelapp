@@ -491,11 +491,27 @@ fun App(
                     onBack = { animeStreamUrl.value = null; animePreviewLimitMs.value = null }
                 )
 
-                selectedAnime.value != null -> AnimeDetailScreen(selectedAnime.value!!, repository, appTheme.value, downloadRepo,
-                    isPremium = account?.isPremium == true,
-                    { u, t -> animeStreamUrl.value = u; animeEpisodeTitle.value = t; animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0; animePreviewLimitMs.value = null; animeContentKind.value = "anime" },
-                    { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = null },
-                    { selectedAnime.value = null }, requireAuth)
+                selectedAnime.value != null -> {
+                    val isPrem = account?.isPremium == true
+                    val animeLimit = if (isPrem) null else (5L * 60L * 1000L)
+                    AnimeDetailScreen(selectedAnime.value!!, repository, appTheme.value, downloadRepo,
+                        isPremium = isPrem,
+                        onPlayEpisode = { u, t ->
+                            animeStreamUrl.value = u
+                            animeEpisodeTitle.value = t
+                            animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                            animePreviewLimitMs.value = animeLimit
+                            animeContentKind.value = "anime"
+                        },
+                        onPlayMaEmbed = { u, t ->
+                            maServerEmbedUrl.value = u
+                            maServerEmbedTitle.value = t
+                            maServerPreviewLimitMs.value = animeLimit
+                        },
+                        onBack = { selectedAnime.value = null },
+                        requireAuth = requireAuth
+                    )
+                }
 
                 selectedChapterUrl.value != null -> {
                     if (selectedNovel.value?.isManga == true || selectedNovel.value?.isComic == true) MangaViewerScreen(

@@ -48,6 +48,7 @@ kotlin {
             baseName = "ComposeApp"
             isStatic = false
             binaryOption("bundleId", "com.alexleoreeves.novelapp.ios")
+            freeCompilerArgs += listOf("-Xdisable-phases=Devirtualization")
         }
     }
 
@@ -137,8 +138,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 43
-        versionName = "1.43"
+        versionCode = 44
+        versionName = "1.44"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -232,7 +233,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
             )
             packageName = "NovaRead TV"
-            packageVersion = "1.42.0"
+            packageVersion = "1.44.0"
             description = "NovaRead TV"
             copyright = "© 2025 Mike A. (Alex Leo Reeves)"
             vendor = "Alex Leo Reeves"

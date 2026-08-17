@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -35,15 +36,36 @@ private sealed class UpdateState {
     data class Failed(val message: String) : UpdateState()
 }
 
-private data class VctkVoice(val id: Int, val label: String, val isFemale: Boolean)
+private data class VctkVoice(
+    val id: Int,
+    val label: String,
+    val description: String,
+    val isFemale: Boolean
+)
 
 private val VCTK_VOICES = listOf(
-    VctkVoice(0, "Female 1 (Clear)", true),
-    VctkVoice(5, "Female 2", true),
-    VctkVoice(6, "Female 3", true),
-    VctkVoice(17, "Male 1 (Clear)", false),
-    VctkVoice(18, "Male 2", false),
-    VctkVoice(14, "Male 3", false)
+    // ── Female voices ──────────────────────────────────────────────────────
+    VctkVoice(0,  "Clara",     "British · Clear & Composed",        true),
+    VctkVoice(1,  "Ava",       "British · Warm & Gentle",           true),
+    VctkVoice(2,  "Fiona",     "Scottish · Storyteller tone",       true),
+    VctkVoice(3,  "Nadia",     "British · Crisp & Expressive",      true),
+    VctkVoice(5,  "Isla",      "British · Silky & Calm",            true),
+    VctkVoice(6,  "Zoe",       "Southern English · Bright & Lively",true),
+    VctkVoice(7,  "Priya",     "British Indian · Distinctive",      true),
+    VctkVoice(9,  "Rachel",    "Welsh · Melodic & Soothing",        true),
+    VctkVoice(11, "Amelia",    "Northern · Earthy & Rich",          true),
+    VctkVoice(13, "Harper",    "British · Academic & Refined",      true),
+    // ── Male voices ────────────────────────────────────────────────────────
+    VctkVoice(14, "Liam",      "British · Deep & Authoritative",    false),
+    VctkVoice(15, "Callum",    "Scottish · Rugged & Confident",     false),
+    VctkVoice(16, "Marcus",    "British · Smooth & Measured",       false),
+    VctkVoice(17, "Ethan",     "British · Clear & Balanced",        false),
+    VctkVoice(18, "Finn",      "Northern · Gruff & Warm",           false),
+    VctkVoice(20, "Hugo",      "British · Resonant & Bold",         false),
+    VctkVoice(22, "Connor",    "Irish-tinted · Storytelling flair", false),
+    VctkVoice(24, "Adrian",    "British · Steady & Trustworthy",    false),
+    VctkVoice(26, "Oscar",     "Southern English · Youthful",       false),
+    VctkVoice(28, "Sebastian", "British · Narrator-grade baritone", false),
 )
 
 @Composable
@@ -535,6 +557,13 @@ private fun VoiceSelectorRow(
     ttsController: SherpaNarrationController
 ) {
     var showDialog by remember { mutableStateOf(false) }
+    val isTesting by ttsController.isTestingVoice.collectAsState()
+    var previewingVoiceId by remember { mutableStateOf<Int?>( null) }
+
+    // When the test finishes, clear the previewing id
+    LaunchedEffect(isTesting) {
+        if (!isTesting) previewingVoiceId = null
+    }
 
     Row(
         modifier = Modifier
@@ -546,10 +575,31 @@ private fun VoiceSelectorRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             val voiceName = VCTK_VOICES.find { it.id == selectedVoiceId }?.label ?: "Voice $selectedVoiceId"
-            Text(voiceName, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
+            val voiceDesc = VCTK_VOICES.find { it.id == selectedVoiceId }?.description ?: ""
+            Text(voiceName, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            if (voiceDesc.isNotBlank()) {
+                Text(voiceDesc, color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp)
+            }
         }
-        IconButton(onClick = onTestPlay, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Default.PlayArrow, "Test", tint = NeonBlue, modifier = Modifier.size(20.dp))
+        // Preview play/loading button (top-level row; only active for selected voice)
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(36.dp)) {
+            if (isTesting && previewingVoiceId == selectedVoiceId) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = NeonBlue,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                IconButton(
+                    onClick = {
+                        previewingVoiceId = selectedVoiceId
+                        onTestPlay()
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, "Preview", tint = NeonBlue, modifier = Modifier.size(20.dp))
+                }
+            }
         }
         Icon(Icons.Default.ChevronRight, null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
     }
@@ -561,62 +611,53 @@ private fun VoiceSelectorRow(
                 Text("Select $label", color = Color.White, fontWeight = FontWeight.Bold)
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    VCTK_VOICES.forEach { voice ->
-                        val isSelected = voice.id == selectedVoiceId
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onVoiceSelected(voice.id)
-                                    showDialog = false
-                                }
-                                .padding(vertical = 10.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // Female/male icon
-                            Icon(
-                                if (voice.isFemale) Icons.Default.Face else Icons.Default.Person,
-                                null,
-                                tint = if (isSelected) NeonBlue else Color.White.copy(alpha = 0.6f),
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    voice.label,
-                                    color = if (isSelected) NeonBlue else Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                                Text(
-                                    if (voice.isFemale) "Female voice" else "Male voice",
-                                    color = Color.White.copy(alpha = 0.4f),
-                                    fontSize = 11.sp
-                                )
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    // Section headers
+                    Text(
+                        "Female Voices",
+                        color = NeonBlue.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                    VCTK_VOICES.filter { it.isFemale }.forEach { voice ->
+                        VoiceListItem(
+                            voice = voice,
+                            isSelected = voice.id == selectedVoiceId,
+                            isTesting = isTesting,
+                            previewingVoiceId = previewingVoiceId,
+                            onSelect = { onVoiceSelected(voice.id); showDialog = false },
+                            onPreview = {
+                                previewingVoiceId = voice.id
+                                ttsController.testVoice(voice.id)
                             }
-                            // Test play button
-                            IconButton(
-                                onClick = { ttsController.testVoice(voice.id) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    "Test voice",
-                                    tint = NeonBlue,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Male Voices",
+                        color = NeonBlue.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                    VCTK_VOICES.filter { !it.isFemale }.forEach { voice ->
+                        VoiceListItem(
+                            voice = voice,
+                            isSelected = voice.id == selectedVoiceId,
+                            isTesting = isTesting,
+                            previewingVoiceId = previewingVoiceId,
+                            onSelect = { onVoiceSelected(voice.id); showDialog = false },
+                            onPreview = {
+                                previewingVoiceId = voice.id
+                                ttsController.testVoice(voice.id)
                             }
-                            // Selected checkmark
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    null,
-                                    tint = NeonBlue,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
+                        )
                     }
                 }
             },
@@ -625,10 +666,84 @@ private fun VoiceSelectorRow(
                     Text("Done", color = NeonBlue)
                 }
             },
-            containerColor = Color(0xFF1A1A2E),
+            containerColor = Color(0xFF12121E),
             titleContentColor = Color.White,
             iconContentColor = Color.White
         )
+    }
+}
+
+@Composable
+private fun VoiceListItem(
+    voice: VctkVoice,
+    isSelected: Boolean,
+    isTesting: Boolean,
+    previewingVoiceId: Int?,
+    onSelect: () -> Unit,
+    onPreview: () -> Unit
+) {
+    val isThisLoading = isTesting && previewingVoiceId == voice.id
+    Surface(
+        onClick = onSelect,
+        shape = RoundedCornerShape(10.dp),
+        color = if (isSelected) NeonBlue.copy(alpha = 0.13f) else Color.Transparent,
+        border = if (isSelected) BorderStroke(1.dp, NeonBlue.copy(alpha = 0.5f)) else null,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Gender icon
+            Icon(
+                if (voice.isFemale) Icons.Default.Face else Icons.Default.Person,
+                null,
+                tint = if (isSelected) NeonBlue else Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(22.dp)
+            )
+            // Name + description
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    voice.label,
+                    color = if (isSelected) NeonBlue else Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                )
+                Text(
+                    voice.description,
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 10.sp
+                )
+            }
+            // Preview button / loading spinner
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(32.dp)) {
+                if (isThisLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = NeonBlue,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    IconButton(
+                        onClick = onPreview,
+                        modifier = Modifier.size(32.dp),
+                        enabled = !isTesting   // disable other buttons while one is loading
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            "Preview voice",
+                            tint = if (isTesting) Color.White.copy(alpha = 0.25f) else NeonBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+            // Checkmark for selected
+            if (isSelected) {
+                Icon(Icons.Default.Check, null, tint = NeonBlue, modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 

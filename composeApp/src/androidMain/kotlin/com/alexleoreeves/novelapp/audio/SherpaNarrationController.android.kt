@@ -1,6 +1,9 @@
 package com.alexleoreeves.novelapp.audio
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 actual class SherpaNarrationController actual constructor() {
     
@@ -33,6 +37,9 @@ actual class SherpaNarrationController actual constructor() {
     actual val currentWordIndex: StateFlow<Int> = stutterFreeNarrator.currentWordIndex
     actual val playbackProgress: StateFlow<Float> = stutterFreeNarrator.playbackProgress
     actual val isBuffering: StateFlow<Boolean> = stutterFreeNarrator.isBuffering
+
+    private val _isTestingVoice = MutableStateFlow(false)
+    actual val isTestingVoice: StateFlow<Boolean> = _isTestingVoice
     
     private val _voiceSetupStatus = MutableStateFlow(VoiceSetupStatus())
     actual val voiceSetupStatus: StateFlow<VoiceSetupStatus> = _voiceSetupStatus
@@ -157,11 +164,64 @@ actual class SherpaNarrationController actual constructor() {
 
     actual fun testVoice(voiceId: Int) {
         scope.launch(Dispatchers.IO) {
-            val audioResult = chapterNarrator.generateAudioWavBytes("This is a test of the selected voice.", voiceId)
-            if (audioResult != null) {
-                platformPlayAudio(audioResult.first)
+            // Show loading indicator – synthesis can take 1-2 s on first call
+            _isTestingVoice.value = true
+            try {
+                if (!modelManager.isModelReady()) {
+                    modelManager.prepareModel { }
+                }
+                val audioResult = chapterNarrator.generateAudioWavBytes(
+                    "Hello. This is a preview of the selected voice.",
+                    voiceId
+                )
+                if (audioResult != null) {
+                    // Play preview on its own AudioTrack – main narration is unaffected
+                    playPreviewWav(audioResult.first)
+                }
+            } finally {
+                _isTestingVoice.value = false
             }
         }
+    }
+
+    /**
+     * Plays a WAV byte-array on a dedicated AudioTrack so it doesn't interfere
+     * with the main streaming narration AudioTrack in SherpaStutterFreeNarrator.
+     */
+    private suspend fun playPreviewWav(wavBytes: ByteArray) = withContext(Dispatchers.IO) {
+        // Skip the 44-byte WAV header; read sample-rate from bytes 24-27
+        if (wavBytes.size < 44) return@withContext
+        val sampleRate = (wavBytes[24].toInt() and 0xff) or
+            ((wavBytes[25].toInt() and 0xff) shl 8) or
+            ((wavBytes[26].toInt() and 0xff) shl 16) or
+            ((wavBytes[27].toInt() and 0xff) shl 24)
+        val pcmBytes = wavBytes.copyOfRange(44, wavBytes.size)
+        val minBuf = AudioTrack.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+        val track = AudioTrack(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+            AudioFormat.Builder()
+                .setSampleRate(sampleRate)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build(),
+            maxOf(minBuf, pcmBytes.size),
+            AudioTrack.MODE_STATIC,
+            android.media.AudioManager.AUDIO_SESSION_ID_GENERATE
+        )
+        track.write(pcmBytes, 0, pcmBytes.size)
+        track.play()
+        // Block until playback done, then release
+        val durationMs = (pcmBytes.size.toLong() * 1000L) / (sampleRate * 2)
+        delay(durationMs + 200)
+        track.stop()
+        track.release()
     }
 
     actual fun pause() {
