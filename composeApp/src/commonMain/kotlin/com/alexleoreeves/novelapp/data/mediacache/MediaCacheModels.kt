@@ -65,7 +65,12 @@ data class MediaDownloadRequest(
     val priority: Int = 0,            // lower = more urgent
     val serverId: String = "",        // selected server key (anime_server_3, stream_server_5…)
     val serverName: String = "",      // human label ("Server 3 (AniKoto)")
-    val subtitleUrl: String = ""      // candidate English .srt URL bundled on download
+    val subtitleUrl: String = "",     // candidate English .srt URL bundled on download
+    val mediaType: String = "",       // ANIME, MOVIE, DONGHUA, etc.
+    val seasonNumber: Int = 0,        // 0 = movie/single, >0 = season number
+    val coverUrl: String = "",        // poster/cover image URL
+    val maxBytes: Long = 0L,          // 0 = unlimited; >0 = absolute cap
+    val maxFraction: Float = 0f       // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
 )
 
 /** Result of probing a source URL (HEAD + first range request). */
@@ -181,7 +186,12 @@ data class DownloadManifest(
     val serverName: String = "",       // human label ("Server 3 (AniKoto)")
     val subtitleUrl: String = "",      // English .srt source URL, if downloaded
     val subtitleBundlePath: String = "", // absolute path of the bundled .srt sidecar
-    val completedAtMs: Long = 0L       // epoch ms when the bundle finished (0 = not yet completed)
+    val completedAtMs: Long = 0L,      // epoch ms when the bundle finished (0 = not yet completed)
+    val mediaType: String = "",        // ANIME, MOVIE, DONGHUA, K_DRAMA, CARTOON, CLASSIC, NIGERIAN, MANGA, NOVEL, COMIC
+    val seasonNumber: Int = 0,         // 0 = movie/single, >0 = season number
+    val coverUrl: String = "",         // poster/cover image URL for the downloads UI
+    val maxBytes: Long = 0L,           // 0 = unlimited; >0 = absolute cap
+    val maxFraction: Float = 0f        // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
 )
 
 

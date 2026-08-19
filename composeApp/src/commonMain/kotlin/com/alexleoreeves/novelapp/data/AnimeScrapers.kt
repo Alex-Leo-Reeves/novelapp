@@ -377,7 +377,7 @@ class AninekoScraper(private val client: HttpClient) {
                 )
             }
             .distinctBy { it.url }
-            .sortedByDescending { it.episodeNumber }
+            .sortedBy { it.episodeNumber }
             .let { episodes ->
                 if (maxEpisodes > 0) episodes.take(maxEpisodes) else episodes
             }
@@ -656,7 +656,7 @@ class AnimePaheScraper(private val client: HttpClient) {
             page++
         } while (page <= lastPage && page <= 20)
 
-        return episodes.distinctBy { it.url }.sortedByDescending { it.episodeNumber }
+        return episodes.distinctBy { it.url }.sortedBy { it.episodeNumber }
     }
 
     private fun candidateBaseUrls(preferred: String? = null): List<String> =
@@ -1036,7 +1036,12 @@ private fun decodeBase64Ascii(value: String): String? = runCatching {
 class AniDaoScraper(private val client: HttpClient) {
 
     companion object {
-        private const val BASE_URL = "https://anidao.to"
+        private const val PRIMARY_BASE_URL = "https://anidao.to"
+        // anidao.to is frequently down/geo-blocked; anidao.app mirrors it.
+        private val BASE_URL_CANDIDATES = listOf(
+            "https://anidao.to",
+            "https://anidao.app"
+        )
         private val BROWSER_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -1045,13 +1050,18 @@ class AniDaoScraper(private val client: HttpClient) {
         )
 
         fun isAniDaoUrl(url: String): Boolean =
-            url.contains("anidao.to", ignoreCase = true)
+            url.contains("anidao.to", ignoreCase = true) ||
+                url.contains("anidao.app", ignoreCase = true)
     }
+
+    private var cachedBaseUrl: String = PRIMARY_BASE_URL
 
     /**
      * Search AniDao for an anime title and return its episode list.
      * Each episode URL is the watch-online player page (loads in the visible
      * WebView player — MaServerPlayerScreen / TvEmbedPlayerScreen).
+     * Tries every candidate domain (anidao.to, anidao.app) so a down or
+     * geo-blocked domain no longer kills the whole server.
      */
     suspend fun fetchEpisodes(
         titleQuery: String,
@@ -1063,27 +1073,40 @@ class AniDaoScraper(private val client: HttpClient) {
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
 
-        for (query in queries) {
-            val episodes = runCatching { fetchEpisodesForQuery(query, maxEpisodes) }
-                .getOrElse { error ->
-                    println("[AniDao] Episode fetch failed for '$query': ${error.message}")
-                    emptyList()
+        for (baseUrl in candidateBaseUrls()) {
+            for (query in queries) {
+                val episodes = runCatching { fetchEpisodesForQuery(baseUrl, query, maxEpisodes) }
+                    .getOrElse { error ->
+                        println("[AniDao] Episode fetch failed for '$query' on $baseUrl: ${error.message}")
+                        emptyList()
+                    }
+                if (episodes.isNotEmpty()) {
+                    cachedBaseUrl = baseUrl
+                    return episodes
                 }
-            if (episodes.isNotEmpty()) return episodes
+            }
         }
         return emptyList()
     }
 
-    private suspend fun fetchEpisodesForQuery(query: String, maxEpisodes: Int): List<AnimeEpisode> {
+    private fun candidateBaseUrls(): List<String> =
+        buildList {
+            add(cachedBaseUrl)
+            addAll(BASE_URL_CANDIDATES)
+        }.distinct()
+
+    private suspend fun fetchEpisodesForQuery(baseUrl: String, query: String, maxEpisodes: Int): List<AnimeEpisode> {
         // Step 1: search → best /anime/{slug} candidate
-        val searchHtml = fetchHtml("$BASE_URL/search.html?keyword=${query.encodeURLQueryComponent()}", "$BASE_URL/")
+        val searchHtml = fetchHtml("$baseUrl/search.html?keyword=${query.encodeURLQueryComponent()}", "$baseUrl/")
         if (searchHtml.isBlockedOrErrorPage()) return emptyList()
 
         val searchDoc = Ksoup.parse(searchHtml)
-        val candidates = searchDoc.select("a[href^='/anime/'], a[href^='https://anidao.to/anime/']")
+        val candidates = searchDoc.select(
+            "a[href^='/anime/'], a[href^='https://anidao.to/anime/'], a[href^='https://anidao.app/anime/']"
+        )
             .mapNotNull { link ->
                 val href = link.attr("href").trim().ifBlank { return@mapNotNull null }
-                val url = if (href.startsWith("/")) "$BASE_URL$href" else href
+                val url = if (href.startsWith("/")) "$baseUrl$href" else href
                 val slug = url.substringAfter("/anime/").substringBefore("/").trim()
                 if (slug.isBlank()) return@mapNotNull null
                 val title = link.select("[data-an-name-en], .name, h3").firstOrNull()?.text()
@@ -1099,7 +1122,7 @@ class AniDaoScraper(private val client: HttpClient) {
 
         // Step 2: parse the watch-online episode links on the best series page
         for (seriesUrl in candidates) {
-            val episodes = runCatching { parseEpisodeGrid(seriesUrl, maxEpisodes) }
+            val episodes = runCatching { parseEpisodeGrid(baseUrl, seriesUrl, maxEpisodes) }
                 .getOrElse { error ->
                     println("[AniDao] Grid parse failed for '$seriesUrl': ${error.message}")
                     emptyList()
@@ -1109,15 +1132,15 @@ class AniDaoScraper(private val client: HttpClient) {
         return emptyList()
     }
 
-    private suspend fun parseEpisodeGrid(seriesUrl: String, maxEpisodes: Int): List<AnimeEpisode> {
-        val html = fetchHtml(seriesUrl, "$BASE_URL/")
+    private suspend fun parseEpisodeGrid(baseUrl: String, seriesUrl: String, maxEpisodes: Int): List<AnimeEpisode> {
+        val html = fetchHtml(seriesUrl, "$baseUrl/")
         if (html.isBlockedOrErrorPage()) return emptyList()
 
         val doc = Ksoup.parse(html)
         val episodes = doc.select("a[href*='/watch-online/']")
             .mapNotNull { link ->
                 val href = link.attr("href").trim().ifBlank { return@mapNotNull null }
-                val url = if (href.startsWith("/")) "$BASE_URL$href" else href
+                val url = if (href.startsWith("/")) "$baseUrl$href" else href
                 val episodeNumber = Regex("""episode-(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
                     .find(url)
                     ?.groupValues
@@ -1148,10 +1171,14 @@ class AniDaoScraper(private val client: HttpClient) {
      * page hosts the player iframes — load it directly in the visible WebView.
      */
     suspend fun resolvePlayerUrl(episodeUrl: String): String = runCatching {
-        val url = if (episodeUrl.startsWith("/")) "$BASE_URL$episodeUrl" else episodeUrl
-        fetchHtml(url, "$BASE_URL/")
+        val baseUrl = cachedBaseUrl
+        val url = if (episodeUrl.startsWith("/")) "$baseUrl$episodeUrl" else episodeUrl
+        fetchHtml(url, "$baseUrl/")
         url
-    }.getOrElse { if (episodeUrl.startsWith("/")) "$BASE_URL$episodeUrl" else episodeUrl }
+    }.getOrElse {
+        val baseUrl = cachedBaseUrl
+        if (episodeUrl.startsWith("/")) "$baseUrl$episodeUrl" else episodeUrl
+    }
 
     private suspend fun fetchHtml(url: String, referer: String): String =
         client.get(url) {
@@ -1208,7 +1235,7 @@ class ConsumetAnimeScraper(private val client: HttpClient) {
                         )
                     }
                     .distinctBy { it.url }
-                    .sortedByDescending { it.episodeNumber }
+                    .sortedBy { it.episodeNumber }
             }.getOrElse { error ->
                 println("[Consumet:$provider] Episode fetch failed for '$query': ${error.message}")
                 emptyList()
@@ -1571,7 +1598,14 @@ class AnimeHeavenScraper(private val client: HttpClient) {
         if (searchHtml.isBlockedOrErrorPage()) return emptyList()
 
         val searchDoc = Ksoup.parse(searchHtml)
-        val candidates = searchDoc.select("div.similarimg a[href], .similarimg a[href]")
+        // Widen the selector: AnimeHeaven has used several layouts over time.
+        // Older pages wrap results in div.similarimg; newer ones use generic
+        // result cards / direct anime.php anchors. Match any anchor whose href
+        // contains anime.php so a layout change can't silently break search.
+        val candidates = searchDoc.select(
+            "div.similarimg a[href], .similarimg a[href], .similar_anime a[href], " +
+                ".search-result a[href], .search_result a[href], a[href*='anime.php']"
+        )
             .mapNotNull { link ->
                 val href = link.attr("href").trim().ifBlank { return@mapNotNull null }
                 val code = href.substringAfter("anime.php?").substringBefore("&")

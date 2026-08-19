@@ -155,6 +155,12 @@ fun buildTvBingeEpisode(
  * Every server resolves through [resolveStreamUrl] and is classified by
  * [buildTvBingeEpisode] — no server gets special-cased into a hidden WebView
  * scrape. This keeps webplayer behavior identical across all tabs/servers.
+ *
+ * For anime/donghua servers, uses strict direct-media classification to avoid
+ * sending embed page URLs to LibVLC (which causes a crash). Only URLs with
+ * clear media file extensions (.m3u8/.mp4/.mpd/.webm) are routed to LibVLC;
+ * everything else (including pages with `/stream/` or `/dash/` in the path)
+ * goes to the WebView embed player.
  */
 suspend fun TvMediaRepository.resolveBingeEpisode(
     context: Context,
@@ -166,12 +172,60 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
     isDonghua: Boolean
 ): TvBingeEpisode? {
     val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
-    return buildTvBingeEpisode(
+    val trimmed = resolved.trim()
+    val kind = deriveBingeKind(item, chapter, isDonghua)
+
+    // For anime/donghua providers (Anivexa 1-13, Anivault 14-16, VidLink 17,
+    // AnimeXin), use strict media-extension classification. The old
+    // isTvPlayableStreamUrl() matched loose patterns like /stream/ and /dash/
+    // that also appear in embed page URLs — sending those to LibVLC crashed the
+    // app. Only true media files belong in LibVLC; everything else is a WebView
+    // embed that TvEmbedPlayerScreen handles.
+    val isAnimeContext = animeServer != null || isDonghua
+    val isDirect = if (isAnimeContext) {
+        isStrictDirectMediaUrl(trimmed)
+    } else {
+        !isDonghua && isTvPlayableStreamUrl(trimmed)
+    }
+
+    return TvBingeEpisode(
         chapter = chapter ?: Chapter(item.title, item.detailPageUrl, 0),
-        rawUrl = resolved,
-        kind = deriveBingeKind(item, chapter, isDonghua),
-        isDonghua = isDonghua
+        url = trimmed,
+        kind = kind,
+        isDirect = isDirect
     )
+}
+
+/**
+ * Strict direct-media URL check for anime/donghua playback.
+ * Returns true ONLY when the URL clearly points to a media file that LibVLC
+ * can play (HLS manifest, MP4, DASH manifest, etc.). Embed pages, HTML player
+ * pages, and provider watch pages always return false — they belong in the
+ * WebView embed player.
+ *
+ * This is intentionally stricter than [isTvPlayableStreamUrl] which has loose
+ * pattern matching (/stream/, /dash/) that misclassifies embed pages.
+ */
+fun isStrictDirectMediaUrl(url: String): Boolean {
+    val lower = url.lowercase()
+    // Explicit media file extensions in the path (before query params)
+    val path = lower.substringBefore("?").substringBefore("#")
+    if (path.endsWith(".m3u8") || path.endsWith(".m3u") ||
+        path.endsWith(".mp4") || path.endsWith(".mpd") ||
+        path.endsWith(".webm") || path.endsWith(".mkv") ||
+        path.endsWith(".mov") || path.endsWith(".flv")) {
+        return true
+    }
+    // Media extensions anywhere in the URL (common for HLS segment URLs)
+    if (lower.contains(".m3u8") || lower.contains(".mp4?") ||
+        lower.contains(".mpd") || lower.contains(".webm")) {
+        return true
+    }
+    // CinePro proxy URLs are direct streams
+    if (lower.contains("/v1/proxy?data=")) return true
+    // blob: URLs are always direct (HLS.js output)
+    if (lower.startsWith("blob:")) return true
+    return false
 }
 
 /**

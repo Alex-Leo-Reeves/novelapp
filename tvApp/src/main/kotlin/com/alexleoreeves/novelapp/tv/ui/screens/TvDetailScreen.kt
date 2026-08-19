@@ -33,6 +33,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import com.alexleoreeves.novelapp.data.mediacache.DownloadPhase
+import com.alexleoreeves.novelapp.data.mediacache.MediaServerCandidate
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.mediacache.UsbVolume
 import androidx.activity.compose.BackHandler
@@ -109,6 +110,15 @@ fun TvDetailScreen(
     // server path so live-action shows that got filtered into the anime tab
     // (e.g. Legend of the Seeker) still play on the movie/TV servers.
     var animeFallbackActive by remember { mutableStateOf(false) }
+
+    // Quality selection dialog: shown before storage dialog when user clicks download
+    var pendingQualityChapter by remember { mutableStateOf<Chapter?>(null) }
+    val qualityOptions = listOf(
+        "1080p" to "Full HD • largest file",
+        "720p" to "HD • balanced quality & size",
+        "480p" to "Standard • smallest file"
+    )
+    var selectedQuality by remember { mutableStateOf("720p") }
 
     // Storage destination dialog: set when a download is requested and USB is present
     val mountedVolumes by mediaCache?.volumes?.collectAsState() ?: remember { mutableStateOf<List<UsbVolume>>(emptyList()) }
@@ -195,6 +205,17 @@ fun TvDetailScreen(
                 statusText = "Could not resolve a download link. Try another server."
                 return@launch
             }
+            val derivedMediaType = when {
+                isDonghua -> "DONGHUA"
+                item.isAnime -> "ANIME"
+                item.isVideo -> item.mediaKind.uppercase().ifBlank { "MOVIE" }
+                item.isManga -> "MANGA"
+                item.isComic -> "COMIC"
+                else -> "NOVEL"
+            }
+            // Free-tier: single-content (movies) get 20% file cap via maxFraction.
+            // Episode cap is already enforced in enqueueDownload().
+            val effectiveMaxFraction = if (account?.isPremium != true && isSingleContent) 0.2f else 0f
             cache.enqueueInternal(
                 taskId = taskId,
                 sourceUrl = sourceUrl,
@@ -207,7 +228,11 @@ fun TvDetailScreen(
                     else selectedServer.name,
                 serverName = if (isDonghua) selectedDonghuaServer.displayName
                     else if (item.isAnime) selectedAnimeServer.displayName
-                    else selectedServer.displayName
+                    else selectedServer.displayName,
+                mediaType = derivedMediaType,
+                seasonNumber = ch.seasonNumber,
+                coverUrl = item.coverUrl,
+                maxFraction = effectiveMaxFraction
             )
             statusText = "Download started — see Downloads (active queue)."
         }
@@ -261,6 +286,10 @@ fun TvDetailScreen(
      * If a USB volume is mounted, shows a D-pad-friendly storage destination
      * dialog before enqueueing. Otherwise routes directly to internal storage.
      */
+    /**
+     * Enqueue an episode/movie for offline download.
+     * Flow: Quality popup → (if USB) Storage dialog → Smart server probe → Download.
+     */
     fun enqueueDownload(chapter: Chapter? = null) {
         val cache = mediaCache ?: run {
             statusText = "Downloads unavailable on this build."
@@ -268,12 +297,30 @@ fun TvDetailScreen(
         }
         val ch = chapter ?: chapters.firstOrNull()
             ?: Chapter(item.title, item.detailPageUrl, 0)
+        // Free-tier 20% episode cap: block if user already downloaded ≥20% of episodes
+        if (account?.isPremium != true && chapters.size > 1) {
+            val totalEpisodes = chapters.size
+            val downloadedForTitle = cacheTasks.values.count {
+                it.request.parentId == item.id &&
+                    it.isTerminal &&
+                    it.phase == DownloadPhase.COMPLETED
+            }
+            val maxAllowed = maxOf(1, totalEpisodes / 5) // 20%
+            if (downloadedForTitle >= maxAllowed) {
+                statusText = "Free tier: only $maxAllowed of $totalEpisodes episodes allowed. Go premium for unlimited."
+                return
+            }
+        }
+        // Show quality selection popup first
+        pendingQualityChapter = ch
+    }
 
+    /** Called after quality is selected; routes to USB dialog or straight to download. */
+    fun proceedAfterQuality(ch: Chapter) {
+        val cache = mediaCache ?: return
         if (mountedVolumes.isNotEmpty()) {
-            // USB detected — ask where to save
             pendingStorageChapter = ch
         } else {
-            // No USB — go straight to internal
             startDownloadToInternal(cache, ch)
         }
     }
@@ -848,9 +895,124 @@ fun TvDetailScreen(
             }
         }
 
+        // ── Quality Selection Dialog ────────────────────────────────────────────
+        val qualityChapter = pendingQualityChapter
+        val cache = mediaCache
+        if (qualityChapter != null && cache != null) {
+            AlertDialog(
+                onDismissRequest = { pendingQualityChapter = null },
+                containerColor = Color(0xFF0E0E18),
+                title = {
+                    Column {
+                        Text(
+                            "Select Quality",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            qualityChapter.title.ifBlank { item.title },
+                            color = Color.White.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Choose the video quality for this download.",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        qualityOptions.forEach { (quality, description) ->
+                            val isSelected = selectedQuality == quality
+                            var qFocused by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = {
+                                    selectedQuality = quality
+                                    pendingQualityChapter = null
+                                    proceedAfterQuality(qualityChapter)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected || qFocused) Color(0xFF1C1C30) else Color(0xFF131320),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) Color(0xFF00BFFF)
+                                    else if (qFocused) Color(0xFF00BFFF).copy(0.5f)
+                                    else Color.White.copy(0.12f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { qFocused = it.isFocused }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        if (quality == "1080p") Icons.Default.HighQuality
+                                        else if (quality == "720p") Icons.Default.Hd
+                                        else Icons.Default.Sd,
+                                        null,
+                                        tint = if (isSelected) Color(0xFF00BFFF) else Color.White.copy(0.6f),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            quality,
+                                            color = if (isSelected) Color(0xFF00BFFF) else Color.White,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Text(
+                                            description,
+                                            color = Color.White.copy(alpha = 0.5f),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            }
+                        }
+                        // Free tier notice
+                        if (account?.isPremium != true) {
+                            Surface(
+                                color = Color(0xFFFFB347).copy(0.12f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFFFFB347).copy(0.3f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Info, null, tint = Color(0xFFFFB347), modifier = Modifier.size(16.dp))
+                                    Text(
+                                        "Free users: limited to 20% of content. Go premium for full downloads.",
+                                        color = Color(0xFFFFB347),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { pendingQualityChapter = null }) {
+                        Text("Cancel", color = Color(0xFF00BFFF))
+                    }
+                }
+            )
+        }
+
         // ── USB Storage Selection Dialog ────────────────────────────────────────
         val chapterForStorage = pendingStorageChapter
-        val cache = mediaCache
         if (chapterForStorage != null && cache != null) {
             AlertDialog(
                 onDismissRequest = { pendingStorageChapter = null },

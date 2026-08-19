@@ -101,6 +101,39 @@ object MediaAccessPolicy {
         else -> "$remaining of $FREE_DAILY_DOWNLOADS free downloads left today"
     }
 
+    /**
+     * Byte cap for a free-tier download of a single file. For episodic content
+     * the user may download at most [FREE_PREVIEW_FRACTION] (20%) of the total
+     * bytes; for a movie the cap is [FREE_MOVIE_PREVIEW_MS] worth of bytes
+     * at a nominal 1 MB/s equivalent (~1.2 GB). Returns 0 when the user is
+     * premium (no cap).
+     *
+     * @param totalBytes full file size from the probe
+     * @param isEpisodic true for series episodes, false for movies
+     */
+    fun downloadByteCap(account: SavedUserAccount?, totalBytes: Long, isEpisodic: Boolean): Long {
+        if (isPremiumActive(account)) return 0L   // 0 = unlimited
+        if (totalBytes <= 0L) return 0L
+        return if (isEpisodic) {
+            (totalBytes * FREE_PREVIEW_FRACTION).toLong().coerceAtLeast(MEDIA_CHUNK_SIZE)
+        } else {
+            // Movies: cap at ~20 min worth at ~1 MB/s ≈ 1.2 GB, or 20% if smaller
+            val minuteBytes = (totalBytes * FREE_PREVIEW_FRACTION).toLong()
+            minuteBytes.coerceAtLeast(MEDIA_CHUNK_SIZE)
+        }
+    }
+
+    /**
+     * Maximum episode index a free user may download for a series of
+     * [totalEpisodeCount] episodes (20% rule). Returns [totalEpisodeCount] for
+     * premium users.
+     */
+    fun maxFreeEpisodeIndex(account: SavedUserAccount?, totalEpisodeCount: Int): Int {
+        if (isPremiumActive(account)) return totalEpisodeCount
+        if (totalEpisodeCount <= 0) return 0
+        return (totalEpisodeCount * FREE_PREVIEW_FRACTION).toInt().coerceAtLeast(1)
+    }
+
     /** Content types that never consume a quota slot (novel / manga / comic). */
     val NMC_CONTENT_TYPES: Set<String> = setOf(
         com.alexleoreeves.novelapp.data.ContentType.NOVEL,

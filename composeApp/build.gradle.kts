@@ -141,7 +141,7 @@ android {
         versionCode = 44
         versionName = "1.44"
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
     }
     packaging {
@@ -153,7 +153,7 @@ android {
         }
     }
     androidResources {
-        noCompress += listOf("onnx", "bin", "dict", "json", "wav")
+        noCompress += listOf("onnx", "bin", "dict", "json", "wav", "zip")
     }
     buildTypes {
         if (
@@ -196,7 +196,7 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDir("../nodebridge/jniLibs")
-            assets.srcDir("../nodebridge/assets")
+            assets.srcDirs("src/androidMain/assets", "../nodebridge/assets")
         }
     }
 }

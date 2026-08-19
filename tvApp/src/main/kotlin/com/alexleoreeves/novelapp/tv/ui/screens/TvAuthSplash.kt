@@ -119,8 +119,7 @@ fun TvAuthScreen(
         Box(
             modifier = Modifier.align(Alignment.Center).size(720.dp).background(
                 Brush.radialGradient(
-                    listOf(Color(0xFF00BFFF).copy(0.10f), Color.Transparent),
-                    center = androidx.compose.ui.geometry.Offset(0.5f, 0.4f)
+                    listOf(Color(0xFF00BFFF).copy(0.10f), Color.Transparent)
                 ),
                 CircleShape
             )

@@ -149,9 +149,15 @@ class MediaTaskRunner(
     }
 
     private fun buildManifest(request: MediaDownloadRequest, probe: MediaProbe, subtitleBundlePath: String): DownloadManifest {
-        val chunkCount = chunkCountFor(probe.totalBytes)
+        // Free-tier 20% cap: absolute maxBytes takes priority, then maxFraction.
+        val effectiveBytes = when {
+            request.maxBytes in 1L until probe.totalBytes -> request.maxBytes
+            request.maxFraction in 0.01f..0.99f -> (probe.totalBytes * request.maxFraction).toLong().coerceAtLeast(MEDIA_CHUNK_SIZE)
+            else -> probe.totalBytes
+        }
+        val chunkCount = chunkCountFor(effectiveBytes)
         val chunks = List(chunkCount) { index ->
-            val byteLen = chunkLengthAt(index, probe.totalBytes)
+            val byteLen = chunkLengthAt(index, effectiveBytes)
             ChunkRecord(
                 index = index,
                 startOffset = index.toLong() * MEDIA_CHUNK_SIZE,
@@ -162,7 +168,7 @@ class MediaTaskRunner(
         return DownloadManifest(
             taskId = request.taskId,
             sourceUrl = request.sourceUrl,
-            totalBytes = probe.totalBytes,
+            totalBytes = effectiveBytes,
             containerExtension = request.containerExtension,
             target = request.target,
             usbVolumeId = request.usbVolumeId,
@@ -179,7 +185,11 @@ class MediaTaskRunner(
             serverId = request.serverId,
             serverName = request.serverName,
             subtitleUrl = request.subtitleUrl,
-            subtitleBundlePath = subtitleBundlePath
+            subtitleBundlePath = subtitleBundlePath,
+            mediaType = request.mediaType,
+            seasonNumber = request.seasonNumber,
+            coverUrl = request.coverUrl,
+            maxBytes = request.maxBytes
         )
     }
 

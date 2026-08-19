@@ -31,6 +31,7 @@ import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.platform.AppUpdateTarget
 import com.alexleoreeves.novelapp.nodebridge.NodeBridgeStatus
+import com.alexleoreeves.novelapp.nodebridge.NodeBridgeState
 
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
@@ -51,6 +52,11 @@ import com.alexleoreeves.novelapp.tv.ui.screens.TvDownloadsScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvYouScreen
 import com.alexleoreeves.novelapp.tv.ui.screens.TvProfileScreen
 import com.alexleoreeves.novelapp.tv.ui.theme.*
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -133,20 +139,89 @@ fun TvApp(
     // re-launches. Keyed by "${mediaId}::${episodeTitle}".
     val watchProgressStore = remember(context) { TvWatchProgressStore(context) }
 
-    // Load saved account
-    LaunchedEffect(Unit) {
-        val saved = sessionStore.loadAccount()
-        if (saved != null && saved.authToken.isNotBlank()) {
-            // Verify token is still valid. authMe returns null ONLY for a real
-            // 401/403 rejection; it throws for transient errors (a TV boots
-            // before the network is up). So: null → session truly dead, clear.
-            // Exception → keep the saved account and continue (no forced logout).
-            val fresh = try { authMe(saved.authToken) } catch (_: Exception) { saved }
+    // ── Network connectivity state ────────────────────────────────────────
+    // True when at least one network is available. Drives offline-first boot
+    // and the auth re-check that fires when connectivity returns.
+    var isNetworkAvailable by remember { mutableStateOf(true) }
+
+    DisposableEffect(context) {
+        var callback: ConnectivityManager.NetworkCallback? = null
+        val cm = runCatching { context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager }.getOrNull()
+        if (cm != null) {
+            runCatching {
+                val active = cm.activeNetwork
+                isNetworkAvailable = active != null &&
+                    cm.getNetworkCapabilities(active)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            }
+
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    isNetworkAvailable = true
+                }
+                override fun onLost(network: Network) {
+                    runCatching {
+                        val current = cm.activeNetwork
+                        isNetworkAvailable = current != null &&
+                            cm.getNetworkCapabilities(current)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    }.onFailure {
+                        isNetworkAvailable = false
+                    }
+                }
+            }
+            callback = cb
+            runCatching {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(request, cb)
+            }
+        }
+        onDispose {
+            callback?.let { cb ->
+                runCatching { cm?.unregisterNetworkCallback(cb) }
+            }
+        }
+    }
+
+    // ── Auth re-check when internet returns ──────────────────────────────
+    // If the user opened the app offline with a saved session, we skip the
+    // auth check and go straight to downloads. When connectivity returns we
+    // silently verify the token; if it's been revoked we log the user out.
+    LaunchedEffect(isNetworkAvailable) {
+        if (isNetworkAvailable && nav.account != null && nav.screen != TvScreen.SPLASH && nav.screen != TvScreen.AUTH) {
+            val token = nav.account?.authToken ?: return@LaunchedEffect
+            val fresh = try { authMe(token) } catch (_: Exception) { nav.account }
             if (fresh != null) {
                 nav = nav.copy(account = fresh)
                 sessionStore.saveAccount(fresh)
             } else {
+                // Token revoked while offline — log out silently.
                 sessionStore.clearAccount()
+                nav = nav.copy(account = null, screen = TvScreen.AUTH)
+            }
+        }
+    }
+
+    // Load saved account
+    LaunchedEffect(Unit) {
+        val saved = sessionStore.loadAccount()
+        if (saved != null && saved.authToken.isNotBlank()) {
+            if (isNetworkAvailable) {
+                // Verify token is still valid. authMe returns null ONLY for a real
+                // 401/403 rejection; it throws for transient errors (a TV boots
+                // before the network is up). So: null → session truly dead, clear.
+                // Exception → keep the saved account and continue (no forced logout).
+                val fresh = try { authMe(saved.authToken) } catch (_: Exception) { saved }
+                if (fresh != null) {
+                    nav = nav.copy(account = fresh)
+                    sessionStore.saveAccount(fresh)
+                } else {
+                    sessionStore.clearAccount()
+                }
+            } else {
+                // Offline boot: trust the cached session, skip auth verification.
+                // The auth re-check (above) will verify once connectivity returns.
+                nav = nav.copy(account = saved)
             }
         }
         isLoading = false
@@ -418,12 +493,26 @@ fun TvApp(
             nav.screen == TvScreen.SPLASH -> {
                 TvSplashScreen(onFinished = {
                     val account = sessionStore.loadAccount()
-                    nav = if (account != null) {
-                        // Auth-first: returning user picks a profile before browsing.
-                        nav.copy(screen = TvScreen.PROFILE, account = account)
-                    } else {
-                        // Auth-first: new users must sign in before browsing. No guest bypass.
-                        nav.copy(screen = TvScreen.AUTH)
+                    nav = when {
+                        account != null && !isNetworkAvailable -> {
+                            // Offline boot: skip profile selection, go straight
+                            // to HOME → Downloads so the user can play offline
+                            // content immediately. Auth re-checks once the
+                            // network returns.
+                            nav.copy(
+                                screen = TvScreen.HOME,
+                                selectedSection = TvSection.DOWNLOADS,
+                                account = account
+                            )
+                        }
+                        account != null -> {
+                            // Auth-first: returning user picks a profile before browsing.
+                            nav.copy(screen = TvScreen.PROFILE, account = account)
+                        }
+                        else -> {
+                            // Auth-first: new users must sign in before browsing. No guest bypass.
+                            nav.copy(screen = TvScreen.AUTH)
+                        }
                     }
                 })
             }
@@ -565,7 +654,8 @@ fun TvApp(
                                         sessionStore.clearAccount()
                                         nav = nav.copy(account = null, selectedSection = TvSection.HOME, screen = TvScreen.AUTH)
                                     },
-                                    onBackHome = { nav = nav.copy(selectedSection = TvSection.HOME) }
+                                    onBackHome = { nav = nav.copy(selectedSection = TvSection.HOME) },
+                                    onGoPremium = { nav = nav.copy(selectedSection = TvSection.YOU) }
                                 )
                             }
 
@@ -910,7 +1000,83 @@ fun TvApp(
                             TextButton(onClick = { isStartupUpdateDismissed = true }) { Text("Later") }
                         }
                     }
-                )
+            }
+        }
+
+        // ── Node.js Anime Engine Status Notification ───────────────────────
+        val nodeState by NodeBridgeStatus.state.collectAsState()
+        var nodeToastDismissed by remember { mutableStateOf(false) }
+
+        LaunchedEffect(nodeState) {
+            if (nodeState is NodeBridgeState.Ready) {
+                nodeToastDismissed = false
+                kotlinx.coroutines.delay(6500)
+                nodeToastDismissed = true
+            }
+        }
+
+        androidx.compose.animation.AnimatedVisibility(
+            visible = (nodeState is NodeBridgeState.Ready && !nodeToastDismissed) ||
+                (nodeState is NodeBridgeState.Starting && nav.screen == TvScreen.HOME),
+            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
+            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 28.dp)
+        ) {
+            when (val s = nodeState) {
+                is NodeBridgeState.Ready -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF0D2818),
+                        border = BorderStroke(1.5.dp, Color(0xFF06D6A0)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Bolt, null, tint = Color(0xFF06D6A0), modifier = Modifier.size(24.dp))
+                            Column {
+                                Text(
+                                    "⚡ Anime Engine (Node.js) Ready",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Black,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                Text(
+                                    "13 Providers Active on Local IP (Port ${s.port})",
+                                    color = Color(0xFF06D6A0),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+                is NodeBridgeState.Starting -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF141422),
+                        border = BorderStroke(1.dp, Color(0xFF00BFFF).copy(0.5f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFF00BFFF)
+                            )
+                            Text(
+                                "Starting Built-in Anime Engine...",
+                                color = Color.White.copy(0.8f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+                else -> Unit
             }
         }
     }

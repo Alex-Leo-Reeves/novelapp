@@ -46,14 +46,47 @@ class AnivexaApi(private val client: HttpClient) {
         var embeddedBaseUrl: String? = null
             private set
 
+        /** Timestamp of the last successful embedded-server response. Reset
+         *  to 0 when a health check or API call fails so stale URLs are skipped. */
+        @Volatile
+        private var embeddedLastHealthyMs: Long = 0L
+
+        /** Grace period (ms) after a successful response before we re-check.
+         *  Within this window the cached URL is used without a health probe. */
+        private const val EMBEDDED_HEALTH_GRACE_MS = 60_000L
+
         /** Called by the Android/TV nodebridge starter after the worker boots. */
         fun setEmbeddedBaseUrl(url: String) {
             embeddedBaseUrl = url.trimEnd('/').takeIf { it.isNotBlank() }
+            embeddedLastHealthyMs = System.currentTimeMillis()
         }
 
-        /** Loopback URL when the embedded worker is up, else the app backend. */
-        internal fun baseUrl(): String =
-            embeddedBaseUrl ?: AppReleaseConfig.API_BASE_URL + "/anivexa"
+        /** Notify that the embedded server failed (called by API callers). */
+        fun markEmbeddedUnhealthy() {
+            embeddedLastHealthyMs = 0L
+        }
+
+        /** Notify that the embedded server responded successfully. */
+        fun markEmbeddedHealthy() {
+            embeddedLastHealthyMs = System.currentTimeMillis()
+        }
+
+        /**
+         * Loopback URL when the embedded worker is up and healthy, else the
+         * app backend. Stale URLs (no successful response in the last 60s) are
+         * skipped so the app falls back to the backend automatically when the
+         * embedded Node.js runtime crashes or the emulator can't run it.
+         */
+        internal fun baseUrl(): String {
+            val embedded = embeddedBaseUrl
+            if (embedded != null) {
+                val elapsed = System.currentTimeMillis() - embeddedLastHealthyMs
+                if (elapsed < EMBEDDED_HEALTH_GRACE_MS) return embedded
+                // Stale — fall through to backend. The caller can call
+                // markEmbeddedHealthy() when a request succeeds to restore it.
+            }
+            return AppReleaseConfig.API_BASE_URL + "/anivexa"
+        }
     }
 
     /**
@@ -61,11 +94,13 @@ class AnivexaApi(private val client: HttpClient) {
      * Returns AnimeEpisode with url = `anivexa://{episodeId}`.
      */
     suspend fun fetchEpisodes(provider: String, anilistId: String): List<AnimeEpisode> {
+        val usedEmbedded = embeddedBaseUrl != null && baseUrl() == embeddedBaseUrl
         return runCatching {
             val raw: String = client.get("${baseUrl()}/episodes/$provider/$anilistId").body()
             val root = json.parseToJsonElement(raw).jsonObject
             if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return emptyList()
             val data = root["data"]?.jsonObject ?: return emptyList()
+            if (usedEmbedded) markEmbeddedHealthy()
 
             val sub = data["sub"]?.jsonArray.orEmpty()
             val dub = data["dub"]?.jsonArray.orEmpty()
@@ -90,6 +125,7 @@ class AnivexaApi(private val client: HttpClient) {
                 .distinctBy { it.url }
                 .sortedBy { it.episodeNumber }
         }.getOrElse { error ->
+            if (usedEmbedded) markEmbeddedUnhealthy()
             println("[Anivexa] Episode fetch failed for $provider/$anilistId: ${error.message}")
             emptyList()
         }
@@ -105,6 +141,7 @@ class AnivexaApi(private val client: HttpClient) {
         val episodeId = episodeUrl.removePrefix(MARKER_PREFIX).trimStart('/')
         if (episodeId.isBlank()) return null
 
+        val usedEmbedded = baseUrl() == embeddedBaseUrl
         return runCatching {
             val raw: String = client.get("${baseUrl()}/$episodeId").body()
             val root = json.parseToJsonElement(raw).jsonObject
@@ -120,8 +157,10 @@ class AnivexaApi(private val client: HttpClient) {
             val url = streamObj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
             if (url.isBlank()) return null
             val type = streamObj["type"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (usedEmbedded) markEmbeddedHealthy()
             AnivexaStream(url = url, type = type)
         }.getOrElse { error ->
+            if (usedEmbedded) markEmbeddedUnhealthy()
             println("[Anivexa] Stream resolve failed for $episodeId: ${error.message}")
             null
         }

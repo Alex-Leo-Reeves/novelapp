@@ -60,27 +60,54 @@ class TvUsbVolumeMonitor(private val context: Context) {
     }
 
     private fun refresh() {
-        val manager = context.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
+        val manager = runCatching { context.getSystemService(Context.STORAGE_SERVICE) as? StorageManager }.getOrNull()
         if (manager == null) {
             _volumes.value = emptyList()
             return
         }
-        val mounted = manager.storageVolumes
-            .mapNotNull(::toUsbVolume)
-            .filter { it.root.exists() && it.root.canRead() }
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.N) {
+            _volumes.value = emptyList()
+            return
+        }
+        val mounted = runCatching {
+            manager.storageVolumes
+                .mapNotNull(::toUsbVolume)
+                .filter { it.root.exists() && it.root.canRead() }
+        }.getOrDefault(emptyList())
         _volumes.value = mounted
     }
 
     private fun toUsbVolume(volume: StorageVolume): UsbVolume? {
+        val root = getVolumeDirectory(volume) ?: return null
         val state = runCatching { volume.state }.getOrNull()
-            ?: volume.directory?.let { Environment.getStorageState(it) }
+            ?: runCatching { Environment.getStorageState(root) }.getOrNull()
         if (state != Environment.MEDIA_MOUNTED) return null
-        val root = volume.directory ?: return null
         val id = volume.uuid ?: root.absolutePath.hashCode().toUInt().toString(16)
+        val label = runCatching { volume.getDescription(context) }.getOrNull() ?: "USB Storage"
         return UsbVolume(
             id = id,
-            label = volume.getDescription(context) ?: "USB Storage",
+            label = label,
             root = root
         )
+    }
+
+    private fun getVolumeDirectory(volume: StorageVolume): File? {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val dir = runCatching { volume.directory }.getOrNull()
+            if (dir != null) return dir
+        }
+        val fromPathFile = runCatching {
+            val method = volume.javaClass.getMethod("getPathFile")
+            method.invoke(volume) as? File
+        }.getOrNull()
+        if (fromPathFile != null) return fromPathFile
+
+        val fromPath = runCatching {
+            val method = volume.javaClass.getMethod("getPath")
+            (method.invoke(volume) as? String)?.let { File(it) }
+        }.getOrNull()
+        if (fromPath != null) return fromPath
+
+        return null
     }
 }

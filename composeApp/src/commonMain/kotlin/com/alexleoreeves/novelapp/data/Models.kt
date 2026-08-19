@@ -64,7 +64,8 @@ enum class VideoCategory(val label: String) {
 data class Chapter(
     val title: String,
     val url: String,
-    val chapterNumber: Int = 0
+    val chapterNumber: Int = 0,
+    val seasonNumber: Int = 0
 )
 
 // ───────────────────────────────────────────────

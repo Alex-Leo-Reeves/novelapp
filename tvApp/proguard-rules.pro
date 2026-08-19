@@ -21,6 +21,12 @@
 -keepclassmembers class android.speech.tts.** { *; }
 -dontwarn android.speech.tts.**
 
+# ── Sherpa-ONNX Offline TTS (JNI & Native Engine) ───────────────────────────
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keepclassmembers class com.k2fsa.sherpa.onnx.** { *; }
+-dontwarn com.k2fsa.sherpa.onnx.**
+
+
 # ── VideoLAN LibVLC player (JNI) ─────────────────────────────────────────────
 -keep class org.videolan.** { *; }
 -keep class org.videolan.libvlc.** { *; }

@@ -239,6 +239,11 @@ class DownloadEngine(
             usbVolumeId = manifest.usbVolumeId,
             serverId = manifest.serverId,
             serverName = manifest.serverName,
-            subtitleUrl = manifest.subtitleUrl
+            subtitleUrl = manifest.subtitleUrl,
+            mediaType = manifest.mediaType,
+            seasonNumber = manifest.seasonNumber,
+            coverUrl = manifest.coverUrl,
+            maxBytes = manifest.maxBytes,
+            maxFraction = manifest.maxFraction
         )
 }

@@ -13,6 +13,9 @@ import com.alexleoreeves.novelapp.data.mediacache.MEDIA_BUNDLE_EXT
 import com.alexleoreeves.novelapp.data.mediacache.MEDIA_CACHE_SUBDIR
 import com.alexleoreeves.novelapp.data.mediacache.MediaAccessPolicy
 import com.alexleoreeves.novelapp.data.mediacache.MediaDownloadRequest
+import com.alexleoreeves.novelapp.data.mediacache.MediaServerCandidate
+import com.alexleoreeves.novelapp.data.mediacache.MediaServerProbe
+import com.alexleoreeves.novelapp.data.mediacache.MediaServerProbeResult
 import com.alexleoreeves.novelapp.data.mediacache.MediaSource
 import com.alexleoreeves.novelapp.data.mediacache.MediaStreamOpener
 import com.alexleoreeves.novelapp.data.mediacache.StorageTarget
@@ -108,7 +111,12 @@ class TvMediaCacheController(private val context: Context) {
         containerExtension: String,
         serverId: String = "",
         serverName: String = "",
-        subtitleUrl: String = ""
+        subtitleUrl: String = "",
+        mediaType: String = "",
+        seasonNumber: Int = 0,
+        coverUrl: String = "",
+        maxBytes: Long = 0L,
+        maxFraction: Float = 0f
     ) {
         engine.send(
             DownloadCommand.Enqueue(
@@ -122,7 +130,12 @@ class TvMediaCacheController(private val context: Context) {
                     target = StorageTarget.INTERNAL,
                     serverId = serverId,
                     serverName = serverName,
-                    subtitleUrl = subtitleUrl
+                    subtitleUrl = subtitleUrl,
+                    mediaType = mediaType,
+                    seasonNumber = seasonNumber,
+                    coverUrl = coverUrl,
+                    maxBytes = maxBytes,
+                    maxFraction = maxFraction
                 )
             )
         )
@@ -174,6 +187,18 @@ class TvMediaCacheController(private val context: Context) {
     fun setCellularAllowed(allowed: Boolean) = engine.send(DownloadCommand.SetCellularAllowed(allowed))
 
     suspend fun setSpeedLimit(bytesPerSecond: Long) = engine.setSpeedLimit(bytesPerSecond)
+
+    // ── Smart server selection ───────────────────────────────────────────
+
+    private val serverProbe by lazy { MediaServerProbe(transport) }
+
+    /**
+     * Probe a set of candidate download URLs concurrently and rank them by
+     * latency (fastest healthy server first). Used by the UI's download
+     * pipeline so the user never has to pick a server manually.
+     */
+    suspend fun probeServers(candidates: List<MediaServerCandidate>): List<MediaServerProbeResult> =
+        serverProbe.probeServers(candidates)
 
     // ── P5b: local playback + quota exposure ───────────────────────────────
 

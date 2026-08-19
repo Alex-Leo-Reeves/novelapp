@@ -59,10 +59,7 @@ android {
         }
 
         release {
-            // R8 code shrinking: cuts DEX size substantially. JNI/native and
-            // reflection entry points are pinned in proguard-rules.pro
-            // (nodebridge, Sherpa-ONNX, LibVLC, kotlinx.serialization, ZXing).
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -120,12 +117,14 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDir("../nodebridge/jniLibs")
-            assets.srcDir("../nodebridge/assets")
+            assets.srcDirs("src/main/assets", "../composeApp/src/androidMain/assets", "../nodebridge/assets")
         }
     }
 }
 
 dependencies {
+    // Sherpa-ONNX offline neural TTS
+    implementation(files("libs/sherpa-onnx-1.13.4.aar"))
     // TV UI
     implementation("androidx.activity:activity-compose:1.9.3")
     // FileProvider for in-app updates (androidx.core.content.FileProvider)

@@ -29,7 +29,10 @@ data class TvIndexedBundle(
     val metadataFile: File,
     val integrityOk: Boolean,
     val completedAtMs: Long,
-    val indexedAtMs: Long
+    val indexedAtMs: Long,
+    val mediaType: String = "",
+    val seasonNumber: Int = 0,
+    val coverUrl: String = ""
 )
 
 /**
@@ -102,7 +105,10 @@ class TvMediaIndexer(private val scope: CoroutineScope) {
                 metadataFile = sidecar,
                 integrityOk = bundle.exists() && actualBytes == expectedCipherBytes,
                 completedAtMs = manifest.completedAtMs,
-                indexedAtMs = stamped
+                indexedAtMs = stamped,
+                mediaType = manifest.mediaType,
+                seasonNumber = manifest.seasonNumber,
+                coverUrl = manifest.coverUrl
             )
         }.sortedBy { it.title.lowercase() }
     }

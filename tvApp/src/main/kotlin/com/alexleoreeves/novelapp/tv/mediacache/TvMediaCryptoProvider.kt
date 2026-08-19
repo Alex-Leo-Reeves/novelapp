@@ -41,11 +41,12 @@ class TvMediaCryptoProvider : MediaCryptoPort {
 
     override fun hmacKeyFingerprint(): String {
         provision()
-        val hmacKeyBytes = requireNotNull(keystore.getKey(HMAC_ALIAS, null) as? SecretKey) {
+        val hmacKey = requireNotNull(keystore.getKey(HMAC_ALIAS, null) as? SecretKey) {
             "HMAC key missing"
-        }.encoded
-        // SHA-256 of the key material, hex — stable per device, non-reversible.
-        return MessageDigest.getInstance("SHA-256").digest(hmacKeyBytes).toHex()
+        }
+        val mac = Mac.getInstance(HMAC_ALGORITHM)
+        mac.init(hmacKey)
+        return mac.doFinal("novelapp_device_binding_fingerprint".toByteArray(Charsets.UTF_8)).toHex()
     }
 
     override fun generateIvSeed(): ByteArray {

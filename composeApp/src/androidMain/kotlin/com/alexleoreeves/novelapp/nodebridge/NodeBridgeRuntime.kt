@@ -37,10 +37,9 @@ object NodeBridgeRuntime {
 
     private const val TAG = "NodeBridge"
     private const val ASSET_ROOT = "nodebridge"
-    // v2: bridge main.js now normalizes raw worker responses into the
-    // { ok, data, error } envelope (search/embed/episodes/watch/map) so the
-    // embedded path parses identically to the backend. Bump forces re-stage.
-    private const val STAMP_VERSION = "2"
+    // v3: added process.on('uncaughtException') to main.js so JS errors never
+    // terminate the Android process, and full route normalisation layer.
+    private const val STAMP_VERSION = "3"
     private const val STAMP_FILE = "nodebridge_stamp.txt"
     private const val PORT_FILE = "bridge-port.json"
 
@@ -107,7 +106,7 @@ object NodeBridgeRuntime {
                 }
 
                 AnivexaApi.setEmbeddedBaseUrl("http://127.0.0.1:$resolved")
-                NodeBridgeStatus.reportStarted()
+                NodeBridgeStatus.reportStarted(resolved)
                 Log.i(TAG, "embedded Anivexa worker ready at http://127.0.0.1:$resolved")
             } catch (t: Throwable) {
                 Log.w(TAG, "nodebridge failed to start; backend fallback active", t)

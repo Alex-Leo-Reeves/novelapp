@@ -40,6 +40,16 @@ import { fileURLToPath } from "node:url";
 
 import anivexaWorker from "./anivexa/index.js";
 
+// Prevent any uncaught JS exception from terminating the embedded Node process
+if (typeof process !== "undefined" && process && typeof process.on === "function") {
+    process.on("uncaughtException", function(err) {
+        console.error("[nodebridge] Uncaught exception:", err && (err.stack || err.message || String(err)));
+    });
+    process.on("unhandledRejection", function(reason) {
+        console.error("[nodebridge] Unhandled rejection:", reason);
+    });
+}
+
 const __dirname = path.dirname(fileURLToPath(
     import.meta.url));
 const PORT_FILE = path.join(__dirname, "bridge-port.json");

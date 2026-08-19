@@ -48,7 +48,8 @@ fun TvHomeScreen(
     onReadNovel: (String, String) -> Unit = { _, _ -> },
     onPlaySports: (String, String) -> Unit = { _, _ -> },
     onSignOut: () -> Unit = {},
-    onBackHome: () -> Unit = {}
+    onBackHome: () -> Unit = {},
+    onGoPremium: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedSearchCategory by remember { mutableStateOf("all") }
@@ -292,7 +293,8 @@ fun TvHomeScreen(
                 mediaCache = mediaCache,
                 onPlayInternal = onPlayLocalInternal,
                 onPlayUsb = onPlayLocalUsb,
-                onRemoveUsb = onRemoveLocalUsb
+                onRemoveUsb = onRemoveLocalUsb,
+                onGoPremium = onGoPremium
             )
 
             section == TvSection.YOU -> TvYouScreen(
