@@ -94,6 +94,20 @@ enum class StreamServer(
             if (type == "movie") "https://cinepro-core-esmh.onrender.com/v1/movies/$id"
             else "https://cinepro-core-esmh.onrender.com/v1/tv/$id/seasons/$s/episodes/$e"
         }
+    ),
+    // LAST server in the normal movie/TV row. AniNeko is normally an anime-only
+    // Anivexa provider, but it also hosts Western series (Henry Danger, FROM…)
+    // and the user wants it reachable for series/movies/kdrama/cartoon too.
+    // The episode list in the StreamServer row is TMDB-keyed, so the embed URL
+    // maps to VidLink (Server 1) as the fallback; TvMediaRepository handles the
+    // AniNeko-first resolution via the device-side title scraper.
+    ANINEKO(
+        "Server 11 (AniNeko)",
+        11,
+        { id, type, s, e ->
+            if (type == "movie") "https://vidlink.pro/movie/$id"
+            else "https://vidlink.pro/tv/$id/$s/$e"
+        }
     );
 
     companion object {
@@ -105,6 +119,9 @@ enum class StreamServer(
 
         /** ExoPlayer servers that scrape the embed for a direct stream (Server 5) */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)
+
+        /** True when a StreamServer chip is the AniNeko (Anivexa) route. */
+        fun isAninekoRoute(server: StreamServer?): Boolean = server == ANINEKO
     }
 }
 
@@ -220,7 +237,7 @@ fun buildEmbedUrlForServer(vidLinkUrl: String, server: StreamServer): String {
     val tmdbTvMarkerMatch = Regex("""^tv:(\d+):(\d+):(\d+)$""").find(cleanUrl)
     val twoEmbedMovieMatch = Regex("""2embed\.skin/embed/movie/(\d+)""").find(cleanUrl)
     val twoEmbedTvMatch = Regex("""2embed\.skin/embed/tv/(\d+)/(\d+)/(\d+)""").find(cleanUrl)
-    
+
     return if (tvMatch != null) {
         val id = tvMatch.groupValues[1]
         val season = tvMatch.groupValues[2]

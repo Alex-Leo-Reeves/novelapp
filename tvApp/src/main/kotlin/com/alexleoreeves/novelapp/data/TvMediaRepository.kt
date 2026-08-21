@@ -410,6 +410,35 @@ class TvMediaRepository {
         val isTmdb = item.detailPageUrl.startsWith("tmdb://")
         val targetServer = server ?: StreamServer.VIDLINK
 
+        // AniNeko as a normal StreamServer-row chip (Server 11): for NON-anime
+        // series/movies/kdrama/cartoon, AniNeko resolves the episode page via
+        // its device-side scraper first; if the title isn't on AniNeko, fall
+        // back to the normal TMDB embed (VidLink-equivalent) so the chip
+        // always has a working route. This replicates "Server 5 for Henry
+        // Danger" the user verified — AniNeko hosts Western series too.
+        if (!isDonghua && StreamServer.isAninekoRoute(targetServer)) {
+            val aninekoStream = runCatching {
+                val episodes = aninekoScraper.fetchEpisodes(item.title, maxEpisodes = 500)
+                val targetEp = episodes.firstOrNull { ep ->
+                    chapter == null || ep.episodeNumber == chapter.chapterNumber
+                } ?: episodes.firstOrNull()
+                targetEp?.let { aninekoScraper.extractStreamUrl(it.url) }
+            }.getOrNull()
+            if (!aninekoStream.isNullOrBlank()) return aninekoStream
+
+            // Fallback: normal TMDB embed for this title (VidLink URL shape).
+            val fallbackMarker = parseTmdbPlaybackMarker(chapter?.url, item.detailPageUrl, chapter?.chapterNumber)
+            if (fallbackMarker != null) {
+                return StreamServer.VIDLINK.buildEmbedUrl(fallbackMarker.tmdbId, fallbackMarker.mediaType, fallbackMarker.season, fallbackMarker.episode)
+            }
+            if (isTmdb && item.detailPageUrl.contains("/tv/")) {
+                val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
+                val tmdbId = parts.getOrNull(1).orEmpty()
+                val epNum = chapter?.chapterNumber?.coerceAtLeast(1)?.toString() ?: "1"
+                return StreamServer.VIDLINK.buildEmbedUrl(tmdbId, "tv", "1", epNum)
+            }
+        }
+
         if (!isDonghua) {
             parseTmdbPlaybackMarker(chapter?.url, item.detailPageUrl, chapter?.chapterNumber)?.let { marker ->
                 // CinePro (Server 10) is an OMSS JSON API, NOT an embed page.
@@ -471,8 +500,8 @@ class TvMediaRepository {
                 }
             }
             // AnimeXin default (DonghuaServer row or no anime chip) — unchanged.
-            val targetServer = donghuaServer ?: DonghuaServer.ANIMEXIN
-            return when (targetServer) {
+            val donghuaTarget = donghuaServer ?: DonghuaServer.ANIMEXIN
+            return when (donghuaTarget) {
                 // Only AnimeXin remains — resolve the episode page to its embed
                 // player URL; animexin.dev hosts donghua embeds that load fine
                 // in the visible WebView player (TvEmbedPlayerScreen).
