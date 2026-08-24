@@ -255,7 +255,7 @@ class TvMediaRepository {
                     val tmdbId = parts.getOrNull(1) ?: ""
                     if (tmdbType == "tv") {
                         tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId).map { ep ->
-                            Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                            Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber, seasonNumber = ep.seasonNumber)
                         }
                     } else {
                         emptyList()
@@ -294,7 +294,7 @@ class TvMediaRepository {
         if (item.detailPageUrl.startsWith("tmdb://tv/")) {
             val tvId = item.detailPageUrl.removePrefix("tmdb://tv/").substringBefore("/")
             return tmdbScraper.fetchTVSeasonsAndEpisodes(tvId).map { ep ->
-                Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber, seasonNumber = ep.seasonNumber)
             }
         }
 
@@ -316,7 +316,7 @@ class TvMediaRepository {
                 ?.takeIf { tvAnimeTitleMatchScore(query, it.title) > 0 }
             if (best != null) {
                 return tmdbScraper.fetchTVSeasonsAndEpisodes(best.id).map { ep ->
-                    Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                    Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber, seasonNumber = ep.seasonNumber)
                 }
             }
         }

@@ -363,7 +363,7 @@ suspend fun searchTvContentForCategory(
     if (normalized == "novel") return novelRepo.searchNovels(trimmed)
     if (normalized != "all") return searchContent(normalized, trimmed)
 
-    val categories = listOf("anime", "movie", "donghua", "kdrama", "cartoon", "classic", "nigerian", "manga", "comic", "novel")
+    val categories = listOf("movie", "classic", "kdrama", "cartoon", "nigerian", "donghua", "anime", "manga", "comic", "novel")
     return coroutineScope {
         categories.map { cat ->
             async {

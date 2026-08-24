@@ -1480,7 +1480,8 @@ async function tmdbItems(type, query, page = 1) {
             results = results.filter(item => {
                 const language = item.original_language || "";
                 const genres = Array.isArray(item.genre_ids) ? item.genre_ids : [];
-                return language === "ja" || genres.includes(16) || normalizeTitleKey(item.title || item.name).includes(normalizeTitleKey(query));
+                // Anime is strictly Japanese origin / Japanese animation
+                return language === "ja" && (genres.includes(16) || genres.length === 0);
             });
         }
         // If multi-search returned fewer than 5 results, also try dedicated movie search + TV search as fallback

@@ -343,7 +343,7 @@ fun TvEmbedPlayerScreen(
                             Key.Back -> { onBack(); true }
                             else -> true
                         }
-                    } else if (resumeMs > 0 && !hasAppliedResume) {
+                    } else if (resumeMs > 0 && !hasAppliedResume && !resumeDecided) {
                         // Resume card is showing: let the remote's OK/Enter/dpad
                         // reach the focused Resume / Watch-from-Start Surface
                         // instead of stealing them for playback. Only Back is
@@ -351,24 +351,31 @@ fun TvEmbedPlayerScreen(
                         if (event.key == Key.Back) { onBack(); true } else false
                     } else {
                         showControls = true
+                        val isOkKey = event.key == Key.DirectionCenter || event.key == Key.Enter ||
+                            keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_BUTTON_A ||
+                            event.key == Key.MediaPlayPause || event.key == Key.MediaPlay || event.key == Key.MediaPause
+
                         if (event.type == KeyEventType.KeyUp) {
-                            when (event.key) {
-                                Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
-                                Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
-                                Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
-                                Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
-                                Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
-                                Key.MediaNext -> { onNext(); true }
-                                Key.MediaPrevious -> { onPrev(); true }
-                                Key.Back -> { onBack(); true }
+                            when {
+                                isOkKey -> { playerTogglePlay(); true }
+                                event.key == Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
+                                event.key == Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
+                                event.key == Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
+                                event.key == Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
+                                event.key == Key.MediaNext -> { onNext(); true }
+                                event.key == Key.MediaPrevious -> { onPrev(); true }
+                                event.key == Key.Back -> { onBack(); true }
                                 else -> false
                             }
                         } else {
                             // Intercept KeyDown for navigation keys so focus doesn't jump
-                            when (event.key) {
-                                Key.DirectionLeft, Key.DirectionRight, Key.DirectionCenter, Key.Enter,
-                                Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause, Key.MediaFastForward, Key.MediaRewind,
-                                Key.MediaNext, Key.MediaPrevious -> true
+                            when {
+                                isOkKey || event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
+                                event.key == Key.MediaFastForward || event.key == Key.MediaRewind ||
+                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> true
                                 else -> false
                             }
                         }
@@ -753,18 +760,27 @@ private const val EMBED_PAUSE_JS = """
 private const val EMBED_TOGGLE_PLAY_JS = """
 (function(){
     var v = __novelAppFindBestVideo();
-    if (!v) return 'none';
+    if (v) {
+        try {
+            if (v.paused) {
+                v.muted = false;
+                v.volume = 1.0;
+                var p = v.play();
+                if (p && p.catch) p.catch(function(){});
+            } else {
+                v.pause();
+            }
+            return 'toggled';
+        } catch(e) {}
+    }
     try {
-        if (v.paused) {
-            v.muted = false;
-            v.volume = 1.0;
-            var p = v.play();
-            if (p && p.catch) p.catch(function(){});
-        } else {
-            v.pause();
+        var btn = document.querySelector('.play-button, .jw-icon-display, .vjs-big-play-button, .vjs-play-control, button[aria-label="Play"], button[aria-label="Pause"], .plyr__control--overlaid, .play-btn, [class*="play"], [id*="play"]');
+        if (btn && btn.tagName !== 'VIDEO') {
+            btn.click();
+            return 'toggled';
         }
-        return 'toggled';
-    } catch(e) { return 'none'; }
+    } catch(e) {}
+    return 'none';
 })()
 """
 

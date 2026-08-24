@@ -25,7 +25,8 @@ data class MediaResult(
 data class MediaEpisode(
     val title: String,
     val url: String,
-    val episodeNumber: Int
+    val episodeNumber: Int,
+    val seasonNumber: Int = 1
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -987,9 +988,10 @@ class TMDBMovieScraper(private val httpClient: HttpClient) {
                     for (ep in 1..epCount) {
                         episodes.add(
                             MediaEpisode(
-                                title = "Season $seasonNum - Episode $ep",
+                                title = "S$seasonNum E$ep",
                                 url = "tv:$tvId:$seasonNum:$ep",
-                                episodeNumber = ep
+                                episodeNumber = ep,
+                                seasonNumber = seasonNum
                             )
                         )
                     }
@@ -997,12 +999,12 @@ class TMDBMovieScraper(private val httpClient: HttpClient) {
             }
             episodes.ifEmpty {
                 (1..16).map { ep ->
-                    MediaEpisode(title = "Episode $ep", url = "tv:$tvId:1:$ep", episodeNumber = ep)
+                    MediaEpisode(title = "Episode $ep", url = "tv:$tvId:1:$ep", episodeNumber = ep, seasonNumber = 1)
                 }
             }
         } catch (e: Exception) {
             (1..16).map { ep ->
-                MediaEpisode(title = "Episode $ep", url = "tv:$tvId:1:$ep", episodeNumber = ep)
+                MediaEpisode(title = "Episode $ep", url = "tv:$tvId:1:$ep", episodeNumber = ep, seasonNumber = 1)
             }
         }
     }

@@ -699,24 +699,45 @@ suspend fun fetchWweStream(id: String, title: String, eventType: String): String
     finally { client.close() }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
 private fun JsonObject.toUnifiedResult(): UnifiedSearchResult {
     val detailUrl = this["detailUrl"]?.jsonPrimitive?.contentOrNull
         ?: this["detail_url"]?.jsonPrimitive?.contentOrNull ?: ""
-    val kind = this["kind"]?.jsonPrimitive?.contentOrNull ?: ""
+    val rawKind = (this["kind"]?.jsonPrimitive?.contentOrNull ?: "").lowercase()
+    val subtitle = this["subtitle"]?.jsonPrimitive?.contentOrNull ?: ""
+    val sourceName = this["sourceName"]?.jsonPrimitive?.contentOrNull ?: ""
+    val id = this["id"]?.jsonPrimitive?.contentOrNull ?: ""
+
+    // An item is truly anime ONLY if it comes from AniList or is explicitly Japanese animation
+    val isRealAnime = rawKind == "anime" && (
+        sourceName.equals("AniList", ignoreCase = true) ||
+        id.startsWith("anilist_", ignoreCase = true) ||
+        subtitle.contains("Japanese", ignoreCase = true) ||
+        subtitle.contains("Anime", ignoreCase = true)
+    )
+
+    val effectiveKind = when {
+        isRealAnime -> "anime"
+        rawKind == "anime" && detailUrl.contains("/movie") -> "movie"
+        rawKind == "anime" -> "tv"
+        rawKind.isNotBlank() -> rawKind
+        detailUrl.contains("/movie") -> "movie"
+        detailUrl.contains("/tv") -> "tv"
+        else -> "movie"
+    }
+
     return UnifiedSearchResult(
-        id = this["id"]?.jsonPrimitive?.contentOrNull ?: "",
+        id = id,
         title = this["title"]?.jsonPrimitive?.contentOrNull ?: "",
         coverUrl = this["coverUrl"]?.jsonPrimitive?.contentOrNull ?: "",
         detailPageUrl = detailUrl,
-        sourceName = this["sourceName"]?.jsonPrimitive?.contentOrNull ?: "",
-        author = this["subtitle"]?.jsonPrimitive?.contentOrNull ?: "",
-        genre = this["subtitle"]?.jsonPrimitive?.contentOrNull ?: "",
+        sourceName = sourceName,
+        author = subtitle,
+        genre = subtitle,
         synopsis = this["synopsis"]?.jsonPrimitive?.contentOrNull ?: "",
-        isManga = kind == "manga",
-        isComic = kind == "comic",
-        isAnime = kind == "anime",
-        isVideo = kind in listOf("movie", "kdrama", "cartoon", "donghua", "classic", "nigerian"),
-        mediaKind = kind
+        isManga = effectiveKind == "manga",
+        isComic = effectiveKind == "comic",
+        isAnime = isRealAnime,
+        isVideo = effectiveKind in listOf("movie", "tv", "kdrama", "cartoon", "donghua", "classic", "nigerian"),
+        mediaKind = effectiveKind
     )
 }

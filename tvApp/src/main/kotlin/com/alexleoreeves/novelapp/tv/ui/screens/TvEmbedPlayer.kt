@@ -61,21 +61,14 @@ fun TvEmbedPlayer(
         phaseMessage = "Loading player..."
         stabilizeAttempts = 0
         if (webViewRef != null) {
-            val headers = embedRequestHeaders(embedUrl)
-            if (headers.isNotEmpty()) {
-                webViewRef?.loadUrl(embedUrl, headers)
-            } else {
-                webViewRef?.loadUrl(embedUrl)
-            }
+            loadEmbedContent(webViewRef, embedUrl)
         }
     }
 
     // Stabilization timer: enforce minimum 3s in STABILIZING.
     // On READY we match the Android player (MaServerPlayerScreen) exactly:
     // STABILIZATION_END_JS unmutes and force-plays the video (top-level AND
-    // inside iframes, with retries at 500ms/1500ms). Without this, vidsrc.cc
-    // (Server 2), Nontongo (Server 3) and 2Embed (Server 4) sit on a black
-    // screen — their embeds never start on their own on Android TV.
+    // inside iframes, with retries at 500ms/1500ms).
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.STABILIZING) {
             phaseMessage = "Stabilizing player... (3s)"
@@ -116,14 +109,11 @@ fun TvEmbedPlayer(
         }
     }
 
-    // Synthetic touch gesture on READY to allow unmuted autoplay.
-    // Deliberately at the TOP-LEFT CORNER (20,20), not the center: it only
-    // needs to count as a user activation for AudioContext.resume(), and a
-    // center tap can toggle play/pause on players that auto-pause on first
-    // touch — leaving the video stuck paused.
+    // Clean audio gesture on READY: sets volume to 1.0 and unmutes without
+    // any distortion or compression.
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.READY) {
-            delay(500L) // Wait for UI layout and JS injection
+            delay(500L)
             val view = webViewRef ?: return@LaunchedEffect
             val x = 20f
             val y = 20f
@@ -140,21 +130,15 @@ fun TvEmbedPlayer(
             view.dispatchTouchEvent(upEvent)
             downEvent.recycle()
             upEvent.recycle()
-            // Auto volume boost — the READY touch is also the user gesture the
-            // AudioContext needs for `resume()`, so chain the boost right here.
-            view.evaluateJavascript(AUDIO_BOOST_JS, null)
+            view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
         }
     }
 
-    // Auto volume booster re-application: embeds frequently rebuild their
-    // <video> element mid-playback (ad roll, quality switch, HLS reload), which
-    // drops the Web Audio boost graph. Re-inject every 3s for the first 90s of
-    // the episode so the boost always lands, with zero user interaction.
     LaunchedEffect(embedUrl) {
-        repeat(30) { attempt ->
+        repeat(5) { attempt ->
             delay(3_000L * (attempt + 1))
             val view = webViewRef ?: return@repeat
-            view.evaluateJavascript(AUDIO_BOOST_JS, null)
+            view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
         }
     }
 
@@ -648,98 +632,88 @@ private const val FULLSCREEN_CSS_JS = """
 })();
 """
 
-private const val AUDIO_BOOST_JS = """
+private const val CLEAN_AUDIO_UNMUTE_JS = """
 (function() {
-    // Auto volume booster: routes the <video> element through a Web Audio
-    // gain node (MediaElementSource -> DynamicsCompressor -> Gain 1.75x ->
-    // destination). This actually amplifies audio past the 1.0 volume cap,
-    // player-agnostically, with zero user interaction. The soft-knee
-    // compressor in front of the gain prevents clipping on loud peaks.
-    //
-    // Safety: cross-origin media whose element lacks `crossOrigin` would go
-    // silent through createMediaElementSource (tainted output). We skip those
-    // and let the regular 1.0 volume apply — no harm. Same-origin embeds
-    // (vidlink, vidsrc, embed.su, nontongo, smashystream, autoembed) and HLS
-    // blob: streams route cleanly.
-
-    function getCtx(doc) {
-        var w = doc.defaultView || window;
-        if (w.__NOVEL_BOOST_CTX) return w.__NOVEL_BOOST_CTX;
+    function unmuteIn(doc) {
         try {
-            var AC = w.AudioContext || w.webkitAudioContext;
-            if (!AC) return null;
-            var ctx = new AC();
-            w.__NOVEL_BOOST_CTX = ctx;
-            var resume = function() {
+            doc.querySelectorAll('video, audio').forEach(function(v) {
                 try {
-                    if (ctx.state !== 'running') ctx.resume().catch(function() {});
+                    v.muted = false;
+                    v.volume = 1.0;
                 } catch(e) {}
-            };
-            ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function(evt) {
-                try { doc.addEventListener(evt, resume, { once: true, passive: true }); } catch(e) {}
             });
-            try { if (ctx.state !== 'running') ctx.resume().catch(function() {}); } catch(e) {}
-            return ctx;
-        } catch(e) { return null; }
-    }
-
-    function isSafeToRoute(src) {
-        if (!src) return true;
-        var lower = String(src).toLowerCase();
-        // blob:/data: media is same-origin by construction (HLS hls.js output)
-        if (lower.indexOf('blob:') === 0 || lower.indexOf('data:') === 0) return true;
-        try {
-            var s = new URL(String(src), window.location.href);
-            return s.origin === window.location.origin;
-        } catch(e) {
-            // Protocol-relative or bare path -> same origin unless explicitly http(s)
-            return lower.indexOf('http') !== 0;
-        }
-    }
-
-    function boostIn(doc) {
-        var videos = doc.querySelectorAll('video');
-        for (var i = 0; i < videos.length; i++) {
-            var v = videos[i];
-            try {
-                v.muted = false;
-                v.volume = 1.0;
-                if (v.__novelAppBoosted) continue;
-                var src = v.currentSrc || v.src || '';
-                if (src && !isSafeToRoute(src)) continue;
-                var ctx = getCtx(doc);
-                if (!ctx) continue;
-                var source = ctx.createMediaElementSource(v);
-                var compressor = ctx.createDynamicsCompressor();
-                compressor.threshold.value = -12;
-                compressor.knee.value = 20;
-                compressor.ratio.value = 12;
-                compressor.attack.value = 0.003;
-                compressor.release.value = 0.25;
-                var gain = ctx.createGain();
-                gain.gain.value = 1.75;
-                source.connect(compressor);
-                compressor.connect(gain);
-                gain.connect(ctx.destination);
-                v.__novelAppBoosted = true;
-            } catch(e) {}
-        }
-    }
-
-    // Walk the top document and every reachable (same-origin) iframe.
-    function walk(doc) {
-        boostIn(doc);
-        try {
-            var frames = doc.querySelectorAll('iframe');
-            for (var i = 0; i < frames.length; i++) {
-                try {
-                    var inner = frames[i].contentDocument;
-                    if (inner) walk(inner);
-                } catch(e) {}
-            }
         } catch(e) {}
     }
-
-    walk(document);
+    unmuteIn(document);
+    try {
+        var frames = document.querySelectorAll('iframe');
+        for (var i = 0; i < frames.length; i++) {
+            try {
+                var inner = frames[i].contentDocument || frames[i].contentWindow.document;
+                if (inner) unmuteIn(inner);
+            } catch(e) {}
+        }
+    } catch(e) {}
 })();
 """
+
+private fun isDirectMediaStream(url: String): Boolean {
+    val lower = url.lowercase().substringBefore("?")
+    return lower.endsWith(".m3u8") || lower.endsWith(".mp4") || lower.endsWith(".webm") ||
+        lower.endsWith(".mkv") || lower.endsWith(".mpd") || lower.contains(".m3u8")
+}
+
+private fun loadEmbedContent(webView: WebView?, url: String) {
+    if (webView == null || url.isBlank()) return
+    if (isDirectMediaStream(url)) {
+        val safeUrl = org.json.JSONObject.quote(url)
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+                <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+                <style>
+                    body, html { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+                    video { width:100%; height:100%; object-fit:contain; }
+                </style>
+            </head>
+            <body>
+                <video id="player" controls autoplay playsinline webkit-playsinline></video>
+                <script>
+                    var video = document.getElementById('player');
+                    var src = ${'$'}safeUrl;
+                    if (src.indexOf('.m3u8') !== -1 && Hls.isSupported()) {
+                        var hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+                        hls.loadSource(src);
+                        hls.attachMedia(video);
+                        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                            video.play().catch(function(){});
+                        });
+                        hls.on(Hls.Events.ERROR, function(event, data) {
+                            if (data.fatal) {
+                                switch(data.type) {
+                                    case Hls.ErrorTypes.NETWORK_ERROR: hls.startLoad(); break;
+                                    case Hls.ErrorTypes.MEDIA_ERROR: hls.recoverMediaError(); break;
+                                    default: hls.destroy(); break;
+                                }
+                            }
+                        });
+                    } else {
+                        video.src = src;
+                        video.play().catch(function(){});
+                    }
+                </script>
+            </body>
+            </html>
+        """.trimIndent()
+        webView.loadDataWithBaseURL("https://novelapp.local/", html, "text/html", "UTF-8", null)
+    } else {
+        val extraHeaders = embedRequestHeaders(url)
+        if (extraHeaders.isNotEmpty()) {
+            webView.loadUrl(url, extraHeaders)
+        } else {
+            webView.loadUrl(url)
+        }
+    }
+}

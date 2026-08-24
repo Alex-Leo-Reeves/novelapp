@@ -126,12 +126,11 @@ fun deriveBingeKind(
 
 /**
  * Classifies a resolved stream URL into the right TV player:
- *  - Direct stream URL (.m3u8/.mp4/.mpd/...) → LibVLC TvPlayerScreen.
- *  - Everything else (embed page / CinePro page / Donghua) → TvEmbedPlayerScreen.
+ *  - Local offline media (file://, content://, local cache daemon) → LibVLC TvPlayerScreen.
+ *  - All online streams / embeds / server content → TvEmbedPlayerScreen (WebPlayer).
  *
- * NOTE: every embed-style server (VidLink, VidLink Exo, vidsrc, Nontongo,
- * AnimeHeaven, ...) routes through the SAME WebView embed player so behavior
- * is consistent across servers. Only true direct media streams go to LibVLC.
+ * WebPlayer provides full subtitle options, anti-bot support, and stable
+ * playback without LibVLC native player hangs on Android TV.
  */
 fun buildTvBingeEpisode(
     chapter: Chapter,
@@ -140,7 +139,7 @@ fun buildTvBingeEpisode(
     isDonghua: Boolean
 ): TvBingeEpisode {
     val trimmed = rawUrl.trim()
-    val isDirect = !isDonghua && isTvPlayableStreamUrl(trimmed)
+    val isDirect = isLocalOfflineMediaUrl(trimmed)
     return TvBingeEpisode(
         chapter = chapter,
         url = trimmed,
@@ -150,17 +149,23 @@ fun buildTvBingeEpisode(
 }
 
 /**
+ * Checks whether a URL points to a local on-device / USB offline media file.
+ */
+fun isLocalOfflineMediaUrl(url: String): Boolean {
+    val lower = url.lowercase().trim()
+    return lower.startsWith("file:") ||
+        lower.startsWith("content:") ||
+        (lower.contains("127.0.0.1") && lower.contains("/cache/")) ||
+        lower.startsWith("/storage/") ||
+        lower.startsWith("/sdcard/")
+}
+
+/**
  * Resolves one episode's playback route on the session's chosen server.
  *
- * Every server resolves through [resolveStreamUrl] and is classified by
- * [buildTvBingeEpisode] — no server gets special-cased into a hidden WebView
- * scrape. This keeps webplayer behavior identical across all tabs/servers.
- *
- * For anime/donghua servers, uses strict direct-media classification to avoid
- * sending embed page URLs to LibVLC (which causes a crash). Only URLs with
- * clear media file extensions (.m3u8/.mp4/.mpd/.webm) are routed to LibVLC;
- * everything else (including pages with `/stream/` or `/dash/` in the path)
- * goes to the WebView embed player.
+ * Every online server stream routes to the WebView embed player (TvEmbedPlayerScreen)
+ * for reliable playback with native subtitles and player controls. Only local
+ * offline downloads use LibVLC.
  */
 suspend fun TvMediaRepository.resolveBingeEpisode(
     context: Context,
@@ -174,19 +179,7 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
     val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
     val trimmed = resolved.trim()
     val kind = deriveBingeKind(item, chapter, isDonghua)
-
-    // For anime/donghua providers (Anivexa 1-13, Anivault 14-16, VidLink 17,
-    // AnimeXin), use strict media-extension classification. The old
-    // isTvPlayableStreamUrl() matched loose patterns like /stream/ and /dash/
-    // that also appear in embed page URLs — sending those to LibVLC crashed the
-    // app. Only true media files belong in LibVLC; everything else is a WebView
-    // embed that TvEmbedPlayerScreen handles.
-    val isAnimeContext = animeServer != null || isDonghua
-    val isDirect = if (isAnimeContext) {
-        isStrictDirectMediaUrl(trimmed)
-    } else {
-        !isDonghua && isTvPlayableStreamUrl(trimmed)
-    }
+    val isDirect = isLocalOfflineMediaUrl(trimmed)
 
     return TvBingeEpisode(
         chapter = chapter ?: Chapter(item.title, item.detailPageUrl, 0),

@@ -770,6 +770,36 @@ fun TvDetailScreen(
                     }
                 }
 
+                val seasonsList = remember(chapters) {
+                    chapters.map { it.seasonNumber.coerceAtLeast(1) }.distinct().sorted()
+                }
+                var selectedSeason by remember(seasonsList) {
+                    mutableStateOf(seasonsList.firstOrNull() ?: 1)
+                }
+
+                if (seasonsList.size > 1) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        items(seasonsList) { seasonNum ->
+                            val isSelected = selectedSeason == seasonNum
+                            var sFocused by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = { selectedSeason = seasonNum },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
+                            ) {
+                                Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                    Text("Season $seasonNum", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (isLoading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = Purple500, modifier = Modifier.size(48.dp))
@@ -789,15 +819,24 @@ fun TvDetailScreen(
                         }
                     }
                 } else {
-                    val chapterList = chapters.sortedBy { it.chapterNumber }
+                    val displayedEpisodes = remember(chapters, selectedSeason, seasonsList) {
+                        if (seasonsList.size > 1) {
+                            chapters.filter { it.seasonNumber.coerceAtLeast(1) == selectedSeason }.sortedBy { it.chapterNumber }
+                        } else {
+                            chapters.sortedWith(compareBy({ it.seasonNumber }, { it.chapterNumber }))
+                        }
+                    }
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(160.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(bottom = 48.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(chapterList.size) { index ->
-                            val ch = chapterList[index]
+                        itemsIndexed(
+                            items = displayedEpisodes,
+                            key = { index, ch -> if (ch.url.isNotBlank()) ch.url else "ep_${ch.seasonNumber}_${ch.chapterNumber}_$index" }
+                        ) { index, ch ->
                             var chFocused by remember { mutableStateOf(false) }
                             val isSingle = watchLabel == "Watch Now"
                             val chDownloaded = remember(completedTasks) {
@@ -823,7 +862,7 @@ fun TvDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        ch.title.ifBlank { "Chapter ${ch.chapterNumber}" },
+                                        ch.title.ifBlank { "Episode ${ch.chapterNumber}" },
                                         color = Color.White,
                                         fontWeight = if (chFocused) FontWeight.Bold else FontWeight.Normal,
                                         style = MaterialTheme.typography.bodyMedium,
