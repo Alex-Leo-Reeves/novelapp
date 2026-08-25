@@ -50,6 +50,9 @@ fun FootballMatchScreen(
     var streamError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
+    var allEmbedUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    var currentServerIndex by remember { mutableStateOf(0) }
+
     fun resolveStream() {
         if (isLoadingStream) return
         scope.launch {
@@ -57,45 +60,54 @@ fun FootballMatchScreen(
             streamError = null
             streamResult = null
 
-            // Ladder approach:
             // 1. Try Server 2 (backend .m3u8 scraper) for a direct stream
-            // 2. If that fails, fall back to embed URLs
-            val result = footballApi.resolveStream(
+            val direct = footballApi.resolveServerDirectStream(
                 homeTeam = match.homeTeam,
                 awayTeam = match.awayTeam,
                 leagueName = match.leagueName
             )
+            if (direct != null) {
+                streamResult = direct
+                isLoadingStream = false
+                onPlayStream(direct, "${match.homeTeam} vs ${match.awayTeam}")
+                return@launch
+            }
 
-            streamResult = result
+            // 2. Fetch all embed URLs (StreamEast exact ID primary, then fallbacks)
+            val urls = footballApi.resolveStreamUrls(
+                fixtureId = match.fixtureId,
+                homeTeam = match.homeTeam,
+                awayTeam = match.awayTeam,
+                leagueName = match.leagueName,
+                streamHint = match.streamHint
+            )
+            allEmbedUrls = urls
+            currentServerIndex = 0
+
+            val firstUrl = urls.firstOrNull()
             isLoadingStream = false
 
-            when (result) {
-                is StreamResult.Direct -> {
-                    // Direct .m3u8 from backend → AnimePlayerScreen (ExoPlayer)
-                    onPlayStream(result, "${match.homeTeam} vs ${match.awayTeam}")
-                }
-                is StreamResult.Embed -> {
-                    if (result.url.isBlank()) {
-                        streamError = "No stream available for this match yet. Try again closer to kickoff."
-                    } else {
-                        // Embed URL → MaServerPlayerScreen (WebView)
-                        onPlayStream(result, "${match.homeTeam} vs ${match.awayTeam}")
-                    }
-                }
+            if (!firstUrl.isNullOrBlank()) {
+                val embed = StreamResult.Embed(firstUrl)
+                streamResult = embed
+                onPlayStream(embed, "${match.homeTeam} vs ${match.awayTeam}")
+            } else {
+                streamError = "No stream available for this match yet. Try again closer to kickoff."
             }
         }
     }
 
     fun tryNextServer() {
-        // Re-resolve — the resolver tries Server 2 first, then falls back to embeds.
-        // If already an Embed, suggest using the same fallback again (may work after reload).
-        if (streamResult == null) {
+        if (allEmbedUrls.isEmpty()) {
             resolveStream()
             return
         }
-        // Reset and re-resolve
-        streamResult = null
-        resolveStream()
+        val nextIndex = (currentServerIndex + 1) % allEmbedUrls.size
+        currentServerIndex = nextIndex
+        val nextUrl = allEmbedUrls[nextIndex]
+        val embed = StreamResult.Embed(nextUrl)
+        streamResult = embed
+        onPlayStream(embed, "${match.homeTeam} vs ${match.awayTeam} (Server ${nextIndex + 1})")
     }
 
     Column(

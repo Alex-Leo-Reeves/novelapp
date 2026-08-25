@@ -37,9 +37,8 @@ object NodeBridgeRuntime {
 
     private const val TAG = "NodeBridge"
     private const val ASSET_ROOT = "nodebridge"
-    // v3: added process.on('uncaughtException') to main.js so JS errors never
-    // terminate the Android process, and full route normalisation layer.
-    private const val STAMP_VERSION = "3"
+    // v6: removed all import.meta.url usages across main.js and smartcache.js
+    private const val STAMP_VERSION = "6"
     private const val STAMP_FILE = "nodebridge_stamp.txt"
     private const val PORT_FILE = "bridge-port.json"
 
@@ -52,6 +51,9 @@ object NodeBridgeRuntime {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope.launch {
             try {
+                // Allow the UI and splash/login to settle cleanly before heavy IO/Node initialization
+                delay(3500)
+
                 if (!NodeNativeBridge.isLoaded) {
                     val reason = "The built-in anime engine isn't supported on this device's chip (backend fallback active)."
                     NodeBridgeStatus.reportFailure(reason)

@@ -4,6 +4,7 @@ import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import io.ktor.http.encodeURLPath
 import kotlinx.serialization.json.*
 
 private val footballJson = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -34,7 +35,8 @@ data class FootballMatch(
     val leagueLogo: String = "",
     val leagueSeason: Int = 0,
     val matchDate: String = "",   // ISO date
-    val matchTime: String = ""    // kickoff time
+    val matchTime: String = "",   // kickoff time
+    val streamHint: String = ""  // StreamEast match-page URL scraped by server
 ) {
     val isLive: Boolean get() = status == "LIVE" || status == "HT" || status == "1H" || status == "2H" || status == "PEN"
     val isFinished: Boolean get() = status == "FT"
@@ -74,26 +76,47 @@ class FootballApiSource(private val httpClient: HttpClient) {
     private val espnBaseUrl = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 
     suspend fun fetchFixtures(date: String = ""): List<FootballMatch> = runCatching {
-        val url = "$espnBaseUrl/all/scoreboard${if (date.isNotBlank()) "?dates=${date.replace("-", "")}" else ""}"
-        val raw = httpClient.get(url).bodyAsText()
-        parseEspnResponse(raw)
+        // Primary: fetch from server (which scrapes StreamEast Asia + ESPN fallback)
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures").bodyAsText()
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        val ok = root["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (ok) {
+            parseServerFixtures(root["data"]?.jsonArray)
+        } else {
+            // Secondary fallback: ESPN direct
+            val espnUrl = "$espnBaseUrl/all/scoreboard${if (date.isNotBlank()) "?dates=${date.replace("-", "")}" else ""}"
+            parseEspnResponse(httpClient.get(espnUrl).bodyAsText())
+        }
     }.getOrElse { error ->
         println("[FootballAPI] Fixtures fetch failed: ${error.message}")
         emptyList()
     }
 
     suspend fun fetchUpcomingFixtures(): List<FootballMatch> = runCatching {
-        // Fetch next 3 days
-        val raw = httpClient.get("$espnBaseUrl/all/scoreboard?limit=100&dates=20240101-20301231").bodyAsText()
-        parseEspnResponse(raw).filter { it.isNotStarted }.take(50)
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures?upcoming=true").bodyAsText()
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        val ok = root["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (ok) {
+            parseServerFixtures(root["data"]?.jsonArray).filter { it.isNotStarted }.take(50)
+        } else {
+            val raw2 = httpClient.get("$espnBaseUrl/all/scoreboard?limit=100").bodyAsText()
+            parseEspnResponse(raw2).filter { it.isNotStarted }.take(50)
+        }
     }.getOrElse { error ->
         println("[FootballAPI] Upcoming fixtures failed: ${error.message}")
         emptyList()
     }
 
     suspend fun fetchLiveFixtures(): List<FootballMatch> = runCatching {
-        val raw = httpClient.get("$espnBaseUrl/all/scoreboard").bodyAsText()
-        parseEspnResponse(raw).filter { it.isLive }
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/fixtures?live=all").bodyAsText()
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        val ok = root["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (ok) {
+            parseServerFixtures(root["data"]?.jsonArray).filter { it.isLive }
+        } else {
+            val raw2 = httpClient.get("$espnBaseUrl/all/scoreboard").bodyAsText()
+            parseEspnResponse(raw2).filter { it.isLive }
+        }
     }.getOrElse { error ->
         println("[FootballAPI] Live fixtures failed: ${error.message}")
         emptyList()
@@ -115,53 +138,92 @@ class FootballApiSource(private val httpClient: HttpClient) {
         fixtureId: Int,
         homeTeam: String = "",
         awayTeam: String = "",
-        leagueName: String = ""
+        leagueName: String = "",
+        streamHint: String = ""
     ): String? {
-        return resolveStreamUrls(fixtureId, homeTeam, awayTeam, leagueName).firstOrNull()
+        return resolveStreamUrls(fixtureId, homeTeam, awayTeam, leagueName, streamHint).firstOrNull()
     }
 
     suspend fun resolveStreamUrls(
         fixtureId: Int,
         homeTeam: String = "",
         awayTeam: String = "",
-        leagueName: String = ""
+        leagueName: String = "",
+        streamHint: String = ""
     ): List<String> {
-        // ScoreBat embed provides actual video highlights/replays in an embeddable player.
-        // The embed endpoint renders a proper video player, not a search/results page.
-        // Build a direct embed URL using the fixture ID when available.
         val embedUrls = mutableListOf<String>()
 
-        // Server 1: Scorebat Direct Match API (Exact Match)
-        val scorebatUrl = runCatching {
-            val feed = httpClient.get("https://www.scorebat.com/video-api/v3/feed/").bodyAsText()
-            val root = footballJson.parseToJsonElement(feed).jsonObject
-            val matches = root["response"]?.jsonArray
-            val exactMatch = matches?.firstOrNull { el ->
-                val title = el.jsonObject["title"]?.jsonPrimitive?.content ?: ""
-                homeTeam.isNotBlank() && title.contains(homeTeam, ignoreCase = true) && 
-                awayTeam.isNotBlank() && title.contains(awayTeam, ignoreCase = true)
+        // Step 1: Ask the server for its full prioritised embed URL list
+        // (StreamEast Asia first, using the scraped streamHint if available)
+        val serverUrls = runCatching {
+            val resp = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/stream") {
+                parameter("home", homeTeam)
+                parameter("away", awayTeam)
+                parameter("league", leagueName)
+                if (streamHint.isNotBlank()) parameter("hint", streamHint)
             }
-            exactMatch?.jsonObject?.get("matchviewUrl")?.jsonPrimitive?.content
-        }.getOrNull()
-        
-        if (!scorebatUrl.isNullOrBlank()) {
-            embedUrls.add(scorebatUrl)
-        } else {
-            // Server 2: ScoreBat Widget with search fallback
+            val root = footballJson.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val ok = root["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+            if (!ok) return@runCatching emptyList()
+            val raw = root["data"]?.jsonPrimitive?.contentOrNull ?: ""
+            raw.split("|").map { it.trim() }.filter { it.isNotBlank() }
+        }.getOrElse { emptyList() }
+
+        embedUrls.addAll(serverUrls)
+
+        // Step 2: Client-side fallbacks if server returned nothing
+        if (embedUrls.isEmpty()) {
+            val homeSlug = homeTeam.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+            val awaySlug = awayTeam.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
             val searchQuery = buildString {
                 if (homeTeam.isNotBlank()) append(homeTeam.take(20).replace(" ", "+"))
-                if (awayTeam.isNotBlank()) {
-                    if (isNotEmpty()) append("+vs+")
-                    append(awayTeam.take(20).replace(" ", "+"))
-                }
+                if (awayTeam.isNotBlank()) { if (isNotEmpty()) append("+vs+"); append(awayTeam.take(20).replace(" ", "+")) }
             }
-            if (searchQuery.isNotBlank()) {
+
+            // StreamEast domains
+            val streamEastDomains = listOf(
+                "https://streamseast.ws",
+                "https://www.streamseast.ws",
+                "https://streamseast.asia",
+                "https://streamseast.me"
+            )
+            if (streamHint.isNotBlank()) embedUrls.add(streamHint)
+            for (domain in streamEastDomains.take(2)) {
+                if (fixtureId > 0 && homeSlug.isNotBlank() && awaySlug.isNotBlank()) {
+                    embedUrls.add("$domain/soccer/$fixtureId/$homeSlug-vs-$awaySlug")
+                }
+                if (homeSlug.isNotBlank() && awaySlug.isNotBlank()) {
+                    embedUrls.add("$domain/soccer/$homeSlug-vs-$awaySlug")
+                    embedUrls.add("$domain/stream/football-$homeSlug-vs-$awaySlug")
+                    embedUrls.add("$domain/football/$homeSlug-vs-$awaySlug-live")
+                }
+                embedUrls.add("$domain/soccer")
+                embedUrls.add("$domain/football")
+            }
+
+            // ScoreBat Direct Match API
+            val scorebatUrl = runCatching {
+                val feed = httpClient.get("https://www.scorebat.com/video-api/v3/feed/").bodyAsText()
+                val root = footballJson.parseToJsonElement(feed).jsonObject
+                val matches = root["response"]?.jsonArray
+                val exactMatch = matches?.firstOrNull { el ->
+                    val title = el.jsonObject["title"]?.jsonPrimitive?.content ?: ""
+                    homeTeam.isNotBlank() && title.contains(homeTeam, ignoreCase = true) &&
+                    awayTeam.isNotBlank() && title.contains(awayTeam, ignoreCase = true)
+                }
+                exactMatch?.jsonObject?.get("matchviewUrl")?.jsonPrimitive?.content
+            }.getOrNull()
+
+            if (!scorebatUrl.isNullOrBlank()) {
+                embedUrls.add(scorebatUrl)
+            } else if (searchQuery.isNotBlank()) {
                 embedUrls.add("https://www.scorebat.com/embed/livescore/?search=$searchQuery")
             }
-        }
 
-        // Server 3: Generic ScoreBat embed (fallback — shows whatever is featured)
-        embedUrls.add("https://www.scorebat.com/embed/")
+            if (searchQuery.isNotBlank()) {
+                embedUrls.add("https://v2.sportsurge.net/search?q=${searchQuery.replace("+", "%20")}")
+            }
+        }
 
         return embedUrls.distinct()
     }
@@ -213,18 +275,21 @@ class FootballApiSource(private val httpClient: HttpClient) {
     suspend fun resolveStream(
         homeTeam: String,
         awayTeam: String,
-        leagueName: String = ""
+        leagueName: String = "",
+        fixtureId: Int = 0,
+        streamHint: String = ""
     ): StreamResult {
         // Step 1: Try Server 2 — backend direct-stream scraper
         val direct = resolveServerDirectStream(homeTeam, awayTeam, leagueName)
         if (direct != null) return direct
 
-        // Step 2: Fall back to embed URLs (Servers 1, 3, 4, 5)
+        // Step 2: Fall back to embed URLs (StreamEast exact ID/hint primary, then fallbacks)
         val embedUrls = resolveStreamUrls(
-            fixtureId = 0,
+            fixtureId = fixtureId,
             homeTeam = homeTeam,
             awayTeam = awayTeam,
-            leagueName = leagueName
+            leagueName = leagueName,
+            streamHint = streamHint
         )
         val firstEmbed = embedUrls.firstOrNull()
         if (firstEmbed != null) return StreamResult.Embed(firstEmbed)
@@ -234,14 +299,53 @@ class FootballApiSource(private val httpClient: HttpClient) {
     }
 
     suspend fun searchFixtures(query: String): List<FootballMatch> = runCatching {
-        val raw = httpClient.get("$espnBaseUrl/all/scoreboard").bodyAsText()
-        val all = parseEspnResponse(raw)
-        all.filter {
-            it.homeTeam.contains(query, ignoreCase = true) ||
-            it.awayTeam.contains(query, ignoreCase = true) ||
-            it.leagueName.contains(query, ignoreCase = true)
+        // Try server search (StreamEast-backed) first
+        val raw = httpClient.get("${AppReleaseConfig.API_BASE_URL}/football/search?q=${query.encodeURLPath()}").bodyAsText()
+        val root = footballJson.parseToJsonElement(raw).jsonObject
+        val ok = root["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (ok) {
+            parseServerFixtures(root["data"]?.jsonArray)
+        } else {
+            // Fallback: local filter on cached ESPN data
+            val all = parseEspnResponse(httpClient.get("$espnBaseUrl/all/scoreboard").bodyAsText())
+            all.filter {
+                it.homeTeam.contains(query, ignoreCase = true) ||
+                it.awayTeam.contains(query, ignoreCase = true) ||
+                it.leagueName.contains(query, ignoreCase = true)
+            }
         }
     }.getOrElse { emptyList() }
+
+    /**
+     * Parse the flat fixture objects returned by our server endpoints
+     * (scraped from StreamEast Asia or built from ESPN JSON by the server).
+     * The server normalises them so all fields are top-level strings/numbers.
+     */
+    private fun parseServerFixtures(data: JsonArray?): List<FootballMatch> {
+        if (data == null) return emptyList()
+        return data.mapNotNull { element ->
+            runCatching {
+                val obj = element.jsonObject
+                FootballMatch(
+                    fixtureId = obj["fixtureId"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null,
+                    homeTeam = obj["homeTeam"]?.jsonPrimitive?.contentOrNull?.ifBlank { null } ?: return@mapNotNull null,
+                    awayTeam = obj["awayTeam"]?.jsonPrimitive?.contentOrNull?.ifBlank { null } ?: return@mapNotNull null,
+                    homeLogo = obj["homeLogo"]?.jsonPrimitive?.contentOrNull ?: "",
+                    awayLogo = obj["awayLogo"]?.jsonPrimitive?.contentOrNull ?: "",
+                    homeGoals = obj["homeGoals"]?.jsonPrimitive?.intOrNull,
+                    awayGoals = obj["awayGoals"]?.jsonPrimitive?.intOrNull,
+                    status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "NS",
+                    elapsed = obj["elapsed"]?.jsonPrimitive?.intOrNull,
+                    leagueName = obj["leagueName"]?.jsonPrimitive?.contentOrNull ?: "Football",
+                    leagueLogo = obj["leagueLogo"]?.jsonPrimitive?.contentOrNull ?: "",
+                    leagueSeason = obj["leagueSeason"]?.jsonPrimitive?.intOrNull ?: 0,
+                    matchDate = obj["matchDate"]?.jsonPrimitive?.contentOrNull ?: "",
+                    matchTime = obj["matchTime"]?.jsonPrimitive?.contentOrNull ?: "",
+                    streamHint = obj["streamHint"]?.jsonPrimitive?.contentOrNull ?: ""
+                )
+            }.getOrNull()
+        }
+    }
 
     private fun parseEspnResponse(raw: String): List<FootballMatch> {
         val root = footballJson.parseToJsonElement(raw).jsonObject

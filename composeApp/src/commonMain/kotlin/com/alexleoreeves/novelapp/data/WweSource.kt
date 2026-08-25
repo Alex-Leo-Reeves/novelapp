@@ -309,8 +309,8 @@ class WweSource(private val httpClient: HttpClient) {
      * Option A: Resolve embed URLs from the server.
      * Returns embed URLs suitable for MaServerPlayerScreen (WebView).
      */
-    suspend fun resolveEmbedUrls(eventId: String, eventTitle: String = ""): List<String> = runCatching {
-        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/stream?event=${eventId.encodeURLParameter()}&title=${eventTitle.encodeURLParameter()}"
+    suspend fun resolveEmbedUrls(eventId: String, eventTitle: String = "", detailUrl: String = ""): List<String> = runCatching {
+        val url = "${AppReleaseConfig.API_BASE_URL}/wwe/stream?event=${eventId.encodeURLParameter()}&title=${eventTitle.encodeURLParameter()}&detailUrl=${detailUrl.encodeURLParameter()}"
         val response = httpClient.get(url) {
             header("Accept", "application/json")
             header("User-Agent", "NovelApp/1.0")
@@ -332,11 +332,12 @@ class WweSource(private val httpClient: HttpClient) {
      * Option B: Resolve direct .m3u8 stream URLs from the server.
      * Returns WweStreamResult.Direct with the HLS URL.
      */
-    suspend fun resolveDirectStreamUrls(eventId: String, eventTitle: String = ""): List<WweStreamResult> = runCatching {
+    suspend fun resolveDirectStreamUrls(eventId: String, eventTitle: String = "", detailUrl: String = ""): List<WweStreamResult> = runCatching {
         val url = "${AppReleaseConfig.API_BASE_URL}/wwe/direct-stream"
         val body = buildJsonObject {
             put("eventId", eventId)
             put("eventTitle", eventTitle)
+            put("detailUrl", detailUrl)
         }.toString()
 
         val response = httpClient.post(url) {
@@ -388,47 +389,51 @@ class WweSource(private val httpClient: HttpClient) {
      * 2. Fall back to Option A (server-side embed extraction) — returns Embed
      * 3. Last resort: reconstruct the watchwrestling page URL as an embed fallback
      */
-    suspend fun resolveStream(eventId: String, eventTitle: String = ""): WweStreamResult? {
+    suspend fun resolveStream(eventId: String, eventTitle: String = "", detailUrl: String = ""): WweStreamResult? {
         // Try Option B first — direct .m3u8
-        val directResults = resolveDirectStreamUrls(eventId, eventTitle)
+        val directResults = resolveDirectStreamUrls(eventId, eventTitle, detailUrl)
         val directUrl = directResults.firstOrNull { it is WweStreamResult.Direct }
         if (directUrl != null) return directUrl
 
         // Try Option A — embed URLs
-        val embedUrls = resolveEmbedUrls(eventId, eventTitle)
+        val embedUrls = resolveEmbedUrls(eventId, eventTitle, detailUrl)
         if (embedUrls.isNotEmpty()) return WweStreamResult.Embed(embedUrls.first())
 
         // Last resort: scrape watchwrestling page to extract the actual iframe player
-        val pageUrl = eventId.replace("_", "/").let { "https://$it" }.takeIf { it.startsWith("https://") }
-        if (pageUrl != null) {
+        val pageUrl = detailUrl.takeIf { it.isNotBlank() }
+            ?: (if (eventId.startsWith("http")) eventId else "https://${eventId.replace(Regex("^watchwrestling\\.ae_"), "watchwrestling.ae/").replace(Regex("_+$"), "/")}")
+        if (pageUrl.isNotBlank()) {
             val html = runCatching { httpClient.get(pageUrl).bodyAsText() }.getOrDefault("")
             if (html.isNotBlank()) {
                 val doc = Ksoup.parse(html)
-                // Look for iframes (doodstream, vidmoly, streamtape, etc.)
+                // Look for iframes (fastvid, doodstream, vidmoly, streamtape, etc.)
                 val iframeSrc = doc.select("iframe").map { it.attr("src") }.firstOrNull { src ->
-                    src.contains("dood") || src.contains("vidmoly") || src.contains("streamtape") || 
-                    src.contains("netu") || src.contains("dailymotion") || src.contains("embed")
+                    src.contains("fastvid") || src.contains("dailymotion") || src.contains("dood") ||
+                    src.contains("vidmoly") || src.contains("streamtape") || src.contains("netu") ||
+                    src.contains("embed")
                 }
                 if (!iframeSrc.isNullOrBlank()) {
                     val finalSrc = if (iframeSrc.startsWith("//")) "https:$iframeSrc" else iframeSrc
                     return WweStreamResult.Embed(finalSrc)
                 }
-                
-                // Sometimes links are in buttons
-                val buttonLink = doc.select("a.external-link, a.watch-link").map { it.attr("href") }.firstOrNull { src ->
-                    src.contains("dood") || src.contains("vidmoly") || src.contains("streamtape")
-                }
-                if (!buttonLink.isNullOrBlank()) {
-                    return WweStreamResult.Embed(buttonLink)
+
+                // Check textareas or script links (e.g. afiyukent.one / play.php)
+                val textareaHtml = doc.select("textarea").text()
+                if (textareaHtml.isNotBlank()) {
+                    val tDoc = Ksoup.parse(textareaHtml)
+                    val tLink = tDoc.select("a").map { it.attr("href") }.firstOrNull { it.startsWith("http") }
+                    if (tLink != null) {
+                        return WweStreamResult.Embed(tLink)
+                    }
                 }
             }
         }
-        
+
         return null
     }
 
-    suspend fun resolveStreamUrl(eventId: String): String? {
-        val result = resolveStream(eventId)
+    suspend fun resolveStreamUrl(eventId: String, detailUrl: String = ""): String? {
+        val result = resolveStream(eventId, detailUrl = detailUrl)
         return when (result) {
             is WweStreamResult.Direct -> result.url
             is WweStreamResult.Embed -> result.url
@@ -436,8 +441,8 @@ class WweSource(private val httpClient: HttpClient) {
         }
     }
 
-    suspend fun resolveStreamUrls(eventId: String): List<String> {
-        val embedUrls = resolveEmbedUrls(eventId)
+    suspend fun resolveStreamUrls(eventId: String, detailUrl: String = ""): List<String> {
+        val embedUrls = resolveEmbedUrls(eventId, detailUrl = detailUrl)
         return embedUrls.ifEmpty {
             val directUrls = resolveDirectStreamUrls(eventId)
             directUrls.mapNotNull {

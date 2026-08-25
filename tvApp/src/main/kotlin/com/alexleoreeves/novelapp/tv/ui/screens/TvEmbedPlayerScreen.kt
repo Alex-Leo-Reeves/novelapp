@@ -111,6 +111,21 @@ fun TvEmbedPlayerScreen(
         webViewStartedAt = System.currentTimeMillis()
     }
 
+    DisposableEffect(embedUrl) {
+        onDispose {
+            try {
+                webViewRef?.apply {
+                    stopLoading()
+                    loadUrl("about:blank")
+                    onPause()
+                    removeAllViews()
+                    destroy()
+                }
+            } catch (_: Exception) {}
+            webViewRef = null
+        }
+    }
+
     // Auto-hide controls
     LaunchedEffect(showControls) {
         if (showControls) {
@@ -759,12 +774,34 @@ private const val EMBED_PAUSE_JS = """
  */
 private const val EMBED_TOGGLE_PLAY_JS = """
 (function(){
+    function boostMediaAudio(v) {
+        if (!v || v.__gainBoosted) return;
+        try {
+            var AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
+            var ctx = window.__novelAppAudioCtx;
+            var src = ctx.createMediaElementSource(v);
+            var gain = ctx.createGain();
+            gain.gain.value = 1.5;
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            v.__gainBoosted = true;
+            if (ctx.state === 'suspended') {
+                var resume = function() { ctx.resume(); };
+                v.addEventListener('play', resume, { once: true });
+            }
+        } catch(e) {
+            try { v.volume = 1.0; } catch(_) {}
+        }
+    }
+
     var v = __novelAppFindBestVideo();
     if (v) {
         try {
             if (v.paused) {
                 v.muted = false;
-                v.volume = 1.0;
+                boostMediaAudio(v);
                 var p = v.play();
                 if (p && p.catch) p.catch(function(){});
             } else {
@@ -786,12 +823,32 @@ private const val EMBED_TOGGLE_PLAY_JS = """
 
 /**
  * Unmute every reachable <video>/<audio> — the top-level document plus any
- * same-origin iframes. Clicking in-page "mute" buttons is also attempted for
- * players that keep their own mute state. Volume keys return false from the
- * key handler, so the system TV volume still changes normally.
+ * same-origin iframes. Boosts volume with clean WebAudio GainNode.
  */
 private const val EMBED_UNMUTE_JS = """
 (function(){
+    function boostMediaAudio(v) {
+        if (!v || v.__gainBoosted) return;
+        try {
+            var AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
+            var ctx = window.__novelAppAudioCtx;
+            var src = ctx.createMediaElementSource(v);
+            var gain = ctx.createGain();
+            gain.gain.value = 1.5;
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            v.__gainBoosted = true;
+            if (ctx.state === 'suspended') {
+                var resume = function() { ctx.resume(); };
+                v.addEventListener('play', resume, { once: true });
+            }
+        } catch(e) {
+            try { v.volume = 1.0; } catch(_) {}
+        }
+    }
+
     function collectVideos(root) {
         var out = [];
         try { root.querySelectorAll('video,audio').forEach(function(v){ out.push(v); }); } catch(e) {}
@@ -808,7 +865,7 @@ private const val EMBED_UNMUTE_JS = """
     collectVideos(document).forEach(function(v) {
         try {
             v.muted = false;
-            v.volume = 1.0;
+            boostMediaAudio(v);
             var p = v.play && v.play();
             if (p) p.catch(function(){});
         } catch(e) {}

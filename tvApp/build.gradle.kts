@@ -35,7 +35,7 @@ android {
         versionCode = 44
         versionName = "1.44"
 
-        // Exclude x86/x86_64 desktop binaries to cut APK size in half
+        // Exclude x86/x86_64 to cut APK size in half for TV
         ndk {
             abiFilters.addAll(setOf("arm64-v8a", "armeabi-v7a"))
         }
@@ -90,6 +90,7 @@ android {
         }
         jniLibs {
             useLegacyPackaging = true
+            pickFirsts += "**/libc++_shared.so"
         }
     }
 }

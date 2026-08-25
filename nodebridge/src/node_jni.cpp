@@ -31,6 +31,8 @@
 #include <new>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <setjmp.h>
 
 #define LOG_TAG "NodeBridge"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -44,9 +46,33 @@ struct NodeThreadArgs {
     char* entryPath;     // absolute path to the bridge main.js
 };
 
+// Thread-local signal jump buffer: lets us recover from SIGSEGV/SIGABRT
+// on the Node thread without killing the Android process.
+static thread_local sigjmp_buf s_node_jmp;
+static thread_local volatile bool s_node_jmp_set = false;
+
+static void nodeSignalHandler(int sig) {
+    LOGE("Node thread caught signal %d — recovering to prevent process kill", sig);
+    if (s_node_jmp_set) {
+        s_node_jmp_set = false;
+        siglongjmp(s_node_jmp, 1);
+    }
+    // If not recoverable, log and exit just this thread, not the whole process.
+    pthread_exit(NULL);
+}
+
 static void* nodeThreadMain(void* opaque) {
     NodeThreadArgs* args = static_cast<NodeThreadArgs*>(opaque);
     if (!args) return NULL;
+
+    // Install per-thread signal handlers to contain Node crashes.
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = nodeSignalHandler;
+    sa.sa_flags = SA_RESETHAND;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGBUS,  &sa, NULL);
 
     // 1. Load the embedded Node runtime.
     void* handle = dlopen(args->libNodePath, RTLD_NOW | RTLD_GLOBAL);
@@ -71,12 +97,21 @@ static void* nodeThreadMain(void* opaque) {
     }
 
     // 3. Run Node on this detached thread: node /path/to/main.js
+    // Use setjmp so a fatal signal inside node::Start() is caught here
+    // rather than killing the entire Android process.
     LOGI("booting embedded Node with entry=%s", args->entryPath);
     char* argv[2];
     argv[0] = const_cast<char*>("node");
     argv[1] = args->entryPath;
-    int rc = start(2, argv);
-    LOGI("embedded Node exited with code %d", rc);
+
+    s_node_jmp_set = true;
+    if (sigsetjmp(s_node_jmp, 1) == 0) {
+        int rc = start(2, argv);
+        s_node_jmp_set = false;
+        LOGI("embedded Node exited with code %d", rc);
+    } else {
+        LOGE("embedded Node crashed with a fatal signal — process protected");
+    }
 
     dlclose(handle);
     free(args->libNodePath);
@@ -108,13 +143,18 @@ Java_com_alexleoreeves_novelapp_nodebridge_NodeNativeBridge_startNode(
     env->ReleaseStringUTFChars(entryPath, entry);
 
     pthread_t thread;
-    if (pthread_create(&thread, NULL, nodeThreadMain, args) != 0) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); // 8MB stack for Node.js / V8
+    if (pthread_create(&thread, &attr, nodeThreadMain, args) != 0) {
         LOGE("pthread_create failed");
+        pthread_attr_destroy(&attr);
         free(args->libNodePath);
         free(args->entryPath);
         delete args;
         return env->NewStringUTF("ERR_THREAD");
     }
+    pthread_attr_destroy(&attr);
     pthread_detach(thread);
     return env->NewStringUTF("OK");
 }

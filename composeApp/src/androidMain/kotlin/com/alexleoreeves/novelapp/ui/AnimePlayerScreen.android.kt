@@ -2,6 +2,7 @@ package com.alexleoreeves.novelapp.ui
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.view.ViewGroup
 import androidx.compose.animation.*
@@ -243,6 +244,18 @@ actual fun AnimePlayerScreen(
                         .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                         .build()
                     setAudioAttributes(audioAttributes, true)
+
+                    // ── Volume boost via LoudnessEnhancer (+500 mB ≈ +5 dB) ──
+                    // LoudnessEnhancer is a pure gain stage — no DynamicsCompressor,
+                    // no muffling. Works on any audio session ID from ExoPlayer.
+                    runCatching {
+                        val sessionId = audioSessionId
+                        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                            val enhancer = LoudnessEnhancer(sessionId)
+                            enhancer.setTargetGain(500) // +500 mB = +5 dB
+                            enhancer.enabled = true
+                        }
+                    }
 
                     // ── CRITICAL: Set subtitle preferences BEFORE prepare() ──
                     val subEnabled = subtitleMode != "off"

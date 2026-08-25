@@ -36,11 +36,10 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import anivexaWorker from "./anivexa/index.js";
-
-// Prevent any uncaught JS exception from terminating the embedded Node process
+// Prevent any uncaught JS exception from terminating the embedded Node process.
+// These handlers MUST be registered before any imports that could throw,
+// especially import.meta which is unavailable in nodejs-mobile embedded mode.
 if (typeof process !== "undefined" && process && typeof process.on === "function") {
     process.on("uncaughtException", function(err) {
         console.error("[nodebridge] Uncaught exception:", err && (err.stack || err.message || String(err)));
@@ -50,8 +49,13 @@ if (typeof process !== "undefined" && process && typeof process.on === "function
     });
 }
 
-const __dirname = path.dirname(fileURLToPath(
-    import.meta.url));
+import anivexaWorker from "./anivexa/index.js";
+
+// nodejs-mobile passes the script path as process.argv[1].
+// We CANNOT use import.meta.url — it is not available in the embedded
+// Node.js runtime (nodejs-mobile) and will throw a fatal V8 error that
+// kills the entire Android process (not catchable by Kotlin handlers).
+const __dirname = path.dirname(process.argv[1] || "/data/user/0/com.alexleoreeves.novelapp/files/nodebridge/main.js");
 const PORT_FILE = path.join(__dirname, "bridge-port.json");
 const HOST = "127.0.0.1";
 const ANILIST_GRAPHQL = "https://graphql.anilist.co";

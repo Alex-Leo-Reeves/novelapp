@@ -87,7 +87,7 @@ fun WweMatchScreen(
             resolvedResult = null
 
             // Use the full pipeline: try Direct first, then Embed, then error
-            val result = wweSource.resolveStream(event.eventId, event.title)
+            val result = wweSource.resolveStream(event.eventId, event.title, event.detailPageUrl)
             if (result != null) {
                 resolvedResult = result
                 // Auto-launch based on type

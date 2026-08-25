@@ -150,6 +150,7 @@ android {
         }
         jniLibs {
             useLegacyPackaging = true
+            pickFirsts += "**/libc++_shared.so"
         }
     }
     androidResources {

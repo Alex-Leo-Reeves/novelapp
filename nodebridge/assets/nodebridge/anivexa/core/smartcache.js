@@ -55,9 +55,8 @@ if (IS_LOCAL_NODE) {
   const { readFileSync, mkdirSync, existsSync } = await import("node:fs");
   const { writeFile, unlink }                   = await import("node:fs/promises");
   const { join, dirname }                        = await import("node:path");
-  const { fileURLToPath }                        = await import("node:url");
 
-  const __dir    = dirname(fileURLToPath(import.meta.url));
+  const __dir    = (typeof process !== "undefined" && process.argv && process.argv[1]) ? dirname(process.argv[1]) : "/data/user/0/com.alexleoreeves.novelapp/files/nodebridge";
   const CACHE_DIR = join(__dir, ".cache");
   try { mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
 

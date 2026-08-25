@@ -143,6 +143,21 @@ actual fun MaServerPlayerScreen(
         previewRemainingLabel = ""
     }
 
+    DisposableEffect(embedUrl) {
+        onDispose {
+            try {
+                webViewRef?.apply {
+                    stopLoading()
+                    loadUrl("about:blank")
+                    onPause()
+                    removeAllViews()
+                    destroy()
+                }
+            } catch (_: Exception) {}
+            webViewRef = null
+        }
+    }
+
     // Wall-clock preview cap for the WebView path (free users only).
     // Starts counting once the player reaches READY and pauses the video
     // via JS when the cap is hit, then shows the gate overlay.
@@ -856,6 +871,7 @@ private const val STABILIZATION_END_JS = """
 
         document.querySelectorAll('video').forEach(function(v) {
             v.muted = false;
+            try { boostMediaAudio(v); } catch(e) {}
             var p = v.play();
             if (p) p.catch(function() {});
         });
@@ -867,9 +883,8 @@ private const val STABILIZATION_END_JS = """
 """
 
 /**
- * Legacy inline-video JS that was already present in the original
- * implementation. Ensures videos play inline and not in a native
- * fullscreen overlay.
+ * Clean WebAudio volume booster: applies 1.5x linear gain (+~3.5dB) to HTML5
+ * video elements without DynamicsCompressor (which causes muffled sound).
  */
 private const val INLINE_VIDEO_JS = """
 (function() {
@@ -880,6 +895,28 @@ private const val INLINE_VIDEO_JS = """
         window.prompt = function() { return null; };
         window.onbeforeunload = null;
     } catch(e) {}
+
+    function boostMediaAudio(v) {
+        if (!v || v.__gainBoosted) return;
+        try {
+            var AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
+            var ctx = window.__novelAppAudioCtx;
+            var src = ctx.createMediaElementSource(v);
+            var gain = ctx.createGain();
+            gain.gain.value = 1.5; // +50% clean volume boost (no compressor/muffling)
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            v.__gainBoosted = true;
+            if (ctx.state === 'suspended') {
+                var resume = function() { ctx.resume(); };
+                v.addEventListener('play', resume, { once: true });
+            }
+        } catch(e) {
+            try { v.volume = 1.0; } catch(_) {}
+        }
+    }
 
     function neutralizeOverlays() {
         try {
@@ -905,6 +942,7 @@ private const val INLINE_VIDEO_JS = """
                 v.setAttribute('webkit-playsinline', '');
                 v.setAttribute('x-webkit-airplay', 'allow');
                 v.setAttribute('autoplay', '');
+                boostMediaAudio(v);
             });
         } catch(e) {}
     }

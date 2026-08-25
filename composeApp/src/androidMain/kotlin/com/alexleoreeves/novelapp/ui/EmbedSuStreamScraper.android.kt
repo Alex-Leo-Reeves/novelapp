@@ -61,13 +61,33 @@ suspend fun extractStreamFromEmbed(
                     return
                 }
                 settled = true
+                mainHandler.removeCallbacksAndMessages(null)
                 if (cont.isActive) {
                     val resultUrl = url ?: latestDetectedUrl
                     if (resultUrl != null) cont.resume(ScrapedStream(resultUrl))
                     else cont.resume(null)
                 }
-                try { webView?.destroy() } catch (_: Exception) {}
+                try {
+                    webView?.stopLoading()
+                    webView?.loadUrl("about:blank")
+                    webView?.onPause()
+                    webView?.destroy()
+                } catch (_: Exception) {}
                 webView = null
+            }
+
+            cont.invokeOnCancellation {
+                settled = true
+                mainHandler.removeCallbacksAndMessages(null)
+                mainHandler.post {
+                    try {
+                        webView?.stopLoading()
+                        webView?.loadUrl("about:blank")
+                        webView?.onPause()
+                        webView?.destroy()
+                    } catch (_: Exception) {}
+                    webView = null
+                }
             }
 
             try {

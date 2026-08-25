@@ -3943,61 +3943,229 @@ async function handleAddChapter(request, response) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Football / API-Football Proxy Endpoints
+//  Football — StreamEast Asia Scraper (no API key required)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sportsApiRequest(endpoint, params = {}) {
-  if (!SPORTS_API_KEY) {
-    throw new Error("SPORTS_API_KEY is not configured on the server.");
+/**
+ * StreamEast Asia domain list — tried in order until one responds.
+ * streamseast.asia is the canonical domain; others are subdomains/mirrors.
+ */
+const STREAMSEAST_DOMAINS = [
+  "https://streamseast.ws",
+  "https://www.streamseast.ws",
+  "https://streamseast.asia",
+  "https://www.streamseast.asia",
+  "https://streamseast.me",
+  "https://streamseast.tv",
+  "https://streamseast.io",
+  "https://streamseast.net",
+  "https://streamseast.app"
+];
+
+const STREAMSEAST_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Referer": "https://streamseast.ws/"
+};
+
+/** In-memory cache for scraped fixtures — 60 second TTL */
+let streameastCache = { fixtures: null, fetchedAt: 0, ttl: 60000 };
+
+/**
+ * Try to fetch a URL from the StreamEast domain list.
+ * Returns { html, domain } for the first domain that responds, or null.
+ */
+async function fetchStreamEast(path, timeoutMs = 12000) {
+  for (const domain of STREAMSEAST_DOMAINS) {
+    try {
+      const res = await fetchWithAbort(`${domain}${path}`, { headers: STREAMSEAST_HEADERS }, timeoutMs);
+      if (!res || !res.ok) continue;
+      const html = await res.text();
+      if (html && html.length > 500) return { html, domain };
+    } catch (_) { continue; }
   }
-  const query = new URLSearchParams(params).toString();
-  const url = `https://${SPORTS_API_HOST}${endpoint}${query ? "?" + query : ""}`;
-  const response = await fetchWithTimeout(url, {
-    headers: {
-      "x-rapidapi-key": SPORTS_API_KEY,
-      "x-rapidapi-host": SPORTS_API_HOST,
-      "accept": "application/json"
+  return null;
+}
+
+/**
+ * Scrape live & scheduled football fixtures from StreamEast.
+ * Parses the HTML of streamseast.ws to extract match info with exact match IDs.
+ * Falls back to ESPN's free scoreboard if scraping fails.
+ */
+async function scrapeStreamEastFixtures() {
+  const now = Date.now();
+  if (streameastCache.fixtures && (now - streameastCache.fetchedAt) < streameastCache.ttl) {
+    return streameastCache.fixtures;
+  }
+
+  let fixtures = [];
+
+  // ── Primary: StreamEast scrape (tries /soccer first, then /) ───────────────
+  try {
+    const result = await fetchStreamEast("/soccer") || await fetchStreamEast("/");
+    if (result) {
+      const { html, domain } = result;
+      fixtures = parseStreamEastHtml(html, domain);
     }
-  }, 12000);
-  return response;
+  } catch (err) {
+    console.error("[Football] StreamEast scrape failed:", err.message);
+  }
+
+  // ── Fallback: ESPN free scoreboard (which also gives real ESPN event IDs) ──
+  if (fixtures.length === 0) {
+    try {
+      const espnRes = await fetchWithAbort(
+        "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard",
+        { headers: { "Accept": "application/json" } },
+        10000
+      );
+      if (espnRes && espnRes.ok) {
+        const json = await espnRes.json();
+        fixtures = parseEspnJson(json);
+      }
+    } catch (err) {
+      console.error("[Football] ESPN fallback failed:", err.message);
+    }
+  }
+
+  streameastCache = { fixtures, fetchedAt: Date.now(), ttl: 60000 };
+  return fixtures;
+}
+
+/**
+ * Parse StreamEast HTML to extract football match listings.
+ * Parses <a href="/soccer/{id}/{slug}" class="matches"> cards.
+ */
+function parseStreamEastHtml(html, domain) {
+  const fixtures = [];
+
+  // Match pattern: <a href="/soccer/(\d+)/([^"]+)" class="matches"[^>]*aria-label="([^"]*)"?>(.*?)<\/a>
+  const cardRegex = /<a\s+href="\/soccer\/(\d+)\/([^"]+)"\s+class="matches"[^>]*aria-label="([^"]*)"?>(.*?)<\/a>/gis;
+  let match;
+
+  while ((match = cardRegex.exec(html)) !== null && fixtures.length < 60) {
+    const fixtureId = parseInt(match[1], 10);
+    const slug = match[2];
+    const ariaLabel = match[3] || "";
+    const cardContent = match[4];
+
+    // Extract team names
+    const teamNames = [...cardContent.matchAll(/class="team-name">([^<]+)<\/span>/gi)]
+      .map(m => m[1].trim()).filter(Boolean);
+
+    // Extract team logos
+    const teamLogos = [...cardContent.matchAll(/class="team-logo[^"]*"\s+src="([^"]+)"/gi)]
+      .map(m => m[1].trim());
+
+    // Extract date from moment('ISO_DATE')
+    const dateMatch = cardContent.match(/moment\(['"]([^'"]+)['"]\)/i);
+    const matchDate = dateMatch ? dateMatch[1] : new Date().toISOString();
+    const matchTime = matchDate.includes("T") ? matchDate.substring(11, 16) + " UTC" : "";
+
+    // Extract league name from aria-label (e.g. "Fulham vs Chelsea - English Premier League")
+    let leagueName = "Football";
+    if (ariaLabel.includes(" - ")) {
+      leagueName = ariaLabel.split(" - ").pop().trim();
+    }
+
+    const homeTeam = teamNames[0] || (slug.split("-vs-")[0] ? slug.split("-vs-")[0].replace(/-/g, " ") : "Home");
+    const awayTeam = teamNames[1] || (slug.split("-vs-")[1] ? slug.split("-vs-")[1].replace(/-/g, " ") : "Away");
+
+    fixtures.push({
+      fixtureId: fixtureId || (fixtures.length + 1),
+      homeTeam,
+      awayTeam,
+      homeLogo: teamLogos[0] || "",
+      awayLogo: teamLogos[1] || "",
+      homeGoals: null,
+      awayGoals: null,
+      status: "NS",
+      elapsed: null,
+      leagueName,
+      leagueLogo: "",
+      leagueSeason: new Date().getFullYear(),
+      matchDate,
+      matchTime,
+      streamHint: `${domain}/soccer/${fixtureId}/${slug}`
+    });
+  }
+
+  return fixtures;
+}
+
+/** Parse ESPN free JSON scoreboard into our fixture format with StreamEast URLs */
+function parseEspnJson(json) {
+  const events = json?.events || [];
+  return events.slice(0, 50).map((evt, idx) => {
+    const comps = evt?.competitions?.[0];
+    const competitors = comps?.competitors || [];
+    let homeTeam = "", awayTeam = "", homeGoals = null, awayGoals = null;
+    let homeLogo = "", awayLogo = "";
+
+    for (const c of competitors) {
+      const name = c?.team?.displayName || "";
+      const logo = c?.team?.logo || "";
+      const score = c?.score != null ? parseInt(c.score, 10) : null;
+      if (c.homeAway === "home") {
+        homeTeam = name; homeGoals = score; homeLogo = logo;
+      } else {
+        awayTeam = name; awayGoals = score; awayLogo = logo;
+      }
+    }
+    const state = comps?.status?.type?.state || "pre";
+    const shortDetail = comps?.status?.type?.shortDetail || "";
+    let status = "NS";
+    if (state === "in") status = /HT|Half/i.test(shortDetail) ? "HT" : "LIVE";
+    else if (state === "post") status = "FT";
+    const league = evt?.league?.name || evt?.season?.slug || "Football";
+    const dateIso = evt?.date || new Date().toISOString();
+    const kickoff = dateIso.substring(11, 16) + " UTC";
+
+    const espnId = evt?.id || String(idx + 1);
+    const homeSlug = footballTeamSlug(homeTeam);
+    const awaySlug = footballTeamSlug(awayTeam);
+    const seStreamUrl = (homeSlug && awaySlug)
+      ? `https://streamseast.ws/soccer/${espnId}/${homeSlug}-vs-${awaySlug}`
+      : `https://streamseast.ws/soccer`;
+
+    return {
+      fixtureId: parseInt(espnId, 10) || (idx + 1),
+      homeTeam: homeTeam || "Home",
+      awayTeam: awayTeam || "Away",
+      homeLogo,
+      awayLogo,
+      homeGoals: isNaN(homeGoals) ? null : homeGoals,
+      awayGoals: isNaN(awayGoals) ? null : awayGoals,
+      status,
+      elapsed: null,
+      leagueName: league,
+      leagueLogo: "",
+      leagueSeason: new Date().getFullYear(),
+      matchDate: dateIso,
+      matchTime: kickoff,
+      streamHint: seStreamUrl
+    };
+  });
 }
 
 async function handleFootballFixtures(request, response, requestUrl) {
   try {
-    const live = requestUrl.searchParams.get("live");
-    const date = requestUrl.searchParams.get("date");
-    const params = {};
-    if (live === "all") {
-      params.live = "all";
-    } else if (date) {
-      params.date = date;
-    } else {
-    const today = new Date();
-    const paramDate = requestUrl.searchParams.get("date");
-    const upcoming = requestUrl.searchParams.get("upcoming");
-    if (upcoming === "true") {
-      // Fetch next 5 days of fixtures for the Upcoming tab
-      const end = new Date(today);
-      end.setDate(end.getDate() + 5);
-      params.dateFrom = today.toISOString().split("T")[0];
-      params.dateTo = end.toISOString().split("T")[0];
-    } else if (paramDate) {
-      params.date = paramDate;
-      params.live = "all";
-    } else {
-      params.date = today.toISOString().split("T")[0];
-      params.live = "all";
+    const upcoming = requestUrl.searchParams.get("upcoming") === "true";
+    const live = requestUrl.searchParams.get("live") === "all";
+    let fixtures = await scrapeStreamEastFixtures();
+
+    // Filter according to requested tab
+    if (live) {
+      fixtures = fixtures.filter(f => f.status === "LIVE" || f.status === "HT");
+    } else if (upcoming) {
+      fixtures = fixtures.filter(f => f.status === "NS" || f.status === "TBD");
     }
-    }
-    const payload = await sportsApiRequest("/fixtures", params);
-    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-    // Sort: live first, then in-progress, then scheduled
-    fixtures.sort((a, b) => {
-      const statusA = a?.fixture?.status?.short || "";
-      const statusB = b?.fixture?.status?.short || "";
-      const liveOrder = (s) => s === "LIVE" ? 0 : s === "HT" || s === "1H" || s === "2H" ? 1 : s === "NS" ? 2 : 3;
-      return liveOrder(statusA) - liveOrder(statusB);
-    });
+
+    // Sort: live first, then NS, then FT
+    const liveOrder = s => s === "LIVE" ? 0 : s === "HT" ? 1 : s === "NS" ? 2 : 3;
+    fixtures.sort((a, b) => liveOrder(a.status) - liveOrder(b.status));
+
     return sendApiData(response, 200, fixtures.slice(0, 50));
   } catch (error) {
     console.error("[Football] Fixtures error:", error.message || error);
@@ -4006,22 +4174,19 @@ async function handleFootballFixtures(request, response, requestUrl) {
 }
 
 async function handleFootballLeagues(request, response) {
-  try {
-    const payload = await sportsApiRequest("/leagues", { current: "true" });
-    const leagues = Array.isArray(payload?.response) ? payload.response : [];
-    // Return only the league metadata the client needs
-    const mapped = leagues.slice(0, 50).map((item) => ({
-      id: item?.league?.id,
-      name: item?.league?.name || "Unknown",
-      logo: item?.league?.logo || "",
-      season: item?.seasons?.[0]?.year || 0,
-      country: item?.country?.name || ""
-    }));
-    return sendApiData(response, 200, mapped);
-  } catch (error) {
-    console.error("[Football] Leagues error:", error.message || error);
-    return sendApiData(response, 200, []);
-  }
+  // Static league list — no key required
+  return sendApiData(response, 200, [
+    { id: 1, name: "English Premier League", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png", season: new Date().getFullYear(), country: "England" },
+    { id: 2, name: "Spanish LALIGA", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/15.png", season: new Date().getFullYear(), country: "Spain" },
+    { id: 3, name: "Italian Serie A", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/12.png", season: new Date().getFullYear(), country: "Italy" },
+    { id: 4, name: "German Bundesliga", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/10.png", season: new Date().getFullYear(), country: "Germany" },
+    { id: 5, name: "French Ligue 1", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png", season: new Date().getFullYear(), country: "France" },
+    { id: 6, name: "UEFA Champions League", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png", season: new Date().getFullYear(), country: "Europe" },
+    { id: 7, name: "UEFA Europa League", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/18.png", season: new Date().getFullYear(), country: "Europe" },
+    { id: 8, name: "MLS", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/19.png", season: new Date().getFullYear(), country: "USA" },
+    { id: 9, name: "Saudi Pro League", logo: "", season: new Date().getFullYear(), country: "Saudi Arabia" },
+    { id: 10, name: "African Cup of Nations", logo: "", season: new Date().getFullYear(), country: "Africa" }
+  ]);
 }
 
 function footballTeamSlug(name) {
@@ -4062,75 +4227,75 @@ function footballLeagueSlug(leagueName) {
 
 async function handleFootballStream(request, response, requestUrl) {
   try {
-    const fixtureId = parseInt(requestUrl.searchParams.get("fixture"), 10);
-    if (!fixtureId || isNaN(fixtureId)) {
-      return sendApiError(response, 400, "fixture parameter is required.");
+    // Accept team names directly (from cached fixture) or look up by fixtureId in cache
+    let homeTeam = String(requestUrl.searchParams.get("home") || "").trim();
+    let awayTeam = String(requestUrl.searchParams.get("away") || "").trim();
+    let leagueName = String(requestUrl.searchParams.get("league") || "").trim();
+
+    // Optional hint: a StreamEast match-page URL previously scraped during fixture listing
+    const hintParam = String(requestUrl.searchParams.get("hint") || "").trim();
+    let streamHint = (hintParam.startsWith("http") && hintParam.includes("streamseast")) ? hintParam : "";
+
+    // If team names not passed, look them up in our cached fixtures by id
+    if (!homeTeam || !awayTeam) {
+      const fixtureId = parseInt(requestUrl.searchParams.get("fixture"), 10);
+      const cached = await scrapeStreamEastFixtures();
+      const match = cached.find(f => f.fixtureId === fixtureId);
+      if (match) {
+        homeTeam = match.homeTeam;
+        awayTeam = match.awayTeam;
+        leagueName = match.leagueName;
+        if (!streamHint) streamHint = match.streamHint || "";
+      }
     }
-    // Fetch the fixture to get team + league info
-    const fixturePayload = await sportsApiRequest("/fixtures", { id: fixtureId });
-    const fixture = Array.isArray(fixturePayload?.response) ? fixturePayload?.response?.[0] : null;
-    if (!fixture) {
+    if (!homeTeam || !awayTeam) {
       return sendApiData(response, 200, "");
     }
 
-    const homeTeam = fixture?.teams?.home?.name || "";
-    const awayTeam = fixture?.teams?.away?.name || "";
-    const leagueName = fixture?.league?.name || "";
-
-    // Build team slugs for URL construction
+    const embedUrls = [];
     const homeSlug = footballTeamSlug(homeTeam);
     const awaySlug = footballTeamSlug(awayTeam);
+    const lSlug = footballLeagueSlug(leagueName);
+    const encodedSearch = encodeURIComponent(`${homeTeam} vs ${awayTeam}`);
+    const matchId = requestUrl.searchParams.get("fixture") || "";
 
-    // ── Build embed URLs that the Android WebView interceptor can process ──
-    // The AnimePlayerScreen on Android has a headless WebView with
-    // shouldInterceptRequest that loads HTML pages, intercepts network
-    // traffic for .m3u8 URLs, and feeds them to ExoPlayer. This is the
-    // same pipeline that already works for movies and anime.
-    //
-    // These sports streaming aggregators embed live .m3u8 streams on a
-    // page — our WebView interceptor loads the page and catches the
-    // actual video stream URL from network traffic.
+    // 1. Scraped StreamEast hint (most accurate — scraped during fixture listing)
+    if (streamHint) embedUrls.push(streamHint);
 
-    const embedUrls = [];
+    // 2. StreamEast exact ID-based or slug-based match pages
+    for (const domain of STREAMSEAST_DOMAINS.slice(0, 3)) {
+      if (matchId && homeSlug && awaySlug) {
+        embedUrls.push(`${domain}/soccer/${matchId}/${homeSlug}-vs-${awaySlug}`);
+      }
+      if (homeSlug && awaySlug) {
+        embedUrls.push(`${domain}/soccer/${homeSlug}-vs-${awaySlug}`);
+        embedUrls.push(`${domain}/stream/football-${homeSlug}-vs-${awaySlug}`);
+        embedUrls.push(`${domain}/football/${homeSlug}-vs-${awaySlug}-live`);
+      }
+      embedUrls.push(`${domain}/soccer`);
+      embedUrls.push(`${domain}/football`);
+    }
 
-    // 1. Streamed.su — team name based slug
+    // 3. Streamed.su — team name based slug
     if (homeSlug && awaySlug) {
       embedUrls.push(`https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}-live`);
       embedUrls.push(`https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}`);
     }
+    if (lSlug) embedUrls.push(`https://streamed.su/embed/football/${lSlug}-live`);
 
-    // 2. Streamed.su — league-based slug
-    const lSlug = footballLeagueSlug(leagueName);
-    if (lSlug) {
-      embedUrls.push(`https://streamed.su/embed/football/${lSlug}-live`);
-    }
+    // 4. Sportsurge — search-based
+    embedUrls.push(`https://v2.sportsurge.net/search?q=${encodedSearch}`);
 
-    // 3. Crackstreams — match page
+    // 5. ScoreBat — highlights / live score embed
+    embedUrls.push(`https://www.scorebat.com/embed/livescore/?search=${encodedSearch}`);
+
+    // 6. Crackstreams + Sportshub fallback
     if (homeSlug && awaySlug) {
       embedUrls.push(`https://crackstreams.biz/stream/embed-football/${homeSlug}-vs-${awaySlug}-live`);
-      embedUrls.push(`https://crackstreams.biz/stream/${homeSlug}-vs-${awaySlug}`);
-    }
-
-    // 4. Sportshub — team-based URL
-    if (homeSlug && awaySlug) {
       embedUrls.push(`https://sportshub.stream/embed/football/${homeSlug}-vs-${awaySlug}`);
-      embedUrls.push(`https://sportshub.stream/football/${homeSlug}-vs-${awaySlug}-live`);
     }
 
-    // 5. V2 Sportsurge — search-based
-    const searchQuery = encodeURIComponent(`${homeTeam} vs ${awayTeam} live stream`);
-    embedUrls.push(`https://v2.sportsurge.net/search?q=${searchQuery}`);
-
-    // 6. Generic fallback with team names for any aggregator
-    const teamQuery = encodeURIComponent(`${homeTeam} ${awayTeam} live football streaming`);
-    embedUrls.push(`https://embed.su/embed/sports?q=${teamQuery}`);
-
-    // 7. TheTVApp channel-based (league name as search)
-    if (lSlug) {
-      embedUrls.push(`https://thetvapp.to/search/${lSlug}`);
-    }
-
-    return sendApiData(response, 200, embedUrls.join("|"));
+    return sendApiData(response, 200, [...new Set(embedUrls)].join("|"));
   } catch (error) {
     console.error("[Football] Stream error:", error.message || error);
     return sendApiData(response, 200, "");
@@ -4139,19 +4304,15 @@ async function handleFootballStream(request, response, requestUrl) {
 
 async function handleFootballSearch(request, response, requestUrl) {
   try {
-    const query = String(requestUrl.searchParams.get("q") || "").trim();
-    if (!query) {
-      return sendApiData(response, 200, []);
-    }
-    const payload = await sportsApiRequest("/fixtures", { search: query });
-    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-    fixtures.sort((a, b) => {
-      const statusA = a?.fixture?.status?.short || "";
-      const statusB = b?.fixture?.status?.short || "";
-      const liveOrder = (s) => s === "LIVE" ? 0 : s === "HT" || s === "1H" || s === "2H" ? 1 : s === "NS" ? 2 : 3;
-      return liveOrder(statusA) - liveOrder(statusB);
-    });
-    return sendApiData(response, 200, fixtures.slice(0, 30));
+    const query = String(requestUrl.searchParams.get("q") || "").trim().toLowerCase();
+    if (!query) return sendApiData(response, 200, []);
+    const all = await scrapeStreamEastFixtures();
+    const results = all.filter(f =>
+      f.homeTeam.toLowerCase().includes(query) ||
+      f.awayTeam.toLowerCase().includes(query) ||
+      f.leagueName.toLowerCase().includes(query)
+    ).slice(0, 30);
+    return sendApiData(response, 200, results);
   } catch (error) {
     console.error("[Football] Search error:", error.message || error);
     return sendApiData(response, 200, []);
@@ -4176,6 +4337,7 @@ async function handleFootballDirectStream(request, response) {
     const homeTeam = String(body.homeTeam || "").trim();
     const awayTeam = String(body.awayTeam || "").trim();
     const leagueName = String(body.leagueName || "").trim();
+    const fixtureId = body.fixtureId || "";
 
     if (!homeTeam || !awayTeam) {
       return sendApiError(response, 400, "homeTeam and awayTeam are required.");
@@ -4183,7 +4345,7 @@ async function handleFootballDirectStream(request, response) {
 
     // ── Try multiple streaming aggregators for a direct .m3u8 URL ──
 
-    const foundUrl = await findDirectStreamUrl(homeTeam, awayTeam, leagueName);
+    const foundUrl = await findDirectStreamUrl(homeTeam, awayTeam, leagueName, fixtureId);
 
     if (foundUrl) {
       return sendApiData(response, 200, {
@@ -4230,6 +4392,14 @@ async function findDirectStreamUrl(homeTeam, awayTeam, leagueName) {
 
   // Order of attempts: most likely to yield direct .m3u8 first
   const attempts = [
+    // 0. StreamEast Asia mirrors — primary live stream source
+    ...STREAMSEAST_DOMAINS.slice(0, 4).flatMap(d => [
+      ...(homeSlug && awaySlug ? [
+        { url: `${d}/stream/football-${homeSlug}-vs-${awaySlug}`, label: `streamseast: ${homeSlug}-vs-${awaySlug}` },
+        { url: `${d}/football/${homeSlug}-vs-${awaySlug}-live`, label: `streamseast: ${homeSlug}-vs-${awaySlug}-live` }
+      ] : []),
+      { url: `${d}/football`, label: `streamseast: football index` }
+    ]),
     // 1. streamed.su — often has .m3u8 in initial HTML
     { url: `https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}-live`, label: "streamed.su" },
     { url: `https://streamed.su/embed/football/${homeSlug}-vs-${awaySlug}`, label: "streamed.su (alt)" },
@@ -4237,7 +4407,7 @@ async function findDirectStreamUrl(homeTeam, awayTeam, leagueName) {
     { url: `https://sportshub.stream/embed/football/${homeSlug}-vs-${awaySlug}`, label: "sportshub.stream" },
     // 3. crackstreams
     { url: `https://crackstreams.biz/stream/embed-football/${homeSlug}-vs-${awaySlug}-live`, label: "crackstreams" },
-    // 4. the-football.tv (scorebat-style direct)
+    // 4. scorebat-style direct
     { url: `https://www.scorebat.com/embed/livescore/?search=${encodedSearch}`, label: "scorebat search" },
     // 5. Generic football streaming aggregator
     { url: `https://v2.sportsurge.net/search?q=${encodedSearch}`, label: "sportsurge" },

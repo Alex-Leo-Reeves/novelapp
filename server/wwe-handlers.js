@@ -50,18 +50,26 @@ const wweStreamCache = { embedUrls: {}, directUrls: {}, fetchedAt: 0, ttl: 18000
  * These are lightweight iframe players, not full-page websites.
  */
 const KNOWN_EMBED_HOSTS = [
+    "fastvid",
+    "afiyukent",
+    "dailymotion",
     "doodstream",
     "dood",
     "vidmoly",
     "streamtape",
     "voe.sx",
     "voe",
-    "dailymotion",
     "ok.ru",
+    "streamwish",
+    "filelions",
+    "dropload",
+    "netu",
     "youtube.com/embed",
     "streamhub",
     "embed",
-    "player"
+    "player",
+    "play.php",
+    "watchwrestling"
 ];
 
 /**
@@ -76,15 +84,18 @@ function slugify(text) {
     return String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-async function fetchWweHtml(url) {
+async function fetchWweHtml(url, referer = "") {
     try {
+        const headers = {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "en-US,en;q=0.9"
+        };
+        if (referer) headers["referer"] = referer;
+
         const resp = await fetch(url, {
-            headers: {
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "accept-language": "en-US,en;q=0.9"
-            },
-            signal: AbortSignal.timeout(12000)
+            headers,
+            signal: AbortSignal.timeout(10000)
         });
         return resp.ok ? await resp.text() : "";
     } catch (e) {
@@ -94,46 +105,97 @@ async function fetchWweHtml(url) {
 }
 
 /**
- * Extract embed iframe URLs from a watchwrestling post page HTML.
- * These are lightweight video player embeds that MaServerPlayerScreen can handle.
+ * Extract raw candidate embed/player links from HTML, searching:
+ * 1. Standard <iframe> src attributes
+ * 2. Hidden <textarea> blocks used by watchwrestling
+ * 3. Script append blocks with encoded HTML
+ * 4. <a> tags with embed host URLs
  */
-function extractEmbedUrls(html, pageUrl) {
-    const urls = [];
-    if (!html || html.length < 200) return urls;
+function extractCandidateLinks(html, pageUrl) {
+    const rawLinks = [];
+    if (!html || html.length < 100) return rawLinks;
 
-    // 1. iframe src attributes
-    const iframeRegex = /<iframe[^>]*src=["']([^"']+)["'][^>]*>/gi;
+    // 1. Textarea content
+    const textareaRegex = /<textarea[^>]*>([\s\S]*?)<\/textarea>/gi;
     let match;
-    while ((match = iframeRegex.exec(html)) !== null) {
-        const src = match[1].trim();
-        if (src && (isEmbedHost(src) || src.includes("embed") || src.includes("player"))) {
-            urls.push(src.startsWith("//") ? "https:" + src : src);
+    while ((match = textareaRegex.exec(html)) !== null) {
+        const inner = match[1];
+        const linkRe = /href=["']([^"']+)["']/gi;
+        let m2;
+        while ((m2 = linkRe.exec(inner)) !== null) {
+            rawLinks.push(m2[1].trim());
         }
     }
 
-    // 2. Direct links to known video hosts
+    // 2. JavaScript script append blocks
+    const jsScriptRe = /append\(["']([\s\S]*?)["']\)/gi;
+    while ((match = jsScriptRe.exec(html)) !== null) {
+        const inner = match[1].replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\//g, "/");
+        const linkRe = /href=["']([^"']+)["']/gi;
+        let m2;
+        while ((m2 = linkRe.exec(inner)) !== null) {
+            rawLinks.push(m2[1].trim());
+        }
+    }
+
+    // 3. <iframe> src tags
+    const iframeRegex = /<iframe[^>]*src=["']([^"']+)["'][^>]*>/gi;
+    while ((match = iframeRegex.exec(html)) !== null) {
+        const src = match[1].trim();
+        if (src && !src.startsWith("javascript") && !src.startsWith("about:")) {
+            rawLinks.push(src.startsWith("//") ? "https:" + src : src);
+        }
+    }
+
+    // 4. <a> links to known hosts
     const linkRegex = /<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     while ((match = linkRegex.exec(html)) !== null) {
         const href = match[1].trim();
-        const text = (match[2] || "").toLowerCase();
         if (!href || href.startsWith("#") || href.startsWith("javascript")) continue;
-        if (isEmbedHost(href) || text.includes("stream") || text.includes("watch") || text.includes("server") || text.includes("video")) {
+        if (isEmbedHost(href)) {
             const absUrl = href.startsWith("http") ? href : new URL(href, pageUrl).href;
-            urls.push(absUrl);
+            rawLinks.push(absUrl);
         }
     }
 
-    // 3. data attributes with embed URLs
-    const dataRegex = /data-(?:src|video|embed|url)=["']([^"']+)["']/gi;
-    while ((match = dataRegex.exec(html)) !== null) {
-        const src = match[1].trim();
-        if (src && (isEmbedHost(src) || src.includes(".m3u8") || src.includes(".mp4"))) {
-            urls.push(src.startsWith("//") ? "https:" + src : src);
-        }
-    }
+    return [...new Set(rawLinks)].filter(l => l.startsWith("http"));
+}
 
-    // Deduplicate
-    return [...new Set(urls)].slice(0, 15);
+/**
+ * Resolves candidate embed links and unwraps any play.php / afiyukent wrappers
+ * into final direct player iframes (e.g. FastVid, Dailymotion, VidMoly).
+ */
+async function extractEmbedUrls(html, pageUrl) {
+    const candidates = extractCandidateLinks(html, pageUrl);
+    const resolvedEmbeds = [];
+
+    // Parallel unwrap of wrapper links (e.g. afiyukent.one/play.php, fastvid.xyz)
+    const unwrapTasks = candidates.slice(0, 12).map(async (candidate) => {
+        if (candidate.includes("play.php") || candidate.includes("afiyukent")) {
+            try {
+                const wrapperHtml = await fetchWweHtml(candidate, pageUrl);
+                if (wrapperHtml) {
+                    const iframes = wrapperHtml.match(/<iframe[^>]*src=["']([^"']+)["']/gi) || [];
+                    for (const ifr of iframes) {
+                        const srcMatch = ifr.match(/src=["']([^"']+)["']/i);
+                        if (srcMatch) {
+                            let s = srcMatch[1].trim().replace(/&amp;/g, "&");
+                            if (s.startsWith("//")) s = "https:" + s;
+                            resolvedEmbeds.push(s);
+                        }
+                    }
+                }
+            } catch (_) {}
+        } else if (candidate.includes("fastvid.xyz") || isEmbedHost(candidate)) {
+            resolvedEmbeds.push(candidate.replace(/&amp;/g, "&"));
+        }
+    });
+
+    await Promise.allSettled(unwrapTasks);
+
+    // If wrappers resolved inner players, prioritize them; else return candidates
+    const all = [...resolvedEmbeds, ...candidates.filter(c => isEmbedHost(c))];
+    return [...new Set(all)].slice(0, 15);
 }
 
 /**
@@ -400,11 +462,12 @@ function extractWrestlerNames(html) {
 async function handleWweStream(request, response) {
     try {
         const requestUrl = new URL(request.url, "http://localhost");
-        const eventId = requestUrl.searchParams.get("event") || "";
+        const eventId = requestUrl.searchParams.get("event") || requestUrl.searchParams.get("eventId") || "";
         const eventTitle = requestUrl.searchParams.get("title") || "";
-        if (!eventId && !eventTitle) return sendApiData(response, 200, []);
+        const detailUrl = requestUrl.searchParams.get("detailUrl") || requestUrl.searchParams.get("detailPageUrl") || "";
+        if (!eventId && !eventTitle && !detailUrl) return sendApiData(response, 200, []);
 
-        const key = eventId || slugify(eventTitle);
+        const key = detailUrl || eventId || slugify(eventTitle);
         const now = Date.now();
 
         // Check cache
@@ -412,22 +475,29 @@ async function handleWweStream(request, response) {
             return sendApiData(response, 200, wweStreamCache.embedUrls[key]);
         }
 
-        // Reconstruct the watchwrestling page URL from eventId
-        // eventId format: "watchwrestling.ae_2024_09_23_wwe_raw_episode_1234"
-        let pageUrl = "";
-        if (eventId) {
-            // Try to reconstruct URL from eventId
-            const urlPath = eventId.replace(/^https?:\/\//, "").replace(/_/g, "/");
-            pageUrl = urlPath.startsWith("http") ? "" : "https://" + urlPath.replace(/\/+$/, "");
-            // If eventId is just a slug, construct a search URL
-            if (!pageUrl.startsWith("http")) {
+        let pageUrl = detailUrl;
+        if (!pageUrl && eventId) {
+            if (eventId.startsWith("http://") || eventId.startsWith("https://")) {
+                pageUrl = eventId;
+            } else if (eventId.startsWith("watchwrestling.ae_")) {
+                const slug = eventId.replace(/^watchwrestling\.ae_/, "").replace(/_+$/, "");
+                pageUrl = `https://watchwrestling.ae/${slug}/`;
+            } else {
                 pageUrl = `https://watchwrestling.ae/?s=${encodeURIComponent(eventTitle || eventId)}`;
             }
-        } else {
+        } else if (!pageUrl && eventTitle) {
             pageUrl = `https://watchwrestling.ae/?s=${encodeURIComponent(eventTitle)}`;
         }
 
-        const html = await fetchWweHtml(pageUrl);
+        let html = await fetchWweHtml(pageUrl);
+        if (!html || html.length < 200) {
+            // If primary URL failed and we have title, try search
+            if (eventTitle) {
+                const searchUrl = `https://watchwrestling.ae/?s=${encodeURIComponent(eventTitle)}`;
+                html = await fetchWweHtml(searchUrl);
+            }
+        }
+
         if (!html || html.length < 200) {
             return sendApiData(response, 200, []);
         }
@@ -435,8 +505,8 @@ async function handleWweStream(request, response) {
         // Try to find the actual post page if this was a search result
         let postHtml = html;
         let postUrl = pageUrl;
-        const postLinkMatch = html.match(/<a[^>]*href=["']([^"']+)["'][^>]*>[\s\S]*?(?:watch|stream|play|replay|full show)/i);
-        if (postLinkMatch && postLinkMatch[1].startsWith("http")) {
+        const postLinkMatch = html.match(/<a[^>]*href=["'](https?:\/\/watchwrestling\.ae\/[^"']+)["'][^>]*>/i);
+        if (pageUrl.includes("?s=") && postLinkMatch && postLinkMatch[1]) {
             const foundUrl = postLinkMatch[1];
             const foundHtml = await fetchWweHtml(foundUrl);
             if (foundHtml && foundHtml.length > 300) {
@@ -445,9 +515,7 @@ async function handleWweStream(request, response) {
             }
         }
 
-        const embedUrls = extractEmbedUrls(postHtml, postUrl);
-
-        // Also search for direct stream URLs as a bonus
+        const embedUrls = await extractEmbedUrls(postHtml, postUrl);
         const directUrls = extractDirectStreamUrls(postHtml);
 
         wweStreamCache.embedUrls[key] = embedUrls;
@@ -466,7 +534,7 @@ async function handleWweStream(request, response) {
  * and sports streaming aggregators.
  *
  * POST /api/wwe/direct-stream
- * Body: { eventId, eventTitle }
+ * Body: { eventId, eventTitle, detailUrl }
  * Returns: { urls: ["https://...m3u8", ...], embedUrls: ["https://...", ...] }
  */
 async function handleWweDirectStream(request, response) {
@@ -490,11 +558,12 @@ async function handleWweDirectStream(request, response) {
 
         const eventId = String(body.eventId || "").trim();
         const eventTitle = String(body.eventTitle || "").trim();
-        if (!eventId && !eventTitle) {
-            return sendApiError(response, 400, "eventId or eventTitle required.");
+        const detailUrl = String(body.detailUrl || body.detailPageUrl || "").trim();
+        if (!eventId && !eventTitle && !detailUrl) {
+            return sendApiError(response, 400, "eventId, eventTitle, or detailUrl required.");
         }
 
-        const key = eventId || slugify(eventTitle);
+        const key = detailUrl || eventId || slugify(eventTitle);
         const now = Date.now();
 
         // Check cache
@@ -506,28 +575,29 @@ async function handleWweDirectStream(request, response) {
             });
         }
 
-        // Strategy 1: Scrape watchwrestling post page
-        let pageUrl = "";
-        if (eventId) {
-            const urlPath = eventId.replace(/^https?:\/\//, "").replace(/_/g, "/");
-            pageUrl = urlPath.startsWith("http") ? urlPath : "https://" + urlPath.replace(/\/+$/, "");
-            if (!pageUrl.startsWith("http")) {
+        let pageUrl = detailUrl;
+        if (!pageUrl && eventId) {
+            if (eventId.startsWith("http://") || eventId.startsWith("https://")) {
+                pageUrl = eventId;
+            } else if (eventId.startsWith("watchwrestling.ae_")) {
+                const slug = eventId.replace(/^watchwrestling\.ae_/, "").replace(/_+$/, "");
+                pageUrl = `https://watchwrestling.ae/${slug}/`;
+            } else {
                 pageUrl = `https://watchwrestling.ae/?s=${encodeURIComponent(eventTitle || eventId)}`;
             }
-        } else {
+        } else if (!pageUrl && eventTitle) {
             pageUrl = `https://watchwrestling.ae/?s=${encodeURIComponent(eventTitle)}`;
         }
 
         const allDirectUrls = [];
         const allEmbedUrls = [];
-        const html = await fetchWweHtml(pageUrl);
+        let html = await fetchWweHtml(pageUrl);
 
         if (html && html.length > 200) {
-            // Find the post page if this is a search result
             let postHtml = html;
             let postUrl = pageUrl;
-            const postLinkMatch = html.match(/<a[^>]*href=["']([^"']+)["'][^>]*>[\s\S]*?(?:watch|stream|play|replay)/i);
-            if (postLinkMatch && postLinkMatch[1].startsWith("http")) {
+            const postLinkMatch = html.match(/<a[^>]*href=["'](https?:\/\/watchwrestling\.ae\/[^"']+)["'][^>]*>/i);
+            if (pageUrl.includes("?s=") && postLinkMatch && postLinkMatch[1]) {
                 const found = await fetchWweHtml(postLinkMatch[1]);
                 if (found && found.length > 300) {
                     postHtml = found;
@@ -535,20 +605,18 @@ async function handleWweDirectStream(request, response) {
                 }
             }
 
-            // Extract direct stream URLs
             allDirectUrls.push(...extractDirectStreamUrls(postHtml));
-            allEmbedUrls.push(...extractEmbedUrls(postHtml, postUrl));
+            allEmbedUrls.push(...await extractEmbedUrls(postHtml, postUrl));
         }
 
         // Strategy 2: Try sports streaming aggregators for live wrestling
         const searchQuery = encodeURIComponent((eventTitle || eventId).replace(/[_-]/g, " "));
         if (searchQuery) {
-            // Try streamed.su which sometimes has wrestling
             const streamedUrl = `https://streamed.su/search?q=${searchQuery}`;
             const streamedHtml = await fetchWweHtml(streamedUrl).catch(() => "");
             if (streamedHtml && streamedHtml.length > 200) {
                 allDirectUrls.push(...extractDirectStreamUrls(streamedHtml));
-                allEmbedUrls.push(...extractEmbedUrls(streamedHtml, streamedUrl));
+                allEmbedUrls.push(...await extractEmbedUrls(streamedHtml, streamedUrl));
             }
         }
 
@@ -563,17 +631,11 @@ async function handleWweDirectStream(request, response) {
         return sendApiData(response, 200, {
             urls: directUrls,
             embedUrls: embedUrls,
-            message: directUrls.length > 0 ?
-                `Found ${directUrls.length} direct stream(s) and ${embedUrls.length} embed(s).` : embedUrls.length > 0 ?
-                `No direct streams found. ${embedUrls.length} embed(s) available.` : "No streams found for this event. Try again closer to showtime."
+            message: "Resolved stream URLs."
         });
     } catch (e) {
         console.error("[WWE] Direct stream:", e.message || e);
-        return sendApiData(response, 200, {
-            urls: [],
-            embedUrls: [],
-            message: "Server-side stream resolution failed."
-        });
+        return sendApiData(response, 200, { urls: [], embedUrls: [] });
     }
 }
 

@@ -492,10 +492,32 @@ private const val STABILIZATION_END_JS = """
             } catch(e) {}
         });
 
+        function boostMediaAudio(v) {
+            if (!v || v.__gainBoosted) return;
+            try {
+                var AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
+                var ctx = window.__novelAppAudioCtx;
+                var src = ctx.createMediaElementSource(v);
+                var gain = ctx.createGain();
+                gain.gain.value = 1.5;
+                src.connect(gain);
+                gain.connect(ctx.destination);
+                v.__gainBoosted = true;
+                if (ctx.state === 'suspended') {
+                    var resume = function() { ctx.resume(); };
+                    v.addEventListener('play', resume, { once: true });
+                }
+            } catch(e) {
+                try { v.volume = 1.0; } catch(_) {}
+            }
+        }
+
         document.querySelectorAll('video').forEach(function(v) {
             try {
                 v.muted = false;
-                v.volume = 1.0;
+                boostMediaAudio(v);
                 if (v.paused) {
                     var p = v.play();
                     if (p) p.catch(function() {});
@@ -634,12 +656,34 @@ private const val FULLSCREEN_CSS_JS = """
 
 private const val CLEAN_AUDIO_UNMUTE_JS = """
 (function() {
+    function boostMediaAudio(v) {
+        if (!v || v.__gainBoosted) return;
+        try {
+            var AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
+            var ctx = window.__novelAppAudioCtx;
+            var src = ctx.createMediaElementSource(v);
+            var gain = ctx.createGain();
+            gain.gain.value = 1.5;
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            v.__gainBoosted = true;
+            if (ctx.state === 'suspended') {
+                var resume = function() { ctx.resume(); };
+                v.addEventListener('play', resume, { once: true });
+            }
+        } catch(e) {
+            try { v.volume = 1.0; } catch(_) {}
+        }
+    }
+
     function unmuteIn(doc) {
         try {
             doc.querySelectorAll('video, audio').forEach(function(v) {
                 try {
                     v.muted = false;
-                    v.volume = 1.0;
+                    boostMediaAudio(v);
                 } catch(e) {}
             });
         } catch(e) {}

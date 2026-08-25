@@ -1000,6 +1000,7 @@ fun TvApp(
                             TextButton(onClick = { isStartupUpdateDismissed = true }) { Text("Later") }
                         }
                     }
+                )
             }
         }
 

@@ -40,19 +40,40 @@ class FootballStreamResolver(private val httpClient: HttpClient) {
         awayTeam: String,
         leagueName: String = ""
     ): List<String> {
+        val homeSlug = homeTeam.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+        val awaySlug = awayTeam.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
         val query = buildString {
             append(homeTeam.replace(" ", "+"))
             append("+vs+")
             append(awayTeam.replace(" ", "+"))
         }.ifBlank { "live+football" }
 
-        return listOf(
-            "https://v2.sportsurge.net/search?query=$query",
-            "https://www.scorebat.com/embed/livescore/?search=$query",
-            "https://footybite.to/?s=$query",
-            "https://redditsoccerstreams.tv/?s=$query",
-            "https://free-football.tv/?s=$query"
+        val streamEastDomains = listOf(
+            "https://streamseast.ws",
+            "https://www.streamseast.ws",
+            "https://streamseast.asia",
+            "https://streamseast.me"
         )
+
+        return buildList {
+            // 1. StreamEast match pages (primary live source)
+            for (domain in streamEastDomains.take(2)) {
+                if (homeSlug.isNotBlank() && awaySlug.isNotBlank()) {
+                    add("$domain/soccer/$homeSlug-vs-$awaySlug")
+                    add("$domain/stream/football-$homeSlug-vs-$awaySlug")
+                    add("$domain/football/$homeSlug-vs-$awaySlug-live")
+                }
+                add("$domain/soccer")
+                add("$domain/football")
+            }
+            // 2. Sportsurge search
+            add("https://v2.sportsurge.net/search?query=$query")
+            // 3. ScoreBat livescore embed
+            add("https://www.scorebat.com/embed/livescore/?search=$query")
+            // 4. Generic fallbacks
+            add("https://footybite.to/?s=$query")
+            add("https://free-football.tv/?s=$query")
+        }
     }
 
     suspend fun resolveStreamUrl(

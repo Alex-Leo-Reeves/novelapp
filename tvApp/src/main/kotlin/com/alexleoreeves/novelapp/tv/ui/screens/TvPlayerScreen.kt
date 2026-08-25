@@ -120,7 +120,7 @@ fun TvPlayerScreen(
                 )
                 val vlc = LibVLC(context, args)
                 val mp = MediaPlayer(vlc)
-                mp.volume = 100
+                mp.volume = 175  // 175% = +~5dB clean linear boost (no compressor/muffling)
 
                 val media = Media(vlc, Uri.parse(resolvedUrl))
                 if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
@@ -293,7 +293,7 @@ fun TvPlayerScreen(
 
     fun playerUnmute() {
         vlcMediaPlayer?.let { player ->
-            if (player.volume <= 0) player.volume = 100
+            if (player.volume <= 0) player.volume = 175  // restore to boosted level
         }
     }
 

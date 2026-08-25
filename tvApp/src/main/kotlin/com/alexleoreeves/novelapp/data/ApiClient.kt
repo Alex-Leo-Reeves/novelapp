@@ -620,19 +620,33 @@ suspend fun fetchFootballStream(fixtureId: Int, home: String, away: String, leag
 }
 
 /**
- * Resolve a football match for fullscreen playback, mirroring the Android
- * app's FootballSource ladder:
- * 1. POST /api/football/direct-stream — server scrapes aggregators for a raw
- *    .m3u8 / direct .mp4 (playable in ExoPlayer).
- * 2. Fallback — ScoreBat matchview embed (works in the WebView player and
- *    the WebView intercepts the HLS stream for ExoPlayer).
+ * Resolve football match embed URLs for TV fullscreen playback.
+ *
+ * Resolution ladder:
+ * 1. POST /football/direct-stream — server scrapes aggregators for a raw .m3u8
+ * 2. GET  /football/stream?home=&away=&league= — server returns a pipe-separated
+ *    list of prioritised embed URLs (StreamEast Asia first, then fallbacks)
+ * 3. Hard-coded StreamEast + ScoreBat fallback if server is unreachable
+ *
+ * Returns the first URL for single-server callers, or the full list via
+ * [resolveFootballTvStreamList] for multi-server pickers.
  */
 suspend fun resolveFootballTvStream(
     home: String,
     away: String,
     league: String = ""
-): String? {
-    // Step 1: backend direct-stream scraper (Server 2)
+): String? = resolveFootballTvStreamList(home, away, league).firstOrNull()
+
+/**
+ * Returns ALL embed URL candidates for a football match, in priority order.
+ * The caller can walk the list until one plays successfully.
+ */
+suspend fun resolveFootballTvStreamList(
+    home: String,
+    away: String,
+    league: String = ""
+): List<String> {
+    // Step 1: backend direct-stream scraper (raw .m3u8)
     val direct = run {
         val client = platformHttpClient()
         try {
@@ -655,21 +669,60 @@ suspend fun resolveFootballTvStream(
         } catch (_: Exception) { null }
         finally { client.close() }
     }
-    if (!direct.isNullOrBlank()) return direct
 
-    // Step 2: ScoreBat matchview embed fallback (Servers 1 + 3)
+    // Step 2: Ask the server for the full prioritised embed-URL list
+    val serverEmbeds: List<String> = run {
+        val client = platformHttpClient()
+        try {
+            val resp = client.get("${ApiConfig.API_BASE_URL}/football/stream") {
+                parameter("home", home)
+                parameter("away", away)
+                parameter("league", league)
+            }
+            val body = resp.bodyAsText()
+            val json = apiJson.parseToJsonElement(body).jsonObject
+            val ok = json["ok"]?.jsonPrimitive?.booleanOrNull ?: false
+            if (!ok) return@run emptyList()
+            val raw = json["data"]?.jsonPrimitive?.contentOrNull ?: ""
+            raw.split("|").map { it.trim() }.filter { it.isNotBlank() }
+        } catch (_: Exception) { emptyList() }
+        finally { client.close() }
+    }
+
+    // Step 3: Hard-coded client-side fallback (server unreachable)
+    val homeSlug = home.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+    val awaySlug = away.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
     val searchQuery = buildString {
         if (home.isNotBlank()) append(home.replace(" ", "+"))
-        if (away.isNotBlank()) {
-            if (isNotEmpty()) append("+vs+")
-            append(away.replace(" ", "+"))
+        if (away.isNotBlank()) { if (isNotEmpty()) append("+vs+"); append(away.replace(" ", "+")) }
+    }
+    val streamEastDomains = listOf(
+        "https://streamseast.ws",
+        "https://www.streamseast.ws",
+        "https://streamseast.asia",
+        "https://streamseast.me"
+    )
+    val clientFallbacks = buildList {
+        for (domain in streamEastDomains.take(2)) {
+            if (homeSlug.isNotBlank() && awaySlug.isNotBlank()) {
+                add("$domain/soccer/$homeSlug-vs-$awaySlug")
+                add("$domain/stream/football-$homeSlug-vs-$awaySlug")
+                add("$domain/football/$homeSlug-vs-$awaySlug-live")
+            }
+            add("$domain/soccer")
+            add("$domain/football")
+        }
+        if (searchQuery.isNotBlank()) {
+            add("https://www.scorebat.com/embed/livescore/?search=$searchQuery")
+            add("https://v2.sportsurge.net/search?q=${searchQuery.replace("+", "%20")}")
         }
     }
-    return if (searchQuery.isNotBlank()) {
-        "https://www.scorebat.com/embed/livescore/?search=$searchQuery"
-    } else {
-        "https://www.scorebat.com/embed/"
-    }
+
+    return buildList {
+        if (!direct.isNullOrBlank()) add(direct)
+        addAll(serverEmbeds)
+        addAll(clientFallbacks)
+    }.distinct()
 }
 
 // ── WWE ──────────────────────────────────────────────────────────────────────
@@ -684,18 +737,20 @@ suspend fun fetchWweEvents(): List<JsonObject> {
     finally { client.close() }
 }
 
-suspend fun fetchWweStream(id: String, title: String, eventType: String): String? {
+suspend fun fetchWweStream(id: String, title: String = "", detailUrl: String = ""): String? {
     val client = platformHttpClient()
     return try {
         val resp = client.get("${ApiConfig.API_BASE_URL}/wwe/stream") {
-            parameter("id", id)
+            parameter("eventId", id)
             parameter("title", title)
-            parameter("eventType", eventType)
+            if (detailUrl.isNotBlank()) parameter("detailUrl", detailUrl)
         }
         val body = resp.bodyAsText()
         val json = apiJson.parseToJsonElement(body).jsonObject
-        json["data"]?.jsonPrimitive?.contentOrNull
-    } catch (_: Exception) { null }
+        val dataArray = json["data"]?.jsonArray
+        val single = json["data"]?.jsonPrimitive?.contentOrNull
+        dataArray?.firstOrNull()?.jsonPrimitive?.contentOrNull ?: single ?: detailUrl.takeIf { it.isNotBlank() }
+    } catch (_: Exception) { detailUrl.takeIf { it.isNotBlank() } }
     finally { client.close() }
 }
 
