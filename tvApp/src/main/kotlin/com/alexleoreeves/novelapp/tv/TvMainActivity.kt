@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.alexleoreeves.novelapp.nodebridge.NodeBridgeRuntime
+import com.alexleoreeves.novelapp.nodebridge.WebViewBridgeRuntime
 import com.alexleoreeves.novelapp.tv.audio.TvTtsEngine
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
@@ -82,11 +82,11 @@ class TvMainActivity : ComponentActivity() {
         }
 
         try {
-            // Boot the embedded nodejs-mobile runtime for the 13 Anivexa anime providers
-            // with process-level uncaught exception protection in main.js.
-            NodeBridgeRuntime.start(applicationContext)
+            // Boot the Headless WebView runtime for residential-IP scraping
+            // (13 Anivexa anime providers)
+            WebViewBridgeRuntime.start(applicationContext)
         } catch (t: Throwable) {
-            Log.e("TvMainActivity", "NodeBridgeRuntime.start failed", t)
+            Log.e("TvMainActivity", "WebViewBridgeRuntime.start failed", t)
         }
 
         try {

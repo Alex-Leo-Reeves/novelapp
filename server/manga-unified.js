@@ -203,35 +203,33 @@ function createMangaUnified({ contentItem, fetchWithAbort }) {
     }
 
     async function weebCentralPages(chapterUrl) {
+        const cleanUrl = String(chapterUrl || "").replace(/\/+$/, "").replace(/\/images.*$/, "");
+        const imagesUrl = `${cleanUrl}/images?reading_style=long_strip`;
         let html = "";
         try {
-            html = await fetchText(String(chapterUrl || ""), {
+            html = await fetchText(imagesUrl, {
+                headers: { "user-agent": UA, "referer": cleanUrl, "hx-request": "true" }
+            }, 20000);
+        } catch (e) {
+            // fall through to main page
+        }
+
+        if (html && html.length > 200) {
+            const urls = [...html.matchAll(/<img[^>]+src=["'](https:\/\/[^"']+)["']/gi)].map(m => m[1]);
+            const filtered = urls
+                .map((url) => resolveUrl(url, WEBCENTRAL_BASE))
+                .filter((url) => !/broken_image|logo|avatar|icon|brand|static\/images|cover\/fallback/i.test(url));
+            if (filtered.length) return filtered;
+        }
+
+        try {
+            html = await fetchText(cleanUrl, {
                 headers: { "user-agent": UA, "referer": WEBCENTRAL_BASE }
             }, 20000);
         } catch (e) {
             return [];
         }
         if (!html || html.length < 200) return [];
-
-        const imagePath = /hx-get=["']([^"']+\/images[^"']*)["']/i.exec(html);
-        if (imagePath) {
-            try {
-                const separator = imagePath[1].includes("?") ? "&" : "?";
-                const partial = await fetchText(resolveUrl(`${imagePath[1]}${separator}reading_style=long_strip`, WEBCENTRAL_BASE), {
-                    headers: { "user-agent": UA, "referer": chapterUrl, "hx-request": "true" }
-                }, 20000);
-                const pages = uniqueUrls(
-                    /<img[^>]*src="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi,
-                    partial
-                );
-                const filtered = pages
-                    .map((url) => resolveUrl(url, WEBCENTRAL_BASE))
-                    .filter((url) => !/broken_image|logo|avatar|icon|brand|static\/images/i.test(url));
-                if (filtered.length) return filtered;
-            } catch (e) {
-                // fall through
-            }
-        }
 
         const direct = [
             ...uniqueUrls(/<link[^>]*rel=["']preload["'][^>]*href=["']([^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']/gi, html),

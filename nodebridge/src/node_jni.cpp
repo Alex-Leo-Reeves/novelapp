@@ -46,33 +46,9 @@ struct NodeThreadArgs {
     char* entryPath;     // absolute path to the bridge main.js
 };
 
-// Thread-local signal jump buffer: lets us recover from SIGSEGV/SIGABRT
-// on the Node thread without killing the Android process.
-static thread_local sigjmp_buf s_node_jmp;
-static thread_local volatile bool s_node_jmp_set = false;
-
-static void nodeSignalHandler(int sig) {
-    LOGE("Node thread caught signal %d — recovering to prevent process kill", sig);
-    if (s_node_jmp_set) {
-        s_node_jmp_set = false;
-        siglongjmp(s_node_jmp, 1);
-    }
-    // If not recoverable, log and exit just this thread, not the whole process.
-    pthread_exit(NULL);
-}
-
 static void* nodeThreadMain(void* opaque) {
     NodeThreadArgs* args = static_cast<NodeThreadArgs*>(opaque);
     if (!args) return NULL;
-
-    // Install per-thread signal handlers to contain Node crashes.
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = nodeSignalHandler;
-    sa.sa_flags = SA_RESETHAND;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGABRT, &sa, NULL);
-    sigaction(SIGBUS,  &sa, NULL);
 
     // 1. Load the embedded Node runtime.
     void* handle = dlopen(args->libNodePath, RTLD_NOW | RTLD_GLOBAL);
@@ -89,7 +65,6 @@ static void* nodeThreadMain(void* opaque) {
         dlsym(handle, "_ZN4node5StartEiPPc"));
     if (!start) {
         LOGE("dlsym node::Start failed: %s", dlerror());
-        dlclose(handle);
         free(args->libNodePath);
         free(args->entryPath);
         delete args;
@@ -97,23 +72,16 @@ static void* nodeThreadMain(void* opaque) {
     }
 
     // 3. Run Node on this detached thread: node /path/to/main.js
-    // Use setjmp so a fatal signal inside node::Start() is caught here
-    // rather than killing the entire Android process.
     LOGI("booting embedded Node with entry=%s", args->entryPath);
     char* argv[2];
     argv[0] = const_cast<char*>("node");
     argv[1] = args->entryPath;
 
-    s_node_jmp_set = true;
-    if (sigsetjmp(s_node_jmp, 1) == 0) {
-        int rc = start(2, argv);
-        s_node_jmp_set = false;
-        LOGI("embedded Node exited with code %d", rc);
-    } else {
-        LOGE("embedded Node crashed with a fatal signal — process protected");
-    }
+    int rc = start(2, argv);
+    LOGI("embedded Node exited with code %d", rc);
 
-    dlclose(handle);
+    // Note: Never dlclose(handle) — V8/libnode leaves background threads and
+    // TLS destructors active that will segfault if the code segment is unmapped.
     free(args->libNodePath);
     free(args->entryPath);
     delete args;

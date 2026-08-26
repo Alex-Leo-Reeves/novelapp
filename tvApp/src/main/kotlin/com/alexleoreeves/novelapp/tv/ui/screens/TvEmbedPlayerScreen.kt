@@ -220,13 +220,11 @@ fun TvEmbedPlayerScreen(
                     currentPosition = positionMs
                     isPlaying = !paused
 
-                    // Stall recovery: "playing" but the playhead is frozen for
-                    // ~8s → the embed's own black/white play button is likely
-                    // blocking inside a cross-origin iframe JS can't reach. A
-                    // synthetic center tap dismisses it. Max 2 recoveries per
-                    // episode so we never fight the user.
-                    if (stalled && !paused) stallStreak++ else stallStreak = 0
-                    if (stallStreak >= 8 && stallRecoveries < 2) {
+                    // Auto-start / Stall recovery: if the player is stuck paused at 0s
+                    // (waiting for center play button click) or claims "playing" but is frozen,
+                    // inject a synthetic center tap to dismiss the overlay and start playback.
+                    if ((stalled && !paused) || (paused && positionMs == 0L)) stallStreak++ else stallStreak = 0
+                    if (stallStreak >= 4 && stallRecoveries < 3) {
                         stallStreak = 0
                         stallRecoveries++
                         dispatchCenterTouch(webView)

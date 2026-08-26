@@ -4,39 +4,38 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-sealed interface NodeBridgeState {
-    data object Starting : NodeBridgeState
-    data class Ready(val port: Int) : NodeBridgeState
-    data class Failed(val reason: String) : NodeBridgeState
+sealed interface ResidentialScraperState {
+    data object Starting : ResidentialScraperState
+    data class Ready(val port: Int) : ResidentialScraperState
+    data class Failed(val reason: String) : ResidentialScraperState
 }
 
+// Backward compatibility alias
+typealias NodeBridgeState = ResidentialScraperState
+
 /**
- * User-facing status of the embedded nodebridge runtime. This file lives in
- * the shared androidMain nodebridge package and is compiled into BOTH the
- * phone app (composeApp) and the TV app (tvApp build.gradle kotlin.srcDir).
- *
- * Semantics of [message]:
- *  - `null`       → boot still in progress (nothing shown yet)
- *  - `""`         → the bridge started OK (nothing shown)
- *  - non-blank    → the bridge failed to start; the app shows this reason in a
- *                   dismissible dialog and continues with the backend fallback.
+ * User-facing status of the embedded residential IP scraper runtime.
+ * Reports starting, ready (active on local residential IP), or failure.
  */
-object NodeBridgeStatus {
+object ResidentialScraperStatus {
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    private val _state = MutableStateFlow<NodeBridgeState>(NodeBridgeState.Starting)
-    val state: StateFlow<NodeBridgeState> = _state.asStateFlow()
+    private val _state = MutableStateFlow<ResidentialScraperState>(ResidentialScraperState.Starting)
+    val state: StateFlow<ResidentialScraperState> = _state.asStateFlow()
 
     fun reportStarted(port: Int = 0) {
         _message.value = ""
-        _state.value = NodeBridgeState.Ready(port)
+        _state.value = ResidentialScraperState.Ready(port)
     }
 
     fun reportFailure(reason: String) {
-        val msg = reason.ifBlank { "The built-in anime engine failed to start." }
+        val msg = reason.ifBlank { "The residential IP scraper failed to start." }
         _message.value = msg
-        _state.value = NodeBridgeState.Failed(msg)
+        _state.value = ResidentialScraperState.Failed(msg)
     }
 }
+
+// Backward compatibility alias
+typealias NodeBridgeStatus = ResidentialScraperStatus

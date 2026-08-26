@@ -1,11 +1,16 @@
+import fs from "fs";
+import path from "path";
+
 export const _CACHE_ENABLED = false; //change it to true and setup your upstash so you can cache your data
 
 const IS_LOCAL_NODE = (() => {
   try {
     return (
       typeof process !== "undefined" &&
-      typeof process.versions?.node === "string" &&
-      !process.env.VERCEL
+      process &&
+      process.versions &&
+      typeof process.versions.node === "string" &&
+      (!process.env || !process.env.VERCEL)
     );
   } catch { return false; }
 })();
@@ -32,9 +37,9 @@ async function redisCommand(command) {
     },
     body: JSON.stringify(command),
   }).catch(() => null);
-  if (!res?.ok) return null;
+  if (!res || !res.ok) return null;
   const json = await res.json().catch(() => null);
-  return json?.result ?? null;
+  return (json && json.result !== undefined) ? json.result : null;
 }
 
 async function redisWrite(key, entry) {
@@ -52,9 +57,13 @@ let diskWrite = () => {};
 let diskDel   = () => {};
 
 if (IS_LOCAL_NODE) {
-  const { readFileSync, mkdirSync, existsSync } = await import("node:fs");
-  const { writeFile, unlink }                   = await import("node:fs/promises");
-  const { join, dirname }                        = await import("node:path");
+  const readFileSync = fs.readFileSync;
+  const mkdirSync    = fs.mkdirSync;
+  const existsSync   = fs.existsSync;
+  const writeFile    = (fs.promises && fs.promises.writeFile) ? fs.promises.writeFile : (p, data) => new Promise((res, rej) => fs.writeFile(p, data, err => err ? rej(err) : res()));
+  const unlink       = (fs.promises && fs.promises.unlink) ? fs.promises.unlink : (p) => new Promise((res, rej) => fs.unlink(p, err => err ? rej(err) : res()));
+  const join         = path.join;
+  const dirname      = path.dirname;
 
   const __dir    = (typeof process !== "undefined" && process.argv && process.argv[1]) ? dirname(process.argv[1]) : "/data/user/0/com.alexleoreeves.novelapp/files/nodebridge";
   const CACHE_DIR = join(__dir, ".cache");

@@ -2,5 +2,15 @@
     "name": "nodebridge",
     "version": "1.0.0",
     "private": true,
-    "type": "module"
+    "type": "module",
+    "scripts": {
+        "build": "esbuild browser-bridge.js --bundle --minify --platform=browser --format=iife --target=chrome80 --main-fields=browser,module,main --alias:crypto=crypto-browserify --alias:buffer=buffer --alias:stream=stream-browserify --alias:events=events --alias:process=process --outfile=../composeApp/src/androidMain/assets/anivexa/worker.bundle.js"
+    },
+    "dependencies": {
+        "buffer": "^6.0.3",
+        "crypto-browserify": "^3.12.1",
+        "events": "^3.3.0",
+        "process": "^0.11.10",
+        "stream-browserify": "^3.0.0"
+    }
 }

@@ -23,12 +23,12 @@ enum class StreamServer(
             else "https://vidlink.pro/tv/$id/$s/$e"
         }
     ),
-    VIDSRC_CC(
-        "Server 2 (VidSrc)",
+    VIDSRC_TO(
+        "Server 2 (VidSrc.to)",
         2,
         { id, type, s, e ->
-            if (type == "movie") "https://vidsrc.cc/v2/embed/movie/$id"
-            else "https://vidsrc.cc/v2/embed/tv/$id/$s/$e"
+            if (type == "movie") "https://vidsrc.to/embed/movie/$id"
+            else "https://vidsrc.to/embed/tv/$id/$s/$e"
         }
     ),
     NONTONGO(
@@ -115,7 +115,7 @@ enum class StreamServer(
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
         /** WebView servers that load the embed directly (Servers 1-4, 6-9) */
-        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_CC, NONTONGO, TWO_EMBED, MULTI_EMBED, AUTOEMBED, VIDSRC_NET, SMASHY)
+        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_TO, NONTONGO, TWO_EMBED, MULTI_EMBED, AUTOEMBED, VIDSRC_NET, SMASHY)
 
         /** ExoPlayer servers that scrape the embed for a direct stream (Server 5) */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)
@@ -197,7 +197,8 @@ enum class AnimeServer(
     ANIMEHEAVEN("Server 14", "AnimeHeaven", false, 14, null, "animeheaven"),
     ANIMEPAHE("Server 15", "AnimePahe", false, 15, null, "animepahe"),
     ANIDAO("Server 16", "AniDao", false, 16, null, "anidao"),
-    VIDLINK("Server 17", "VidLink", true, 17, null);
+    VIDLINK("Server 17", "VidLink", true, 17, null),
+    VIDSRC_TO("Server 18", "VidSrc.to", true, 18, null);
 
     /** True for the 13 Anivexa-API provider servers (backend, AniList-keyed). */
     val isAnivexa: Boolean get() = anivexaProviderKey != null
@@ -211,15 +212,17 @@ enum class AnimeServer(
     }
 }
 
-/** Only the last anime server (VIDLINK) maps to the generic StreamServer embed. */
+/** TMDB-embed anime servers map to their StreamServer equivalents. */
 fun AnimeServer.toStreamServer(): StreamServer? = when (this) {
     AnimeServer.VIDLINK -> StreamServer.VIDLINK
+    AnimeServer.VIDSRC_TO -> StreamServer.VIDSRC_TO
     else -> null
 }
 
-/** Convert a StreamServer into the anime server slot (only VidLink maps). */
+/** Convert a StreamServer into the anime server slot (VidLink and VidSrc.to map). */
 fun StreamServer.toAnimeServer(): AnimeServer? = when (this) {
     StreamServer.VIDLINK -> AnimeServer.VIDLINK
+    StreamServer.VIDSRC_TO -> AnimeServer.VIDSRC_TO
     else -> null
 }
 

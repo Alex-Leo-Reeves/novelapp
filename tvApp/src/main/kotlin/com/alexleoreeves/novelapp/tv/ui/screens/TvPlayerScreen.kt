@@ -113,14 +113,21 @@ fun TvPlayerScreen(
         remember(resolvedUrl) {
             runCatching {
                 val args = arrayListOf(
-                    "--no-drop-late-frames",
-                    "--no-skip-frames",
-                    "--rtsp-tcp",
-                    "-vvv"
+                    // Network caching: 5 s look-ahead prevents the stutter-on-start
+                    // and mid-stream rebuffering seen with the default 1 s cache.
+                    "--network-caching=5000",
+                    "--file-caching=5000",
+                    "--live-caching=5000",
+                    // HLS/DASH helpers
+                    "--http-reconnect",
+                    "--rtsp-tcp"
                 )
                 val vlc = LibVLC(context, args)
                 val mp = MediaPlayer(vlc)
-                mp.volume = 175  // 175% = +~5dB clean linear boost (no compressor/muffling)
+                // 100 % = unity gain. Anything above 100 causes the Android audio
+                // mixer to clip, producing crackling artefacts and an A/V desync
+                // that makes the video appear to slow down.
+                mp.volume = 100
 
                 val media = Media(vlc, Uri.parse(resolvedUrl))
                 if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
@@ -293,7 +300,7 @@ fun TvPlayerScreen(
 
     fun playerUnmute() {
         vlcMediaPlayer?.let { player ->
-            if (player.volume <= 0) player.volume = 175  // restore to boosted level
+            if (player.volume <= 0) player.volume = 100
         }
     }
 
@@ -314,10 +321,18 @@ fun TvPlayerScreen(
 
     BackHandler { onBack() }
 
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
             .onKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
                 val isVolumeKey = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
@@ -329,7 +344,7 @@ fun TvPlayerScreen(
                         playerUnmute()
                     }
                     false
-                } else if (event.type == KeyEventType.KeyUp) {
+                } else if (event.type == KeyEventType.KeyDown || event.type == KeyEventType.KeyUp) {
                     if (previewExpired) {
                         when (event.key) {
                             Key.Back -> { onBack(); true }
@@ -337,16 +352,37 @@ fun TvPlayerScreen(
                         }
                     } else {
                         showControls = true
-                        when (event.key) {
-                            Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
-                            Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
-                            Key.DirectionCenter, Key.Enter, Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { playerTogglePlay(); true }
-                            Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
-                            Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
-                            Key.MediaNext -> { onNext(); true }
-                            Key.MediaPrevious -> { onPrev(); true }
-                            Key.Back -> { onBack(); true }
-                            else -> false
+                        val isOkKey = event.key == Key.DirectionCenter || event.key == Key.Enter ||
+                            keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_BUTTON_A ||
+                            event.key == Key.MediaPlayPause || event.key == Key.MediaPlay || event.key == Key.MediaPause ||
+                            keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                            keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY ||
+                            keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
+
+                        if (event.type == KeyEventType.KeyUp) {
+                            when {
+                                isOkKey -> { playerTogglePlay(); true }
+                                event.key == Key.DirectionLeft || keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { playerSeekTo(currentPosition - 10000); true }
+                                event.key == Key.DirectionRight || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { playerSeekTo(currentPosition + 10000); true }
+                                event.key == Key.MediaFastForward || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { playerSeekTo(currentPosition + 30000); true }
+                                event.key == Key.MediaRewind || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> { playerSeekTo(currentPosition - 15000); true }
+                                event.key == Key.MediaNext || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> { onNext(); true }
+                                event.key == Key.MediaPrevious || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { onPrev(); true }
+                                event.key == Key.Back || keyCode == android.view.KeyEvent.KEYCODE_BACK -> { onBack(); true }
+                                else -> false
+                            }
+                        } else {
+                            // Intercept KeyDown for navigation keys so focus doesn't jump
+                            when {
+                                isOkKey || event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
+                                keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT ||
+                                event.key == Key.MediaFastForward || event.key == Key.MediaRewind ||
+                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> true
+                                else -> false
+                            }
                         }
                     }
                 } else false

@@ -707,23 +707,23 @@ fun App(
 
         subscriptionMessage?.let { m -> AlertDialog(onDismissRequest = { subscriptionMessage = null }, title = { Text("Premium") }, text = { Text(m) }, confirmButton = { Button(onClick = { beginPremiumCheckout("premium_3_devices") }) { Text("Subscribe") } }, dismissButton = { TextButton(onClick = { subscriptionMessage = null }) { Text("Close") } }) }
 
-        var nodeBridgeDialogDismissed by remember { mutableStateOf(false) }
-        val effectiveBridgeMessage = nodeBridgeMessage?.takeIf { it.isNotBlank() }?.takeIf { !nodeBridgeDialogDismissed }
-        if (effectiveBridgeMessage != null) AlertDialog(
-            onDismissRequest = { nodeBridgeDialogDismissed = true },
+        var scraperDialogDismissed by remember { mutableStateOf(false) }
+        val effectiveScraperMessage = nodeBridgeMessage?.takeIf { it.isNotBlank() }?.takeIf { !scraperDialogDismissed }
+        if (effectiveScraperMessage != null) AlertDialog(
+            onDismissRequest = { scraperDialogDismissed = true },
             icon = { Icon(Icons.Default.Warning, null, tint = appTheme.value.accentColor()) },
-            title = { Text("Anime engine unavailable") },
+            title = { Text("Residential Scraper Unavailable") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(effectiveBridgeMessage)
+                    Text(effectiveScraperMessage)
                     Text(
-                        "Some anime servers may be limited — the app is using the backup servers instead.",
+                        "Some anime providers may be limited — the app is automatically using cloud backup servers instead.",
                         style = MaterialTheme.typography.bodySmall,
                         color = appTheme.value.subTextColor()
                     )
                 }
             },
-            confirmButton = { TextButton(onClick = { nodeBridgeDialogDismissed = true }) { Text("Got it") } }
+            confirmButton = { TextButton(onClick = { scraperDialogDismissed = true }) { Text("Got it") } }
         )
 
         if (updateProgress.isActive) AlertDialog(

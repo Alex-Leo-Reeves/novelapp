@@ -30,8 +30,8 @@ import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.data.*
 import com.alexleoreeves.novelapp.platform.AppUpdateTarget
-import com.alexleoreeves.novelapp.nodebridge.NodeBridgeStatus
-import com.alexleoreeves.novelapp.nodebridge.NodeBridgeState
+import com.alexleoreeves.novelapp.nodebridge.ResidentialScraperStatus
+import com.alexleoreeves.novelapp.nodebridge.ResidentialScraperState
 
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
@@ -640,11 +640,20 @@ fun TvApp(
                                         nav = nav.copy(screen = TvScreen.READER, readerText = text, readerTitle = title)
                                     },
                                     onPlaySports = { url, title ->
+                                        // Clear any stale binge session from a previous movie/show
+                                        // so LibVLC never picks up the previous stream URL.
+                                        val isDirectStream = url.contains(".m3u8", ignoreCase = true) ||
+                                            url.contains(".mp4", ignoreCase = true) ||
+                                            url.contains(".mpd", ignoreCase = true)
                                         nav = nav.copy(
-                                            screen = TvScreen.PLAYER,
+                                            screen = if (isDirectStream) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
                                             playUrl = url,
                                             playTitle = title,
-                                            playerFromSection = TvSection.SPORTS
+                                            playerFromSection = TvSection.SPORTS,
+                                            bingeSession = null,
+                                            selectedItem = null,
+                                            resumePositionMs = null,
+                                            resumeDecided = false
                                         )
                                     },
                                     onSignOut = {
@@ -696,9 +705,17 @@ fun TvApp(
                                 val session = nav.bingeSession
                                 val current = session?.current
                                 val progressKey = "${nav.selectedItem?.id ?: nav.playUrl}::${nav.playTitle}"
+                                // When no binge session (Sports or direct nav), always use
+                                // nav.playUrl — never fall back to a stale current.url that
+                                // belonged to the previous movie/show.
+                                val streamUrl = if (session != null) {
+                                    current?.url.orEmpty().ifBlank { nav.playUrl }
+                                } else {
+                                    nav.playUrl
+                                }
                                 TvPlayerScreen(
-                                    streamUrl = current?.url.orEmpty().ifBlank { nav.playUrl },
-                                    title = current?.chapter?.title?.let { "${session.item.title} - $it" }.orEmpty().ifBlank { nav.playTitle },
+                                    streamUrl = streamUrl,
+                                    title = (if (session != null) current?.chapter?.title?.let { "${session.item.title} - $it" } else null).orEmpty().ifBlank { nav.playTitle },
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
                                     isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
@@ -748,9 +765,14 @@ fun TvApp(
                                 val session = nav.bingeSession
                                 val current = session?.current
                                 val progressKey = "${nav.selectedItem?.id ?: nav.playUrl}::${nav.playTitle}"
+                                val embedUrl = if (session != null) {
+                                    current?.url.orEmpty().ifBlank { nav.playUrl }
+                                } else {
+                                    nav.playUrl
+                                }
                                 TvEmbedPlayerScreen(
-                                    embedUrl = current?.url.orEmpty().ifBlank { nav.playUrl },
-                                    title = current?.chapter?.title?.let { "${session.item.title} - $it" }.orEmpty().ifBlank { nav.playTitle },
+                                    embedUrl = embedUrl,
+                                    title = (if (session != null) current?.chapter?.title?.let { "${session.item.title} - $it" } else null).orEmpty().ifBlank { nav.playTitle },
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
                                     isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
@@ -1004,27 +1026,38 @@ fun TvApp(
             }
         }
 
-        // ── Node.js Anime Engine Status Notification ───────────────────────
-        val nodeState by NodeBridgeStatus.state.collectAsState()
-        var nodeToastDismissed by remember { mutableStateOf(false) }
+        // ── Residential IP Scraper Status Notification ─────────────────────
+        val scraperState by ResidentialScraperStatus.state.collectAsState()
+        var scraperToastDismissed by remember { mutableStateOf(false) }
 
-        LaunchedEffect(nodeState) {
-            if (nodeState is NodeBridgeState.Ready) {
-                nodeToastDismissed = false
-                kotlinx.coroutines.delay(6500)
-                nodeToastDismissed = true
+        LaunchedEffect(scraperState) {
+            when (scraperState) {
+                is ResidentialScraperState.Ready -> {
+                    scraperToastDismissed = false
+                    kotlinx.coroutines.delay(6500)
+                    scraperToastDismissed = true
+                }
+                is ResidentialScraperState.Failed -> {
+                    scraperToastDismissed = false
+                    kotlinx.coroutines.delay(8000)
+                    scraperToastDismissed = true
+                }
+                is ResidentialScraperState.Starting -> {
+                    scraperToastDismissed = false
+                }
             }
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = (nodeState is NodeBridgeState.Ready && !nodeToastDismissed) ||
-                (nodeState is NodeBridgeState.Starting && nav.screen == TvScreen.HOME),
+            visible = (!scraperToastDismissed && scraperState is ResidentialScraperState.Ready) ||
+                (!scraperToastDismissed && scraperState is ResidentialScraperState.Failed) ||
+                (scraperState is ResidentialScraperState.Starting && nav.screen == TvScreen.HOME),
             enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
             exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 28.dp)
         ) {
-            when (val s = nodeState) {
-                is NodeBridgeState.Ready -> {
+            when (val s = scraperState) {
+                is ResidentialScraperState.Ready -> {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color(0xFF0D2818),
@@ -1039,13 +1072,13 @@ fun TvApp(
                             Icon(Icons.Default.Bolt, null, tint = Color(0xFF06D6A0), modifier = Modifier.size(24.dp))
                             Column {
                                 Text(
-                                    "⚡ Anime Engine (Node.js) Ready",
+                                    "🌐 Residential IP Scraper Active",
                                     color = Color.White,
                                     fontWeight = FontWeight.Black,
                                     style = MaterialTheme.typography.titleSmall
                                 )
                                 Text(
-                                    "13 Providers Active on Local IP (Port ${s.port})",
+                                    "13 Anime Providers Streaming on Local Connection",
                                     color = Color(0xFF06D6A0),
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -1053,7 +1086,36 @@ fun TvApp(
                         }
                     }
                 }
-                is NodeBridgeState.Starting -> {
+                is ResidentialScraperState.Failed -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF2A1010),
+                        border = BorderStroke(1.5.dp, Color(0xFFEF4444)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Warning, null, tint = Color(0xFFEF4444), modifier = Modifier.size(24.dp))
+                            Column {
+                                Text(
+                                    "⚠️ Residential Scraper Unavailable",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                Text(
+                                    "Using cloud backup servers",
+                                    color = Color(0xFFEF4444),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+                is ResidentialScraperState.Starting -> {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color(0xFF141422),
@@ -1070,14 +1132,13 @@ fun TvApp(
                                 color = Color(0xFF00BFFF)
                             )
                             Text(
-                                "Starting Built-in Anime Engine...",
+                                "Connecting Residential Scraper...",
                                 color = Color.White.copy(0.8f),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
                 }
-                else -> Unit
             }
         }
     }

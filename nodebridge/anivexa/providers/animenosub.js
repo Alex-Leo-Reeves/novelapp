@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import crypto from "crypto";
 import { getMedia } from "../core/anilist.js";
 import {
   buildTitles,

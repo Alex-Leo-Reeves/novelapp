@@ -762,18 +762,22 @@ private fun JsonObject.toUnifiedResult(): UnifiedSearchResult {
     val sourceName = this["sourceName"]?.jsonPrimitive?.contentOrNull ?: ""
     val id = this["id"]?.jsonPrimitive?.contentOrNull ?: ""
 
-    // An item is truly anime ONLY if it comes from AniList or is explicitly Japanese animation
-    val isRealAnime = rawKind == "anime" && (
+    val isDonghuaItem = rawKind == "donghua" ||
+        subtitle.contains("Donghua", ignoreCase = true) ||
+        sourceName.contains("Donghua", ignoreCase = true)
+
+    val isAnimeItem = !isDonghuaItem && (
+        rawKind in listOf("anime", "animes") ||
         sourceName.equals("AniList", ignoreCase = true) ||
         id.startsWith("anilist_", ignoreCase = true) ||
-        subtitle.contains("Japanese", ignoreCase = true) ||
-        subtitle.contains("Anime", ignoreCase = true)
+        detailUrl.startsWith("anilist:", ignoreCase = true) ||
+        subtitle.contains("Anime", ignoreCase = true) ||
+        subtitle.contains("Japanese Animation", ignoreCase = true)
     )
 
     val effectiveKind = when {
-        isRealAnime -> "anime"
-        rawKind == "anime" && detailUrl.contains("/movie") -> "movie"
-        rawKind == "anime" -> "tv"
+        isDonghuaItem -> "donghua"
+        isAnimeItem -> "anime"
         rawKind.isNotBlank() -> rawKind
         detailUrl.contains("/movie") -> "movie"
         detailUrl.contains("/tv") -> "tv"
@@ -791,8 +795,8 @@ private fun JsonObject.toUnifiedResult(): UnifiedSearchResult {
         synopsis = this["synopsis"]?.jsonPrimitive?.contentOrNull ?: "",
         isManga = effectiveKind == "manga",
         isComic = effectiveKind == "comic",
-        isAnime = isRealAnime,
-        isVideo = effectiveKind in listOf("movie", "tv", "kdrama", "cartoon", "donghua", "classic", "nigerian"),
+        isAnime = isAnimeItem,
+        isVideo = effectiveKind in listOf("movie", "tv", "kdrama", "cartoon", "donghua", "classic", "nigerian", "anime"),
         mediaKind = effectiveKind
     )
 }

@@ -509,17 +509,29 @@ fun AnimeDetailScreen(
                                             server.usesClientScraper -> repository.resolveAnimeServerStream(server, episode.url)
                                             else -> null
                                         }
-                                        val embedRef = if (server == AnimeServer.VIDLINK) {
-                                            repository.resolveAnivexaVidLinkEmbed(
+                                        val embedRef = when (server) {
+                                            AnimeServer.VIDLINK -> repository.resolveAnivexaVidLinkEmbed(
                                                 selectedSeason.id.toString(),
                                                 episode.episodeNumber
                                             )
-                                        } else {
-                                            null
+                                            AnimeServer.VIDSRC_TO -> repository.resolveAnivexaVidLinkEmbed(
+                                                selectedSeason.id.toString(),
+                                                episode.episodeNumber
+                                            )
+                                            else -> null
                                         }
+                                        // For VIDSRC_TO build its own embed URL instead of VidLink's URL shape
+                                        val vidsrcToUrl = if (server == AnimeServer.VIDSRC_TO && embedRef != null) {
+                                            val tmdb = embedRef.tmdbId
+                                            val ep = embedRef.episode
+                                            val s = embedRef.season
+                                            if (embedRef.type == "movie") "https://vidsrc.to/embed/movie/$tmdb"
+                                            else "https://vidsrc.to/embed/tv/$tmdb/$s/$ep"
+                                        } else null
                                         val playUrl = resolvedStream?.url
+                                            ?: vidsrcToUrl
                                             ?: embedRef?.buildEmbedUrl()
-                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK) {
+                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK && server != AnimeServer.VIDSRC_TO) {
                                                 repository.extractStreamUrl(episode.url)
                                             } else {
                                                 null

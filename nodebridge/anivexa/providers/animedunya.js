@@ -1,4 +1,4 @@
-import child_process from "node:child_process";
+import child_process from "child_process";
 import { json, episodeMeta } from "../core/new-provider-utils.js";
 import { getMedia } from "../core/anilist.js";
 import { get as cacheGet, set as cacheSet, isFresh, SHOW_IDENTITY_TTL } from "../core/smartcache.js";

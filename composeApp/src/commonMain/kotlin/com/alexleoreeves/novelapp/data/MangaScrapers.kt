@@ -324,31 +324,32 @@ class WeebCentralScraper(private val httpClient: HttpClient) : MangaScraper {
     override suspend fun fetchMangaPages(chapterUrl: String): List<String> {
         return try {
             val base = liveBase()
-            // Rewrite host in stored URL in case domain hopped since last search
             val effectiveUrl = rewriteUrlOrigin(chapterUrl, base)
+            val cleanUrl = effectiveUrl.replace(Regex("/+$"), "").replace(Regex("/images.*$"), "")
+            val imagesUrl = "$cleanUrl/images?reading_style=long_strip"
+
+            val imagesHtml = runCatching {
+                httpClient.get(imagesUrl) {
+                    header("User-Agent", UA)
+                    header("Referer", cleanUrl)
+                    header("HX-Request", "true")
+                }.bodyAsText()
+            }.getOrNull()
+
+            if (!imagesHtml.isNullOrBlank() && !imagesHtml.isBlockedOrErrorPage()) {
+                val imageDoc = Ksoup.parse(imagesHtml)
+                val pages = imageDoc.select("img[src]")
+                    .map { absoluteMangaUrl(base, it.attr("src")) }
+                    .filter { it.isNotBlank() && !it.contains("broken_image", ignoreCase = true) && !it.contains("logo", ignoreCase = true) }
+                    .distinct()
+                if (pages.isNotEmpty()) return pages
+            }
+
             val html = httpClient.get(effectiveUrl) {
                 header("User-Agent", UA)
                 header("Referer", base)
             }.bodyAsText()
             if (html.isBlockedOrErrorPage()) return emptyList()
-
-            Regex("""hx-get="([^"]+/images[^"]*)"""")
-                .find(html)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.let { imagesPath ->
-                    val imagesHtml = httpClient.get(absoluteMangaUrl(base, imagesPath.replace("&amp;", "&") + "&reading_style=long_strip")) {
-                        header("User-Agent", UA)
-                        header("Referer", effectiveUrl)
-                        header("HX-Request", "true")
-                    }.bodyAsText()
-                    val imageDoc = Ksoup.parse(imagesHtml)
-                    val pages = imageDoc.select("img[src]")
-                        .map { absoluteMangaUrl(base, it.attr("src")) }
-                        .filter { it.isNotBlank() && !it.contains("broken_image", ignoreCase = true) }
-                        .distinct()
-                    if (pages.isNotEmpty()) return pages
-                }
 
             val doc = Ksoup.parse(html)
             // Strategy 1: direct img tags in the reader container

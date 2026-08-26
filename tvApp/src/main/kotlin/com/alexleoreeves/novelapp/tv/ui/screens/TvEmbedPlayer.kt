@@ -109,34 +109,23 @@ fun TvEmbedPlayer(
         }
     }
 
-    // Clean audio gesture on READY: sets volume to 1.0 and unmutes without
-    // any distortion or compression.
+    // Clean audio gesture on READY: clicks the screen center to start playback
+    // (dismissing any iframe/embed play overlays) and sets volume to 1.0 clean.
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.READY) {
-            delay(500L)
             val view = webViewRef ?: return@LaunchedEffect
-            val x = 20f
-            val y = 20f
-            val eventTime = android.os.SystemClock.uptimeMillis()
-            val downEvent = android.view.MotionEvent.obtain(
-                eventTime, eventTime, android.view.MotionEvent.ACTION_DOWN,
-                x, y, 0
-            )
-            val upEvent = android.view.MotionEvent.obtain(
-                eventTime, eventTime + 100, android.view.MotionEvent.ACTION_UP,
-                x, y, 0
-            )
-            view.dispatchTouchEvent(downEvent)
-            view.dispatchTouchEvent(upEvent)
-            downEvent.recycle()
-            upEvent.recycle()
+            delay(300L)
+            simulateCenterClick(view)
+            view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
+            delay(1000L)
+            simulateCenterClick(view)
             view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
         }
     }
 
     LaunchedEffect(embedUrl) {
         repeat(5) { attempt ->
-            delay(3_000L * (attempt + 1))
+            delay(2_000L * (attempt + 1))
             val view = webViewRef ?: return@repeat
             view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
         }
@@ -483,41 +472,22 @@ private const val STABILIZATION_END_JS = """
         var selectors = [
             '.play-button', '.jw-icon-display', '.vjs-big-play-button',
             '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
-            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]'
+            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]',
+            'button', '.play', '.jw-display-icon-display', '[aria-label*="play" i]'
         ];
         selectors.forEach(function(sel) {
             try {
-                var el = document.querySelector(sel);
-                if (el && el.tagName !== 'VIDEO') el.click();
+                var els = document.querySelectorAll(sel);
+                els.forEach(function(el) {
+                    if (el && el.tagName !== 'VIDEO') el.click();
+                });
             } catch(e) {}
         });
-
-        function boostMediaAudio(v) {
-            if (!v || v.__gainBoosted) return;
-            try {
-                var AC = window.AudioContext || window.webkitAudioContext;
-                if (!AC) return;
-                if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
-                var ctx = window.__novelAppAudioCtx;
-                var src = ctx.createMediaElementSource(v);
-                var gain = ctx.createGain();
-                gain.gain.value = 1.5;
-                src.connect(gain);
-                gain.connect(ctx.destination);
-                v.__gainBoosted = true;
-                if (ctx.state === 'suspended') {
-                    var resume = function() { ctx.resume(); };
-                    v.addEventListener('play', resume, { once: true });
-                }
-            } catch(e) {
-                try { v.volume = 1.0; } catch(_) {}
-            }
-        }
 
         document.querySelectorAll('video').forEach(function(v) {
             try {
                 v.muted = false;
-                boostMediaAudio(v);
+                v.volume = 1.0;
                 if (v.paused) {
                     var p = v.play();
                     if (p) p.catch(function() {});
@@ -656,35 +626,21 @@ private const val FULLSCREEN_CSS_JS = """
 
 private const val CLEAN_AUDIO_UNMUTE_JS = """
 (function() {
-    function boostMediaAudio(v) {
-        if (!v || v.__gainBoosted) return;
-        try {
-            var AC = window.AudioContext || window.webkitAudioContext;
-            if (!AC) return;
-            if (!window.__novelAppAudioCtx) window.__novelAppAudioCtx = new AC();
-            var ctx = window.__novelAppAudioCtx;
-            var src = ctx.createMediaElementSource(v);
-            var gain = ctx.createGain();
-            gain.gain.value = 1.5;
-            src.connect(gain);
-            gain.connect(ctx.destination);
-            v.__gainBoosted = true;
-            if (ctx.state === 'suspended') {
-                var resume = function() { ctx.resume(); };
-                v.addEventListener('play', resume, { once: true });
-            }
-        } catch(e) {
-            try { v.volume = 1.0; } catch(_) {}
-        }
-    }
-
     function unmuteIn(doc) {
         try {
             doc.querySelectorAll('video, audio').forEach(function(v) {
                 try {
                     v.muted = false;
-                    boostMediaAudio(v);
+                    v.volume = 1.0;
+                    if (v.paused) {
+                        var p = v.play();
+                        if (p) p.catch(function() {});
+                    }
                 } catch(e) {}
+            });
+            var playButtons = doc.querySelectorAll('button, .play, .play-button, .jw-icon-display, .vjs-big-play-button, .jw-display-icon-display, [aria-label*="play" i]');
+            playButtons.forEach(function(btn) {
+                try { btn.click(); } catch(e) {}
             });
         } catch(e) {}
     }
@@ -700,6 +656,26 @@ private const val CLEAN_AUDIO_UNMUTE_JS = """
     } catch(e) {}
 })();
 """
+
+private fun simulateCenterClick(view: WebView) {
+    val w = view.width.takeIf { it > 0 } ?: 1920
+    val h = view.height.takeIf { it > 0 } ?: 1080
+    val cx = w / 2f
+    val cy = h / 2f
+    val eventTime = android.os.SystemClock.uptimeMillis()
+    val downEvent = android.view.MotionEvent.obtain(
+        eventTime, eventTime, android.view.MotionEvent.ACTION_DOWN,
+        cx, cy, 0
+    )
+    val upEvent = android.view.MotionEvent.obtain(
+        eventTime, eventTime + 100, android.view.MotionEvent.ACTION_UP,
+        cx, cy, 0
+    )
+    view.dispatchTouchEvent(downEvent)
+    view.dispatchTouchEvent(upEvent)
+    downEvent.recycle()
+    upEvent.recycle()
+}
 
 private fun isDirectMediaStream(url: String): Boolean {
     val lower = url.lowercase().substringBefore("?")

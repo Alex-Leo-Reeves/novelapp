@@ -1,5 +1,4 @@
-import child_process from "node:child_process";
-import { json, episodeMeta } from "../core/new-provider-utils.js";
+import { json, episodeMeta, fetchHtml } from "../core/new-provider-utils.js";
 import { getMedia } from "../core/anilist.js";
 import { get as cacheGet, set as cacheSet, isFresh, SHOW_IDENTITY_TTL } from "../core/smartcache.js";
 
@@ -15,11 +14,6 @@ async function resolveMalId(anilistId) {
 
   cacheSet(cacheKey, media.idMal, SHOW_IDENTITY_TTL);
   return media.idMal;
-}
-
-function fetchHtml(url) {
-  const cmd = `curl -s -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8" -H "Accept-Language: en-US,en;q=0.9" "${url}"`;
-  return child_process.execSync(cmd, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
 }
 
 function extractEpisodesList(html) {

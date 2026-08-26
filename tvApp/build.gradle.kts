@@ -117,8 +117,7 @@ kotlin {
 android {
     sourceSets {
         getByName("main") {
-            jniLibs.srcDir("../nodebridge/jniLibs")
-            assets.srcDirs("src/main/assets", "../composeApp/src/androidMain/assets", "../nodebridge/assets")
+            assets.srcDirs("src/main/assets", "../composeApp/src/androidMain/assets")
         }
     }
 }

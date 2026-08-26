@@ -33,9 +33,9 @@
 //
 // NOTE: written without ?? / ?. on purpose — the editor formatter mangles
 // those tokens into invalid JS.
-import http from "node:http";
-import fs from "node:fs";
-import path from "node:path";
+import http from "http";
+import fs from "fs";
+import path from "path";
 
 // Prevent any uncaught JS exception from terminating the embedded Node process.
 // These handlers MUST be registered before any imports that could throw,

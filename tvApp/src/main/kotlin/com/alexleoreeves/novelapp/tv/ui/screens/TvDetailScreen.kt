@@ -710,9 +710,9 @@ fun TvDetailScreen(
                             }
                         }
                     } else if (item.isAnime && !animeFallbackActive) {
-                        // Anime uses its own 17-server list: 13 Anivexa-API
+                        // Anime uses its own 18-server list: 13 Anivexa-API
                         // providers (keyed by AniList ID) + 3 Anivault +
-                        // VidLink LAST.
+                        // VidLink (17) + VidSrc.to LAST (18).
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)

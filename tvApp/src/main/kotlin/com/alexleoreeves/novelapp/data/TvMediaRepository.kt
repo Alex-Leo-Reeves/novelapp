@@ -168,9 +168,10 @@ class TvMediaRepository {
                                 Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
                             }
                         }
-                    } else if (effectiveAnimeServer == AnimeServer.VIDLINK) {
-                        // VidLink (Server 17, LAST): reload TMDB chapters so the
-                        // numbered markers (`tv:{id}:{s}:{e}`) resolve via VidLink.
+                    } else if (effectiveAnimeServer == AnimeServer.VIDLINK || effectiveAnimeServer == AnimeServer.VIDSRC_TO) {
+                        // VidLink (Server 17) / VidSrc.to (Server 18, LAST): reload TMDB
+                        // chapters so the numbered markers (`tv:{id}:{s}:{e}`) resolve via
+                        // the respective embed server.
                         fetchTmdbChaptersForAnime(item)
                     } else {
                         // AnimeXin default — unchanged.
@@ -244,8 +245,9 @@ class TvMediaRepository {
                             fetchTmdbChaptersForAnime(item)
                         }
                     } else {
-                        // VIDLINK (Server 17, LAST): reload episodes from TMDB so the
-                        // numbered markers (`tv:{id}:{s}:{e}`) resolve via VidLink.
+                        // VIDLINK (Server 17) / VIDSRC_TO (Server 18, LAST): reload
+                        // episodes from TMDB so the numbered markers resolve via the
+                        // respective TMDB-embed server.
                         fetchTmdbChaptersForAnime(item)
                     }
                 }
@@ -388,7 +390,7 @@ class TvMediaRepository {
             val mappedMatch = mappedTmdbId
                 ?.trim()
                 ?.let { it.ifBlank { null } }
-            if (mappedMatch != expectedTmdbId) {
+            if (mappedMatch != null && mappedMatch != expectedTmdbId) {
                 println("[Anivexa] Rejected mis-matched AniList id $bridged for TMDB $expectedTmdbId (mapped $mappedMatch)")
                 return null
             }
@@ -486,11 +488,24 @@ class TvMediaRepository {
                     }
                 }
                 effectiveAnimeServer == AnimeServer.VIDLINK -> {
-                    // VidLink (Server 17, LAST): resolve the TMDB marker into the
+                    // VidLink (Server 17): resolve the TMDB marker into the
                     // VidLink embed. parseTmdbPlaybackMarker handles `tv:{id}:{s}:{e}`
                     // chapter markers; if it returns null the AnimeXin fallback runs.
                     parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
                         return StreamServer.VIDLINK.buildEmbedUrl(
+                            marker.tmdbId,
+                            marker.mediaType,
+                            marker.season,
+                            marker.episode
+                        )
+                    }
+                }
+                effectiveAnimeServer == AnimeServer.VIDSRC_TO -> {
+                    // VidSrc.to (Server 18, LAST): resolve the TMDB marker and
+                    // build a vidsrc.to embed URL (works identically to VidLink
+                    // but uses the vidsrc.to embed domain).
+                    parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
+                        return StreamServer.VIDSRC_TO.buildEmbedUrl(
                             marker.tmdbId,
                             marker.mediaType,
                             marker.season,
