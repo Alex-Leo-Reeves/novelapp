@@ -8,6 +8,7 @@ import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -88,12 +89,12 @@ object WebViewBridgeRuntime {
                         initHeadlessWebView(appContext)
                     } catch (t: Throwable) {
                         Log.e(TAG, "Failed to initialize Headless WebView", t)
-                        NodeBridgeStatus.reportFailure("WebView anime engine initialization failed: ${t.message}")
+                        ResidentialScraperStatus.reportFailure("WebView anime engine initialization failed: ${t.message}")
                     }
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to start WebView bridge server", t)
-                NodeBridgeStatus.reportFailure("Failed to start local anime engine server: ${t.message}")
+                ResidentialScraperStatus.reportFailure("Failed to start local anime engine server: ${t.message}")
             }
         }
     }
@@ -105,6 +106,8 @@ object WebViewBridgeRuntime {
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
+            settings.allowFileAccessFromFileURLs = true
+            settings.allowUniversalAccessFromFileURLs = true
             settings.mediaPlaybackRequiresUserGesture = false
             // Standard modern browser User-Agent
             settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -122,10 +125,26 @@ object WebViewBridgeRuntime {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     Log.i(TAG, "Headless WebView loaded: $url")
+                    // Immediate trigger in case JS interface was bound after top-level script execution
+                    view?.evaluateJavascript(
+                        """
+                        (function() {
+                            if (window.AndroidBridge && typeof window.AndroidBridge.onWorkerReady === 'function') {
+                                window.AndroidBridge.onWorkerReady();
+                            }
+                        })();
+                        """.trimIndent(),
+                        null
+                    )
                 }
 
-                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    return super.shouldInterceptRequest(view, request)
+                override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                    super.onReceivedError(view, request, error)
+                    if (request?.isForMainFrame == true) {
+                        val desc = error?.description?.toString() ?: "WebView load error"
+                        Log.e(TAG, "Failed to load worker asset: $desc")
+                        ResidentialScraperStatus.reportFailure("Failed to load worker asset: $desc")
+                    }
                 }
             }
 
@@ -134,6 +153,32 @@ object WebViewBridgeRuntime {
 
         webView = wv
         wv.loadUrl("file:///android_asset/anivexa/index.html")
+
+        // Watchdog: If worker hasn't reported ready within 7 seconds, probe the WebView directly
+        scope.launch {
+            kotlinx.coroutines.delay(7000)
+            if (!isWorkerReady) {
+                mainHandler.post {
+                    webView?.evaluateJavascript(
+                        "(function() { return typeof window.anivexaWorkerBridge !== 'undefined' ? 'ok' : 'missing'; })()"
+                    ) { result ->
+                        val clean = result?.replace("\"", "")?.trim()
+                        if (clean == "ok") {
+                            Log.i(TAG, "Watchdog: anivexaWorkerBridge is present, marking ready")
+                            isWorkerReady = true
+                            val port = boundPort
+                            if (port > 0) {
+                                AnivexaApi.setEmbeddedBaseUrl("http://127.0.0.1:$port")
+                                ResidentialScraperStatus.reportStarted(port)
+                            }
+                        } else {
+                            Log.w(TAG, "Watchdog: anivexaWorkerBridge status is '$clean'")
+                            ResidentialScraperStatus.reportFailure("Scraper initialization timed out")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private class AndroidJsBridge {
@@ -149,13 +194,20 @@ object WebViewBridgeRuntime {
 
         @JavascriptInterface
         fun onWorkerReady() {
+            if (isWorkerReady) return
             Log.i(TAG, "Anivexa JS Worker reported READY in WebView")
             isWorkerReady = true
             val port = boundPort
             if (port > 0) {
                 AnivexaApi.setEmbeddedBaseUrl("http://127.0.0.1:$port")
-                NodeBridgeStatus.reportStarted(port)
+                ResidentialScraperStatus.reportStarted(port)
             }
+        }
+
+        @JavascriptInterface
+        fun postFailure(reason: String) {
+            Log.e(TAG, "Worker reported failure: $reason")
+            ResidentialScraperStatus.reportFailure("Scraper worker error: $reason")
         }
     }
 

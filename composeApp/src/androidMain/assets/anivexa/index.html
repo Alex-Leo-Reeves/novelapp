@@ -3,8 +3,34 @@
 <head>
     <meta charset="utf-8">
     <title>Anivexa Worker</title>
+    <script>
+        window.addEventListener('error', function(e) {
+            console.error('[Anivexa Error]', e.message, e.filename, e.lineno);
+            if (window.AndroidBridge && window.AndroidBridge.postFailure) {
+                window.AndroidBridge.postFailure(e.message || 'Worker script error');
+            }
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('[Anivexa Promise Rejection]', e.reason);
+        });
+    </script>
 </head>
 <body>
     <script src="worker.bundle.js"></script>
+    <script>
+        function checkAndSignalReady() {
+            if (window.AndroidBridge && window.AndroidBridge.onWorkerReady) {
+                window.AndroidBridge.onWorkerReady();
+            } else {
+                setTimeout(checkAndSignalReady, 200);
+            }
+        }
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            checkAndSignalReady();
+        } else {
+            window.addEventListener('DOMContentLoaded', checkAndSignalReady);
+            window.addEventListener('load', checkAndSignalReady);
+        }
+    </script>
 </body>
 </html>

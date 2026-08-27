@@ -108,7 +108,7 @@ fun MediaDetailScreen(
     // ── Server selector ──────────────────────────────────────────────
     // All 2 servers displayed inline. Default to Server 1 (VidLink).
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.ANIMEXIN) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
@@ -124,9 +124,9 @@ fun MediaDetailScreen(
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
         when (selectedDonghuaServer) {
-            // Only AnimeXin remains — the TMDB-embed donghua servers were
-            // removed per user request. Episodes are loaded via animeXinScraper.
-            DonghuaServer.ANIMEXIN -> donghuaStreamScraper
+            DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
+            DonghuaServer.LUCIFER_DONGHUA -> luciferDonghuaScraper
+            else -> donghuaStreamScraper
         }
 
     /** Resolve the AniList ID for anime-only servers (Anivexa providers). */
@@ -189,14 +189,30 @@ fun MediaDetailScreen(
     }
 
     suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? {
-        // Only AnimeXin remains (the TMDB-embed donghua servers were removed).
-        // Resolve the episode page URL to extract the best embed player URL —
-        // animexin.dev hosts Donghua with direct iframe embed extraction that
-        // loads in the visible WebView player.
         return when (selectedDonghuaServer) {
+            DonghuaServer.DONGHUA_STREAM -> {
+                donghuaStreamScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.LUCIFER_DONGHUA -> {
+                luciferDonghuaScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
+            }
             DonghuaServer.ANIMEXIN -> {
-                val playerUrl = animeXinScraper.resolveEpisodePlayerUrl(ep.url)
-                playerUrl ?: ep.url.takeIf { it.isNotBlank() }
+                animeXinScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.VIDLINK -> {
+                val tmdb = tmdbId.ifBlank { providerTmdbId }
+                if (tmdb.isNotBlank()) StreamServer.VIDLINK.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
+                else null
+            }
+            DonghuaServer.VIDSRC_TO -> {
+                val tmdb = tmdbId.ifBlank { providerTmdbId }
+                if (tmdb.isNotBlank()) StreamServer.VIDSRC_TO.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
+                else null
+            }
+            DonghuaServer.AUTOEMBED -> {
+                val tmdb = tmdbId.ifBlank { providerTmdbId }
+                if (tmdb.isNotBlank()) StreamServer.AUTOEMBED.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
+                else null
             }
         }
     }
@@ -448,17 +464,29 @@ fun MediaDetailScreen(
         // Phase 1: Load episodes from the URL the item came from
         val initialEpisodes = when {
             isDonghuaItem -> {
-                if (selectedDonghuaServer == DonghuaServer.ANIMEXIN) {
-                    // AnimeXin (Server 1): fetch the episode list from animexin.dev
-                    // with its own scraper (search → series → eplister) so each
-                    // episode URL resolves through AnimeXinScraper at play time.
-                    animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                } else {
-                    selectedDonghuaScraper().fetchEpisodes(
-                        titleQuery = item.title,
-                        alternateQueries = listOf(item.title.substringBefore(":")),
-                        maxEpisodes = 300
-                    )
+                when (selectedDonghuaServer) {
+                    DonghuaServer.DONGHUA_STREAM -> {
+                        val eps = donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                        if (eps.isNotEmpty()) eps
+                        else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                    }
+                    DonghuaServer.LUCIFER_DONGHUA -> {
+                        val eps = luciferDonghuaScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                        if (eps.isNotEmpty()) eps
+                        else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                    }
+                    DonghuaServer.ANIMEXIN -> {
+                        val eps = animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                        if (eps.isNotEmpty()) eps
+                        else donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                    }
+                    DonghuaServer.VIDLINK, DonghuaServer.VIDSRC_TO, DonghuaServer.AUTOEMBED -> {
+                        if (tmdbId.isNotBlank()) {
+                            tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
+                        } else {
+                            donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                        }
+                    }
                 }
             }
             isAnimeItem -> {
@@ -658,12 +686,15 @@ fun MediaDetailScreen(
                         onPlayMaEmbedWithLimit(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs)
                         return@launch
                     }
-                    // VidLink (LAST anime server): TMDB marker → vidlink embed.
+                    // VidLink / VidSrc.to (TMDB-embed anime servers): use whichever is selected.
                     val urlParts = ep.url.split(":")
-                    val tvId = urlParts.getOrNull(1) ?: tmdbId
-                    val s = urlParts.getOrNull(2) ?: "1"
-                    val e = urlParts.getOrNull(3) ?: "1"
-                    StreamServer.VIDLINK.buildEmbedUrl(tvId, "tv", s, e)
+                    val tvId = urlParts.getOrNull(1).takeIf { !it.isNullOrBlank() }
+                        ?: providerTmdbId.ifBlank { tmdbId }
+                    val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+                    val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() }
+                        ?: ep.episodeNumber.coerceAtLeast(1).toString()
+                    val targetStreamServer = selectedAnimeServer.toStreamServer() ?: StreamServer.VIDSRC_TO
+                    targetStreamServer.buildEmbedUrl(tvId, "tv", s, e)
                 }
                 isTmdbDetail -> {
                     val urlParts = ep.url.split(":")

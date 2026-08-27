@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import com.alexleoreeves.novelapp.nodebridge.NodeBridgeStatus
+import com.alexleoreeves.novelapp.nodebridge.ResidentialScraperStatus
 import com.alexleoreeves.novelapp.nodebridge.WebViewBridgeRuntime
 import com.alexleoreeves.novelapp.platform.AndroidExternalLinkOpener
 import com.alexleoreeves.novelapp.platform.AndroidUserSessionStore
@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val appContext = applicationContext
         setContent {
-            val nodeBridgeMessage by NodeBridgeStatus.message.collectAsState()
+            val nodeBridgeMessage by ResidentialScraperStatus.message.collectAsState()
             App(
                 userSessionStore = AndroidUserSessionStore(appContext),
                 linkOpener = AndroidExternalLinkOpener(appContext),

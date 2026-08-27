@@ -137,13 +137,27 @@ enum class StreamServer(
 enum class DonghuaServer(
     val displayName: String,
     val providerName: String,
-    val serverOrder: Int
+    val serverOrder: Int,
+    val isScraper: Boolean = false,
+    val scraperKey: String? = null
 ) {
-    ANIMEXIN("Server 1", "AnimeXin", 1);
+    DONGHUA_STREAM("Server 1", "DonghuaStream", 1, isScraper = true, scraperKey = "donghuastream"),
+    LUCIFER_DONGHUA("Server 2", "Lucifer Donghua", 2, isScraper = true, scraperKey = "luciferdonghua"),
+    ANIMEXIN("Server 3", "AnimeXin", 3, isScraper = true, scraperKey = "animexin"),
+    VIDLINK("Server 4", "VidLink (TMDB)", 4, isScraper = false, scraperKey = null),
+    VIDSRC_TO("Server 5", "VidSrc.to (TMDB)", 5, isScraper = false, scraperKey = null),
+    AUTOEMBED("Server 6", "AutoEmbed (TMDB)", 6, isScraper = false, scraperKey = null);
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
     }
+}
+
+fun DonghuaServer.toStreamServer(): StreamServer? = when (this) {
+    DonghuaServer.VIDLINK -> StreamServer.VIDLINK
+    DonghuaServer.VIDSRC_TO -> StreamServer.VIDSRC_TO
+    DonghuaServer.AUTOEMBED -> StreamServer.AUTOEMBED
+    else -> null
 }
 
 /**

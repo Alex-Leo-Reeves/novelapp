@@ -97,13 +97,8 @@ fun TvDetailScreen(
     }
 
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.ANIMEXIN) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
-    // Tracks whether the user picked an AnimeServer chip for a donghua title.
-    // When false (the default), donghua routes through AnimeXin (DonghuaServer
-    // row) exactly as before; when true, donghua rides the 13 Anivexa providers /
-    // Anivault trio / VidLink via selectedAnimeServer.
-    var useAnimeServerForDonghua by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
     // Anime misroute escape hatch: when an item flagged as anime returns no
     // episodes from ANY anime provider, fall back to the generic TV/movie
@@ -124,7 +119,7 @@ fun TvDetailScreen(
     val mountedVolumes by mediaCache?.volumes?.collectAsState() ?: remember { mutableStateOf<List<UsbVolume>>(emptyList()) }
     var pendingStorageChapter by remember { mutableStateOf<Chapter?>(null) }
 
-    LaunchedEffect(item, selectedAnimeServer, selectedDonghuaServer, useAnimeServerForDonghua) {
+    LaunchedEffect(item, selectedAnimeServer, selectedDonghuaServer) {
         isLoading = true
         errorMsg = null
         statusText = ""
@@ -132,14 +127,7 @@ fun TvDetailScreen(
         try {
             val fetched = if (isVideoTitle) {
                 if (isDonghua) {
-                    // Donghua: when the user picked an AnimeServer chip
-                    // (useAnimeServerForDonghua=true) ride that provider's episode
-                    // list (13 Anivexa / Anivault trio / VidLink). Otherwise keep
-                    // the original AnimeXin path (animeServer=null → default).
-                    mediaRepo.fetchVideoEpisodes(
-                        item,
-                        if (useAnimeServerForDonghua) selectedAnimeServer else null
-                    )
+                    mediaRepo.fetchVideoEpisodes(item, donghuaServer = selectedDonghuaServer)
                 } else if (item.isAnime) {
                     mediaRepo.fetchVideoEpisodes(item, selectedAnimeServer)
                 } else {
@@ -196,10 +184,8 @@ fun TvDetailScreen(
                     isDonghua || item.isAnime -> null
                     else -> selectedServer
                 },
-                donghuaServer = if (isDonghua && !useAnimeServerForDonghua) selectedDonghuaServer else null,
-                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer
-                    else if (isDonghua && useAnimeServerForDonghua) selectedAnimeServer
-                    else null
+                donghuaServer = if (isDonghua) selectedDonghuaServer else null,
+                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer else null
             )
             if (sourceUrl.isNullOrBlank()) {
                 statusText = "Could not resolve a download link. Try another server."
@@ -252,10 +238,8 @@ fun TvDetailScreen(
                     isDonghua || item.isAnime -> null
                     else -> selectedServer
                 },
-                donghuaServer = if (isDonghua && !useAnimeServerForDonghua) selectedDonghuaServer else null,
-                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer
-                    else if (isDonghua && useAnimeServerForDonghua) selectedAnimeServer
-                    else null
+                donghuaServer = if (isDonghua) selectedDonghuaServer else null,
+                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer else null
             )
             if (sourceUrl.isNullOrBlank()) {
                 statusText = "Could not resolve a download link. Try another server."
@@ -350,17 +334,14 @@ fun TvDetailScreen(
                 val effectiveAnimeServer = when {
                     animeFallbackActive -> null
                     isAnimeItem -> selectedAnimeServer
-                    isDonghua && useAnimeServerForDonghua -> selectedAnimeServer
                     else -> null
                 }
-                // Anime (13 Anivexa providers + VidLink LAST) resolves through
-                // animeServer; never map it to a generic StreamServer embed on TV.
                 val effectiveStreamServer = when {
                     animeFallbackActive -> selectedServer
                     isDonghua || isAnimeItem -> null
                     else -> selectedServer
                 }
-                val effectiveDonghuaServer = if (isDonghua && !useAnimeServerForDonghua) selectedDonghuaServer else null
+                val effectiveDonghuaServer = if (isDonghua) selectedDonghuaServer else null
 
                 val first = mediaRepo.resolveBingeEpisode(
                     context = context,
@@ -651,53 +632,16 @@ fun TvDetailScreen(
                     // 17-server row (13 Anivexa providers + Anivault trio +
                     // VidLink LAST — the Android donghua parity selector).
                     if (isDonghua) {
-                        // Row 1: DonghuaServer (AnimeXin) — device scraper default.
+                        // Donghua Server List: 6 dedicated streaming servers
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                         ) {
                             items(DonghuaServer.ALL_IN_ORDER) { server ->
                                 val isSelected = selectedDonghuaServer == server
                                 var sFocused by remember { mutableStateOf(false) }
                                 Surface(
-                                    onClick = {
-                                        selectedDonghuaServer = server
-                                        selectedAnimeServer = AnimeServer.ANINEKO
-                                        // DonghuaServer row = AnimeXin device-scraper
-                                        // path; clear the anime-server routing flag.
-                                        useAnimeServerForDonghua = false
-                                    },
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
-                                    border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
-                                    modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
-                                ) {
-                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                                        Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
-                                    }
-                                }
-                            }
-                        }
-                        // Row 2: AnimeServer (13 Anivexa + 3 Anivault + VidLink).
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-                        ) {
-                            items(AnimeServer.ALL_IN_ORDER) { server ->
-                                val isSelected = selectedAnimeServer == server
-                                var sFocused by remember { mutableStateOf(false) }
-                                Surface(
-                                    onClick = {
-                                        selectedAnimeServer = server
-                                        // Picking an anime server switches the active
-                                        // route to the Anivexa/Anivault/VidLink path;
-                                        // the DonghuaServer row remains available but is
-                                        // no longer the driving selection.
-                                        selectedDonghuaServer = DonghuaServer.ANIMEXIN
-                                        // Donghua now rides the 13 Anivexa providers /
-                                        // Anivault trio / VidLink via this chip.
-                                        useAnimeServerForDonghua = true
-                                    },
+                                    onClick = { selectedDonghuaServer = server },
                                     shape = RoundedCornerShape(20.dp),
                                     color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
                                     border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),

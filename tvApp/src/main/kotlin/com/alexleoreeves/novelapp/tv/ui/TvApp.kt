@@ -115,11 +115,7 @@ fun TvApp(
     var nav by remember { mutableStateOf(NavigationState()) }
     var isLoading by remember { mutableStateOf(true) }
     var remoteConfig by remember { mutableStateOf(TvRemoteConfigDefaults.default) }
-    // User-facing nodebridge (embedded anime engine) failure reason. Non-blank
-    // only when the engine failed to boot; the app keeps working via backend
-    // fallback but tells the user why some anime servers may be limited.
-    val nodeBridgeMessage by NodeBridgeStatus.message.collectAsState()
-    var nodeBridgeDialogDismissed by remember { mutableStateOf(false) }
+
     // Pre-player "Continue Watching?" dialog — shown BEFORE any player loads
     // (per the user's request) when the clicked episode has a saved position.
     // The video does NOT start loading behind it; the choice routes to the
@@ -921,29 +917,7 @@ fun TvApp(
             )
         }
 
-        // ── Nodebridge (embedded anime engine) failure ─────────────────────
-        // Informational only — the app keeps working via backend fallback.
-        val effectiveBridgeMessage = nodeBridgeMessage
-            ?.takeIf { it.isNotBlank() && !nodeBridgeDialogDismissed }
-        if (effectiveBridgeMessage != null) {
-            AlertDialog(
-                onDismissRequest = { nodeBridgeDialogDismissed = true },
-                title = { Text("Anime engine unavailable") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(effectiveBridgeMessage)
-                        Text(
-                            "Some anime servers may be limited — the app is using the backup servers instead.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TvSubtext
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { nodeBridgeDialogDismissed = true }) { Text("Got it") }
-                }
-            )
-        }
+
 
         // ── In-app update (Android TV APK channel) ─────────────────────────
         // The TV APK update URL is the PERMANENT channel in AppReleaseConfig —
