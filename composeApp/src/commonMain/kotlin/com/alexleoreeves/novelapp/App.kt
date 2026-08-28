@@ -87,6 +87,7 @@ fun App(
     val animePreviewLimitMs = remember { mutableStateOf<Long?>(null) }
     val animeContentKind = remember { mutableStateOf("") }
     val animeSubtitlesJson = remember { mutableStateOf<String?>(null) }
+    val animeStreamHeadersJson = remember { mutableStateOf<String?>(null) }
 
     val maServerEmbedUrl = remember { mutableStateOf<String?>(null) }
     val maServerEmbedTitle = remember { mutableStateOf("") }
@@ -488,6 +489,7 @@ fun App(
                     previewLimitMs = animePreviewLimitMs.value,
                     onPreviewFinished = { animeStreamUrl.value = null; animePreviewLimitMs.value = null; subscriptionMessage = "Free preview ended." },
                     contentKind = animeContentKind.value, subtitlesJson = animeSubtitlesJson.value,
+                    streamHeadersJson = animeStreamHeadersJson.value,
                     onBack = { animeStreamUrl.value = null; animePreviewLimitMs.value = null }
                 )
 
@@ -496,12 +498,14 @@ fun App(
                     val animeLimit = if (isPrem) null else (5L * 60L * 1000L)
                     AnimeDetailScreen(selectedAnime.value!!, repository, appTheme.value, downloadRepo,
                         isPremium = isPrem,
-                        onPlayEpisode = { u, t ->
+                        onPlayEpisode = { u, t, hj, sj ->
                             animeStreamUrl.value = u
                             animeEpisodeTitle.value = t
                             animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
                             animePreviewLimitMs.value = animeLimit
                             animeContentKind.value = "anime"
+                            animeSubtitlesJson.value = sj
+                            animeStreamHeadersJson.value = hj
                         },
                         onPlayMaEmbed = { u, t ->
                             maServerEmbedUrl.value = u
@@ -537,8 +541,9 @@ fun App(
                 selectedMedia.value != null -> MediaDetailScreen(
                     selectedMedia.value!!, appTheme.value, isPremium = account?.isPremium == true, downloadRepo, requireAuth,
                     onSubscribe = { beginPremiumCheckout("premium_3_devices") },
-                    onPlayStream = { u, t, l, sj ->
+                    onPlayStream = { u, t, l, sj, hj ->
                         animeStreamUrl.value = u; animeEpisodeTitle.value = t; animePreviewLimitMs.value = l; animeSubtitlesJson.value = sj
+                        animeStreamHeadersJson.value = hj
                         animeContentKind.value = selectedMedia.value?.let { i -> if (i.mediaKind.equals(VideoCategory.ANIME.name, true)) "anime" else if (i.mediaKind.equals(VideoCategory.DONGHUA.name, true)) "donghua" else "" } ?: ""
                     },
                     onPlayMaEmbed = { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = null },

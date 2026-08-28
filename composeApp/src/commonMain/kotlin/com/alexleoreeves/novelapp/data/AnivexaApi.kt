@@ -87,12 +87,19 @@ class AnivexaApi(private val client: HttpClient) {
     /**
      * Fetch the (sub/dub) episode list for a provider + AniList ID.
      * Returns AnimeEpisode with url = `anivexa://{episodeId}`.
+     * [preferredAudio] selects the list when the provider offers both ("sub"
+     * or "dub", mirroring AniVault's language toggle); falls back to whichever
+     * list the provider actually has.
      * Tries the device's embedded residential nodebridge first, falling back to backend.
      */
-    suspend fun fetchEpisodes(provider: String, anilistId: String): List<AnimeEpisode> {
+    suspend fun fetchEpisodes(
+        provider: String,
+        anilistId: String,
+        preferredAudio: String = "sub"
+    ): List<AnimeEpisode> {
         val primaryUrl = baseUrl()
         val result = runCatching {
-            fetchEpisodesFromUrl(primaryUrl, provider, anilistId)
+            fetchEpisodesFromUrl(primaryUrl, provider, anilistId, preferredAudio)
         }.getOrNull()
 
         if (!result.isNullOrEmpty()) {
@@ -104,7 +111,7 @@ class AnivexaApi(private val client: HttpClient) {
         if (primaryUrl == embeddedBaseUrl) {
             val fallbackUrl = AppReleaseConfig.API_BASE_URL + "/anivexa"
             val fallbackResult = runCatching {
-                fetchEpisodesFromUrl(fallbackUrl, provider, anilistId)
+                fetchEpisodesFromUrl(fallbackUrl, provider, anilistId, preferredAudio)
             }.getOrNull()
             if (!fallbackResult.isNullOrEmpty()) {
                 return fallbackResult
@@ -114,7 +121,12 @@ class AnivexaApi(private val client: HttpClient) {
         return emptyList()
     }
 
-    private suspend fun fetchEpisodesFromUrl(base: String, provider: String, anilistId: String): List<AnimeEpisode> {
+    private suspend fun fetchEpisodesFromUrl(
+        base: String,
+        provider: String,
+        anilistId: String,
+        preferredAudio: String
+    ): List<AnimeEpisode> {
         val raw: String = client.get("$base/episodes/$provider/$anilistId").body()
         val root = json.parseToJsonElement(raw).jsonObject
         if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return emptyList()
@@ -122,8 +134,13 @@ class AnivexaApi(private val client: HttpClient) {
 
         val sub = data["sub"]?.jsonArray.orEmpty()
         val dub = data["dub"]?.jsonArray.orEmpty()
-        // Prefer sub, fall back to dub.
-        val episodes = if (sub.isNotEmpty()) sub else dub
+        // Preferred audio first (dub where the provider has it), fall back to
+        // whichever list exists so a provider with sub-only coverage still plays.
+        val episodes = when {
+            preferredAudio.equals("dub", ignoreCase = true) && dub.isNotEmpty() -> dub
+            sub.isNotEmpty() -> sub
+            else -> dub
+        }
 
         return episodes.mapNotNull { element ->
             val item = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
@@ -183,20 +200,50 @@ class AnivexaApi(private val client: HttpClient) {
         if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return null
         val data = root["data"]?.jsonObject ?: return null
         val streams = data["streams"]?.jsonArray.orEmpty()
+        val payloadHeaders = data["headers"]?.jsonObject
+        val payloadReferer = payloadHeaders?.get("Referer")?.jsonPrimitive?.contentOrNull
+        val payloadUserAgent = payloadHeaders?.get("User-Agent")?.jsonPrimitive?.contentOrNull
 
-        // Prefer active HLS, then active embed, then any first URL.
-        val preferred = streams.firstOrNull { it.jsonObject.isActiveStream() }
-            ?: streams.firstOrNull()
-            ?: return null
-        val streamObj = preferred.jsonObject
-        val url = streamObj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (url.isBlank()) return null
-        val type = streamObj["type"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val embed = streamObj["embed"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (embed.startsWith("http", ignoreCase = true) && requiresProviderPlaybackContext(url)) {
-            return AnivexaStream(url = embed, type = "embed")
+        // Prefer a DIRECT media stream (active first) — ExoPlayer can attach the
+        // provider Referer per request, which makes provider CDNs like anikoto's
+        // kryntal host serve the real playlist instead of a 403 block page.
+        val direct = streams.firstOrNull { el ->
+            val o = runCatching { el.jsonObject }.getOrNull() ?: return@firstOrNull false
+            o.isActiveStream() && o.isDirectStream()
+        } ?: streams.firstOrNull { el ->
+            val o = runCatching { el.jsonObject }.getOrNull() ?: return@firstOrNull false
+            o.isDirectStream()
         }
-        return AnivexaStream(url = url, type = type)
+        if (direct != null) {
+            val streamObj = direct.jsonObject
+            val url = streamObj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (url.isNotBlank()) {
+                val referer = streamObj["referer"]?.jsonPrimitive?.contentOrNull ?: payloadReferer
+                val userAgent = streamObj["userAgent"]?.jsonPrimitive?.contentOrNull ?: payloadUserAgent
+                return AnivexaStream(
+                    url = url,
+                    type = streamObj["type"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    referer = referer,
+                    userAgent = userAgent,
+                    headersJson = buildHeadersJson(referer, userAgent),
+                    subtitlesJson = buildSubtitlesJson(data["subtitles"]?.jsonArray)
+                )
+            }
+        }
+
+        // No direct media URL — fall back to the first entry that has an embed page.
+        val embedStream = streams.firstOrNull { el ->
+            val o = runCatching { el.jsonObject }.getOrNull()
+            o != null && o["embed"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                .startsWith("http", ignoreCase = true)
+        }
+        val streamObj = embedStream?.jsonObject
+            ?: streams.firstOrNull()?.runCatching { jsonObject }.getOrNull()
+            ?: return null
+        val embed = streamObj["embed"]?.jsonPrimitive?.contentOrNull
+            ?: streamObj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (embed.isBlank()) return null
+        return AnivexaStream(url = embed, type = "embed")
     }
 
     /** Resolve the VidLink (TMDB) embed reference for the LAST anime server. */
@@ -290,21 +337,74 @@ class AnivexaApi(private val client: HttpClient) {
         this["isActive"]?.jsonPrimitive?.booleanOrNull == true ||
             this["priority"]?.jsonPrimitive?.intOrNull?.let { it >= 5 } == true
 
-    private fun requiresProviderPlaybackContext(url: String): Boolean {
-        val lower = url.lowercase()
-        return lower.contains("workers.dev") ||
-            lower.contains("vivibebe") ||
-            lower.contains("bibiemb") ||
-            lower.contains("vibevibe") ||
-            lower.contains("otakuhg") ||
-            lower.contains("otakuvid")
+    /** True when the stream entry points at playable media (not an embed page). */
+    private fun JsonObject.isDirectStream(): Boolean {
+        val type = this["type"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (type.equals("hls", ignoreCase = true) ||
+            type.equals("dash", ignoreCase = true) ||
+            type.equals("mp4", ignoreCase = true)
+        ) return true
+        val url = this["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        return url.contains(".m3u8", ignoreCase = true) ||
+            url.contains(".m3u", ignoreCase = true) ||
+            url.contains(".mp4", ignoreCase = true) ||
+            url.contains(".mpd", ignoreCase = true)
+    }
+
+    /**
+     * Build the player-headers JSON for a resolved stream. The worker computes
+     * the exact Referer/User-Agent each provider CDN demands (e.g. anikoto's
+     * kryntal CDN requires `Referer: https://megaplay.buzz/` — without it the
+     * CDN returns a 403 Cloudflare block page). Verified live: no Referer →
+     * 403; payload Referer → 200 playlist + subtitle tracks.
+     */
+    private fun buildHeadersJson(referer: String?, userAgent: String?): String? {
+        if (referer.isNullOrBlank() && userAgent.isNullOrBlank()) return null
+        return buildJsonObject {
+            if (!referer.isNullOrBlank()) {
+                put("Referer", JsonPrimitive(referer))
+                put("Origin", JsonPrimitive(referer.trimEnd('/')))
+            }
+            if (!userAgent.isNullOrBlank()) put("User-Agent", JsonPrimitive(userAgent))
+        }.toString()
+    }
+
+    /**
+     * Map the worker's `subtitles` array ([{url,label,srclang,format,default}])
+     * to the player's subtitle JSON shape ({file,label,srclang,kind}).
+     */
+    private fun buildSubtitlesJson(subtitles: JsonArray?): String? {
+        if (subtitles.isNullOrEmpty()) return null
+        val tracks = subtitles.mapNotNull { element ->
+            val obj = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+            val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            if (url.isBlank()) return@mapNotNull null
+            buildJsonObject {
+                put("file", JsonPrimitive(url))
+                obj["label"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+                    ?.let { put("label", JsonPrimitive(it)) }
+                obj["srclang"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+                    ?.let { put("srclang", JsonPrimitive(it)) }
+                put("kind", JsonPrimitive("subtitles"))
+            }
+        }
+        if (tracks.isEmpty()) return null
+        return buildJsonArray { tracks.forEach { add(it) } }.toString()
     }
 }
 
 /** A resolved Anivexa stream (direct HLS/MP4 or an embed page). */
 data class AnivexaStream(
     val url: String,
-    val type: String
+    val type: String,
+    /** Referer the provider CDN requires (stream entry or payload headers). */
+    val referer: String? = null,
+    /** User-Agent the provider CDN expects (payload headers). */
+    val userAgent: String? = null,
+    /** Ready-to-use JSON object of HTTP headers for the player, or null. */
+    val headersJson: String? = null,
+    /** JSON array of soft-subtitle tracks ({file,label,srclang,kind}), or null. */
+    val subtitlesJson: String? = null
 ) {
     val isDirect: Boolean
         get() = type.equals("hls", ignoreCase = true) ||

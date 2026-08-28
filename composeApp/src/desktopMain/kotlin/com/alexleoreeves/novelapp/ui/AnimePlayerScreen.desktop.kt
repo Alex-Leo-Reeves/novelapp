@@ -57,6 +57,7 @@ actual fun AnimePlayerScreen(
     onPreviewFinished: () -> Unit,
     contentKind: String,
     subtitlesJson: String?,
+    streamHeadersJson: String?,
     onBack: () -> Unit
 ) {
     // Free-preview cap: hard wall-clock timer that ends playback on all paths.

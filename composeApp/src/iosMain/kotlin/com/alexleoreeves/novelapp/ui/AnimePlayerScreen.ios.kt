@@ -69,6 +69,7 @@ actual fun AnimePlayerScreen(
     onPreviewFinished: () -> Unit,
     contentKind: String,
     subtitlesJson: String?,
+    streamHeadersJson: String?,
     onBack: () -> Unit
 ) {
     val isLocalPath = remember(streamUrl) { streamUrl.isIosLocalMediaPath() }

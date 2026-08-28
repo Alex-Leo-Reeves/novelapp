@@ -69,6 +69,7 @@ actual fun AnimePlayerScreen(
     onPreviewFinished: () -> Unit,
     contentKind: String,
     subtitlesJson: String?,
+    streamHeadersJson: String?,
     onBack: () -> Unit
 ) {
     val isDonghua = contentKind.equals("donghua", ignoreCase = true)
@@ -110,6 +111,9 @@ actual fun AnimePlayerScreen(
     var resolveError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     var resolveFailed by remember(streamUrl, retryKey) { mutableStateOf(false) }
     var playerError by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
+    // 0 = play the direct provider URL; 1 = retry through our backend HLS proxy
+    // (mirrors AniVault's api/proxy/hls) when the CDN rejects the direct fetch.
+    var playbackAttempt by remember(streamUrl, retryKey) { mutableStateOf(0) }
 
     // Audio language — default
     val defaultAudioLang = when {
@@ -164,7 +168,7 @@ actual fun AnimePlayerScreen(
     }
 
     // Resolve stream URL via embed scraping
-    LaunchedEffect(streamUrl, retryKey) {
+    LaunchedEffect(streamUrl, retryKey, playbackAttempt) {
         isResolving = true
         resolveError = null
         resolveFailed = false
@@ -182,7 +186,9 @@ actual fun AnimePlayerScreen(
         }
 
         if (candidate.isDirectPlayableMediaUrl()) {
-            resolvedUrl = candidate
+            resolvedUrl = if (playbackAttempt >= 1) {
+                candidate.toProxiedStreamUrl(streamHeadersJson) ?: candidate
+            } else candidate
             resolvedSourceUrl = candidate
             // Don't hardcode null — CinePro may have passed subtitles via the streamUrl param
             // subtitlesJson is already set from scraped results; keep whatever we have.
@@ -220,7 +226,7 @@ actual fun AnimePlayerScreen(
         if (resolvedUrl != null) {
             val url = resolvedUrl!!
             val cache = NovelAppVideoCache.get(context)
-            val requestHeaders = resolvedSourceUrl.playerHeaders()
+            val requestHeaders = resolvedSourceUrl.playerHeaders(streamHeadersJson)
             val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent(PLAYER_USER_AGENT)
                 .setDefaultRequestProperties(requestHeaders)
@@ -330,6 +336,10 @@ actual fun AnimePlayerScreen(
                     if (isAudioCodecTimeout && audioCodecRetries < maxAudioCodecRetries) {
                         playerError = "Audio codec glitch — retrying... (${audioCodecRetries + 1}/$maxAudioCodecRetries)"
                         audioCodecRetries++
+                    } else if (playbackAttempt == 0 && !streamHeadersJson.isNullOrBlank()) {
+                        // Direct fetch rejected (CDN hotlink/egress block) — retry
+                        // once through our backend HLS proxy before failing.
+                        playbackAttempt = 1
                     } else {
                         playerError = error.localizedMessage ?: "Stream failed to load."
                     }
@@ -944,6 +954,20 @@ private object NovelAppVideoCache {
     }
 }
 
+/**
+ * Route a stream through our backend HLS proxy (`/api/anivexa/proxy?url=&ref=`),
+ * which fetches the upstream with the provider-required Referer and rewrites
+ * playlist URLs to stay inside the proxy — same technique AniVault uses.
+ */
+private fun String.toProxiedStreamUrl(headersJson: String?): String? {
+    if (isBlank()) return null
+    val referer = if (headersJson.isNullOrBlank()) "" else runCatching {
+        org.json.JSONObject(headersJson).optString("Referer")
+    }.getOrNull().orEmpty()
+    val base = AppReleaseConfig.API_BASE_URL.trimEnd('/')
+    return "$base/anivexa/proxy?url=" + android.net.Uri.encode(this) + "&ref=" + android.net.Uri.encode(referer)
+}
+
 private fun String.playerReferer(): String {
     val uri = runCatching { Uri.parse(this) }.getOrNull()
     return if (uri != null) "${uri.scheme}://${uri.host}/" else "https://google.com/"
@@ -954,13 +978,34 @@ private fun String.playerOrigin(): String {
     return if (uri != null) "${uri.scheme}://${uri.host}" else "https://google.com"
 }
 
-private fun String.playerHeaders(): Map<String, String> = mapOf(
-    "User-Agent" to PLAYER_USER_AGENT,
-    "Referer" to playerReferer(),
-    "Origin" to playerOrigin(),
-    "Accept" to "*/*",
-    "Accept-Language" to "en-US,en;q=0.9"
-)
+private fun String.playerHeaders(headersJson: String? = null): Map<String, String> {
+    // Base headers derived from the stream URL itself. Provider CDNs usually
+    // want a Referer of THEIR EMBED PARTNER (e.g. anikoto streams want
+    // Referer: https://megaplay.buzz/), which the worker tells us exactly —
+    // payload headers override these derived values when present.
+    val base = mutableMapOf(
+        "User-Agent" to PLAYER_USER_AGENT,
+        "Referer" to playerReferer(),
+        "Origin" to playerOrigin(),
+        "Accept" to "*/*",
+        "Accept-Language" to "en-US,en;q=0.9"
+    )
+    if (!headersJson.isNullOrBlank()) {
+        runCatching {
+            val obj = org.json.JSONObject(headersJson)
+            for (key in obj.keys()) {
+                val value = obj.optString(key)
+                if (value.isBlank()) continue
+                if (key.equals("User-Agent", ignoreCase = true)) {
+                    base["User-Agent"] = value
+                } else {
+                    base[key] = value
+                }
+            }
+        }
+    }
+    return base
+}
 
 private const val PLAYER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 

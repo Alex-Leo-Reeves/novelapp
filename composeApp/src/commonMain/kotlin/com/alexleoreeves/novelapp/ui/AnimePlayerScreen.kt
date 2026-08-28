@@ -17,6 +17,9 @@ import com.alexleoreeves.novelapp.data.AppTheme
  * @param onBack          Called when the user exits the player
  * @param contentKind     "anime" for Japanese anime, "donghua" for Chinese content,
  *                        empty string for regular content with no audio/sub controls
+ * @param streamHeadersJson  Optional JSON object of HTTP headers (Referer/Origin/
+ *                           User-Agent) the provider CDN requires — derived from
+ *                           the Anivexa watch payload so CDN hotlink checks pass.
  */
 @Composable
 expect fun AnimePlayerScreen(
@@ -29,5 +32,6 @@ expect fun AnimePlayerScreen(
     onPreviewFinished: () -> Unit = {},
     contentKind: String = "",
     subtitlesJson: String? = null,
+    streamHeadersJson: String? = null,
     onBack: () -> Unit
 )

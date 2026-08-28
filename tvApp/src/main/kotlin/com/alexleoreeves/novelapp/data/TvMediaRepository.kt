@@ -69,7 +69,8 @@ class TvMediaRepository {
     suspend fun fetchVideoEpisodes(
         item: UnifiedSearchResult,
         animeServer: AnimeServer? = null,
-        donghuaServer: DonghuaServer? = null
+        donghuaServer: DonghuaServer? = null,
+        preferredAudio: String = "sub"
     ): List<Chapter> {
         val kind = item.mediaKind.lowercase()
         val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
@@ -147,7 +148,8 @@ class TvMediaRepository {
                         } else {
                             val anivexaEpisodes = anivexaApi.fetchEpisodes(
                                 provider = effectiveAnimeServer.anivexaProviderKey.orEmpty(),
-                                anilistId = anilistId
+                                anilistId = anilistId,
+                                preferredAudio = preferredAudio
                             ).map { ep ->
                                 Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
                             }

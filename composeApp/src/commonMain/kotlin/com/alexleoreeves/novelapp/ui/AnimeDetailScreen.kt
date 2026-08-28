@@ -30,7 +30,10 @@ import kotlinx.coroutines.launch
  * @param repository    The unified search repository used to fetch episode lists
  * @param currentTheme  App theme reference for styling
  * @param downloadRepo  Downloads tracking repository
- * @param onPlayEpisode Callback invoked with a .m3u8 stream URL when user taps play
+ * @param onPlayEpisode Callback invoked with a direct stream URL, the episode
+ *                      title, the provider-required HTTP headers JSON (Referer/
+ *                      User-Agent — may be null) and the soft-subtitle tracks
+ *                      JSON (may be null) when the user taps play
  * @param onBack        Navigation callback
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,7 +44,7 @@ fun AnimeDetailScreen(
     currentTheme: AppTheme,
     downloadRepo: LocalDownloadRepository,
     isPremium: Boolean = false,
-    onPlayEpisode: (streamUrl: String, episodeTitle: String) -> Unit,
+    onPlayEpisode: (streamUrl: String, episodeTitle: String, headersJson: String?, subtitlesJson: String?) -> Unit,
     onPlayMaEmbed: (embedUrl: String, episodeTitle: String) -> Unit = { _, _ -> },
     onBack: () -> Unit,
     requireAuth: (() -> Unit) -> Unit
@@ -57,6 +60,9 @@ fun AnimeDetailScreen(
     var selectedServer by remember {
         mutableStateOf(AnimeServer.ALL_IN_ORDER.indexOf(AnimeServer.ANINEKO).coerceAtLeast(0))
     }
+    // Dub/Sub preference (like AniVault's language toggle) — applies to the
+    // Anivexa providers, which expose separate sub and dub episode lists.
+    var preferredAudio by remember { mutableStateOf("sub") }
     var seasonChoices by remember(anime.id) { mutableStateOf(listOf(anime.toInitialSeasonChoice())) }
     var selectedSeasonId by remember(anime.id) { mutableStateOf(anime.id) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -79,7 +85,7 @@ fun AnimeDetailScreen(
     }
 
     // Load episodes on mount
-    LaunchedEffect(anime.id, selectedServer, selectedSeason.id) {
+    LaunchedEffect(anime.id, selectedServer, selectedSeason.id, preferredAudio) {
         isLoadingEpisodes = true
         try {
             val server = currentAnimeServer
@@ -87,7 +93,8 @@ fun AnimeDetailScreen(
                 // Anivexa providers are keyed by AniList ID (the season id).
                 repository.fetchAnivexaEpisodes(
                     provider = server.anivexaProviderKey.orEmpty(),
-                    anilistId = selectedSeason.id.toString()
+                    anilistId = selectedSeason.id.toString(),
+                    preferredAudio = preferredAudio
                 )
             } else if (server.usesClientScraper) {
                 // Anivault trio (AnimeHeaven / AnimePahe / AniDao): episode list is
@@ -413,6 +420,28 @@ fun AnimeDetailScreen(
                         )
                     }
                 }
+                if (currentAnimeServer.isAnivexa) {
+                    // ── Dub/Sub selector — sits ABOVE the server tabs, like AniVault ──
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 4.dp)
+                    ) {
+                        listOf("sub" to "SUB", "dub" to "DUB").forEach { (key, label) ->
+                            FilterChip(
+                                selected = preferredAudio == key,
+                                onClick = { preferredAudio = key },
+                                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = currentTheme.accentColor(),
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
@@ -542,7 +571,12 @@ fun AnimeDetailScreen(
                                             val isDirect = resolvedStream?.isDirect == true || (embedRef == null && !server.usesClientScraper)
                                             val playTitle = "${selectedSeason.displayTitle} – EP ${episode.episodeNumber}"
                                             if (isDirect) {
-                                                onPlayEpisode(playUrl, playTitle)
+                                                onPlayEpisode(
+                                                    playUrl,
+                                                    playTitle,
+                                                    resolvedStream?.headersJson,
+                                                    resolvedStream?.subtitlesJson
+                                                )
                                             } else {
                                                 onPlayMaEmbed(playUrl, playTitle)
                                             }

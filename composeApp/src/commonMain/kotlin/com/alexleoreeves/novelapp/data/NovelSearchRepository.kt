@@ -1015,8 +1015,12 @@ class NovelSearchRepository(
     // ─────────────────────────────────────────────────────────────────────────
 
     /** Fetch the sub/dub episode list for an Anivexa provider by AniList ID. */
-    suspend fun fetchAnivexaEpisodes(provider: String, anilistId: String): List<AnimeEpisode> =
-        anivexaApi.fetchEpisodes(provider, anilistId)
+    suspend fun fetchAnivexaEpisodes(
+        provider: String,
+        anilistId: String,
+        preferredAudio: String = "sub"
+    ): List<AnimeEpisode> =
+        anivexaApi.fetchEpisodes(provider, anilistId, preferredAudio)
 
     /** Resolve an `anivexa://` episode marker to a playable stream (HLS/MP4/embed). */
     suspend fun resolveAnivexaStream(episodeUrl: String): AnivexaStream? =

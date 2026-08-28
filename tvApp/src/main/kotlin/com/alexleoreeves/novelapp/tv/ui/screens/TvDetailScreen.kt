@@ -99,6 +99,8 @@ fun TvDetailScreen(
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
     var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
+    // Dub/Sub preference for Anivexa providers (like AniVault's toggle).
+    var preferredAudio by remember { mutableStateOf("sub") }
     var statusText by remember { mutableStateOf("") }
     // Anime misroute escape hatch: when an item flagged as anime returns no
     // episodes from ANY anime provider, fall back to the generic TV/movie
@@ -119,7 +121,7 @@ fun TvDetailScreen(
     val mountedVolumes by mediaCache?.volumes?.collectAsState() ?: remember { mutableStateOf<List<UsbVolume>>(emptyList()) }
     var pendingStorageChapter by remember { mutableStateOf<Chapter?>(null) }
 
-    LaunchedEffect(item, selectedAnimeServer, selectedDonghuaServer) {
+    LaunchedEffect(item, selectedAnimeServer, selectedDonghuaServer, preferredAudio) {
         isLoading = true
         errorMsg = null
         statusText = ""
@@ -129,7 +131,7 @@ fun TvDetailScreen(
                 if (isDonghua) {
                     mediaRepo.fetchVideoEpisodes(item, donghuaServer = selectedDonghuaServer)
                 } else if (item.isAnime) {
-                    mediaRepo.fetchVideoEpisodes(item, selectedAnimeServer)
+                    mediaRepo.fetchVideoEpisodes(item, selectedAnimeServer, preferredAudio = preferredAudio)
                 } else {
                     mediaRepo.fetchVideoEpisodes(item)
                 }
@@ -656,6 +658,29 @@ fun TvDetailScreen(
                         // Anime uses its own 18-server list: 13 Anivexa-API
                         // providers (keyed by AniList ID) + 3 Anivault +
                         // VidLink (17) + VidSrc.to LAST (18).
+                        if (selectedAnimeServer.isAnivexa) {
+                            // ── Dub/Sub selector — above the server row, like AniVault ──
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            ) {
+                                items(listOf("sub" to "SUB", "dub" to "DUB")) { (key, label) ->
+                                    val isLangSelected = preferredAudio == key
+                                    var langFocused by remember { mutableStateOf(false) }
+                                    Surface(
+                                        onClick = { preferredAudio = key },
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if (isLangSelected) Color(0xFF00BFFF) else if (langFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                        border = if (langFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                        modifier = Modifier.height(36.dp).onFocusChanged { langFocused = it.isFocused }
+                                    ) {
+                                        Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)

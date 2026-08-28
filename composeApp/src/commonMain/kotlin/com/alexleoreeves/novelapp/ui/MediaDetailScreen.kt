@@ -37,7 +37,7 @@ fun MediaDetailScreen(
     downloadRepo: LocalDownloadRepository,
     requireAuth: (() -> Unit) -> Unit,
     onSubscribe: () -> Unit,
-    onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?, subtitlesJson: String?) -> Unit,
+    onPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?, subtitlesJson: String?, headersJson: String?) -> Unit,
     onPlayMaEmbed: (embedUrl: String, title: String) -> Unit = { _, _ -> },
     // Fail closed: if a caller only supplies onPlayMaEmbed and a preview limit
     // is set, refuse to play rather than drop the limit and bypass the gate.
@@ -110,16 +110,18 @@ fun MediaDetailScreen(
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
     var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
+    // Dub/Sub preference for Anivexa providers (like AniVault's toggle).
+    var preferredAudio by remember { mutableStateOf("sub") }
 
     val freeMoviePreviewMs = 20 * 60 * 1000L
     val freeEpisodePreviewMs = 5 * 60 * 1000L
 
     fun playWithServer(embedUrl: String, title: String, previewLimitMs: Long?) {
-        onPlayStream(embedUrl, title, previewLimitMs, null)
+        onPlayStream(embedUrl, title, previewLimitMs, null, null)
     }
 
     fun playEpisodeWithServer(embedUrl: String, title: String) {
-        onPlayStream(embedUrl, title, if (isPremium) null else freeEpisodePreviewMs, null)
+        onPlayStream(embedUrl, title, if (isPremium) null else freeEpisodePreviewMs, null, null)
     }
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper =
@@ -456,7 +458,7 @@ fun MediaDetailScreen(
         }
     }
 
-    LaunchedEffect(item.detailPageUrl, selectedDonghuaServer, selectedAnimeServer) {
+    LaunchedEffect(item.detailPageUrl, selectedDonghuaServer, selectedAnimeServer, preferredAudio) {
         providerTmdbId = ""
         providerTmdbType = "tv"
         isLoadingEpisodes = true
@@ -498,7 +500,8 @@ fun MediaDetailScreen(
                     } else {
                         anivexaApi.fetchEpisodes(
                             provider = selectedAnimeServer.anivexaProviderKey.orEmpty(),
-                            anilistId = anilistId
+                            anilistId = anilistId,
+                            preferredAudio = preferredAudio
                         ).map { ep ->
                             MediaEpisode(episodeNumber = ep.episodeNumber, title = ep.title, url = ep.url)
                         }
@@ -626,7 +629,8 @@ fun MediaDetailScreen(
                                 source.url,
                                 "${item.title} - ${ep.title}",
                                 if (isPremium) null else freeEpisodePreviewMs,
-                                subtitlesJson
+                                subtitlesJson,
+                                null
                             )
                             return@launch
                         }
@@ -657,6 +661,7 @@ fun MediaDetailScreen(
                     embedUrl,
                     "${item.title} - ${ep.title}",
                     if (isPremium) null else freeEpisodePreviewMs,
+                    null,
                     null
                 )
                 return@launch
@@ -680,7 +685,13 @@ fun MediaDetailScreen(
                             return@launch
                         }
                         if (stream.isDirect) {
-                            onPlayStream(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs, null)
+                            onPlayStream(
+                                stream.url,
+                                "${item.title} - ${ep.title}",
+                                if (isPremium) null else freeMoviePreviewMs,
+                                stream.subtitlesJson,
+                                stream.headersJson
+                            )
                             return@launch
                         }
                         onPlayMaEmbedWithLimit(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs)
@@ -867,6 +878,42 @@ fun MediaDetailScreen(
                         )
                     }
                 } else if (isAnimeItem) {
+                    // ── Dub/Sub selector — above the server chips, like AniVault ──
+                    if (selectedAnimeServer.isAnivexa) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 20.dp, vertical = 4.dp)
+                        ) {
+                            listOf("sub" to "SUB", "dub" to "DUB").forEach { (key, label) ->
+                                FilterChip(
+                                    selected = preferredAudio == key,
+                                    onClick = { preferredAudio = key },
+                                    label = {
+                                        Text(
+                                            label,
+                                            color = if (preferredAudio == key) Color.White else currentTheme.subTextColor(),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = currentTheme.accentColor(),
+                                        containerColor = currentTheme.cardColor(),
+                                        labelColor = currentTheme.subTextColor()
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = preferredAudio == key,
+                                        selectedBorderColor = currentTheme.accentColor(),
+                                        borderColor = currentTheme.subTextColor().copy(0.3f)
+                                    ),
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                            }
+                        }
+                    }
                     // Anime-only selector: 13 Anivexa providers + VidLink LAST.
                     AnimeServer.ALL_IN_ORDER.forEach { server ->
                         val isSelected = selectedAnimeServer == server
@@ -940,7 +987,7 @@ fun MediaDetailScreen(
                             val videoId = item.id.removePrefix(prefix)
                             val streamUrl = youtubeNollywoodScraper.extractStreamUrl(videoId)
                             if (streamUrl != null) {
-                                onPlayStream(streamUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null)
+                                onPlayStream(streamUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null)
                             } else {
                                 statusText = "Could not resolve stream."
                             }
@@ -999,7 +1046,7 @@ fun MediaDetailScreen(
                                         statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
                                         if (source.url.isDirectPlayableStreamUrl()) {
                                             statusText = ""
-                                            onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson)
+                                            onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson, null)
                                             return@launch
                                         }
                                     }
@@ -1019,7 +1066,7 @@ fun MediaDetailScreen(
                                 statusText = "Server 5: Passing VidLink to ExoPlayer scraper..."
                                 val embedUrl = StreamServer.VIDLINK_EXO.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
                                 statusText = ""
-                                onPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null)
+                                onPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null)
                                 return@launch
                             }
                             val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")

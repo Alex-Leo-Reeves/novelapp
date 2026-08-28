@@ -19,6 +19,7 @@
 //    GET /api/anivexa/embed/{anilistId}?ep={n}          -> { tmdbId, type, season, episode }
 //    GET /api/anivexa/search?q={title}                  -> { anilistId, title }
 //    GET /api/anivexa/map/{anilistId}                   -> { mappings } (AniList -> TMDB/AniDB/TVDb id map)
+//    GET /api/anivexa/proxy?url=&ref=&ua=               -> HLS proxy (spoofed Referer, playlists rewritten)
 //
 //  Anivexa providers (13): mkissa, reanime, anikoto, animegg, anineko,
 //  anidbapp, 2dhive, animenosub, anizone, anibd, senshi, kaa, animedunya.
@@ -254,6 +255,119 @@ async function handleAnivexaMap(response, pathname) {
 }
 
 /**
+ * /api/anivexa/proxy?url={encoded}&ref={referer}&ua={ua} — HLS proxy.
+ *
+ * Mirrors the technique AniVault (api.anivault.co/api/proxy/hls) and the
+ * Anivexa reference site (khankirpola...workers.dev/p/) use: fetch the
+ * upstream playlist/segment with the provider-required Referer (e.g. anikoto's
+ * kryntal CDN demands `Referer: https://megaplay.buzz/` — verified live: no
+ * Referer → 403 Cloudflare block), then rewrite every nested playlist URL so
+ * variant playlists and segments keep flowing through this proxy. Used as the
+ * playback fallback when the app's direct-with-headers fetch is rejected.
+ */
+const PROXY_TIMEOUT_MS = 55 * 1000;
+const PROXY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+function proxyTargetBlocked(target) {
+    try {
+        const u = new URL(target);
+        if (u.protocol !== "http:" && u.protocol !== "https:") return true;
+        const host = u.hostname.toLowerCase();
+        if (host === "localhost" || host.endsWith(".local") || host === "::1" || host === "[::1]") return true;
+        if (/^127\.|^10\.|^0\.|^169\.254\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+        return false;
+    } catch {
+        return true;
+    }
+}
+
+function rewriteHlsToProxy(body, baseUrl, referer, userAgent) {
+    const proxied = (targetUrl) =>
+        "/api/anivexa/proxy?url=" + encodeURIComponent(targetUrl) +
+        "&ref=" + encodeURIComponent(referer || "") +
+        "&ua=" + encodeURIComponent(userAgent || "");
+    return body.split("\n").map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return line;
+        if (trimmed.startsWith("#")) {
+            // Rewrite URI="..." attributes (EXT-X-KEY / EXT-X-MAP / EXT-X-MEDIA ...)
+            return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+                try {
+                    return 'URI="' + proxied(new URL(uri, baseUrl).toString()) + '"';
+                } catch {
+                    return match;
+                }
+            });
+        }
+        try {
+            return proxied(new URL(trimmed, baseUrl).toString());
+        } catch {
+            return line;
+        }
+    }).join("\n");
+}
+
+async function handleAnivexaProxy(response, requestUrl) {
+    const target = String(requestUrl.searchParams.get("url") || "").trim();
+    const ref = String(requestUrl.searchParams.get("ref") || "").trim();
+    const ua = String(requestUrl.searchParams.get("ua") || "").trim() || PROXY_UA;
+    if (!target || proxyTargetBlocked(target)) {
+        return sendApiError(response, 400, "A valid http(s) url parameter is required.");
+    }
+    const referer = ref || new URL(target).origin + "/";
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+    let upstream;
+    try {
+        upstream = await fetch(target, {
+            headers: {
+                "User-Agent": ua,
+                "Referer": referer,
+                "Origin": referer.replace(/\/$/, ""),
+                "Accept": "*/*"
+            },
+            signal: controller.signal,
+            redirect: "follow"
+        });
+    } catch (error) {
+        clearTimeout(timeout);
+        return sendApiError(response, 502, "Upstream fetch failed: " + (error.message || "unknown"));
+    }
+    clearTimeout(timeout);
+
+    const contentType = upstream.headers.get("content-type") || "";
+    const isPlaylist = target.split("?")[0].toLowerCase().endsWith(".m3u8") ||
+        contentType.includes("mpegurl") || contentType.includes("m3u");
+    const cors = corsHeaders();
+
+    if (isPlaylist) {
+        const text = await upstream.text();
+        const rewritten = rewriteHlsToProxy(text, target, referer, ua);
+        response.writeHead(200, {
+            "content-type": "application/vnd.apple.mpegurl",
+            "cache-control": "no-store",
+            ...cors
+        });
+        return response.end(rewritten);
+    }
+
+    // Segments / binary payloads: stream straight through.
+    response.writeHead(upstream.status, {
+        "content-type": contentType || "application/octet-stream",
+        "cache-control": "no-store",
+        ...cors
+    });
+    if (!upstream.body) return response.end();
+    const { Readable } = require("stream");
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.pipe(response);
+    nodeStream.on("error", () => {
+        try { response.end(); } catch (e) { /* already closed */ }
+    });
+}
+
+/**
  * Rank AniList candidates against the queried title and pick the strongest,
  * well-matched one. Returns null when NO candidate is a good match.
  *
@@ -287,7 +401,23 @@ function pickBestAnilistCandidate(query, mediaList) {
             return { media, title, score };
         })
         .filter((item) => item && item.score > 0)
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            // Tiebreaks when titles score identically: prefer a full TV series,
+            // then higher AniList popularity, then more episodes — so shorts,
+            // chibi spin-offs and specials lose to the main show.
+            const af = String((a.media && a.media.format) || "").toUpperCase();
+            const bf = String((b.media && b.media.format) || "").toUpperCase();
+            const aTv = af === "TV" ? 2 : af === "TV_SHORT" ? 1 : 0;
+            const bTv = bf === "TV" ? 2 : bf === "TV_SHORT" ? 1 : 0;
+            if (aTv !== bTv) return bTv - aTv;
+            const ap = Number((a.media && a.media.popularity) || 0);
+            const bp = Number((b.media && b.media.popularity) || 0);
+            if (bp !== ap) return bp - ap;
+            const ae = Number((a.media && a.media.episodes) || 0);
+            const be = Number((b.media && b.media.episodes) || 0);
+            return be - ae;
+        });
 
     const best = candidates[0];
     if (!best) return null;
@@ -318,7 +448,7 @@ async function handleAnivexaSearch(response, requestUrl) {
             method: "POST",
             headers: { "content-type": "application/json", accept: "application/json" },
             body: JSON.stringify({
-                query: "query ($search: String) { Page(page: 1, perPage: 12) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id title { romaji english } } } }",
+                query: "query ($search: String) { Page(page: 1, perPage: 12) { media(search: $search, type: ANIME, sort: SEARCH_MATCH) { id title { romaji english } format episodes popularity } } }",
                 variables: { search: cleanQuery }
             }),
             signal: controller.signal
@@ -368,6 +498,9 @@ async function handleAnivexa(request, response, pathname, requestUrl) {
         }
         if (pathname === "/api/anivexa/search") {
             return await handleAnivexaSearch(response, requestUrl);
+        }
+        if (pathname === "/api/anivexa/proxy" || pathname.startsWith("/api/anivexa/proxy/")) {
+            return await handleAnivexaProxy(response, requestUrl);
         }
         return sendApiError(response, 404, "Anivexa route not found.");
     } catch (error) {
