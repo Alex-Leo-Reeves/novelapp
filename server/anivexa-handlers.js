@@ -18,6 +18,7 @@
 //                                                       -> { streams: [...] }
 //    GET /api/anivexa/embed/{anilistId}?ep={n}          -> { tmdbId, type, season, episode }
 //    GET /api/anivexa/search?q={title}                  -> { anilistId, title }
+//    GET /api/anivexa/map/{anilistId}                   -> { mappings } (AniList -> TMDB/AniDB/TVDb id map)
 //
 //  Anivexa providers (13): mkissa, reanime, anikoto, animegg, anineko,
 //  anidbapp, 2dhive, animenosub, anizone, anibd, senshi, kaa, animedunya.
@@ -106,6 +107,7 @@ async function forwardWorker(fullPath, urlSearch) {
 
 // ── Tiny in-memory TTL caches (Anivexa's own cache is disabled) ─────────────
 const mapCache = new Map(); // anilistId -> { tmdbId, type, season, cachedAt }
+const mapPayloadCache = new Map(); // anilistId -> { payload, cachedAt } (raw worker /map payload)
 const searchCache = new Map(); // normalized title -> { anilistId, title, cachedAt }
 
 function freshFrom(cache, key, ttlMs) {
@@ -219,6 +221,39 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
 }
 
 /**
+ * /api/anivexa/map/{anilistId} — passthrough of the worker's raw AniList ->
+ * TMDB/AniDB/TVDb id mapping payload.
+ *
+ * AnivexaApi.resolveTmdbIdForAnilist() calls GET {base}/map/{anilistId} and
+ * reads data.mappings.themoviedbId to VERIFY a bridged title actually maps to
+ * the expected TMDB show before keying the 13 Anivexa providers off it. The
+ * embedded nodebridge implements /map, but the backend handler only exposed
+ * episodes/watch/embed/search — so on the Render fallback path /map 404'd,
+ * resolveTmdbIdForAnilist returned null, and every TMDB-sourced anime
+ * (Dragon Ball Z included) silently lost its AniList id → 0 episodes on the
+ * 13 Anivexa servers. This route mirrors the bridge's normalizer exactly.
+ */
+async function handleAnivexaMap(response, pathname) {
+    const anilistId = pathname.replace("/api/anivexa/map/", "").split("/")[0];
+    if (!/^\d+$/.test(anilistId)) return sendApiError(response, 400, "anilistId must be numeric.");
+
+    const cacheKey = "rawmap:" + anilistId;
+    const cached = freshFrom(mapPayloadCache, cacheKey, EMBED_CACHE_TTL_MS);
+    if (cached) return sendApiData(response, 200, cached.payload);
+
+    const result = await forwardWorker(`/map/${anilistId}`);
+    if (!result) return sendApiError(response, 503, "Anivexa anime API is unavailable right now.");
+    if (!result.ok || !result.payload || result.payload.error) {
+        const msg = (result.payload && result.payload.error) || result.errorText || "Anivexa map lookup failed.";
+        return sendApiError(response, result.status >= 400 ? result.status : 502, msg);
+    }
+
+    // Cache the FULL payload so repeat /map + /embed calls share one worker hit.
+    mapPayloadCache.set(cacheKey, { payload: result.payload, cachedAt: Date.now() });
+    return sendApiData(response, 200, result.payload);
+}
+
+/**
  * Rank AniList candidates against the queried title and pick the strongest,
  * well-matched one. Returns null when NO candidate is a good match.
  *
@@ -327,6 +362,9 @@ async function handleAnivexa(request, response, pathname, requestUrl) {
         }
         if (pathname.startsWith("/api/anivexa/embed/")) {
             return await handleAnivexaEmbed(response, pathname, requestUrl);
+        }
+        if (pathname.startsWith("/api/anivexa/map/")) {
+            return await handleAnivexaMap(response, pathname);
         }
         if (pathname === "/api/anivexa/search") {
             return await handleAnivexaSearch(response, requestUrl);
