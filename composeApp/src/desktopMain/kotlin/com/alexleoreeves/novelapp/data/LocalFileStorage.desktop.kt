@@ -46,7 +46,8 @@ actual fun deleteDownloadedText(localPath: String) {
 actual suspend fun saveDownloadedVideo(
     parentId: String,
     episodeNumber: Int,
-    sourceUrl: String
+    sourceUrl: String,
+    headersJson: String?
 ): DownloadedVideoFile =
     DownloadedVideoFile(error = "Offline video downloads are only available on Android right now.")
 

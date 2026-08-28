@@ -116,7 +116,8 @@ class TvMediaCacheController(private val context: Context) {
         seasonNumber: Int = 0,
         coverUrl: String = "",
         maxBytes: Long = 0L,
-        maxFraction: Float = 0f
+        maxFraction: Float = 0f,
+        headersJson: String = ""
     ) {
         engine.send(
             DownloadCommand.Enqueue(
@@ -135,7 +136,8 @@ class TvMediaCacheController(private val context: Context) {
                     seasonNumber = seasonNumber,
                     coverUrl = coverUrl,
                     maxBytes = maxBytes,
-                    maxFraction = maxFraction
+                    maxFraction = maxFraction,
+                    headersJson = headersJson
                 )
             )
         )
@@ -156,7 +158,8 @@ class TvMediaCacheController(private val context: Context) {
         usbVolumeId: String,
         serverId: String = "",
         serverName: String = "",
-        subtitleUrl: String = ""
+        subtitleUrl: String = "",
+        headersJson: String = ""
     ): Boolean {
         val mounted = usbMonitor.volumes.value.any { it.id == usbVolumeId }
         if (!mounted) return false
@@ -173,7 +176,8 @@ class TvMediaCacheController(private val context: Context) {
                     usbVolumeId = usbVolumeId,
                     serverId = serverId,
                     serverName = serverName,
-                    subtitleUrl = subtitleUrl
+                    subtitleUrl = subtitleUrl,
+                    headersJson = headersJson
                 )
             )
         )

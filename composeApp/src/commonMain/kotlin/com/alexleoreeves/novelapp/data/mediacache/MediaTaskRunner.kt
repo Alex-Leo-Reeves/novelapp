@@ -50,7 +50,7 @@ class MediaTaskRunner(
         val bundlePath = bundlePathFor(request, volume)
 
         val probe = try {
-            transport.probe(request.sourceUrl)
+            transport.probe(request.sourceUrl, parseDownloadHeaders(request.headersJson))
         } catch (e: Exception) {
             return TaskRunResult.Failure(DownloadFailureReason.NETWORK, e.message)
         }
@@ -189,7 +189,8 @@ class MediaTaskRunner(
             mediaType = request.mediaType,
             seasonNumber = request.seasonNumber,
             coverUrl = request.coverUrl,
-            maxBytes = request.maxBytes
+            maxBytes = request.maxBytes,
+            headersJson = request.headersJson
         )
     }
 

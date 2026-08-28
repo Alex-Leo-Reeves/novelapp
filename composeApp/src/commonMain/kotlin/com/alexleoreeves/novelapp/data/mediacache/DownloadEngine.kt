@@ -244,6 +244,7 @@ class DownloadEngine(
             seasonNumber = manifest.seasonNumber,
             coverUrl = manifest.coverUrl,
             maxBytes = manifest.maxBytes,
-            maxFraction = manifest.maxFraction
+            maxFraction = manifest.maxFraction,
+            headersJson = manifest.headersJson
         )
 }

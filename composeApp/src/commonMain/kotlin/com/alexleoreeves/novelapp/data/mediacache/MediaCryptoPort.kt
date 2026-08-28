@@ -128,14 +128,19 @@ interface MediaBundleWriter {
 /** Network layer the engine drives. One instance per platform HTTP client. */
 interface MediaTransportPort {
     /** Issue HEAD (+ first range probe) to learn size/range support/content-type. */
-    suspend fun probe(url: String): MediaProbe
+    suspend fun probe(url: String, headers: Map<String, String> = emptyMap()): MediaProbe
 
     /**
      * Suspend-fetch ciphertext bytes for one byte range. Implementations must
      * return null on a transient failure so the scheduler can retry, and throw
      * only for fatal errors (e.g. HTTP 416 after resume is logically done).
      */
-    suspend fun fetchRange(url: String, start: Long, endInclusive: Long): ByteArray?
+    suspend fun fetchRange(
+        url: String,
+        start: Long,
+        endInclusive: Long,
+        headers: Map<String, String> = emptyMap()
+    ): ByteArray?
 
     /**
      * Fetch a complete small payload (subtitle `.srt`, sidecar file). Used by
@@ -144,7 +149,7 @@ interface MediaTransportPort {
      * Default implementation returns null so existing port implementations
      * keep compiling; platforms that support subtitle bundling override it.
      */
-    suspend fun fetchFull(url: String): ByteArray? = null
+    suspend fun fetchFull(url: String, headers: Map<String, String> = emptyMap()): ByteArray? = null
 }
 
 /** Whether a background chunk may currently run (network policy gate). */

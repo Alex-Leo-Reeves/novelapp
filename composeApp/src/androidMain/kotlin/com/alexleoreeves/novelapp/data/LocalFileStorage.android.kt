@@ -132,7 +132,8 @@ actual fun deleteDownloadedText(localPath: String) {
 actual suspend fun saveDownloadedVideo(
     parentId: String,
     episodeNumber: Int,
-    sourceUrl: String
+    sourceUrl: String,
+    headersJson: String?
 ): DownloadedVideoFile = withContext(Dispatchers.IO) {
     runCatching {
         if (!sourceUrl.startsWith("http", ignoreCase = true)) {
@@ -152,7 +153,7 @@ actual suspend fun saveDownloadedVideo(
         val mediaTitle = "${parentId.safePathPart()}_EP${episodeNumber}"
 
         if (sourceUrl.isHlsLikeUrl()) {
-            val saved = saveHlsDownload(sourceUrl, internalDir)
+            val saved = saveHlsDownload(sourceUrl, internalDir, headersJson)
             // Copy to public MediaStore as a playlist marker
             val ctx = AppContextHolder.applicationContext
             if (ctx != null && saved.success) {
@@ -166,7 +167,7 @@ actual suspend fun saveDownloadedVideo(
                 .takeIf { it.length in 2..5 }
                 ?: "mp4"
             val file = File(internalDir, "episode.$extension")
-            val size = downloadToFile(sourceUrl, file)
+            val size = downloadToFile(sourceUrl, file, headersJson)
 
             // Copy to public MediaStore for user access
             val ctx = AppContextHolder.applicationContext
@@ -248,9 +249,9 @@ private fun String.isHlsLikeUrl(): Boolean {
         Regex("""/(playlist|manifest|hls)(/|$)""").containsMatchIn(clean)
 }
 
-private fun saveHlsDownload(sourceUrl: String, dir: File): DownloadedVideoFile {
-    val masterText = downloadText(sourceUrl)
-    val (playlistUrl, playlistText) = selectMediaPlaylist(sourceUrl, masterText)
+private fun saveHlsDownload(sourceUrl: String, dir: File, headersJson: String?): DownloadedVideoFile {
+    val masterText = downloadText(sourceUrl, headersJson)
+    val (playlistUrl, playlistText) = selectMediaPlaylist(sourceUrl, masterText, headersJson)
     val playlistFile = File(dir, "playlist.m3u8")
     var totalBytes = 0L
     var segmentIndex = 0
@@ -265,7 +266,7 @@ private fun saveHlsDownload(sourceUrl: String, dir: File): DownloadedVideoFile {
                     if (keyUri.isNullOrBlank()) line else {
                         val keyUrl = resolveUrl(playlistUrl, keyUri)
                         val keyFile = File(dir, "key_${keyIndex++}.bin")
-                        totalBytes += downloadToFile(keyUrl, keyFile)
+                        totalBytes += downloadToFile(keyUrl, keyFile, headersJson)
                         line.replace("""URI="$keyUri"""", """URI="${keyFile.name}"""")
                     }
                 }
@@ -279,7 +280,7 @@ private fun saveHlsDownload(sourceUrl: String, dir: File): DownloadedVideoFile {
                         ?: "ts"
                     val segmentFile = File(dir, "seg_${segmentIndex.toString().padStart(5, '0')}.$extension")
                     segmentIndex += 1
-                    totalBytes += downloadToFile(segmentUrl, segmentFile)
+                    totalBytes += downloadToFile(segmentUrl, segmentFile, headersJson)
                     segmentFile.name
                 }
             }
@@ -289,7 +290,7 @@ private fun saveHlsDownload(sourceUrl: String, dir: File): DownloadedVideoFile {
     return DownloadedVideoFile(playlistFile.toURI().toString(), totalBytes + playlistFile.length())
 }
 
-private fun selectMediaPlaylist(sourceUrl: String, playlistText: String): Pair<String, String> {
+private fun selectMediaPlaylist(sourceUrl: String, playlistText: String, headersJson: String?): Pair<String, String> {
     if (!playlistText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) return sourceUrl to playlistText
     val lines = playlistText.lines()
     var nextUriIsVariant = false
@@ -299,7 +300,7 @@ private fun selectMediaPlaylist(sourceUrl: String, playlistText: String): Pair<S
             nextUriIsVariant = true
         } else if (nextUriIsVariant && trimmed.isNotBlank() && !trimmed.startsWith("#")) {
             val mediaUrl = resolveUrl(sourceUrl, trimmed)
-            return mediaUrl to downloadText(mediaUrl)
+            return mediaUrl to downloadText(mediaUrl, headersJson)
         }
     }
     return sourceUrl to playlistText
@@ -308,12 +309,12 @@ private fun selectMediaPlaylist(sourceUrl: String, playlistText: String): Pair<S
 private fun resolveUrl(baseUrl: String, value: String): String =
     URI(baseUrl).resolve(value).toString()
 
-private fun downloadText(url: String): String =
-    openConnection(url).inputStream.bufferedReader().use { it.readText() }
+private fun downloadText(url: String, headersJson: String?): String =
+    openConnection(url, headersJson).inputStream.bufferedReader().use { it.readText() }
 
-private fun downloadToFile(url: String, file: File): Long {
+private fun downloadToFile(url: String, file: File, headersJson: String?): Long {
     file.parentFile?.mkdirs()
-    openConnection(url).inputStream.use { input ->
+    openConnection(url, headersJson).inputStream.use { input ->
         file.outputStream().use { output ->
             input.copyTo(output)
         }
@@ -321,12 +322,33 @@ private fun downloadToFile(url: String, file: File): Long {
     return file.length()
 }
 
-private fun openConnection(url: String): HttpURLConnection =
+/**
+ * Opens a connection with the download UA plus any provider-required headers
+ * (Referer/Origin/User-Agent) parsed from the Anivexa watch payload. Provider
+ * CDNs like anikoto's kryntal host 403 plain requests — the Referer is what
+ * makes offline downloads work at all.
+ */
+private fun openConnection(url: String, headersJson: String? = null): HttpURLConnection =
     (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 20_000
         readTimeout = 60_000
         instanceFollowRedirects = true
-        setRequestProperty("User-Agent", DOWNLOAD_USER_AGENT)
+        var userAgent = DOWNLOAD_USER_AGENT
+        if (!headersJson.isNullOrBlank()) {
+            runCatching {
+                val obj = org.json.JSONObject(headersJson)
+                for (key in obj.keys()) {
+                    val value = obj.optString(key)
+                    if (value.isBlank()) continue
+                    if (key.equals("User-Agent", ignoreCase = true)) {
+                        userAgent = value
+                    } else {
+                        setRequestProperty(key, value)
+                    }
+                }
+            }
+        }
+        setRequestProperty("User-Agent", userAgent)
         setRequestProperty("Accept", "*/*")
         // Allow chunked streaming for large files
         setRequestProperty("Accept-Encoding", "identity")

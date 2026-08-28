@@ -238,7 +238,7 @@ class AnivexaApi(private val client: HttpClient) {
                 .startsWith("http", ignoreCase = true)
         }
         val streamObj = embedStream?.jsonObject
-            ?: streams.firstOrNull()?.runCatching { jsonObject }.getOrNull()
+            ?: streams.firstOrNull()?.runCatching { jsonObject }?.getOrNull()
             ?: return null
         val embed = streamObj["embed"]?.jsonPrimitive?.contentOrNull
             ?: streamObj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()

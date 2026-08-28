@@ -34,7 +34,7 @@ class SubtitleBundler(
         if (sourceUrl.isEmpty()) return ""
 
         val payload = try {
-            transport.fetchFull(sourceUrl)
+            transport.fetchFull(sourceUrl, parseDownloadHeaders(request.headersJson))
         } catch (e: Exception) {
             null
         } ?: return ""

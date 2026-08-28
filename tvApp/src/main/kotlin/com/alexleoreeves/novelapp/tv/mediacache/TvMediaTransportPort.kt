@@ -35,11 +35,13 @@ class TvMediaTransportPort : MediaTransportPort {
         }
     }
 
-    override suspend fun probe(url: String): MediaProbe {
+    override suspend fun probe(url: String, headers: Map<String, String>): MediaProbe {
         // HEAD can be filtered by some CDNs; treat failure as "unknown" and
         // fall through to the Range GET, which is authoritative anyway.
         val head = try {
-            client.head(url)
+            client.head(url) {
+                headers.forEach { (key, value) -> header(key, value) }
+            }
         } catch (e: Exception) {
             null
         }
@@ -48,6 +50,7 @@ class TvMediaTransportPort : MediaTransportPort {
         val range = try {
             client.get(url) {
                 header(HttpHeaders.Range, "bytes=0-0")
+                headers.forEach { (key, value) -> header(key, value) }
             }
         } catch (e: Exception) {
             return MediaProbe(
@@ -74,10 +77,16 @@ class TvMediaTransportPort : MediaTransportPort {
         )
     }
 
-    override suspend fun fetchRange(url: String, start: Long, endInclusive: Long): ByteArray? {
+    override suspend fun fetchRange(
+        url: String,
+        start: Long,
+        endInclusive: Long,
+        headers: Map<String, String>
+    ): ByteArray? {
         return try {
             val response = client.get(url) {
                 header(HttpHeaders.Range, "bytes=$start-$endInclusive")
+                headers.forEach { (key, value) -> header(key, value) }
             }
             if (response.status == HttpStatusCode.RequestedRangeNotSatisfiable) {
                 // Resume race: all bytes are already in the bundle. Null tells
@@ -94,9 +103,11 @@ class TvMediaTransportPort : MediaTransportPort {
         }
     }
 
-    override suspend fun fetchFull(url: String): ByteArray? {
+    override suspend fun fetchFull(url: String, headers: Map<String, String>): ByteArray? {
         return try {
-            val response = client.get(url)
+            val response = client.get(url) {
+                headers.forEach { (key, value) -> header(key, value) }
+            }
             if (!response.status.isSuccess()) return null
             val bytes = response.bodyAsBytes()
             if (bytes.isEmpty()) null else bytes

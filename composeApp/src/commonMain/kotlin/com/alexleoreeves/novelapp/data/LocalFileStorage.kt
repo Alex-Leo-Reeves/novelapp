@@ -3,7 +3,7 @@ package com.alexleoreeves.novelapp.data
 expect fun saveDownloadedText(novelId: String, chapterNumber: Int, text: String): String
 expect fun loadDownloadedText(localPath: String): String
 expect fun deleteDownloadedText(localPath: String)
-expect suspend fun saveDownloadedVideo(parentId: String, episodeNumber: Int, sourceUrl: String): DownloadedVideoFile
+expect suspend fun saveDownloadedVideo(parentId: String, episodeNumber: Int, sourceUrl: String, headersJson: String? = null): DownloadedVideoFile
 expect fun isDownloadedLocalFileAvailable(localPath: String): Boolean
 expect suspend fun extractStreamFromEmbed(embedUrl: String, timeoutMs: Long = 22_000L): String?
 

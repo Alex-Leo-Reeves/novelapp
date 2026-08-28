@@ -4,6 +4,7 @@ package com.alexleoreeves.novelapp.data
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.plugins.DefaultRequest
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsBytes
@@ -14,6 +15,10 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
@@ -114,7 +119,8 @@ actual fun deleteDownloadedText(localPath: String) {
 actual suspend fun saveDownloadedVideo(
     parentId: String,
     episodeNumber: Int,
-    sourceUrl: String
+    sourceUrl: String,
+    headersJson: String?
 ): DownloadedVideoFile = withContext(Dispatchers.Default) {
     runCatching {
         if (!sourceUrl.startsWith("http", ignoreCase = true)) {
@@ -125,7 +131,18 @@ actual suspend fun saveDownloadedVideo(
         NSFileManager.defaultManager.removeItemAtPath(dir, error = null)
         ensureDirectory(dir)
 
-        val client = HttpClient(Darwin) { expectSuccess = false }
+        // Provider CDNs (anikoto's kryntal host etc.) reject plain requests
+        // with 403 — attach the Referer/UA the worker reports to EVERY request
+        // the download client makes (playlist, variants, keys, segments).
+        val extraHeaders = parseIosDownloadHeaders(headersJson)
+        val client = HttpClient(Darwin) {
+            expectSuccess = false
+            if (extraHeaders.isNotEmpty()) {
+                install(DefaultRequest) {
+                    extraHeaders.forEach { (key, value) -> headers.append(key, value) }
+                }
+            }
+        }
         try {
             if (sourceUrl.isIosHlsLikeUrl()) {
                 saveIosHlsDownload(client, sourceUrl, dir)
@@ -176,6 +193,17 @@ private fun String.isIosHlsLikeUrl(): Boolean {
     val clean = substringBefore("?").substringBefore("#").lowercase()
     return clean.endsWith(".m3u8") ||
         Regex("""/(playlist|manifest|hls)(/|$)""").containsMatchIn(clean)
+}
+
+/** Parse the provider-required headers JSON ({Referer, Origin, User-Agent}). */
+private fun parseIosDownloadHeaders(headersJson: String?): Map<String, String> {
+    if (headersJson.isNullOrBlank()) return emptyMap()
+    return runCatching {
+        Json.parseToJsonElement(headersJson).jsonObject.entries.mapNotNull { (key, value) ->
+            (value as? JsonPrimitive)?.contentOrNull
+                ?.takeIf { it.isNotBlank() }?.let { key to it }
+        }.toMap()
+    }.getOrDefault(emptyMap())
 }
 
 private suspend fun downloadIosToFile(client: HttpClient, url: String, filePath: String) {

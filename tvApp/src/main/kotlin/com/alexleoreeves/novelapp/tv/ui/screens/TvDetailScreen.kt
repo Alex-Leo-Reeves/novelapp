@@ -193,6 +193,7 @@ fun TvDetailScreen(
                 statusText = "Could not resolve a download link. Try another server."
                 return@launch
             }
+            val downloadHeadersJson = mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
             val derivedMediaType = when {
                 isDonghua -> "DONGHUA"
                 item.isAnime -> "ANIME"
@@ -220,7 +221,8 @@ fun TvDetailScreen(
                 mediaType = derivedMediaType,
                 seasonNumber = ch.seasonNumber,
                 coverUrl = item.coverUrl,
-                maxFraction = effectiveMaxFraction
+                maxFraction = effectiveMaxFraction,
+                headersJson = downloadHeadersJson.orEmpty()
             )
             statusText = "Download started — see Downloads (active queue)."
         }
@@ -247,6 +249,7 @@ fun TvDetailScreen(
                 statusText = "Could not resolve a download link. Try another server."
                 return@launch
             }
+            val downloadHeadersJson = mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
             val ok = cache.enqueueUsb(
                 taskId = taskId,
                 sourceUrl = sourceUrl,
@@ -260,7 +263,8 @@ fun TvDetailScreen(
                     else selectedServer.name,
                 serverName = if (isDonghua) selectedDonghuaServer.displayName
                     else if (item.isAnime) selectedAnimeServer.displayName
-                    else selectedServer.displayName
+                    else selectedServer.displayName,
+                headersJson = downloadHeadersJson.orEmpty()
             )
             statusText = if (ok) "Download started — see Downloads (active queue)."
                 else "USB drive was removed. Download to internal storage instead."

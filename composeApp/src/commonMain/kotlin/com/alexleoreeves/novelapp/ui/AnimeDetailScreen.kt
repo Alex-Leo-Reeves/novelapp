@@ -615,10 +615,15 @@ fun AnimeDetailScreen(
                                                 )
                                             )
                                             val server = currentAnimeServer
+                                            var resolvedHeadersJson: String? = null
                                             val streamUrl = when {
                                                 server.isAnivexa -> {
                                                     // Anivexa providers resolve to a direct HLS/MP4 via the backend.
-                                                    repository.resolveAnivexaStream(episode.url)?.url
+                                                    // Keep the payload headers — the provider CDN requires them
+                                                    // for offline downloads (plain fetches get 403'd).
+                                                    val resolved = repository.resolveAnivexaStream(episode.url)
+                                                    resolvedHeadersJson = resolved?.headersJson
+                                                    resolved?.url
                                                         ?.takeIf { it.isDirectPlayableAnimeStream() }
                                                 }
                                                 server.usesClientScraper -> {
@@ -634,7 +639,8 @@ fun AnimeDetailScreen(
                                                 val saved = saveDownloadedVideo(
                                                     parentId = anime.id,
                                                     episodeNumber = episode.episodeNumber,
-                                                    sourceUrl = streamUrl
+                                                    sourceUrl = streamUrl,
+                                                    headersJson = resolvedHeadersJson
                                                 )
                                                 if (saved.success) {
                                                     downloadRepo.addEpisode(
@@ -663,7 +669,12 @@ fun AnimeDetailScreen(
                                                 snackMessage = "Failed to extract stream for offline saving."
                                             }
                                         } catch (e: Exception) {
-                                            // ignore
+                                            // Surface the failure instead of silently eating it —
+                                            // a dead download with no message looks like a UI freeze.
+                                            if (downloadRepo.getEpisodesFor(anime.id).isEmpty()) {
+                                                downloadRepo.deleteItem(anime.id)
+                                            }
+                                            snackMessage = "Download failed: ${e.message ?: "unknown error"}"
                                         } finally {
                                             downloadingEpisodes = downloadingEpisodes - episode.episodeNumber
                                             refreshTrigger++
@@ -753,7 +764,11 @@ private fun EpisodeRow(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "$sourceLabel • Tap to stream",
+                        text = when {
+                            isDownloading -> "$sourceLabel • Saving for offline…"
+                            isDownloaded -> "$sourceLabel • Downloaded — tap to stream"
+                            else -> "$sourceLabel • Tap to stream"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = currentTheme.subTextColor()
                     )

@@ -1,6 +1,10 @@
 package com.alexleoreeves.novelapp.data.mediacache
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Media Cache — core models, task FSM and persisted manifest.
@@ -70,7 +74,8 @@ data class MediaDownloadRequest(
     val seasonNumber: Int = 0,        // 0 = movie/single, >0 = season number
     val coverUrl: String = "",        // poster/cover image URL
     val maxBytes: Long = 0L,          // 0 = unlimited; >0 = absolute cap
-    val maxFraction: Float = 0f       // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
+    val maxFraction: Float = 0f,      // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
+    val headersJson: String = ""      // provider-required HTTP headers JSON (Referer/Origin/UA)
 )
 
 /** Result of probing a source URL (HEAD + first range request). */
@@ -164,6 +169,23 @@ data class ChunkRecord(
     val verified: Boolean = false
 )
 
+/**
+ * Parse the provider-required HTTP headers JSON ({Referer, Origin, User-Agent})
+ * attached to a download request/manifest. Provider CDNs like anikoto's
+ * kryntal host reject plain fetches with 403 unless the exact Referer is sent
+ * — the same requirement the playback path satisfies via ExoPlayer headers.
+ */
+fun parseDownloadHeaders(headersJson: String): Map<String, String> {
+    if (headersJson.isBlank()) return emptyMap()
+    return runCatching {
+        Json.parseToJsonElement(headersJson).jsonObject.entries.mapNotNull { (key, value) ->
+            val text = (value as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            key to text
+        }.toMap()
+    }.getOrDefault(emptyMap())
+}
+
 @Serializable
 data class DownloadManifest(
     val schemaVersion: Int = 1,
@@ -191,7 +213,8 @@ data class DownloadManifest(
     val seasonNumber: Int = 0,         // 0 = movie/single, >0 = season number
     val coverUrl: String = "",         // poster/cover image URL for the downloads UI
     val maxBytes: Long = 0L,           // 0 = unlimited; >0 = absolute cap
-    val maxFraction: Float = 0f        // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
+    val maxFraction: Float = 0f,       // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
+    val headersJson: String = ""       // provider-required HTTP headers JSON, replayed on resume
 )
 
 

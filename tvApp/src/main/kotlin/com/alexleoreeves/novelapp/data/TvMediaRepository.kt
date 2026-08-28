@@ -351,6 +351,17 @@ class TvMediaRepository {
         return runCatching { anivexaApi.searchAnilistId(item.title) }.getOrNull()
     }
 
+    /**
+     * Resolve the provider-required HTTP headers JSON (Referer/Origin/UA) for
+     * an Anivexa episode marker, so the download engine can fetch provider
+     * CDNs (kryntal etc.) that reject plain requests with 403. Returns null
+     * for non-Anivexa URLs and when the payload carries no headers.
+     */
+    suspend fun resolveAnivexaDownloadHeaders(episodeUrl: String): String? {
+        if (!AnivexaApi.isAnivexaEpisodeUrl(episodeUrl)) return null
+        return retryNullable { anivexaApi.resolveStream(episodeUrl)?.headersJson }
+    }
+
     suspend fun resolveStreamUrl(
         item: UnifiedSearchResult,
         chapter: Chapter?,
