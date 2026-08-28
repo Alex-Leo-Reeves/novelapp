@@ -67,6 +67,7 @@ export function diceCoeff(a, b) {
 
 export function titleScore(query, candidate, slug) {
   const base = Math.max(diceCoeff(query, candidate), diceCoeff(query, slug.replace(/-/g, " ")));
+  if (looksLikeParentOnlyMatch(query, `${candidate} ${slug.replace(/-/g, " ")}`)) return base * 0.25;
   const queryFirstNum = norm(query).match(/\d+/)?.[0] ?? "";
   const slugFirstNum = slug.match(/\d+/)?.[0] ?? "";
   if (queryFirstNum && slugFirstNum && queryFirstNum !== slugFirstNum) return base * 0.65;
@@ -83,18 +84,41 @@ export function titleScore(query, candidate, slug) {
   return sLen > qLen * 1.6 + 4 ? base * 0.8 : base;
 }
 
+function normalizedWords(s = "") {
+  return s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+}
+
+function hasContinuationMarker(s = "") {
+  return /\b(season\s*\d+|part\s*\d+|cour\s*\d+|final|movie|ova|ona|special|thousand|blood|war|arc|hen|ii|iii|iv|v|2nd|3rd|4th|5th|[2-9])\b/i.test(s);
+}
+
+function looksLikeParentOnlyMatch(query, candidate) {
+  if (!hasContinuationMarker(query)) return false;
+  const qWords = normalizedWords(query);
+  const cWords = new Set(normalizedWords(candidate));
+  const important = qWords.filter((word) =>
+    word.length >= 3 &&
+    !["the", "and", "season", "part", "cour", "episode", "anime"].includes(word)
+  );
+  if (important.length < 2) return false;
+  const missing = important.filter((word) => !cWords.has(word)).length;
+  return missing >= Math.ceil(important.length * 0.55);
+}
+
 function buildSearchQueries(title) {
   const queries = new Set([title]);
   const words = title.trim().split(/\s+/);
   if (words.length > 4) queries.add(words.slice(0, 4).join(" "));
   if (words.length > 3) queries.add(words.slice(0, 3).join(" "));
-  const stripped = title
-    .replace(/\bseason\s*\d+\b/gi, "")
-    .replace(/\bpart\s*\d+\b/gi, "")
-    .replace(/\b\d+rd\b|\b\d+th\b|\b\d+st\b|\b\d+nd\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (stripped && stripped !== title) queries.add(stripped);
+  if (!hasContinuationMarker(title)) {
+    const stripped = title
+      .replace(/\bseason\s*\d+\b/gi, "")
+      .replace(/\bpart\s*\d+\b/gi, "")
+      .replace(/\b\d+rd\b|\b\d+th\b|\b\d+st\b|\b\d+nd\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (stripped && stripped !== title) queries.add(stripped);
+  }
   return [...queries].filter((q) => q.length >= 3);
 }
 

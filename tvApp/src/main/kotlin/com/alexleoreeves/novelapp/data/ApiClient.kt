@@ -276,7 +276,10 @@ suspend fun fetchChapters(kind: String, detailUrl: String, title: String, source
         chapters.map { Chapter(
             title = it.jsonObject["title"]?.jsonPrimitive?.contentOrNull ?: "",
             url = it.jsonObject["url"]?.jsonPrimitive?.contentOrNull ?: "",
-            chapterNumber = it.jsonObject["chapterNumber"]?.jsonPrimitive?.intOrNull ?: 0
+            chapterNumber = it.jsonObject["chapterNumber"]?.jsonPrimitive?.intOrNull ?: 0,
+            seasonNumber = it.jsonObject["seasonNumber"]?.jsonPrimitive?.intOrNull
+                ?: it.jsonObject["season"]?.jsonPrimitive?.intOrNull
+                ?: 0
         ) }
     } catch (_: Exception) { emptyList() }
     finally { client.close() }

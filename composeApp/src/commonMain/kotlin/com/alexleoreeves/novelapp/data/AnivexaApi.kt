@@ -192,6 +192,10 @@ class AnivexaApi(private val client: HttpClient) {
         val url = streamObj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (url.isBlank()) return null
         val type = streamObj["type"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val embed = streamObj["embed"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (embed.startsWith("http", ignoreCase = true) && requiresProviderPlaybackContext(url)) {
+            return AnivexaStream(url = embed, type = "embed")
+        }
         return AnivexaStream(url = url, type = type)
     }
 
@@ -285,6 +289,16 @@ class AnivexaApi(private val client: HttpClient) {
     private fun JsonObject.isActiveStream(): Boolean =
         this["isActive"]?.jsonPrimitive?.booleanOrNull == true ||
             this["priority"]?.jsonPrimitive?.intOrNull?.let { it >= 5 } == true
+
+    private fun requiresProviderPlaybackContext(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("workers.dev") ||
+            lower.contains("vivibebe") ||
+            lower.contains("bibiemb") ||
+            lower.contains("vibevibe") ||
+            lower.contains("otakuhg") ||
+            lower.contains("otakuvid")
+    }
 }
 
 /** A resolved Anivexa stream (direct HLS/MP4 or an embed page). */

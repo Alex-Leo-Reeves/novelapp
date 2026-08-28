@@ -318,7 +318,7 @@ fun TvDetailScreen(
                 // episode is resolved now; the rest resolve lazily on auto-next /
                 // remote NEXT (see TvApp#playBingeEpisode) so anime/donghua
                 // scrapers never hammer hundreds of episode pages up front.
-                val chapterList = chapters.sortedBy { it.chapterNumber }
+                val chapterList = chapters.sortedWith(compareBy({ it.seasonNumber.coerceAtLeast(1) }, { it.chapterNumber }))
                 val startChapter = chapter ?: chapterList.firstOrNull()
                     ?: Chapter(item.title, item.detailPageUrl, 0)
                 val startIndex = chapterList.indexOfFirst { it.url == startChapter.url }
@@ -368,7 +368,6 @@ fun TvDetailScreen(
                     serverName = when {
                         animeFallbackActive -> selectedServer.displayName
                         isAnimeItem -> selectedAnimeServer.displayName
-                        isDonghua && useAnimeServerForDonghua -> selectedAnimeServer.displayName
                         isDonghua -> selectedDonghuaServer.displayName
                         else -> selectedServer.displayName
                     },

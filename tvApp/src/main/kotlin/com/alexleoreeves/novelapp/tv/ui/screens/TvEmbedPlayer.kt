@@ -148,7 +148,7 @@ fun TvEmbedPlayer(
                         userAgentString = MA_SERVER_USER_AGENT
                         allowContentAccess = true
                         allowFileAccess = false
-                        cacheMode = WebSettings.LOAD_DEFAULT
+                        cacheMode = WebSettings.LOAD_NO_CACHE
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         builtInZoomControls = false
@@ -685,6 +685,10 @@ private fun isDirectMediaStream(url: String): Boolean {
 
 private fun loadEmbedContent(webView: WebView?, url: String) {
     if (webView == null || url.isBlank()) return
+    webView.stopLoading()
+    webView.loadUrl("about:blank")
+    webView.clearHistory()
+    webView.clearCache(false)
     if (isDirectMediaStream(url)) {
         val safeUrl = org.json.JSONObject.quote(url)
         val html = """

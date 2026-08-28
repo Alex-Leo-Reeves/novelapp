@@ -1745,9 +1745,10 @@ async function tmdbEpisodes(detailUrl) {
             const epNumber = Number(ep.episode_number || 0);
             if (!epNumber) continue;
             episodes.push({
-                        title: `S${seasonNumber}E${epNumber}${ep.name ? ` - ${ep.name}` : ""}`,
+                title: `S${seasonNumber}E${epNumber}${ep.name ? ` - ${ep.name}` : ""}`,
                 url: `tmdb-episode://${id}/${seasonNumber}/${epNumber}`,
-                chapterNumber: episodes.length + 1
+                chapterNumber: epNumber,
+                seasonNumber: seasonNumber
             });
         }
     }

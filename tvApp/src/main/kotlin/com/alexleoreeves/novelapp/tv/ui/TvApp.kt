@@ -330,13 +330,13 @@ fun TvApp(
             )
         } else {
             // Lazy episode → resolve now on the session's server.
-            val current = session.current
+            val targetEpisode = session.episodes.getOrNull(targetIndex)
             scope.launch {
                 val repo = TvMediaRepository()
                 val resolvedEpisode = repo.resolveBingeEpisode(
                     context = context,
                     item = session.item,
-                    chapter = current?.chapter,
+                    chapter = targetEpisode?.chapter,
                     server = if (session.isDonghua) null
                         else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
                         else session.server,
