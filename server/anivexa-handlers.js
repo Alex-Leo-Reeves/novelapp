@@ -388,19 +388,59 @@ function pickBestAnilistCandidate(query, mediaList) {
     const q = normalized(query);
     if (!q) return null;
 
+    // Stopwords dropped from token coverage so "battle of the gods" and
+    // "battle of gods" score identically.
+    const STOP_WORDS = new Set(["the", "a", "an", "of", "no", "wa"]);
+    const qTokens = q.split(" ").filter((w) => w && !STOP_WORDS.has(w));
+    const minimumTokenHits = Math.min(2, qTokens.length);
+
     const candidates = (mediaList || []).map((media) => {
             const titleObj = (media && media.title) || {};
-            const raw = titleObj.english || titleObj.romaji || "";
-            const title = String(raw || "").trim();
-            if (!title) return null;
-            const t = normalized(title);
-            if (!t) return null;
+            const rawTitles = [titleObj.english, titleObj.romaji]
+                .map((v) => String(v || "").trim())
+                .filter(Boolean);
+            if (!rawTitles.length) return null;
 
-            const sequelPenalty = /(\bseason\s+[2-9]\b|\b\d+(st|nd|rd|th)\s+season\b|\bcour\s+[2-9]\b|\b(part|movie|special|ova|ona|recap)\b)/.test(t) ? 900 : 0;
-            const score = t === q ? 10000 : t.startsWith(q + " ") ? 8000 - sequelPenalty : t.includes(q) ? 5000 - sequelPenalty : 0;
-            return { media, title, score };
+            // Sequel/special penalty keeps chibi spin-offs and numbered seasons
+            // from winning. NOTE: "movie" is deliberately NOT penalized — when
+            // the user asks for a film, the film must be allowed to win.
+            const penalty = 900;
+            let bestScore = 0;
+            let bestTitle = rawTitles[0];
+            for (const raw of rawTitles) {
+                const t = normalized(raw);
+                if (!t) continue;
+                const sequelly = /(\bseason\s+[2-9]\b|\b\d+(st|nd|rd|th)\s+season\b|\bcour\s+[2-9]\b|\b(part|special|ova|ona|recap)\b)/.test(t) ? penalty : 0;
+                let score;
+                if (t === q) score = 10000;
+                else if (t.startsWith(q + " ") || q.startsWith(t + " ")) score = 8000 - sequelly;
+                else if (t.includes(q) || q.includes(t)) score = 5000 - sequelly;
+                else {
+                    // Token-overlap fallback. Pure substring matching fails when
+                    // the query drops or adds tokens the title has —
+                    // "dragon ball battle of gods" vs the actual
+                    // "Dragon Ball Z: Battle of Gods" (the stray "z" breaks
+                    // includes()), which made the title bridge return null and
+                    // pushed movies to the TMDB/vidlink fallback with the wrong
+                    // episode list. Require most of the query's meaningful
+                    // tokens to appear in the title so unrelated shows
+                    // (e.g. anything merely containing "gods") still lose.
+                    const tTokens = t.split(" ").filter(Boolean);
+                    const hits = qTokens.filter((w) => tTokens.includes(w)).length;
+                    const coverage = qTokens.length ? hits / qTokens.length : 0;
+                    score = hits >= minimumTokenHits && coverage >= 0.6
+                        ? Math.round(2200 * coverage) - sequelly
+                        : 0;
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestTitle = raw;
+                }
+            }
+            if (bestScore <= 0) return null;
+            return { media, title: bestTitle, score: bestScore };
         })
-        .filter((item) => item && item.score > 0)
+        .filter(Boolean)
         .sort((a, b) => {
             if (b.score !== a.score) return b.score - a.score;
             // Tiebreaks when titles score identically: prefer a full TV series,

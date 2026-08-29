@@ -257,6 +257,11 @@ class TvMediaRepository {
             item.title.removeAnimeSeasonSuffixForTv()
         ).filter { it.isNotBlank() }.distinctBy { it.lowercase() }
 
+        // Best MOVIE candidate across queries (Battle of Gods, the Broly films,
+        // etc.). Used when no TV show matches OR when the query exactly equals a
+        // movie title — a MOVIE-format AniList entry must never fall through to
+        // a (wrong) TV show's episode list.
+        var bestMovie: MediaResult? = null
         for (query in queries) {
             val results = runCatching { tmdbScraper.searchMultiPaged(query, 2) }.getOrElse { emptyList() }
             val best = results
@@ -272,6 +277,28 @@ class TvMediaRepository {
                     Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber, seasonNumber = ep.seasonNumber)
                 }
             }
+            val movieHere = results
+                .filter { it.type == "MOVIE" }
+                .maxBy { tvAnimeTitleMatchScore(query, it.title) }
+                ?.takeIf { tvAnimeTitleMatchScore(query, it.title) > 0 }
+            if (movieHere != null) {
+                // Normalized-title equality (10_000 minus the 900 "movie" title
+                // penalty ⇒ ≥ 9_000) means the item IS the film → one playable
+                // `tmdb-movie://` entry instead of fake episodes.
+                if (tvAnimeTitleMatchScore(query, movieHere.title) >= 9_000) {
+                    return listOf(
+                        Chapter(title = movieHere.title, url = "tmdb-movie://${movieHere.id}", chapterNumber = 1)
+                    )
+                }
+                if (bestMovie == null) bestMovie = movieHere
+            }
+        }
+        // No TV show matched anywhere — a strong movie candidate is still better
+        // than an empty list (Server 17/18 resolve `tmdb-movie://` correctly).
+        bestMovie?.let { movie ->
+            return listOf(
+                Chapter(title = movie.title, url = "tmdb-movie://${movie.id}", chapterNumber = 1)
+            )
         }
         return emptyList()
     }
@@ -360,6 +387,30 @@ class TvMediaRepository {
     suspend fun resolveAnivexaDownloadHeaders(episodeUrl: String): String? {
         if (!AnivexaApi.isAnivexaEpisodeUrl(episodeUrl)) return null
         return retryNullable { anivexaApi.resolveStream(episodeUrl)?.headersJson }
+    }
+
+    /**
+     * Make a resolved Anivexa stream playable on TV. Embed pages are returned
+     * untouched (the WebView supplies its own page context). Everything else
+     * that carries a provider Referer routes through the backend HLS proxy
+     * (`/api/anivexa/proxy?url=&ref=`) — the proxy fetches upstream with the
+     * required Referer and serves CORS-enabled responses, so neither LibVLC
+     * nor the WebView hls.js page needs any header support.
+     */
+    private fun tvPlayableStreamUrl(stream: AnivexaStream): String {
+        val url = stream.url
+        if (stream.type.equals("embed", ignoreCase = true)) return url
+        val referer = stream.referer?.takeIf { it.isNotBlank() }
+            ?: stream.headersJson?.let { headers ->
+                runCatching { org.json.JSONObject(headers).optString("Referer") }
+                    .getOrNull()?.takeIf { it.isNotBlank() }
+            }
+            ?: return url
+        val base = AppReleaseConfig.SERVER_BASE_URL.trimEnd('/')
+        val encodedUrl = java.net.URLEncoder.encode(url, "UTF-8")
+        val encodedRef = java.net.URLEncoder.encode(referer, "UTF-8")
+        println("[TvMediaRepository] Anivexa HLS routed via backend HLS proxy (provider Referer)")
+        return "$base/api/anivexa/proxy?url=$encodedUrl&ref=$encodedRef"
     }
 
     suspend fun resolveStreamUrl(
@@ -457,10 +508,21 @@ class TvMediaRepository {
             val effectiveAnimeServer = animeServer ?: AnimeServer.ANINEKO
             if (effectiveAnimeServer.isAnivexa && AnivexaApi.isAnivexaEpisodeUrl(chapter.url)) {
                 // Anivexa-API provider: resolve the direct HLS/MP4/embed via the
-                // app backend. Direct URLs play in LibVLC (TvPlayerScreen); embed
-                // pages open in the visible WebView (TvEmbedPlayerScreen).
+                // app backend. Provider CDNs (kryntal etc.) REQUIRE the payload
+                // Referer and 403 anything else — TV players cannot attach
+                // per-request headers (LibVLC has no header API here, the
+                // WebView forbids it), so a raw direct URL fails exactly like a
+                // bare browser ("content not found" for DBZ/Super/DS while
+                // lenient-CDN titles like Kai played). Referer-carrying streams
+                // therefore route through the backend HLS proxy, which adds the
+                // Referer server-side and rewrites playlist URLs to stay inside
+                // the proxy: the result plays in ANY TV player (LibVLC or the
+                // WebView hls.js page) with zero header support. Embed pages
+                // keep opening in the visible WebView (TvEmbedPlayerScreen).
                 // Retried: provider CDNs rate-limit / cold-start transiently.
-                return retryNullable { anivexaApi.resolveStream(chapter.url)?.url }
+                val stream = retryNullable { anivexaApi.resolveStream(chapter.url) }
+                    ?: return null
+                return tvPlayableStreamUrl(stream)
             }
             if (effectiveAnimeServer.usesClientScraper) {
                 // Anivault trio (Servers 14-16: AnimeHeaven / AnimePahe / AniDao).
@@ -484,15 +546,20 @@ class TvMediaRepository {
             // block below uses the correct embed URL (not the default VidLink).
             val animeStreamServer = effectiveAnimeServer.toStreamServer()
             if (animeStreamServer != null) {
-                val urlParts = chapter.url.split(":")
-                val tvId = urlParts.getOrNull(1)?.ifBlank { null }
+                // Parse the chapter's TMDB reference properly. Chapter URLs here
+                // are `tmdb-episode://{id}/{s}/{e}` / `tmdb-movie://{id}` /
+                // `tv:{id}:{s}:{e}` markers — a naive split(":") produced garbage
+                // ids ("//813/1/5") and VidLink's "content not found" page.
+                val marker = parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)
+                val tvId = marker?.tmdbId?.ifBlank { null }
                     ?: item.detailPageUrl.removePrefix("tmdb://tv/").substringBefore("/").ifBlank { null }
                     ?: item.detailPageUrl.removePrefix("tmdb://movie/").substringBefore("/")
-                val s = urlParts.getOrNull(2)?.ifBlank { null } ?: "1"
-                val e = urlParts.getOrNull(3)?.ifBlank { null }
+                val mediaType = marker?.mediaType
+                    ?: if (item.detailPageUrl.contains("/movie/")) "movie" else "tv"
+                val season = marker?.season ?: "1"
+                val episode = marker?.episode
                     ?: chapter.chapterNumber.coerceAtLeast(1).toString()
-                val mediaT = if (item.detailPageUrl.contains("/movie/")) "movie" else "tv"
-                return animeStreamServer.buildEmbedUrl(tvId.orEmpty().ifBlank { item.id }, mediaT, s, e)
+                return animeStreamServer.buildEmbedUrl(tvId.ifBlank { item.id }, mediaType, season, episode)
             }
         }
 

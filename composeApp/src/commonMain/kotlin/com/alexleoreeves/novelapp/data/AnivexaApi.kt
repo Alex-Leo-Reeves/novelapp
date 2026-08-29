@@ -142,7 +142,7 @@ class AnivexaApi(private val client: HttpClient) {
             else -> dub
         }
 
-        return episodes.mapNotNull { element ->
+        val mapped = episodes.mapNotNull { element ->
             val item = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
             val id = item["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
             if (id.isBlank()) return@mapNotNull null
@@ -157,6 +157,19 @@ class AnivexaApi(private val client: HttpClient) {
                 thumbnail = item["image"]?.jsonPrimitive?.contentOrNull.orEmpty()
             )
         }.distinctBy { it.url }.sortedBy { it.episodeNumber }
+
+        // MOVIE entries (Battle of Gods, Broly, Mugen Train…): the mapping
+        // payload marks format=MOVIE and the film is a single entry, but some
+        // providers leak the franchise's full episode list for a movie id —
+        // which made the UI show 291 "episodes" for a film. Collapse to the
+        // single movie entry (verified live: /watch/{provider}/{id}/{audio}/
+        // {provider}-1 resolves real streams for MOVIE-format ids).
+        val format = data["mappings"]?.jsonObject?.get("format")
+            ?.jsonPrimitive?.contentOrNull?.uppercase()
+        if (format == "MOVIE") {
+            return mapped.take(1).map { it.copy(episodeNumber = 1, title = "Movie") }
+        }
+        return mapped
     }
 
     /**

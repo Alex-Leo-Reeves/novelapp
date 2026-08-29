@@ -30,6 +30,12 @@ function pickBestAnilistCandidate(query, mediaList) {
     const q = normalizeCandidateTitle(query);
     if (!q) return null;
 
+    // Stopwords are dropped from token coverage so "battle of the gods" and
+    // "battle of gods" score identically.
+    const STOP_WORDS = new Set(["the", "a", "an", "of", "no", "wa"]);
+    const qTokens = q.split(" ").filter(function(w) { return w && !STOP_WORDS.has(w); });
+    const minimumTokenHits = Math.min(2, qTokens.length);
+
     const candidates = (mediaList || []).map(function(media) {
         const titleObject = (media && media.title) || {};
         const raw = titleObject.english || titleObject.romaji || "";
@@ -37,11 +43,38 @@ function pickBestAnilistCandidate(query, mediaList) {
         if (!title) return null;
         const t = normalizeCandidateTitle(title);
         const format = String((media && media.format) || "").toUpperCase();
-        let score = 0;
-        if (t === q) score += 120;
-        else if (t.startsWith(q)) score += 80;
-        else if (t.includes(q)) score += 50;
 
+        // Sequel/special penalty keeps chibi spin-offs and numbered seasons
+        // from winning. NOTE: "movie" is deliberately NOT penalized — when
+        // the user asks for a film, the film must be allowed to win.
+        const sequelly = /(\bseason\s+[2-9]\b|\b\d+(st|nd|rd|th)\s+season\b|\bcour\s+[2-9]\b|\b(part|special|ova|ona|recap)\b)/.test(t) ? 900 : 0;
+
+        // Base score from the TITLE ONLY. Format/popularity are tiebreakers
+        // added afterwards — never award them when the title did not match,
+        // otherwise "Dragon Ball Battle of Gods" (movie, popular) beats the
+        // actual "Dragon Ball Z: Battle of Gods" entry via raw popularity.
+        let base = 0;
+        if (t === q) base = 120;
+        else if (t.startsWith(q + " ") || q.startsWith(t + " ")) base = 100 - sequelly;
+        else if (t.includes(q) || q.includes(t)) base = 80 - sequelly;
+        else {
+            // Token-overlap fallback. Pure substring matching fails when the
+            // query drops or adds tokens the title has — "dragon ball battle
+            // of gods" vs "Dragon Ball Z: Battle of Gods" (the stray "z"
+            // breaks includes()) — which mis-keyed movies to the parent show.
+            const tTokens = t.split(" ").filter(Boolean);
+            let hits = 0;
+            for (let i = 0; i < qTokens.length; i++) {
+                if (tTokens.indexOf(qTokens[i]) !== -1) hits++;
+            }
+            const coverage = qTokens.length ? hits / qTokens.length : 0;
+            base = hits >= minimumTokenHits && coverage >= 0.6
+                ? Math.round(60 * coverage) - sequelly
+                : 0;
+        }
+        if (base <= 0) return null;
+
+        let score = base;
         if (format === "TV" || format === "TV_SHORT") score += 20;
         else if (format === "MOVIE") score += 10;
         else if (format === "ONA" || format === "OVA") score += 10;

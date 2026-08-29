@@ -100,8 +100,27 @@ function pickBestAnilistCandidate(query, mediaList) {
             const t = normalizeCandidateTitle(title);
             if (!t) return null;
 
-            const sequelPenalty = /(\bseason\s+[2-9]\b|\b\d+(st|nd|rd|th)\s+season\b|\bcour\s+[2-9]\b|\b(part|movie|special|ova|ona|recap)\b)/.test(t) ? 900 : 0;
-            const score = t === q ? 10000 : t.startsWith(q + " ") ? 8000 - sequelPenalty : t.includes(q) ? 5000 - sequelPenalty : 0;
+            const sequelPenalty = /(\bseason\s+[2-9]\b|\b\d+(st|nd|rd|th)\s+season\b|\bcour\s+[2-9]\b|\b(part|special|ova|ona|recap)\b)/.test(t) ? 900 : 0;
+            // NOTE: "movie" is deliberately NOT penalized — when the user asks
+            // for a film, the film must be allowed to win.
+            const STOP_WORDS = new Set(["the", "a", "an", "of", "no", "wa"]);
+            let score;
+            if (t === q) score = 10000;
+            else if (t.startsWith(q + " ") || q.startsWith(t + " ")) score = 8000 - sequelPenalty;
+            else if (t.includes(q) || q.includes(t)) score = 5000 - sequelPenalty;
+            else {
+                // Token-overlap fallback: substring matching fails when the
+                // query drops/adds tokens ("dragon ball battle of gods" vs
+                // "Dragon Ball Z: Battle of Gods" — the stray "z" breaks
+                // includes()), which mis-keyed movies to the parent show.
+                const qTokens = q.split(" ").filter(function(w) { return w && !STOP_WORDS.has(w); });
+                const tTokens = t.split(" ").filter(Boolean);
+                const hits = qTokens.filter(function(w) { return tTokens.indexOf(w) !== -1; }).length;
+                const coverage = qTokens.length ? hits / qTokens.length : 0;
+                score = hits >= Math.min(2, qTokens.length) && coverage >= 0.6
+                    ? Math.round(2200 * coverage) - sequelPenalty
+                    : 0;
+            }
             return { media: media, title: title, score: score };
         })
         .filter(function(item) { return item && item.score > 0; })
