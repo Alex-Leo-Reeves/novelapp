@@ -14,9 +14,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -36,6 +39,7 @@ class TvMainActivity : ComponentActivity() {
 
     private var mediaCache: TvMediaCacheController? = null
     private val crashError = mutableStateOf<String?>(null)
+    private val crashDismissFocus = FocusRequester()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +71,11 @@ class TvMainActivity : ComponentActivity() {
                     Log.w("TvMainActivity", "Previous crash detected:\n$previousCrash")
                     crashError.value = previousCrash
                 }
+                // Show-once: purge the file NOW so the NEXT boot is always clean.
+                // Previously the file survived until "Dismiss" was pressed — a
+                // crash-loop or an unreachable button bricked the app until the
+                // user reinstalled. Now the report survives exactly one boot.
+                runCatching { crashFile.delete() }
             }
         } catch (_: Throwable) { /* ignore */ }
 
@@ -97,6 +106,11 @@ class TvMainActivity : ComponentActivity() {
             setContent {
                 NovaReadTVTheme {
                     val error = crashError.value
+                    LaunchedEffect(error) {
+                        // TV: no touch — the Dismiss button must be focused so
+                        // the remote's OK button can always reach it.
+                        runCatching { crashDismissFocus.requestFocus() }
+                    }
                     if (error != null) {
                         // Emergency crash display: shows the crash inline so we can
                         // see the cause even without ADB.
@@ -117,6 +131,7 @@ class TvMainActivity : ComponentActivity() {
                                 Text(error, color = Color.White, style = MaterialTheme.typography.bodySmall)
                                 androidx.compose.foundation.layout.Spacer(Modifier.padding(16.dp))
                                 androidx.compose.material3.Button(
+                                    modifier = Modifier.focusRequester(crashDismissFocus),
                                     onClick = {
                                         runCatching { File(filesDir, "crash_log.txt").delete() }
                                         crashError.value = null
@@ -150,6 +165,9 @@ class TvMainActivity : ComponentActivity() {
             }
             setContent {
                 NovaReadTVTheme {
+                    LaunchedEffect(Unit) {
+                        runCatching { crashDismissFocus.requestFocus() }
+                    }
                     Box(
                         Modifier.fillMaxSize().background(Color.Black),
                         contentAlignment = Alignment.Center
@@ -167,6 +185,7 @@ class TvMainActivity : ComponentActivity() {
                             Text(trace, color = Color.White, style = MaterialTheme.typography.bodySmall)
                             androidx.compose.foundation.layout.Spacer(Modifier.padding(16.dp))
                             androidx.compose.material3.Button(
+                                modifier = Modifier.focusRequester(crashDismissFocus),
                                 onClick = {
                                     runCatching { File(filesDir, "crash_log.txt").delete() }
                                     crashError.value = null

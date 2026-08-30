@@ -74,6 +74,9 @@ fun TvPlayerScreen(
 ) {
     val context = LocalContext.current
     var showControls by remember { mutableStateOf(true) }
+    // Bumped on every user interaction so the auto-hide window restarts even
+    // while the overlay is already visible (LaunchedEffect keys on it).
+    var controlsTick by remember { mutableStateOf(0) }
     var isPlaying by remember { mutableStateOf(true) }
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
@@ -251,12 +254,19 @@ fun TvPlayerScreen(
         }
     }
 
-    // Auto-hide controls
-    LaunchedEffect(showControls) {
+    // Auto-hide controls: 5 seconds after the LAST interaction. Keying on
+    // [controlsTick] too means every wake/OK/seek press restarts the window.
+    LaunchedEffect(showControls, controlsTick) {
         if (showControls) {
             delay(5000)
             showControls = false
         }
+    }
+
+    /** Show the overlay and restart its 5s auto-hide window. */
+    fun wakeControls() {
+        showControls = true
+        controlsTick++
     }
 
     // Preview cap for direct LibVLC stream
@@ -342,7 +352,7 @@ fun TvPlayerScreen(
                     keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE
                 if (isVolumeKey) {
                     if (event.type == KeyEventType.KeyUp) {
-                        showControls = true
+                        wakeControls()
                         playerUnmute()
                     }
                     false
@@ -353,7 +363,6 @@ fun TvPlayerScreen(
                             else -> true
                         }
                     } else {
-                        showControls = true
                         val isOkKey = event.key == Key.DirectionCenter || event.key == Key.Enter ||
                             keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
                             keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
@@ -366,23 +375,38 @@ fun TvPlayerScreen(
 
                         if (event.type == KeyEventType.KeyUp) {
                             when {
-                                isOkKey -> { playerTogglePlay(); true }
-                                event.key == Key.DirectionLeft || keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { playerSeekTo(currentPosition - 10000); true }
-                                event.key == Key.DirectionRight || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { playerSeekTo(currentPosition + 10000); true }
-                                event.key == Key.MediaFastForward || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { playerSeekTo(currentPosition + 30000); true }
-                                event.key == Key.MediaRewind || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> { playerSeekTo(currentPosition - 15000); true }
+                                // OK depends on overlay visibility:
+                                //   hidden → just wake the overlay (5s window)
+                                //   visible → toggle playback (pause ↔ play)
+                                isOkKey -> {
+                                    if (showControls) {
+                                        controlsTick++ // restart the 5s window
+                                        playerTogglePlay()
+                                    } else {
+                                        wakeControls()
+                                    }
+                                    true
+                                }
+                                event.key == Key.DirectionLeft || keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { wakeControls(); playerSeekTo(currentPosition - 10000); true }
+                                event.key == Key.DirectionRight || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { wakeControls(); playerSeekTo(currentPosition + 10000); true }
+                                event.key == Key.MediaFastForward || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { wakeControls(); playerSeekTo(currentPosition + 30000); true }
+                                event.key == Key.MediaRewind || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> { wakeControls(); playerSeekTo(currentPosition - 15000); true }
                                 event.key == Key.MediaNext || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> { onNext(); true }
                                 event.key == Key.MediaPrevious || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { onPrev(); true }
                                 event.key == Key.Back || keyCode == android.view.KeyEvent.KEYCODE_BACK -> { onBack(); true }
                                 else -> false
                             }
                         } else {
-                            // Intercept KeyDown for navigation keys so focus doesn't jump
+                            // KeyDown: wake the overlay for non-OK keys (and keep
+                            // focus from jumping). OK must NOT wake here — KeyUp
+                            // decides wake-vs-toggle from the visibility the
+                            // press STARTED with.
                             when {
-                                isOkKey || event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
+                                isOkKey -> true
+                                event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
                                 keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT ||
                                 event.key == Key.MediaFastForward || event.key == Key.MediaRewind ||
-                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> true
+                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> { wakeControls(); true }
                                 else -> false
                             }
                         }

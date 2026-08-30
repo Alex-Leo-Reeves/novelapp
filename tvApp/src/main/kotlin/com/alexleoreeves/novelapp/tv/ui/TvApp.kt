@@ -125,6 +125,24 @@ fun TvApp(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // ---- Rapid-remote-press guard ------------------------------------------
+    // TV remotes flood OK/NEXT events. Unguarded, every press spawned another
+    // concurrent stream resolution and each completion re-navigated to a fresh
+    // player — the WebView churn hard-crashes TV boxes (a native crash the
+    // global handler cannot catch). While a lazy resolution is in flight, new
+    // play/advance presses are dropped; a 500 ms press debounce additionally
+    // absorbs double-taps on the instant paths.
+    var routingBusy by remember { mutableStateOf(false) }
+    var lastRoutePressMs by remember { mutableStateOf(0L) }
+    fun routePressAllowed(): Boolean {
+        if (routingBusy) return false
+        val now = System.currentTimeMillis()
+        if (now - lastRoutePressMs < 500L) return false
+        lastRoutePressMs = now
+        return true
+    }
+    // -------------------------------------------------------------------------
+
     // In-app update state (Android TV APK channel)
     var startupUpdateManifest by remember { mutableStateOf<AppUpdateManifest?>(null) }
     var isStartupUpdateDismissed by remember { mutableStateOf(false) }
@@ -330,38 +348,58 @@ fun TvApp(
             )
         } else {
             // Lazy episode → resolve now on the session's server.
+            // Single-flight: duplicate presses while a resolve is in flight are
+            // dropped, and the resolve itself is time-boxed so the gate can
+            // never hang permanently.
+            if (routingBusy) return
+            routingBusy = true
             val targetEpisode = session.episodes.getOrNull(targetIndex)
             scope.launch {
-                val repo = TvMediaRepository()
-                val resolvedEpisode = repo.resolveBingeEpisode(
-                    context = context,
-                    item = session.item,
-                    chapter = targetEpisode?.chapter,
-                    server = if (session.isDonghua) null
-                        else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
-                        else session.server,
-                    donghuaServer = if (session.isDonghua) session.donghuaServer else null,
-                    animeServer = session.animeServer,
-                    isDonghua = session.isDonghua
-                )
-                if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) {
-                    onResult(currentNav) // stream unavailable; stay on detail
-                    return@launch
-                }
-                val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
-                onResult(
-                    currentNav.copy(
-                        screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
-                        selectedItem = session.item,
-                        playUrl = resolvedEpisode.url,
-                        playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
-                        playPreviewLimitMs = previewLimit,
-                        playerFromSection = null,
-                        bingeSession = updatedSession,
-                        resumePositionMs = resumeMs,
-                        resumeDecided = resumeDecided
+                try {
+                    val repo = TvMediaRepository()
+                    val resolvedEpisode = kotlinx.coroutines.withTimeout(45_000L) {
+                        repo.resolveBingeEpisode(
+                            context = context,
+                            item = session.item,
+                            chapter = targetEpisode?.chapter,
+                            server = if (session.isDonghua) null
+                                else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
+                                else session.server,
+                            donghuaServer = if (session.isDonghua) session.donghuaServer else null,
+                            animeServer = session.animeServer,
+                            isDonghua = session.isDonghua
+                        )
+                    }
+                    if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) {
+                        onResult(currentNav) // stream unavailable; stay on detail
+                        return@launch
+                    }
+                    val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
+                    onResult(
+                        currentNav.copy(
+                            screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
+                            selectedItem = session.item,
+                            playUrl = resolvedEpisode.url,
+                            playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
+                            playPreviewLimitMs = previewLimit,
+                            playerFromSection = null,
+                            bingeSession = updatedSession,
+                            resumePositionMs = resumeMs,
+                            resumeDecided = resumeDecided
+                        )
                     )
-                )
+                } catch (ce: kotlin.coroutines.cancellation.CancellationException) {
+                    // 45s timeout → stay on detail. Scope cancellation must rethrow.
+                    if (ce !is kotlinx.coroutines.TimeoutCancellationException) {
+                        routingBusy = false
+                        throw ce
+                    }
+                    onResult(currentNav)
+                } catch (e: Exception) {
+                    onResult(currentNav) // resolve failed → stay on detail, never hang the gate
+                } finally {
+                    routingBusy = false
+                }
             }
         }
     }
@@ -385,6 +423,7 @@ fun TvApp(
             onResult(currentNav)
             return
         }
+        if (!routePressAllowed()) return
         val current = session.current
         val targetIndex = session.currentIndex
         val progressKey = tvBingeProgressKey(session.item, current?.chapter?.title ?: "")
@@ -407,6 +446,7 @@ fun TvApp(
      */
     fun advanceBinge(delta: Int) {
         val session = nav.bingeSession ?: return
+        if (!routePressAllowed()) return
         val targetIndex = session.currentIndex + delta
         if (targetIndex < 0 || targetIndex > session.episodes.lastIndex) return
         val target = session.episodes.getOrNull(targetIndex) ?: return
@@ -435,29 +475,46 @@ fun TvApp(
                 resumeDecided = false
             )
         } else {
+            // Single-flight lazy resolve (same protection as routePlaybackSession).
+            if (routingBusy) return
+            routingBusy = true
             scope.launch {
-                val repo = TvMediaRepository()
-                val resolvedEpisode = repo.resolveBingeEpisode(
-                    context = context,
-                    item = session.item,
-                    chapter = target.chapter,
-                    server = if (session.isDonghua) null
-                        else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
-                        else session.server,
-                    donghuaServer = if (session.isDonghua) session.donghuaServer else null,
-                    animeServer = session.animeServer,
-                    isDonghua = session.isDonghua
-                )
-                if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) return@launch
-                val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
-                nav = targetNav.copy(
-                    bingeSession = updatedSession,
-                    screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
-                    playUrl = resolvedEpisode.url,
-                    playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
-                    resumePositionMs = null,
-                    resumeDecided = false
-                )
+                try {
+                    val repo = TvMediaRepository()
+                    val resolvedEpisode = kotlinx.coroutines.withTimeout(45_000L) {
+                        repo.resolveBingeEpisode(
+                            context = context,
+                            item = session.item,
+                            chapter = target.chapter,
+                            server = if (session.isDonghua) null
+                                else if (session.animeServer != null) session.animeServer?.toStreamServer() ?: session.server
+                                else session.server,
+                            donghuaServer = if (session.isDonghua) session.donghuaServer else null,
+                            animeServer = session.animeServer,
+                            isDonghua = session.isDonghua
+                        )
+                    }
+                    if (resolvedEpisode == null || resolvedEpisode.url.isBlank()) return@launch
+                    val updatedSession = session.withResolvedEpisode(targetIndex, resolvedEpisode)
+                    nav = targetNav.copy(
+                        bingeSession = updatedSession,
+                        screen = if (resolvedEpisode.isDirect) TvScreen.PLAYER else TvScreen.EMBED_PLAYER,
+                        playUrl = resolvedEpisode.url,
+                        playTitle = "${session.item.title} - ${resolvedEpisode.chapter.title}",
+                        resumePositionMs = null,
+                        resumeDecided = false
+                    )
+                } catch (ce: kotlin.coroutines.cancellation.CancellationException) {
+                    if (ce !is kotlinx.coroutines.TimeoutCancellationException) {
+                        routingBusy = false
+                        throw ce
+                    }
+                    // 45s timeout → stay on the current episode.
+                } catch (_: Exception) {
+                    // resolve failed → stay on the current episode
+                } finally {
+                    routingBusy = false
+                }
             }
         }
     }
@@ -604,6 +661,12 @@ fun TvApp(
                                                         .firstOrNull { it.taskId == taskId }?.title ?: taskId,
                                                     localSubtitlePath = subtitle
                                                 )
+                                            } else {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Couldn't open this download. Delete it and download again.",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
                                             }
                                         }
                                     },
@@ -619,6 +682,12 @@ fun TvApp(
                                                     playTitle = bundle.title,
                                                     localSubtitlePath = manifest?.subtitleBundlePath ?: ""
                                                 )
+                                            } else {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Couldn't open this USB download. Reconnect the drive and check it in Downloads.",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
                                             }
                                         }
                                     },

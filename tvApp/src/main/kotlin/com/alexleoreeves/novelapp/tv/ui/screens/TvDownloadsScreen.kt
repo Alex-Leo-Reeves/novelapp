@@ -19,6 +19,7 @@ import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.mediacache.DownloadManifest
 import com.alexleoreeves.novelapp.data.mediacache.DownloadPhase
 import com.alexleoreeves.novelapp.data.mediacache.DownloadTask
+import com.alexleoreeves.novelapp.data.mediacache.DownloadFailureReason
 import com.alexleoreeves.novelapp.data.mediacache.MediaAccessPolicy
 import com.alexleoreeves.novelapp.tv.mediacache.TvIndexedBundle
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
@@ -674,6 +675,42 @@ private fun formatBytes(bytes: Long): String = when {
     else -> String.format("%.2f GB", bytes / (1024f * 1024f * 1024f))
 }
 
+/**
+ * Human-readable failure text. The engine stores raw exception messages
+ * ("Unable to resolve host ...", "HTTP 403", timeouts) — translate the common
+ * ones into remote-friendly guidance instead of showing them verbatim.
+ */
+private fun friendlyDownloadError(task: DownloadTask): String {
+    val raw = task.errorMessage?.trim().orEmpty()
+    val lower = raw.lowercase()
+    return when (task.failureReason) {
+        DownloadFailureReason.NETWORK -> when {
+            "unable to resolve host" in lower || "no address associated" in lower ->
+                "Couldn't reach the server. Check the TV's internet connection, then press Retry."
+            "403" in lower || "forbidden" in lower || "blocked" in lower ->
+                "The stream refused the download (its link likely expired). Delete this, then download again from the title's page."
+            "404" in lower || "not found" in lower ->
+                "The stream link is no longer valid. Delete this, then download again from the title's page."
+            "timeout" in lower || "timed out" in lower ->
+                "The connection timed out. Press Retry to try again."
+            else -> "Network error. Check the connection, then press Retry."
+        }
+        DownloadFailureReason.NO_RANGE_SUPPORT ->
+            "This source doesn't allow downloads. Try a different server on the title's page."
+        DownloadFailureReason.STORAGE_LOW ->
+            "Not enough free storage on this device. Free up space and retry."
+        DownloadFailureReason.STORAGE_FULL_MIDWRITE ->
+            "Storage filled up during the download. Free up space, then delete and retry."
+        DownloadFailureReason.USB_UNMOUNTED ->
+            "The USB drive was disconnected. Reconnect it, then press Retry."
+        DownloadFailureReason.VERIFY_FAILED ->
+            "The file failed integrity verification. Delete it and download again."
+        DownloadFailureReason.CANCELLED -> "Download was cancelled."
+        null, DownloadFailureReason.UNKNOWN ->
+            if (raw.isNotBlank()) "Download failed: ${raw.take(120)}" else "Download failed. Press Retry to try again."
+    }
+}
+
 private fun phaseLabel(phase: DownloadPhase): String = when (phase) {
     DownloadPhase.QUEUED -> "Queued"
     DownloadPhase.PROBING -> "Probing"
@@ -809,7 +846,11 @@ private fun ActiveTaskRow(
                     )
                 }
                 if (task.phase == DownloadPhase.PAUSED || task.phase == DownloadPhase.FAILED) {
-                    SmallAction("Resume", Accent, onResume)
+                    SmallAction(
+                        if (task.phase == DownloadPhase.FAILED) "Retry" else "Resume",
+                        Accent,
+                        onResume
+                    )
                 } else if (!task.isTerminal) {
                     SmallAction("Pause", Color.White, onPause)
                 }
@@ -833,9 +874,9 @@ private fun ActiveTaskRow(
                     color = Color.White.copy(0.45f)
                 )
             }
-            task.errorMessage?.let { error ->
+            task.errorMessage?.let { _ ->
                 Text(
-                    error,
+                    friendlyDownloadError(task),
                     style = MaterialTheme.typography.labelSmall,
                     color = Red.copy(0.9f),
                     maxLines = 2,

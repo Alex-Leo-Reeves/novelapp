@@ -61,6 +61,9 @@ fun TvEmbedPlayerScreen(
     onOpenRecommendations: (UnifiedSearchResult) -> Unit = {}
 ) {
     var showControls by remember { mutableStateOf(true) }
+    // Bumped on every user interaction so the auto-hide window restarts even
+    // while the overlay is already visible (LaunchedEffect keys on it).
+    var controlsTick by remember { mutableStateOf(0) }
     // Start as paused: the embed starts paused and only plays after a real
     // user gesture (OK/Play). Claiming "playing" before that left the UI
     // showing a Pause icon while the video sat paused.
@@ -126,12 +129,19 @@ fun TvEmbedPlayerScreen(
         }
     }
 
-    // Auto-hide controls
-    LaunchedEffect(showControls) {
+    // Auto-hide controls: 5 seconds after the LAST interaction. Keying on
+    // [controlsTick] too means every wake/OK/seek press restarts the window.
+    LaunchedEffect(showControls, controlsTick) {
         if (showControls) {
             delay(5000)
             showControls = false
         }
+    }
+
+    /** Show the overlay and restart its 5s auto-hide window. */
+    fun wakeControls() {
+        showControls = true
+        controlsTick++
     }
 
     /**
@@ -304,15 +314,11 @@ fun TvEmbedPlayerScreen(
 
     fun playerTogglePlay() {
         val wv = webViewRef ?: return
-        // Prefer direct JS play/pause on the REAL (longest) video — reliable
-        // even when the embed has hidden its controls (also unmutes). The
-        // toggle script calls __novelAppFindBestVideo(), so FIND_BEST_VIDEO_JS
-        // must be injected alongside it. Falls back to a synthetic center tap
-        // only when the <video> is inside a cross-origin iframe JS can't reach.
-        wv.evaluateJavascript(FIND_BEST_VIDEO_JS + EMBED_TOGGLE_PLAY_JS) { raw ->
-            val result = raw?.trim()?.trim('"') ?: "none"
-            if (result == "none") dispatchCenterTouch(wv)
-        }
+        // OK-button toggle = a physical tap at the screen centre — the same
+        // gesture a touch user makes. The embed's own player handles
+        // play/pause, so this works even when JS can't reach the <video>
+        // (cross-origin iframe). Deterministic — no JS round-trip.
+        dispatchCenterTouch(wv)
     }
 
     fun playerUnmute() {
@@ -346,7 +352,7 @@ fun TvEmbedPlayerScreen(
                     keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE
                 if (isVolumeKey) {
                     if (event.type == KeyEventType.KeyUp) {
-                        showControls = true
+                        wakeControls()
                         playerUnmute()
                     }
                     false
@@ -363,7 +369,6 @@ fun TvEmbedPlayerScreen(
                         // handled here so the user can still leave.
                         if (event.key == Key.Back) { onBack(); true } else false
                     } else {
-                        showControls = true
                         val isOkKey = event.key == Key.DirectionCenter || event.key == Key.Enter ||
                             keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
                             keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
@@ -373,22 +378,37 @@ fun TvEmbedPlayerScreen(
 
                         if (event.type == KeyEventType.KeyUp) {
                             when {
-                                isOkKey -> { playerTogglePlay(); true }
-                                event.key == Key.DirectionLeft -> { playerSeekTo(currentPosition - 10000); true }
-                                event.key == Key.DirectionRight -> { playerSeekTo(currentPosition + 10000); true }
-                                event.key == Key.MediaFastForward -> { playerSeekTo(currentPosition + 30000); true }
-                                event.key == Key.MediaRewind -> { playerSeekTo(currentPosition - 15000); true }
+                                // OK depends on overlay visibility:
+                                //   hidden → just wake the overlay (5s window)
+                                //   visible → centre-tap toggle (pause ↔ play)
+                                isOkKey -> {
+                                    if (showControls) {
+                                        controlsTick++ // restart the 5s window
+                                        playerTogglePlay()
+                                    } else {
+                                        wakeControls()
+                                    }
+                                    true
+                                }
+                                event.key == Key.DirectionLeft -> { wakeControls(); playerSeekTo(currentPosition - 10000); true }
+                                event.key == Key.DirectionRight -> { wakeControls(); playerSeekTo(currentPosition + 10000); true }
+                                event.key == Key.MediaFastForward -> { wakeControls(); playerSeekTo(currentPosition + 30000); true }
+                                event.key == Key.MediaRewind -> { wakeControls(); playerSeekTo(currentPosition - 15000); true }
                                 event.key == Key.MediaNext -> { onNext(); true }
                                 event.key == Key.MediaPrevious -> { onPrev(); true }
                                 event.key == Key.Back -> { onBack(); true }
                                 else -> false
                             }
                         } else {
-                            // Intercept KeyDown for navigation keys so focus doesn't jump
+                            // KeyDown: wake the overlay for non-OK keys (and keep
+                            // focus from jumping). OK must NOT wake here — KeyUp
+                            // decides wake-vs-toggle from the visibility the
+                            // press STARTED with.
                             when {
-                                isOkKey || event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
+                                isOkKey -> true
+                                event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
                                 event.key == Key.MediaFastForward || event.key == Key.MediaRewind ||
-                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> true
+                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> { wakeControls(); true }
                                 else -> false
                             }
                         }

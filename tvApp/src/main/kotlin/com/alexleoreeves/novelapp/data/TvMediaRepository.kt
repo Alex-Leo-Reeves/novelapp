@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.data
 
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import io.ktor.client.request.*
 import io.ktor.client.statement.*

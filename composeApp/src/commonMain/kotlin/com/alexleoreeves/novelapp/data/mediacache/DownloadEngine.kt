@@ -50,8 +50,22 @@ class DownloadEngine(
     private val runningJobs = mutableMapOf<String, Job>()
 
     fun start() {
-        scope.launch { reconcile() }
-        scope.launch { for (command in commands) handle(command) }
+        // Boot hardening: reconcile() replays on-disk state written before a
+        // crash. Any exception there previously escaped the bare launch and
+        // crashed the app on EVERY subsequent boot (the "must reinstall" loop).
+        scope.launch { runCatching { reconcile() } }
+        scope.launch {
+            for (command in commands) {
+                try {
+                    handle(command)
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A poisoned command must not kill the queue loop.
+                    println("DownloadEngine: command ${command::class.simpleName} failed: ${e.message}")
+                }
+            }
+        }
     }
 
     fun send(command: DownloadCommand) {
@@ -77,11 +91,23 @@ class DownloadEngine(
     fun decodeCompletedMetadata(path: String): DownloadManifest? = manifests.decodeMetadataFile(path)
 
     private suspend fun reconcile() {
-        cleaner.purgeStaleInFlight(nowMs())
-        manifests.listInFlight().forEach { manifest ->
-            val request = requestFor(manifest)
-            upsert(taskFor(request, DownloadPhase.QUEUED).copy(manifestPath = manifests.manifestPath(manifest.taskId)))
-            scope.launch { runTask(request) }
+        try {
+            cleaner.purgeStaleInFlight(nowMs())
+        } catch (e: Exception) {
+            println("DownloadEngine: purgeStaleInFlight failed: ${e.message}")
+        }
+        // Resume interrupted downloads — but at most a few at once. A hard kill
+        // can leave many in-flight entries; relaunching all of them at boot
+        // thundering-herds the network + disk and can OOM low-RAM TV boxes.
+        manifests.listInFlight().take(4).forEach { manifest ->
+            try {
+                val request = requestFor(manifest)
+                upsert(taskFor(request, DownloadPhase.QUEUED).copy(manifestPath = manifests.manifestPath(manifest.taskId)))
+                scope.launch { runTask(request) }
+            } catch (e: Exception) {
+                // Corrupt/partial manifest from a hard kill: skip it this boot.
+                println("DownloadEngine: skipping in-flight manifest ${manifest.taskId}: ${e.message}")
+            }
         }
     }
 
