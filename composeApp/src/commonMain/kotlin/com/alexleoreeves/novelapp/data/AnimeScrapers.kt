@@ -1401,6 +1401,7 @@ private fun String.toDonghuaAbsoluteUrl(baseUrl: String): String? {
 class AnimeXinScraper(private val client: HttpClient) {
 
     companion object {
+        private val BASE_URL_CANDIDATES = listOf("https://animexin.dev", "https://animexin.vip")
         private const val BASE_URL = "https://animexin.dev"
         private val BROWSER_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
@@ -1410,7 +1411,7 @@ class AnimeXinScraper(private val client: HttpClient) {
     }
 
     /**
-     * Search animexin.dev for a Donghua/Anime title and return a list of episodes.
+     * Search animexin.dev / animexin.vip for a Donghua/Anime title and return a list of episodes.
      */
     suspend fun fetchEpisodes(titleQuery: String, maxEpisodes: Int = 300): List<MediaEpisode> {
         val queries = listOf(
@@ -1420,20 +1421,21 @@ class AnimeXinScraper(private val client: HttpClient) {
             titleQuery.split(" ").take(3).joinToString(" ")
         ).filter { it.isNotBlank() }.distinctBy { it.lowercase() }
 
-        for (query in queries) {
-            val episodes = runCatching { fetchEpisodesForQuery(query, maxEpisodes) }.getOrElse { emptyList() }
-            if (episodes.isNotEmpty()) return episodes
+        for (baseUrl in BASE_URL_CANDIDATES) {
+            for (query in queries) {
+                val episodes = runCatching { fetchEpisodesForQuery(query, maxEpisodes, baseUrl) }.getOrElse { emptyList() }
+                if (episodes.isNotEmpty()) return episodes
+            }
         }
         return emptyList()
     }
 
-    private suspend fun fetchEpisodesForQuery(query: String, maxEpisodes: Int): List<MediaEpisode> {
-        val searchHtml = fetchHtml("$BASE_URL/?s=${query.encodeURLQueryComponent()}", BASE_URL)
+    private suspend fun fetchEpisodesForQuery(query: String, maxEpisodes: Int, baseUrl: String): List<MediaEpisode> {
+        val searchHtml = fetchHtml("$baseUrl/?s=${query.encodeURLQueryComponent()}", baseUrl)
         if (searchHtml.isBlockedOrErrorPage()) return emptyList()
 
         val doc = Ksoup.parse(searchHtml)
-        // AnimeXin uses .listupd article > a for search results
-        val seriesCandidates = doc.select("div.listupd a[href], article.bs a[href], .animposx a[href]")
+        val seriesCandidates = doc.select("div.listupd a[href], article.bs a[href], .animposx a[href], .bsx a[href]")
             .mapNotNull { link ->
                 val href = link.attr("href").ifBlank { return@mapNotNull null }
                 val title = link.attr("title")
@@ -1450,28 +1452,32 @@ class AnimeXinScraper(private val client: HttpClient) {
             .distinct()
 
         for (seriesUrl in seriesCandidates) {
-            val episodes = runCatching { fetchEpisodesFromSeries(seriesUrl, maxEpisodes) }.getOrElse { emptyList() }
+            val episodes = runCatching { fetchEpisodesFromSeries(seriesUrl, baseUrl, maxEpisodes) }.getOrElse { emptyList() }
             if (episodes.isNotEmpty()) return episodes
         }
         return emptyList()
     }
 
-    private suspend fun fetchEpisodesFromSeries(seriesUrl: String, maxEpisodes: Int): List<MediaEpisode> {
-        val html = fetchHtml(seriesUrl, BASE_URL)
+    private suspend fun fetchEpisodesFromSeries(seriesUrl: String, baseUrl: String, maxEpisodes: Int): List<MediaEpisode> {
+        val html = fetchHtml(seriesUrl, baseUrl)
         if (html.isBlockedOrErrorPage()) return emptyList()
         val doc = Ksoup.parse(html)
 
-        // Episode list: AnimeXin typically uses .eplister ul li a or .eplist a
+        // Episode list: AnimeXin uses .eplister ul li a or .eplist a
         val epLinks = doc.select(".eplister ul li a[href], .eplist a[href], #episodelist a[href], .episodelist a[href]")
             .mapNotNull { link ->
                 val href = link.attr("href").ifBlank { return@mapNotNull null }
-                val rawTitle = link.select(".epl-title,.epl-num,span").firstOrNull()?.text()
-                    ?.ifBlank { link.text() }
-                    ?: link.text()
-                val combined = "$rawTitle $href"
-                val epNum = Regex("""(?:episode|ep|/ep)[-\s]*([\d]+)""", RegexOption.IGNORE_CASE)
+                val numText = link.select(".epl-num").text().trim()
+                val titleText = link.select(".epl-title").text().trim()
+                val rawTitle = titleText.ifBlank { link.text() }
+                val combined = "$numText $rawTitle $href"
+
+                val epNum = Regex("""(?:episode|ep|/ep)[\.\-\s]*([\d]+)""", RegexOption.IGNORE_CASE)
                     .find(combined)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    ?: Regex("""^(\d+)$""").find(numText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    ?: Regex("""-episode-(\d+)""").find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
                     ?: return@mapNotNull null
+
                 MediaEpisode(
                     title = rawTitle.trim().ifBlank { "Episode $epNum" },
                     url = href,
@@ -1491,12 +1497,13 @@ class AnimeXinScraper(private val client: HttpClient) {
      * that can be loaded in MaServerPlayerScreen.
      */
     suspend fun resolveEpisodePlayerUrl(episodeUrl: String): String? = runCatching {
-        val html = fetchHtml(episodeUrl, BASE_URL)
+        val baseUrl = BASE_URL_CANDIDATES.firstOrNull { episodeUrl.startsWith(it) } ?: BASE_URL
+        val html = fetchHtml(episodeUrl, baseUrl)
         if (html.isBlockedOrErrorPage()) return@runCatching null
 
-        // Try to extract a direct stream first
+        // Try direct media URL first
         extractDirectDonghuaMediaUrlFromHtml(html)
-            ?: extractBestEmbedUrl(html, episodeUrl)
+            ?: extractBestEmbedUrl(html, episodeUrl, baseUrl)
     }.getOrElse { e ->
         println("[AnimeXin] resolveEpisodePlayerUrl error: ${e.message}")
         null
@@ -1515,9 +1522,13 @@ class AnimeXinScraper(private val client: HttpClient) {
         }?.decodeHtmlEntitiesLite()
     }
 
-    private fun extractBestEmbedUrl(html: String, pageUrl: String): String? {
+    private fun extractBestEmbedUrl(html: String, pageUrl: String, baseUrl: String): String? {
         val doc = Ksoup.parse(html)
-        // AnimeXin servers dropdown: .mirror-item select option, or direct iframe
+        // Direct player embed iframe in the page
+        val directIframes = doc.select(".player-embed iframe[src], #pembed iframe[src], .responsive-embed iframe[src], iframe#iframe-to-load[src]")
+            .mapNotNull { it.attr("src").toDonghuaAbsoluteUrl(baseUrl) }
+
+        // AnimeXin servers dropdown: .mirror-item select option, or data-iframe
         val mirrorCandidates = doc.select("select.mirror option[value], .player-option[data-src], .server-item[data-iframe]")
             .mapNotNull { el ->
                 val raw = (el.attr("value") + el.attr("data-src") + el.attr("data-iframe")).decodeHtmlEntitiesLite()
@@ -1525,17 +1536,17 @@ class AnimeXinScraper(private val client: HttpClient) {
                 val src = if (decoded.contains("<iframe", ignoreCase = true)) {
                     Ksoup.parse(decoded).select("iframe").attr("src").ifBlank { decoded }
                 } else decoded
-                src.toDonghuaAbsoluteUrl(BASE_URL)
+                src.toDonghuaAbsoluteUrl(baseUrl)
             }
         val iframeCandidates = doc.select("iframe[src], iframe[data-src]")
             .flatMap { listOf(it.attr("src"), it.attr("data-src")) }
-            .mapNotNull { it.toDonghuaAbsoluteUrl(BASE_URL) }
+            .mapNotNull { it.toDonghuaAbsoluteUrl(baseUrl) }
         val jsCandidates = Regex("""(?:src|file|url|iframe)["']?\s*[:=]\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .findAll(html.replace("\\/", "/"))
-            .mapNotNull { it.groupValues.getOrNull(1)?.toDonghuaAbsoluteUrl(BASE_URL) }
+            .mapNotNull { it.groupValues.getOrNull(1)?.toDonghuaAbsoluteUrl(baseUrl) }
             .toList()
 
-        return (mirrorCandidates + iframeCandidates + jsCandidates)
+        return (directIframes + mirrorCandidates + iframeCandidates + jsCandidates)
             .filter { it.startsWith("http", ignoreCase = true) }
             .filterNot { it.isNonPlayableAnimeProviderUrl() }
             .distinct()
@@ -1543,21 +1554,12 @@ class AnimeXinScraper(private val client: HttpClient) {
             .firstOrNull()
     }
 
-    /**
-     * Ranks embed candidates by how well they play inside a plain WebView
-     * (MaServerPlayerScreen on Android/iOS/desktop and TvEmbedPlayer on TV).
-     * The first `<select class="mirror">` option is typically GDrivePlayer,
-     * whose embed is a JW-Player/JS-only page that exposes no direct .m3u8/.mp4
-     * (verified: 0 stream candidates, "This video file cannot be played").
-     * Dailymotion serves a native <video>-capable embed that plays without
-     * external JS, so it is preferred over GDrivePlayer.
-     */
     private fun String.animeXinEmbedPriority(): Int {
         val host = runCatching { Url(this).host.lowercase() }.getOrNull().orEmpty()
         return when {
             "dailymotion.com" in host -> 1
             "fembed.com" in host || "femax20.com" in host || "mp4upload.com" in host ||
-                "streamtape.com" in host || "dood." in host -> 2
+                "streamtape.com" in host || "dood." in host || "odysee.com" in host || "ok.ru" in host -> 2
             else -> 9
         }
     }

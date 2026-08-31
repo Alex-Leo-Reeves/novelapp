@@ -196,8 +196,25 @@ fun DiscoverHomeScreen(
                     )
                     val aniList = com.alexleoreeves.novelapp.data.AniListSource(io.ktor.client.HttpClient())
                     val engine = com.alexleoreeves.novelapp.data.RecommendationEngine(tmdb, aniList, downloadRepo)
-                    recommendedItems = engine.getRecommendations()
-                } catch (_: Exception) {}
+                    val recs = engine.getRecommendations()
+                    recommendedItems = if (recs.isNotEmpty()) recs else {
+                        val movies = tmdb.fetchVideo(VideoCategory.MOVIES, 1).take(15)
+                        val anime = aniList.fetchTrending(1).take(15)
+                        (movies + anime).shuffled()
+                    }
+                } catch (_: Exception) {
+                    try {
+                        val tmdb = com.alexleoreeves.novelapp.data.TmdbSource(
+                            client = io.ktor.client.HttpClient(),
+                            readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
+                            apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
+                        )
+                        val aniList = com.alexleoreeves.novelapp.data.AniListSource(io.ktor.client.HttpClient())
+                        val movies = tmdb.fetchVideo(VideoCategory.MOVIES, 1).take(15)
+                        val anime = aniList.fetchTrending(1).take(15)
+                        recommendedItems = (movies + anime).shuffled()
+                    } catch (_: Exception) {}
+                }
                 isLoadingRecommended = false
             }
         }

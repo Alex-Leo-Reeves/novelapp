@@ -109,24 +109,27 @@ fun TvEmbedPlayer(
         }
     }
 
-    // Clean audio gesture on READY: clicks the screen center to start playback
-    // (dismissing any iframe/embed play overlays) and sets volume to 1.0 clean.
+    // Clean audio gesture & autoplay loop: repeatedly dispatches center touches
+    // to start playback in cross-origin iframes (AutoEmbed, 2Embed, VidLink, VidSrc)
+    // and sets volume to maximum.
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.READY) {
             val view = webViewRef ?: return@LaunchedEffect
-            delay(300L)
-            simulateCenterClick(view)
-            view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
-            delay(1000L)
-            simulateCenterClick(view)
-            view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
+            val delays = listOf(300L, 800L, 1200L, 1800L, 2500L, 3500L, 5000L)
+            for (d in delays) {
+                delay(d)
+                val currentView = webViewRef ?: break
+                simulateCenterClick(currentView)
+                currentView.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
+            }
         }
     }
 
     LaunchedEffect(embedUrl) {
-        repeat(5) { attempt ->
-            delay(2_000L * (attempt + 1))
+        repeat(8) { attempt ->
+            delay(1_500L * (attempt + 1))
             val view = webViewRef ?: return@repeat
+            simulateCenterClick(view)
             view.evaluateJavascript(CLEAN_AUDIO_UNMUTE_JS, null)
         }
     }
@@ -411,6 +414,16 @@ private fun embedRequestHeaders(embedUrl: String): Map<String, String> {
         extraHeaders["Origin"] = "https://vidsrc.to"
     } else if (embedUrl.contains("smashystream")) {
         extraHeaders["Referer"] = "https://embed.smashystream.com/"
+    } else if (embedUrl.contains("dailymotion.com") || embedUrl.contains("geo.dailymotion")) {
+        extraHeaders["Referer"] = "https://animexin.dev/"
+        extraHeaders["Origin"] = "https://animexin.dev"
+    } else if (embedUrl.contains("animexin")) {
+        extraHeaders["Referer"] = "https://animexin.dev/"
+    } else if (embedUrl.contains("odysee.com")) {
+        extraHeaders["Referer"] = "https://animexin.dev/"
+        extraHeaders["Origin"] = "https://animexin.dev"
+    } else if (embedUrl.contains("ok.ru")) {
+        extraHeaders["Referer"] = "https://animexin.dev/"
     }
     return extraHeaders
 }
@@ -534,6 +547,8 @@ private const val INLINE_VIDEO_JS = """
                 v.setAttribute('webkit-playsinline', '');
                 v.setAttribute('x-webkit-airplay', 'allow');
                 v.setAttribute('autoplay', '');
+                v.muted = false;
+                try { v.volume = 1.0; } catch(e) {}
             });
         } catch(e) {}
     }
@@ -559,9 +574,19 @@ private const val IFRAME_EXTRACTION_JS = """
         var attempts = 0;
         var interval = setInterval(function() {
             attempts++;
-            if (window.__iframeExtracted || attempts > 20) {
+            if (window.__iframeExtracted || attempts > 30) {
                 clearInterval(interval);
                 return;
+            }
+            var playerContainer = document.querySelector('.player-embed, #pembed, .responsive-embed, #player, .video-content');
+            if (playerContainer) {
+                playerContainer.style.position = 'fixed';
+                playerContainer.style.top = '0';
+                playerContainer.style.left = '0';
+                playerContainer.style.width = '100vw';
+                playerContainer.style.height = '100vh';
+                playerContainer.style.zIndex = '999999';
+                playerContainer.style.background = '#000';
             }
             var iframes = document.querySelectorAll('iframe');
             for (var i = 0; i < iframes.length; i++) {
@@ -570,12 +595,6 @@ private const val IFRAME_EXTRACTION_JS = """
                     var frame = iframes[i];
                     window.__iframeExtracted = true;
                     clearInterval(interval);
-                    document.body.innerHTML = '';
-                    document.body.appendChild(frame);
-                    document.body.style.margin = '0';
-                    document.body.style.padding = '0';
-                    document.body.style.overflow = 'hidden';
-                    document.body.style.backgroundColor = '#000';
                     frame.style.position = 'fixed';
                     frame.style.top = '0';
                     frame.style.left = '0';
@@ -583,13 +602,21 @@ private const val IFRAME_EXTRACTION_JS = """
                     frame.style.height = '100vh';
                     frame.style.border = 'none';
                     frame.style.zIndex = '999999';
-                    if (frame.dataset.src) {
+                    frame.style.backgroundColor = '#000';
+                    if (frame.dataset.src && !frame.src) {
                         frame.src = frame.dataset.src;
                     }
+                    try {
+                        var doc = frame.contentDocument || frame.contentWindow.document;
+                        if (doc) {
+                            var v = doc.querySelector('video');
+                            if (v) { v.muted = false; v.play().catch(function(){}); }
+                        }
+                    } catch(e) {}
                     return;
                 }
             }
-        }, 500);
+        }, 300);
     }
 })();
 """

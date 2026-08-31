@@ -19,6 +19,16 @@ async function fetchARM(anilistId) {
   return res.json().catch(() => null);
 }
 __name(fetchARM, "fetchARM");
+async function fetchAniZip(anilistId) {
+  try {
+    const res = await fetch(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+__name(fetchAniZip, "fetchAniZip");
 async function fetchAniListRelations(anilistId) {
   const q = `
   query ($id: Int) {
@@ -55,10 +65,11 @@ async function fetchAniListRelations(anilistId) {
 }
 __name(fetchAniListRelations, "fetchAniListRelations");
 async function mapAnimeIds(anilistId) {
-  const [arm, media, alRelations] = await Promise.all([
+  const [arm, media, alRelations, anizip] = await Promise.all([
     fetchARM(anilistId),
     getMedia(anilistId).catch(() => null),
-    fetchAniListRelations(anilistId)
+    fetchAniListRelations(anilistId),
+    fetchAniZip(anilistId)
   ]);
   const malId = arm?.myanimelist ?? null;
   const format = media?.format ?? null;
@@ -102,6 +113,14 @@ async function mapAnimeIds(anilistId) {
   const thetvdbId = arm?.thetvdb ?? null;
   const themoviedbId = arm?.themoviedb ?? null;
   const imdbId = arm?.imdb ?? null;
+  
+  let episodeOffset = null;
+  if (anizip && anizip.episodes && anizip.episodes["1"] && anizip.episodes["1"].episodeNumber) {
+    const epNum = Number(anizip.episodes["1"].episodeNumber);
+    if (!isNaN(epNum) && epNum > 0) {
+      episodeOffset = epNum - 1;
+    }
+  }
   return {
     mappings: {
       id: Number(anilistId),
@@ -130,7 +149,7 @@ async function mapAnimeIds(anilistId) {
       franchiseId: thetvdbId ? hashFranchiseId(`tvdb:${thetvdbId}`) : null,
       defaultTvdbSeason: arm?.["thetvdb-season"] != null ? String(arm["thetvdb-season"]) : null,
       tmdbSeason: arm?.["themoviedb-season"] != null ? String(arm["themoviedb-season"]) : null,
-      episodeOffset: null,
+      episodeOffset: episodeOffset,
       tmdbOffset: null,
       malIds: null,
       aniskip: null,

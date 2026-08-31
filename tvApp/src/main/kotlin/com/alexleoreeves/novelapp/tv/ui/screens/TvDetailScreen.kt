@@ -97,7 +97,7 @@ fun TvDetailScreen(
     }
 
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.MOVIE_SERVER_1) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
     // Dub/Sub preference for Anivexa providers (like AniVault's toggle).
     var preferredAudio by remember { mutableStateOf("sub") }
@@ -327,8 +327,9 @@ fun TvDetailScreen(
                 val chapterList = chapters.sortedWith(compareBy({ it.seasonNumber.coerceAtLeast(1) }, { it.chapterNumber }))
                 val startChapter = chapter ?: chapterList.firstOrNull()
                     ?: Chapter(item.title, item.detailPageUrl, 0)
-                val startIndex = chapterList.indexOfFirst { it.url == startChapter.url }
-                    .coerceAtLeast(0)
+                val startIndex = chapterList.indexOfFirst { 
+                    it == startChapter || (it.chapterNumber == startChapter.chapterNumber && it.seasonNumber == startChapter.seasonNumber && (it.url.isBlank() || it.url == startChapter.url))
+                }.coerceAtLeast(0)
 
                 val isAnimeItem = item.isAnime && !isDonghua
                 // Anime misroute escape hatch: when the anime-tagged title had no
@@ -807,7 +808,7 @@ fun TvDetailScreen(
                     ) {
                         itemsIndexed(
                             items = displayedEpisodes,
-                            key = { index, ch -> if (ch.url.isNotBlank()) ch.url else "ep_${ch.seasonNumber}_${ch.chapterNumber}_$index" }
+                            key = { index, ch -> "ep_s${ch.seasonNumber}_e${ch.chapterNumber}_${ch.url}_$index" }
                         ) { index, ch ->
                             var chFocused by remember { mutableStateOf(false) }
                             val isSingle = watchLabel == "Watch Now"

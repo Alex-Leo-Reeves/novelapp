@@ -289,6 +289,8 @@ actual fun MaServerPlayerScreen(
                             // Block third-party main-frame navigations (e.g., popunders that try to hijack the WebView)
                             if (request.isForMainFrame) {
                                 val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") || 
+                                                    embedUrl.contains("animexin") || embedUrl.contains("dailymotion") || embedUrl.contains("geo.dailymotion") ||
+                                                    embedUrl.contains("odysee") || embedUrl.contains("ok.ru") ||
                                                     embedUrl.contains("footybite") || embedUrl.contains("sportsurge") || 
                                                     embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
                                 val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") || embedUrl.contains("embed.su") || embedUrl.contains("vidlink") || embedUrl.contains("vidsrc") || embedUrl.contains("smashystream") || embedUrl.contains("2embed") || embedUrl.contains("nontongo")
@@ -499,6 +501,16 @@ actual fun MaServerPlayerScreen(
                     } else if (embedUrl.contains("autoembed")) {
                         extraHeaders["Referer"] = "https://player.autoembed.cc/"
                         extraHeaders["Origin"] = "https://player.autoembed.cc"
+                    } else if (embedUrl.contains("dailymotion.com") || embedUrl.contains("geo.dailymotion")) {
+                        extraHeaders["Referer"] = "https://animexin.dev/"
+                        extraHeaders["Origin"] = "https://animexin.dev"
+                    } else if (embedUrl.contains("animexin")) {
+                        extraHeaders["Referer"] = "https://animexin.dev/"
+                    } else if (embedUrl.contains("odysee.com")) {
+                        extraHeaders["Referer"] = "https://animexin.dev/"
+                        extraHeaders["Origin"] = "https://animexin.dev"
+                    } else if (embedUrl.contains("ok.ru")) {
+                        extraHeaders["Referer"] = "https://animexin.dev/"
                     }
 
                     if (extraHeaders.isNotEmpty()) {

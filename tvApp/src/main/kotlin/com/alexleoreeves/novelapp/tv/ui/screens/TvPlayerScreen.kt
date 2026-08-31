@@ -70,7 +70,8 @@ fun TvPlayerScreen(
     onPrev: () -> Unit = {},
     onEnded: () -> Unit = {},
     onOpenRecommendations: (UnifiedSearchResult) -> Unit = {},
-    subtitlePath: String? = null
+    subtitlePath: String? = null,
+    isLiveTv: Boolean = false
 ) {
     val context = LocalContext.current
     var showControls by remember { mutableStateOf(true) }
@@ -125,7 +126,8 @@ fun TvPlayerScreen(
                     "--live-caching=5000",
                     // HLS/DASH helpers
                     "--http-reconnect",
-                    "--rtsp-tcp"
+                    "--rtsp-tcp",
+                    "--http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 )
                 val vlc = LibVLC(context, args)
                 val mp = MediaPlayer(vlc)
@@ -135,8 +137,17 @@ fun TvPlayerScreen(
                 mp.volume = 100
 
                 val media = Media(vlc, Uri.parse(resolvedUrl))
+                media.addOption(":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                 if (resolvedUrl.contains("shegu.net") || resolvedUrl.contains("febbox")) {
                     media.addOption(":http-referrer=https://www.febbox.com/")
+                } else if (resolvedUrl.contains("megaplay") || resolvedUrl.contains("kryntal")) {
+                    media.addOption(":http-referrer=https://megaplay.buzz/")
+                } else if (resolvedUrl.contains("akirax") || resolvedUrl.contains("vidtube")) {
+                    media.addOption(":http-referrer=https://vidtube.site/")
+                }
+                
+                if (isLiveTv) {
+                    media.addOption(":network-caching=3000")
                 }
                 // Offline (downloaded) bundles may carry a bundled English .srt
                 // sidecar recorded in the manifest. Attach it as an external
@@ -254,12 +265,15 @@ fun TvPlayerScreen(
         }
     }
 
+    val focusRequester = remember { FocusRequester() }
+
     // Auto-hide controls: 5 seconds after the LAST interaction. Keying on
     // [controlsTick] too means every wake/OK/seek press restarts the window.
     LaunchedEffect(showControls, controlsTick) {
         if (showControls) {
             delay(5000)
             showControls = false
+            try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
     }
 
@@ -333,8 +347,6 @@ fun TvPlayerScreen(
 
     BackHandler { onBack() }
 
-    val focusRequester = remember { FocusRequester() }
-
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
@@ -402,11 +414,18 @@ fun TvPlayerScreen(
                             // decides wake-vs-toggle from the visibility the
                             // press STARTED with.
                             when {
-                                isOkKey -> true
                                 event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
                                 keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT ||
                                 event.key == Key.MediaFastForward || event.key == Key.MediaRewind ||
-                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> { wakeControls(); true }
+                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> { 
+                                    if (!showControls) {
+                                        wakeControls()
+                                        true 
+                                    } else {
+                                        wakeControls()
+                                        false // Let Compose focus handle navigation
+                                    }
+                                }
                                 else -> false
                             }
                         }
@@ -529,7 +548,7 @@ fun TvPlayerScreen(
                 Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     var backFocused by remember { mutableStateOf(false) }
                     Surface(
-                        onClick = onBack, shape = CircleShape,
+                        onClick = { onBack(); controlsTick++ }, shape = CircleShape,
                         color = if (backFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                         border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier.size(44.dp).onFocusChanged { backFocused = it.isFocused }
@@ -568,7 +587,7 @@ fun TvPlayerScreen(
                     if (bingeSession != null && bingeSession.currentIndex > 0) {
                         var prevFocused by remember { mutableStateOf(false) }
                         Surface(
-                            onClick = { onPrev() }, shape = CircleShape,
+                            onClick = { onPrev(); controlsTick++ }, shape = CircleShape,
                             color = if (prevFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                             border = if (prevFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                             modifier = Modifier.size(56.dp).onFocusChanged { prevFocused = it.isFocused }
@@ -582,7 +601,7 @@ fun TvPlayerScreen(
 
                     var ppFocused by remember { mutableStateOf(false) }
                     Surface(
-                        onClick = { playerTogglePlay() }, shape = CircleShape,
+                        onClick = { playerTogglePlay(); controlsTick++ }, shape = CircleShape,
                         color = if (ppFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                         border = if (ppFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier.size(72.dp).onFocusChanged { ppFocused = it.isFocused }
@@ -598,7 +617,7 @@ fun TvPlayerScreen(
                         Spacer(Modifier.width(16.dp))
                         var nextFocused by remember { mutableStateOf(false) }
                         Surface(
-                            onClick = { onNext() }, shape = CircleShape,
+                            onClick = { onNext(); controlsTick++ }, shape = CircleShape,
                             color = if (nextFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                             border = if (nextFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                             modifier = Modifier.size(56.dp).onFocusChanged { nextFocused = it.isFocused }
@@ -626,7 +645,7 @@ fun TvPlayerScreen(
                         Spacer(Modifier.height(10.dp))
                         var resumeFocused by remember { mutableStateOf(false) }
                         Surface(
-                            onClick = { playerResume() },
+                            onClick = { playerResume(); controlsTick++ },
                             shape = RoundedCornerShape(8.dp),
                             color = if (resumeFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.2f),
                             border = if (resumeFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.6f)),

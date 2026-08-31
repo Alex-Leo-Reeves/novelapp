@@ -121,20 +121,26 @@ enum class StreamServer(
 
 /**
  * Donghua-only servers.
+ *
+ * Movie Server 1/2 use TMDB-embed playback (VidLink / VidSrc.to).
+ * Anime Server 5/3 use the Anivexa API (AniNeko / AniKoto providers).
+ * AnimeXin is a dedicated Donghua scraper site.
  */
 enum class DonghuaServer(
     val displayName: String,
     val providerName: String,
     val serverOrder: Int,
     val isScraper: Boolean = false,
-    val scraperKey: String? = null
+    val scraperKey: String? = null,
+    val anivexaProviderKey: String? = null
 ) {
-    DONGHUA_STREAM("Server 1", "DonghuaStream", 1, isScraper = true, scraperKey = "donghuastream"),
-    LUCIFER_DONGHUA("Server 2", "Lucifer Donghua", 2, isScraper = true, scraperKey = "luciferdonghua"),
-    ANIMEXIN("Server 3", "AnimeXin", 3, isScraper = true, scraperKey = "animexin"),
-    VIDLINK("Server 4", "VidLink (TMDB)", 4, isScraper = false, scraperKey = null),
-    VIDSRC_TO("Server 5", "VidSrc.to (TMDB)", 5, isScraper = false, scraperKey = null),
-    AUTOEMBED("Server 6", "AutoEmbed (TMDB)", 6, isScraper = false, scraperKey = null);
+    MOVIE_SERVER_1("Movie Server 1", "VidLink (TMDB)", 1),
+    MOVIE_SERVER_2("Movie Server 2", "VidSrc.to (TMDB)", 2),
+    ANIME_SERVER_5("Anime Server 5", "AniNeko", 3, anivexaProviderKey = "anineko"),
+    ANIME_SERVER_3("Anime Server 3", "AniKoto", 4, anivexaProviderKey = "anikoto"),
+    ANIMEXIN("AnimeXin", "AnimeXin", 5, isScraper = true, scraperKey = "animexin");
+
+    val isAnivexa: Boolean get() = anivexaProviderKey != null
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
@@ -142,9 +148,14 @@ enum class DonghuaServer(
 }
 
 fun DonghuaServer.toStreamServer(): StreamServer? = when (this) {
-    DonghuaServer.VIDLINK -> StreamServer.VIDLINK
-    DonghuaServer.VIDSRC_TO -> StreamServer.VIDSRC_TO
-    DonghuaServer.AUTOEMBED -> StreamServer.AUTOEMBED
+    DonghuaServer.MOVIE_SERVER_1 -> StreamServer.VIDLINK
+    DonghuaServer.MOVIE_SERVER_2 -> StreamServer.VIDSRC_TO
+    else -> null
+}
+
+fun DonghuaServer.toAnimeServer(): AnimeServer? = when (this) {
+    DonghuaServer.ANIME_SERVER_5 -> AnimeServer.ANINEKO
+    DonghuaServer.ANIME_SERVER_3 -> AnimeServer.ANIKOTO
     else -> null
 }
 
@@ -209,16 +220,36 @@ fun StreamServer.toAnimeServer(): AnimeServer? = when (this) {
  */
 fun buildEmbedUrlForServer(vidLinkUrl: String, server: StreamServer): String {
     val cleanUrl = vidLinkUrl.trim()
+    val tmdbEpisodeMarkerMatch = Regex("""^tmdb-episode://(\d+)/(\d+)/(\d+)$""").find(cleanUrl)
+    val tmdbMovieMarkerMatch2 = Regex("""^tmdb-movie://(\d+)$""").find(cleanUrl)
+    val tmdbUriTvMatch = Regex("""^tmdb://tv/(\d+)(?:/(\d+)/(\d+))?$""").find(cleanUrl)
+    val tmdbUriMovieMatch = Regex("""^tmdb://movie/(\d+)$""").find(cleanUrl)
     val movieMatch = Regex("""vidlink\.pro/movie/(\d+)""").find(cleanUrl)
     val tvMatch = Regex("""vidlink\.pro/tv/(\d+)/(\d+)/(\d+)""").find(cleanUrl)
-    val tmdbTvMarkerMatch = Regex("""^tv:(\d+):(\d+):(\d+)$""").find(cleanUrl)
-    val tmdbMovieMarkerMatch = Regex("""^movie:(\d+)$""").find(cleanUrl)
+    val tmdbTvMarkerMatch = Regex("""^(?:tmdb|tv):(\d+):(\d+):(\d+)$""").find(cleanUrl)
+    val tmdbMovieMarkerMatch = Regex("""^(?:tmdb|movie):(\d+)$""").find(cleanUrl)
     val twoEmbedMovieMatch = Regex("""2embed\.(?:skin|online|cc)/embed/movie/([^/?&]+)""").find(cleanUrl)
     val twoEmbedTvMatch = Regex("""2embed\.(?:skin|online|cc)/embed/tv/([^/?&]+)/(\d+)/(\d+)""").find(cleanUrl)
     val autoembedMovieMatch = Regex("""autoembed\.(?:co|app|cc)/movie/tmdb/(\d+)""").find(cleanUrl)
     val autoembedTvMatch = Regex("""autoembed\.(?:co|app|cc)/tv/tmdb/(\d+)-(\d+)-(\d+)""").find(cleanUrl)
 
-    return if (tvMatch != null) {
+    return if (tmdbEpisodeMarkerMatch != null) {
+        val id = tmdbEpisodeMarkerMatch.groupValues[1]
+        val season = tmdbEpisodeMarkerMatch.groupValues[2]
+        val episode = tmdbEpisodeMarkerMatch.groupValues[3]
+        server.buildEmbedUrl(id, "tv", season, episode)
+    } else if (tmdbMovieMarkerMatch2 != null) {
+        val id = tmdbMovieMarkerMatch2.groupValues[1]
+        server.buildEmbedUrl(id, "movie", "1", "1")
+    } else if (tmdbUriTvMatch != null) {
+        val id = tmdbUriTvMatch.groupValues[1]
+        val season = tmdbUriTvMatch.groupValues.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
+        val episode = tmdbUriTvMatch.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() } ?: "1"
+        server.buildEmbedUrl(id, "tv", season, episode)
+    } else if (tmdbUriMovieMatch != null) {
+        val id = tmdbUriMovieMatch.groupValues[1]
+        server.buildEmbedUrl(id, "movie", "1", "1")
+    } else if (tvMatch != null) {
         val id = tvMatch.groupValues[1]
         val season = tvMatch.groupValues[2]
         val episode = tvMatch.groupValues[3]

@@ -129,12 +129,15 @@ fun TvEmbedPlayerScreen(
         }
     }
 
+    val focusRequester = remember { FocusRequester() }
+
     // Auto-hide controls: 5 seconds after the LAST interaction. Keying on
     // [controlsTick] too means every wake/OK/seek press restarts the window.
     LaunchedEffect(showControls, controlsTick) {
         if (showControls) {
             delay(5000)
             showControls = false
+            try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
     }
 
@@ -197,6 +200,20 @@ fun TvEmbedPlayerScreen(
                 currentPosition = resumeMs
             } else {
                 resumeFailedNotice = true
+            }
+        }
+    }
+
+    // Fallback autoplay loop for cross-origin iframes (e.g. 2Embed, AutoEmbed, VidLink)
+    // where evaluateJavascript cannot reach inside the nested frame.
+    LaunchedEffect(embedUrl) {
+        val delays = listOf(1000L, 1500L, 2000L, 2500L, 3000L, 4000L)
+        for (d in delays) {
+            delay(d)
+            if (currentPosition == 0L && !isPlaying) {
+                webViewRef?.let { wv ->
+                    dispatchCenterTouch(wv)
+                }
             }
         }
     }
@@ -333,8 +350,6 @@ fun TvEmbedPlayerScreen(
 
     BackHandler { onBack() }
 
-    val focusRequester = remember { FocusRequester() }
-
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
@@ -405,10 +420,17 @@ fun TvEmbedPlayerScreen(
                             // decides wake-vs-toggle from the visibility the
                             // press STARTED with.
                             when {
-                                isOkKey -> true
                                 event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
                                 event.key == Key.MediaFastForward || event.key == Key.MediaRewind ||
-                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> { wakeControls(); true }
+                                event.key == Key.MediaNext || event.key == Key.MediaPrevious -> {
+                                    if (!showControls) {
+                                        wakeControls()
+                                        true
+                                    } else {
+                                        wakeControls()
+                                        false
+                                    }
+                                }
                                 else -> false
                             }
                         }
@@ -545,7 +567,7 @@ fun TvEmbedPlayerScreen(
                             // Resume — seek to saved position, then dismiss
                             var resumeCardFocused by remember { mutableStateOf(false) }
                             Surface(
-                                onClick = { playerResume() },
+                                onClick = { playerResume(); controlsTick++ },
                                 shape = RoundedCornerShape(14.dp),
                                 color = if (resumeCardFocused) Color(0xFF00D4FF) else Color(0xFF00BFFF),
                                 border = if (resumeCardFocused) BorderStroke(2.dp, Color.White) else null,
@@ -597,7 +619,7 @@ fun TvEmbedPlayerScreen(
                 Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     var backFocused by remember { mutableStateOf(false) }
                     Surface(
-                        onClick = onBack, shape = CircleShape,
+                        onClick = { onBack(); controlsTick++ }, shape = CircleShape,
                         color = if (backFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                         border = if (backFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier.size(44.dp).onFocusChanged { backFocused = it.isFocused }
@@ -637,7 +659,7 @@ fun TvEmbedPlayerScreen(
                     if (bingeSession != null && bingeSession.currentIndex > 0) {
                         var prevFocused by remember { mutableStateOf(false) }
                         Surface(
-                            onClick = { onPrev() }, shape = CircleShape,
+                            onClick = { onPrev(); controlsTick++ }, shape = CircleShape,
                             color = if (prevFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                             border = if (prevFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                             modifier = Modifier.size(56.dp).onFocusChanged { prevFocused = it.isFocused }
@@ -651,7 +673,7 @@ fun TvEmbedPlayerScreen(
 
                     var ppFocused by remember { mutableStateOf(false) }
                     Surface(
-                        onClick = { playerTogglePlay() }, shape = CircleShape,
+                        onClick = { playerTogglePlay(); controlsTick++ }, shape = CircleShape,
                         color = if (ppFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                         border = if (ppFocused) BorderStroke(3.dp, Color(0xFF00BFFF)) else null,
                         modifier = Modifier.size(72.dp).onFocusChanged { ppFocused = it.isFocused }
@@ -667,7 +689,7 @@ fun TvEmbedPlayerScreen(
                         Spacer(Modifier.width(16.dp))
                         var nextFocused by remember { mutableStateOf(false) }
                         Surface(
-                            onClick = { onNext() }, shape = CircleShape,
+                            onClick = { onNext(); controlsTick++ }, shape = CircleShape,
                             color = if (nextFocused) Color(0xFF00BFFF) else Color.Black.copy(0.6f),
                             border = if (nextFocused) BorderStroke(2.dp, Color(0xFF00BFFF)) else null,
                             modifier = Modifier.size(56.dp).onFocusChanged { nextFocused = it.isFocused }

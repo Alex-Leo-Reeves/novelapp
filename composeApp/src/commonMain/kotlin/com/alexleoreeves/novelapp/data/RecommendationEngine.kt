@@ -22,10 +22,10 @@ class RecommendationEngine(
         // 2. Fetch TMDB / AniList recommendations for watched items in parallel
         val recJobs = watchedItems.map { item ->
             async {
-                val mediaType = if (item.mediaKind.equals("MOVIE", ignoreCase = true)) "movie" else "tv"
+                val mediaType = if (item.type.equals("MOVIE", ignoreCase = true)) "movie" else "tv"
                 val rawId = item.id.replace(Regex("""[^0-9]"""), "")
                 if (rawId.isNotBlank()) {
-                    if (item.mediaKind.equals("ANIME", ignoreCase = true)) {
+                    if (item.type.equals("ANIME", ignoreCase = true)) {
                         aniListSource.search(item.title, page = 1)
                             .map { it.toUnifiedSearchResult() }
                     } else {

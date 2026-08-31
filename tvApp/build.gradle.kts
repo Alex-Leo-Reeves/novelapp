@@ -108,7 +108,8 @@ kotlin {
             kotlin.exclude(
                 "LocalDownloadRepository.kt",
                 "LocalFileStorage.kt",
-                "MangaPageCache.kt"
+                "MangaPageCache.kt",
+                "RecommendationEngine.kt"
             )
         }
     }

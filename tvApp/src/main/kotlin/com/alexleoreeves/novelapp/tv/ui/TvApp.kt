@@ -810,6 +810,7 @@ fun TvApp(
                                     onNext = { advanceBinge(1) },
                                     onPrev = { advanceBinge(-1) },
                                     subtitlePath = nav.localSubtitlePath.ifBlank { null },
+                                    isLiveTv = nav.playerFromSection == TvSection.LIVE_TV,
                                     onEnded = {
                                         if (session?.hasNext == true) {
                                             advanceBinge(1)

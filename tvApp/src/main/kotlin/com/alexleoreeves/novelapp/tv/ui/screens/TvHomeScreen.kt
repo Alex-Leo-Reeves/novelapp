@@ -438,6 +438,7 @@ private fun TvHomeFeed(
     var isLoading by remember { mutableStateOf(true) }
 
     val novelRepo = remember { TvNovelSearchRepository() }
+    val downloadRepo = remember { LocalDownloadRepository() }
     val rowScope = rememberCoroutineScope()
 
     LaunchedEffect(config.version) {
@@ -447,9 +448,26 @@ private fun TvHomeFeed(
             async {
                 row.key to runCatching {
                     if (row.type == "recommended") {
-                        val movies = fetchContentHome("movie", 1).take(15)
-                        val anime = fetchContentHome("anime", 1).take(15)
-                        (movies + anime).shuffled().take(20)
+                        try {
+                            val tmdb = TmdbSource(
+                                client = io.ktor.client.HttpClient(),
+                                readAccessToken = BuildKonfig.TMDB_READ_ACCESS_TOKEN,
+                                apiKey = BuildKonfig.TMDB_API_KEY
+                            )
+                            val aniList = AniListSource(io.ktor.client.HttpClient())
+                            val engine = RecommendationEngine(tmdb, aniList, downloadRepo)
+                            val recs = engine.getRecommendations()
+                            if (recs.isNotEmpty()) recs
+                            else {
+                                val movies = fetchContentHome("movie", 1).take(15)
+                                val anime = fetchContentHome("anime", 1).take(15)
+                                (movies + anime).shuffled().take(20)
+                            }
+                        } catch (_: Exception) {
+                            val movies = fetchContentHome("movie", 1).take(15)
+                            val anime = fetchContentHome("anime", 1).take(15)
+                            (movies + anime).shuffled().take(20)
+                        }
                     } else if (row.type == "novel") {
                         novelRepo.fetchPopularNovels(1)
                     } else {

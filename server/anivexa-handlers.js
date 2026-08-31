@@ -179,7 +179,7 @@ async function handleAnivexaWatch(response, pathname) {
 async function handleAnivexaEmbed(response, pathname, requestUrl) {
     const anilistId = pathname.replace("/api/anivexa/embed/", "").split("/")[0];
     if (!/^\d+$/.test(anilistId)) return sendApiError(response, 400, "anilistId must be numeric.");
-    const episode = Math.max(1, Number(requestUrl.searchParams.get("ep") || 1) || 1);
+    let episode = Math.max(1, Number(requestUrl.searchParams.get("ep") || 1) || 1);
 
     const cacheKey = "map:" + anilistId;
     const cached = freshFrom(mapCache, cacheKey, EMBED_CACHE_TTL_MS);
@@ -188,7 +188,7 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
             tmdbId: cached.tmdbId,
             type: cached.type,
             season: cached.season,
-            episode: episode
+            episode: episode + (cached.episodeOffset || 0)
         });
     }
 
@@ -197,6 +197,7 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
     let format = "";
     let season = "1";
     let isMovie = false;
+    let episodeOffset = 0;
 
     try {
         const result = await forwardWorker(`/map/${anilistId}`);
@@ -209,6 +210,7 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
                 const hasSeason = Boolean(mappings.tmdbSeason || mappings.defaultTvdbSeason);
                 isMovie = format === "MOVIE" || (format === "SPECIAL" && !hasSeason);
                 season = String(mappings.tmdbSeason || mappings.defaultTvdbSeason || "1").trim();
+                episodeOffset = Number(mappings.episodeOffset) || 0;
             }
         }
     } catch (_) {}
@@ -236,13 +238,14 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
         tmdbId: tmdbId,
         type: isMovie ? "movie" : "tv",
         season: season,
+        episodeOffset: episodeOffset,
         cachedAt: Date.now()
     });
     return sendApiData(response, 200, {
         tmdbId: tmdbId,
         type: isMovie ? "movie" : "tv",
         season: season,
-        episode: episode
+        episode: episode + episodeOffset
     });
 }
 

@@ -108,7 +108,7 @@ fun MediaDetailScreen(
     // ── Server selector ──────────────────────────────────────────────
     // All 2 servers displayed inline. Default to Server 1 (VidLink).
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DONGHUA_STREAM) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.MOVIE_SERVER_1) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
     // Dub/Sub preference for Anivexa providers (like AniVault's toggle).
     var preferredAudio by remember { mutableStateOf("sub") }
@@ -124,12 +124,7 @@ fun MediaDetailScreen(
         onPlayStream(embedUrl, title, if (isPremium) null else freeEpisodePreviewMs, null, null)
     }
 
-    fun selectedDonghuaScraper(): DonghuaSiteScraper =
-        when (selectedDonghuaServer) {
-            DonghuaServer.DONGHUA_STREAM -> donghuaStreamScraper
-            DonghuaServer.LUCIFER_DONGHUA -> luciferDonghuaScraper
-            else -> donghuaStreamScraper
-        }
+    fun selectedDonghuaScraper(): DonghuaSiteScraper = donghuaStreamScraper
 
     /** Resolve the AniList ID for anime-only servers (Anivexa providers). */
     suspend fun resolveAnimeAnilistId(): String? {
@@ -192,29 +187,24 @@ fun MediaDetailScreen(
 
     suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? {
         return when (selectedDonghuaServer) {
-            DonghuaServer.DONGHUA_STREAM -> {
-                donghuaStreamScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.LUCIFER_DONGHUA -> {
-                luciferDonghuaScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.ANIMEXIN -> {
-                animeXinScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
-            }
-            DonghuaServer.VIDLINK -> {
+            DonghuaServer.MOVIE_SERVER_1 -> {
                 val tmdb = tmdbId.ifBlank { providerTmdbId }
                 if (tmdb.isNotBlank()) StreamServer.VIDLINK.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
                 else null
             }
-            DonghuaServer.VIDSRC_TO -> {
+            DonghuaServer.MOVIE_SERVER_2 -> {
                 val tmdb = tmdbId.ifBlank { providerTmdbId }
                 if (tmdb.isNotBlank()) StreamServer.VIDSRC_TO.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
                 else null
             }
-            DonghuaServer.AUTOEMBED -> {
-                val tmdb = tmdbId.ifBlank { providerTmdbId }
-                if (tmdb.isNotBlank()) StreamServer.AUTOEMBED.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
-                else null
+            DonghuaServer.ANIME_SERVER_5, DonghuaServer.ANIME_SERVER_3 -> {
+                // Anivexa-backed servers resolve through the backend
+                if (AnivexaApi.isAnivexaEpisodeUrl(ep.url)) {
+                    anivexaApi.resolveStream(ep.url)?.url
+                } else ep.url.takeIf { it.isNotBlank() }
+            }
+            DonghuaServer.ANIMEXIN -> {
+                animeXinScraper.resolveEpisodePlayerUrl(ep.url) ?: ep.url.takeIf { it.isNotBlank() }
             }
         }
     }
@@ -467,27 +457,34 @@ fun MediaDetailScreen(
         val initialEpisodes = when {
             isDonghuaItem -> {
                 when (selectedDonghuaServer) {
-                    DonghuaServer.DONGHUA_STREAM -> {
-                        val eps = donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                        if (eps.isNotEmpty()) eps
-                        else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                    DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2 -> {
+                        // TMDB-embed servers: load episode list from TMDB
+                        if (tmdbId.isNotBlank()) {
+                            tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
+                        } else {
+                            animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                        }
                     }
-                    DonghuaServer.LUCIFER_DONGHUA -> {
-                        val eps = luciferDonghuaScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                        if (eps.isNotEmpty()) eps
-                        else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                    DonghuaServer.ANIME_SERVER_5, DonghuaServer.ANIME_SERVER_3 -> {
+                        // Anivexa provider: episodes keyed by AniList ID
+                        val anilistId = resolveAnimeAnilistId()
+                        if (anilistId != null) {
+                            val providerKey = selectedDonghuaServer.anivexaProviderKey.orEmpty()
+                            anivexaApi.fetchEpisodes(
+                                provider = providerKey,
+                                anilistId = anilistId,
+                                preferredAudio = preferredAudio
+                            )
+                        } else {
+                            // Fallback to TMDB if no AniList ID
+                            if (tmdbId.isNotBlank()) tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
+                            else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                        }
                     }
                     DonghuaServer.ANIMEXIN -> {
                         val eps = animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
                         if (eps.isNotEmpty()) eps
-                        else donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                    }
-                    DonghuaServer.VIDLINK, DonghuaServer.VIDSRC_TO, DonghuaServer.AUTOEMBED -> {
-                        if (tmdbId.isNotBlank()) {
-                            tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
-                        } else {
-                            donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                        }
+                        else emptyList()
                     }
                 }
             }

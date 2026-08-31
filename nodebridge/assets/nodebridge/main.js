@@ -206,17 +206,17 @@ function writeJson(res, statusCode, payload) {
 
 // /embed/{anilistId}?ep={n} — build a VidLink-compatible embed reference from
 // the worker's /map payload. Mirrors server/anivexa-handlers.js handleAnivexaEmbed.
-const embedCache = new Map(); // anilistId -> { tmdbId, type, season, cachedAt }
+const embedCache = new Map(); // anilistId -> { tmdbId, type, season, episodeOffset, cachedAt }
 
 async function handleEmbed(req, res, reqUrl, anilistId) {
-    const episode = Math.max(1, Number(reqUrl.searchParams.get("ep") || 1) || 1);
+    const rawEpisode = Math.max(1, Number(reqUrl.searchParams.get("ep") || 1) || 1);
     const cached = embedCache.get(anilistId);
     if (cached && Date.now() - cached.cachedAt < EMBED_CACHE_TTL_MS) {
         return writeJson(res, 200, ok({
             tmdbId: cached.tmdbId,
             type: cached.type,
             season: cached.season,
-            episode: episode
+            episode: rawEpisode + (cached.episodeOffset || 0)
         }));
     }
 
@@ -241,18 +241,20 @@ async function handleEmbed(req, res, reqUrl, anilistId) {
     const hasSeason = Boolean(mappings.tmdbSeason || mappings.defaultTvdbSeason);
     const isMovie = format === "MOVIE" || (format === "SPECIAL" && !hasSeason);
     const season = String(mappings.tmdbSeason || mappings.defaultTvdbSeason || "1").trim();
+    const episodeOffset = Number(mappings.episodeOffset) || 0;
 
     embedCache.set(anilistId, {
         tmdbId: tmdbId,
         type: isMovie ? "movie" : "tv",
         season: season,
+        episodeOffset: episodeOffset,
         cachedAt: Date.now()
     });
     return writeJson(res, 200, ok({
         tmdbId: tmdbId,
         type: isMovie ? "movie" : "tv",
         season: season,
-        episode: episode
+        episode: rawEpisode + episodeOffset
     }));
 }
 

@@ -110,27 +110,34 @@ class TvMediaRepository {
 
             val episodes = when {
                 isDonghua -> {
-                    val effectiveDonghua = donghuaServer ?: DonghuaServer.DONGHUA_STREAM
+                    val effectiveDonghua = donghuaServer ?: DonghuaServer.MOVIE_SERVER_1
                     when (effectiveDonghua) {
-                        DonghuaServer.DONGHUA_STREAM -> {
-                            val eps = donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                            if (eps.isNotEmpty()) eps.map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
+                        DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2 -> {
+                            // TMDB-embed servers
+                            val tmdbEps = fetchTmdbChaptersForAnime(item)
+                            if (tmdbEps.isNotEmpty()) tmdbEps
                             else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300).map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
                         }
-                        DonghuaServer.LUCIFER_DONGHUA -> {
-                            val eps = luciferDonghuaScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                            if (eps.isNotEmpty()) eps.map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
-                            else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300).map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
+                        DonghuaServer.ANIME_SERVER_5, DonghuaServer.ANIME_SERVER_3 -> {
+                            // Anivexa provider: episodes keyed by AniList ID
+                            val anilistId = resolveAnilistId(item)
+                            if (anilistId != null) {
+                                val anivexaEpisodes = anivexaApi.fetchEpisodes(
+                                    provider = effectiveDonghua.anivexaProviderKey.orEmpty(),
+                                    anilistId = anilistId,
+                                    preferredAudio = preferredAudio
+                                ).map { ep ->
+                                    Chapter(title = ep.title, url = ep.url, chapterNumber = ep.episodeNumber)
+                                }
+                                if (anivexaEpisodes.isNotEmpty()) anivexaEpisodes
+                                else fetchTmdbChaptersForAnime(item)
+                            } else {
+                                fetchTmdbChaptersForAnime(item)
+                            }
                         }
                         DonghuaServer.ANIMEXIN -> {
                             val eps = animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
-                            if (eps.isNotEmpty()) eps.map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
-                            else donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300).map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
-                        }
-                        DonghuaServer.VIDLINK, DonghuaServer.VIDSRC_TO, DonghuaServer.AUTOEMBED -> {
-                            val tmdbEps = fetchTmdbChaptersForAnime(item)
-                            if (tmdbEps.isNotEmpty()) tmdbEps
-                            else donghuaStreamScraper.fetchEpisodes(item.title, maxEpisodes = 300).map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
+                            eps.map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
                         }
                     }
                 }
@@ -476,31 +483,36 @@ class TvMediaRepository {
         }
 
         if (isDonghua && chapter != null) {
-            val effectiveDonghua = donghuaServer ?: DonghuaServer.DONGHUA_STREAM
+            val effectiveDonghua = donghuaServer ?: DonghuaServer.MOVIE_SERVER_1
             return when (effectiveDonghua) {
-                DonghuaServer.DONGHUA_STREAM -> {
-                    donghuaStreamScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
-                }
-                DonghuaServer.LUCIFER_DONGHUA -> {
-                    luciferDonghuaScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
-                }
-                DonghuaServer.ANIMEXIN -> {
-                    animeXinScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
-                }
-                DonghuaServer.VIDLINK -> {
+                DonghuaServer.MOVIE_SERVER_1 -> {
                     parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
                         StreamServer.VIDLINK.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)
                     } ?: StreamServer.VIDLINK.buildEmbedUrl(item.id, "tv", "1", chapter.chapterNumber.toString())
                 }
-                DonghuaServer.VIDSRC_TO -> {
+                DonghuaServer.MOVIE_SERVER_2 -> {
                     parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
                         StreamServer.VIDSRC_TO.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)
                     } ?: StreamServer.VIDSRC_TO.buildEmbedUrl(item.id, "tv", "1", chapter.chapterNumber.toString())
                 }
-                DonghuaServer.AUTOEMBED -> {
-                    parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
-                        StreamServer.AUTOEMBED.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)
-                    } ?: StreamServer.AUTOEMBED.buildEmbedUrl(item.id, "tv", "1", chapter.chapterNumber.toString())
+                DonghuaServer.ANIME_SERVER_5, DonghuaServer.ANIME_SERVER_3 -> {
+                    // Anivexa-backed: resolve stream through the backend
+                    if (AnivexaApi.isAnivexaEpisodeUrl(chapter.url)) {
+                        val stream = retryNullable { anivexaApi.resolveStream(chapter.url) }
+                        if (stream != null) {
+                            val headersJson = stream.headersJson
+                            if (!headersJson.isNullOrBlank() && stream.url.isNotBlank()) {
+                                buildProxiedStreamUrl(stream.url, headersJson)
+                            } else {
+                                stream.url.takeIf { it.isNotBlank() } ?: chapter.url
+                            }
+                        } else chapter.url
+                    } else {
+                        chapter.url
+                    }
+                }
+                DonghuaServer.ANIMEXIN -> {
+                    animeXinScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
                 }
             }
         }

@@ -1949,20 +1949,12 @@ function donghuaEmbedProviders(mediaType, id, season = "1", episode = "1") {
   const movie = mediaType === "movie";
     return [
       {
-        provider: "Donghua Server 1 (Nontongo)",
-        url: movie ? `https://nontongo.win/embed/movie/${id}` : `https://nontongo.win/embed/tv/${id}/${season}/${episode}`
+        provider: "Donghua Movie Server 1 (VidLink)",
+        url: movie ? `https://vidlink.pro/movie/${id}` : `https://vidlink.pro/tv/${id}/${season}/${episode}`
       },
       {
-        provider: "Donghua Server 2 (AutoEmbed)",
-        url: movie ? `https://player.autoembed.cc/embed/movie/${id}` : `https://player.autoembed.cc/embed/tv/${id}/${season}/${episode}`
-      },
-      {
-        provider: "Donghua Server 3 (DonghuaStream)",
-        url: movie ? `https://donghuastream.org/embed/movie/${id}` : `https://donghuastream.org/embed/tv/${id}/${season}/${episode}`
-      },
-      {
-        provider: "Donghua Server 4 (EmbedSu)",
-        url: movie ? `https://embed.su/embed/movie/${id}` : `https://embed.su/embed/tv/${id}/${season}/${episode}`
+        provider: "Donghua Movie Server 2 (VidSrc.to)",
+        url: movie ? `https://vidsrc.to/embed/movie/${id}` : `https://vidsrc.to/embed/tv/${id}/${season}/${episode}`
       }
     ];
 }
