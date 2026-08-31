@@ -234,8 +234,20 @@ class LocalDownloadRepository {
     fun getReadProgress(chapterUrl: String): ReadHistoryItem? =
         loadIndex().readHistory.firstOrNull { it.chapterUrl == chapterUrl }
 
-    fun getWatchProgress(streamUrl: String): WatchHistoryItem? =
-        loadIndex().watchHistory.firstOrNull { it.streamUrl == streamUrl }
+    fun getWatchProgress(
+        streamUrl: String,
+        parentId: String? = null,
+        episodeNumber: Int? = null,
+        title: String? = null
+    ): WatchHistoryItem? {
+        val history = loadIndex().watchHistory
+        return history.firstOrNull { it.streamUrl == streamUrl }
+            ?: if (!parentId.isNullOrBlank() && episodeNumber != null && episodeNumber > 0) {
+                history.firstOrNull { it.parentId == parentId && it.episodeNumber == episodeNumber }
+            } else if (!title.isNullOrBlank()) {
+                history.firstOrNull { it.title.equals(title, ignoreCase = true) || it.episodeTitle.equals(title, ignoreCase = true) }
+            } else null
+    }
 
     fun getSearchHistory(tab: String): List<SearchHistoryItem> {
         val normalizedTab = tab.trim().uppercase()
@@ -272,7 +284,7 @@ class LocalDownloadRepository {
                 watchHistory = mergeByLatest(
                     local = idx.watchHistory,
                     remote = state.watchHistory,
-                    key = { it.streamUrl },
+                    key = { if (it.parentId.isNotBlank() && it.episodeNumber > 0) "${it.parentId}:${it.episodeNumber}" else it.streamUrl },
                     updatedAt = { it.updatedAt }
                 ).take(MAX_HISTORY_ITEMS),
                 searchHistory = mergeByLatest(
@@ -307,8 +319,12 @@ class LocalDownloadRepository {
         )
         saveIndex(
             idx.copy(
-                watchHistory = (listOf(updated) + idx.watchHistory.filter { it.streamUrl != item.streamUrl })
-                    .take(MAX_HISTORY_ITEMS)
+                watchHistory = (listOf(updated) + idx.watchHistory.filter {
+                    val sameParentAndEp = item.parentId.isNotBlank() && item.episodeNumber > 0 &&
+                        it.parentId == item.parentId && it.episodeNumber == item.episodeNumber
+                    val sameStream = it.streamUrl == item.streamUrl
+                    !sameParentAndEp && !sameStream
+                }).take(MAX_HISTORY_ITEMS)
             )
         )
     }

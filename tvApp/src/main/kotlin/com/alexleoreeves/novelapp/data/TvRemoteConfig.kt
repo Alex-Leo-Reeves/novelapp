@@ -58,12 +58,13 @@ object TvRemoteConfigDefaults {
             TvConfigSection("cartoon", "Cartoon"),
             TvConfigSection("classic", "Classic"),
             TvConfigSection("movies", "Movies"),
-            TvConfigSection("nollywood", "Nollywood"),
+            TvConfigSection("live_tv", "Live TV"),
             TvConfigSection("sports", "Sports"),
             TvConfigSection("downloads", "Downloads"),
             TvConfigSection("you", "You")
         ),
         homeRows = listOf(
+            TvConfigRow("recommended", "✨ Recommended For You", "recommended"),
             TvConfigRow("trendingAnime", "🔥 Trending Anime", "anime"),
             TvConfigRow("popularNovels", "📚 Popular Novels", "novel"),
             TvConfigRow("topManga", "🎨 Top Manga", "manga"),
@@ -100,7 +101,7 @@ fun TvConfigSection.toSection(): TvSection = when (key.lowercase()) {
     "cartoon" -> TvSection.CARTOON
     "classic" -> TvSection.CLASSIC
     "movies" -> TvSection.MOVIES
-    "nollywood" -> TvSection.NOLLYWOOD
+    "live_tv", "livetv", "live tv", "nollywood" -> TvSection.LIVE_TV
     "sports" -> TvSection.SPORTS
     "downloads" -> TvSection.DOWNLOADS
     "you" -> TvSection.YOU

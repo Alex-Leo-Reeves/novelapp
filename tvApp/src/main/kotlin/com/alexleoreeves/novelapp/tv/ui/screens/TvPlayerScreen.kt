@@ -158,7 +158,7 @@ fun TvPlayerScreen(
                     when (event.type) {
                         MediaPlayer.Event.TimeChanged -> {
                             currentPosition = mp.time
-                            if (duration <= 0 && mp.length > 0) {
+                            if (mp.length > 0) {
                                 duration = mp.length
                             }
                             // End of media: within 10s of the end → fire onEnded

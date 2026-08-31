@@ -259,21 +259,46 @@ class AnivexaApi(private val client: HttpClient) {
         return AnivexaStream(url = embed, type = "embed")
     }
 
-    /** Resolve the VidLink (TMDB) embed reference for the LAST anime server. */
+    /** Resolve the VidLink/VidSrc/AutoEmbed (TMDB) embed reference for anime servers. */
     suspend fun resolveVidLinkEmbed(anilistId: String, episode: Int): VidLinkEmbedRef? {
-        return runCatching {
+        val primary = runCatching {
             val raw: String = client.get("${baseUrl()}/embed/$anilistId") {
                 parameter("ep", episode)
             }.body()
             val root = json.parseToJsonElement(raw).jsonObject
-            if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) return null
-            val data = root["data"]?.jsonObject ?: return null
-            VidLinkEmbedRef(
-                tmdbId = data["tmdbId"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                type = data["type"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                season = data["season"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                episode = data["episode"]?.jsonPrimitive?.intOrNull ?: episode
-            )
+            if (root["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                val data = root["data"]?.jsonObject ?: return@runCatching null
+                val tid = data["tmdbId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (tid.isNotBlank()) {
+                    VidLinkEmbedRef(
+                        tmdbId = tid,
+                        type = data["type"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "tv" },
+                        season = data["season"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "1" },
+                        episode = data["episode"]?.jsonPrimitive?.intOrNull ?: episode
+                    )
+                } else null
+            } else null
+        }.getOrNull()
+
+        if (primary != null) return primary
+
+        // Fallback: backend remote route or direct MAL-Sync mapping
+        return runCatching {
+            val fallbackUrl = "${AppReleaseConfig.API_BASE_URL}/anivexa/embed/$anilistId"
+            val raw: String = client.get(fallbackUrl) {
+                parameter("ep", episode)
+            }.body()
+            val root = json.parseToJsonElement(raw).jsonObject
+            val data = root["data"]?.jsonObject ?: return@runCatching null
+            val tid = data["tmdbId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (tid.isNotBlank()) {
+                VidLinkEmbedRef(
+                    tmdbId = tid,
+                    type = data["type"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "tv" },
+                    season = data["season"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "1" },
+                    episode = data["episode"]?.jsonPrimitive?.intOrNull ?: episode
+                )
+            } else null
         }.getOrElse { error ->
             println("[Anivexa] Embed resolve failed for $anilistId/$episode: ${error.message}")
             null

@@ -40,6 +40,8 @@ fun DiscoverHomeScreen(
     var isSearching by remember { mutableStateOf(false) }
 
     // Section data — loaded lazily per category
+    var recommendedItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    var isLoadingRecommended by remember { mutableStateOf(false) }
     var animeItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var movieItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var nollywoodItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
@@ -183,6 +185,22 @@ fun DiscoverHomeScreen(
     }
 
     LaunchedEffect(Unit) {
+        if (recommendedItems.isEmpty()) {
+            scope.launch {
+                isLoadingRecommended = true
+                try {
+                    val tmdb = com.alexleoreeves.novelapp.data.TmdbSource(
+                        client = io.ktor.client.HttpClient(),
+                        readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
+                        apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
+                    )
+                    val aniList = com.alexleoreeves.novelapp.data.AniListSource(io.ktor.client.HttpClient())
+                    val engine = com.alexleoreeves.novelapp.data.RecommendationEngine(tmdb, aniList, downloadRepo)
+                    recommendedItems = engine.getRecommendations()
+                } catch (_: Exception) {}
+                isLoadingRecommended = false
+            }
+        }
         if (animeItems.isEmpty()) loadSection(VideoCategory.ANIME, { animeItems = it }, { isLoadingAnime = it })
         if (movieItems.isEmpty()) loadSection(VideoCategory.MOVIES, { movieItems = it }, { isLoadingMovies = it })
         if (nollywoodItems.isEmpty()) loadSection(VideoCategory.NIGERIAN, { nollywoodItems = it }, { isLoadingNollywood = it })
@@ -364,8 +382,24 @@ fun DiscoverHomeScreen(
                     }
                 }
             } else {
-                // Browse feed — labeled sections as horizontal rows
-                item { GlassSectionLabel("Anime", modifier = Modifier.padding(horizontal = 16.dp)) }
+                // Browse feed — Recommended section is the very FIRST section
+                if (recommendedItems.isNotEmpty() || isLoadingRecommended) {
+                    item { GlassSectionLabel("Recommended For You", modifier = Modifier.padding(horizontal = 16.dp)) }
+                    if (isLoadingRecommended) {
+                        item { SectionShimmerHorizontal() }
+                    } else {
+                        item {
+                            DiscoverPosterRow(
+                                items = recommendedItems,
+                                isLoadingMore = false,
+                                onItemClick = onNovelSelected,
+                                onLoadMore = {}
+                            )
+                        }
+                    }
+                }
+
+                item { GlassSectionLabel("Anime", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
                 if (isLoadingAnime) {
                     item { SectionShimmerHorizontal() }
                 } else {

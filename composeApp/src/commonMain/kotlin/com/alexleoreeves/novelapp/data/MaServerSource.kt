@@ -31,28 +31,28 @@ enum class StreamServer(
             else "https://vidsrc.to/embed/tv/$id/$s/$e"
         }
     ),
-    NONTONGO(
-        "Server 3 (Nontongo)",
+    AUTOEMBED(
+        "Server 3 (AutoEmbed)",
         3,
+        { id, type, s, e ->
+            if (type == "movie") "https://autoembed.co/movie/tmdb/$id"
+            else "https://autoembed.co/tv/tmdb/$id-$s-$e"
+        }
+    ),
+    TWO_EMBED_ONLINE(
+        "Server 4 (2Embed.online)",
+        4,
+        { id, type, s, e ->
+            if (type == "movie") "https://www.2embed.online/embed/movie/$id"
+            else "https://www.2embed.online/embed/tv/$id/$s/$e"
+        }
+    ),
+    NONTONGO(
+        "Server 5 (Nontongo)",
+        5,
         { id, type, s, e ->
             if (type == "movie") "https://nontongo.win/embed/movie/$id"
             else "https://nontongo.win/embed/tv/$id/$s/$e"
-        }
-    ),
-    TWO_EMBED(
-        "Server 4 (2Embed)",
-        4,
-        { id, type, s, e ->
-            if (type == "movie") "https://www.2embed.cc/embed/$id"
-            else "https://www.2embed.cc/embedtv/$id&s=$s&e=$e"
-        }
-    ),
-    VIDLINK_EXO(
-        "Server 5 (ExoPlayer)",
-        5,
-        { id, type, s, e ->
-            if (type == "movie") "https://vidlink.pro/movie/$id"
-            else "https://vidlink.pro/tv/$id/$s/$e"
         }
     ),
     MULTI_EMBED(
@@ -63,44 +63,38 @@ enum class StreamServer(
             else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e"
         }
     ),
-    AUTOEMBED(
-        "Server 7 (AutoEmbed)",
-        7,
-        { id, type, s, e ->
-            if (type == "movie") "https://autoembed.co/movie/tmdb/$id"
-            else "https://autoembed.co/tv/tmdb/$id-$s-$e"
-        }
-    ),
     VIDSRC_NET(
-        "Server 8 (VidSrc Net)",
-        8,
+        "Server 7 (VidSrc Net)",
+        7,
         { id, type, s, e ->
             if (type == "movie") "https://vidsrc.net/embed/movie?tmdb=$id"
             else "https://vidsrc.net/embed/tv?tmdb=$id&season=$s&episode=$e"
         }
     ),
     SMASHY(
-        "Server 9 (SmashyStream)",
-        9,
+        "Server 8 (SmashyStream)",
+        8,
         { id, type, s, e ->
             if (type == "movie") "https://embed.smashystream.com/playere.php?tmdb=$id"
             else "https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&ep=$e"
         }
     ),
     CINEPRO(
-        "Server 10 (CinePro)",
-        10,
+        "Server 9 (CinePro)",
+        9,
         { id, type, s, e ->
             if (type == "movie") "https://cinepro-core-esmh.onrender.com/v1/movies/$id"
             else "https://cinepro-core-esmh.onrender.com/v1/tv/$id/seasons/$s/episodes/$e"
         }
     ),
-    // LAST server in the normal movie/TV row. AniNeko is normally an anime-only
-    // Anivexa provider, but it also hosts Western series (Henry Danger, FROM…)
-    // and the user wants it reachable for series/movies/kdrama/cartoon too.
-    // The episode list in the StreamServer row is TMDB-keyed, so the embed URL
-    // maps to VidLink (Server 1) as the fallback; TvMediaRepository handles the
-    // AniNeko-first resolution via the device-side title scraper.
+    VIDLINK_EXO(
+        "Server 10 (ExoPlayer)",
+        10,
+        { id, type, s, e ->
+            if (type == "movie") "https://vidlink.pro/movie/$id"
+            else "https://vidlink.pro/tv/$id/$s/$e"
+        }
+    ),
     ANINEKO(
         "Server 11 (AniNeko)",
         11,
@@ -114,10 +108,10 @@ enum class StreamServer(
         /** All servers in display order */
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
-        /** WebView servers that load the embed directly (Servers 1-4, 6-9) */
-        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_TO, NONTONGO, TWO_EMBED, MULTI_EMBED, AUTOEMBED, VIDSRC_NET, SMASHY)
+        /** WebView servers that load the embed directly */
+        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_TO, AUTOEMBED, TWO_EMBED_ONLINE, NONTONGO, MULTI_EMBED, VIDSRC_NET, SMASHY)
 
-        /** ExoPlayer servers that scrape the embed for a direct stream (Server 5) */
+        /** ExoPlayer servers that scrape the embed for a direct stream */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)
 
         /** True when a StreamServer chip is the AniNeko (Anivexa) route. */
@@ -126,13 +120,7 @@ enum class StreamServer(
 }
 
 /**
- * Donghua-only servers. Intentionally separate from [StreamServer] so the
- * movie/anime/K-drama/cartoon/classic/Nigerian tabs keep their normal Server 1
- * and Server 2 behavior. Only AnimeXin is kept — the other TMDB-embed donghua
- * servers (Nontongo/AutoEmbed/DonghuaStream/EmbedSu/LuciferDonghua/VidSrc)
- * were removed per user request; donghua plays through AnimeXin's device-side
- * scraper, which extracts embed/direct streams that load in the WebView player
- * (same trick as AnimeHeaven/AniDao for anime).
+ * Donghua-only servers.
  */
 enum class DonghuaServer(
     val displayName: String,
@@ -161,29 +149,7 @@ fun DonghuaServer.toStreamServer(): StreamServer? = when (this) {
 }
 
 /**
- * Anime-only servers — the content-aware anime selector.
- *
- * When the app detects anime content it shows ONLY this list, never the
- * generic [StreamServer] movie/TV list. Servers 1-13 are Anivexa-API providers
- * (backed by server/anivexa on the app backend, keyed by AniList ID). Servers
- * 14-16 (AnimeHeaven / AnimePahe / AniDao) are the three Anivault servers —
- * they are DESCRIBED in the Anivault-Scraper repo but here run through the
- * DEVICE-SIDE scrapers (AnimeScrapers.kt), which is exactly how the repo
- * owner's site works: the scraping runs on the user's residential IP inside
- * the app, so CDNs/Cloudflare that block datacenter egress (Render/Vercel
- * probes) let these play — Dragon Ball Super included. VIDLINK (Server 17)
- * is the TMDB-embed fallback and is intentionally the LAST server.
- *
- * [usesTmdbEpisodes] is true only for VIDLINK: its episode list is reloaded from
- * TMDB so the embed URL resolves via the tmdb marker → `StreamServer.buildEmbedUrl`
- * flow. The Anivexa providers use AniList ID-based episode lists instead.
- *
- * [isAnivexa] is true for the 13 backend providers (resolved via server/anivexa).
- * [usesClientScraper] is true for the 3 Anivault servers — resolved via the
- * device-side scrapers that run on the user's IP (AnimeHeavenScraper,
- * AnimePaheScraper, AniDaoScraper). [clientScraperKey] maps to the provider key
- * used by NovelSearchRepository.fetchEpisodesFromAnimeProvider /
- * resolveAnimeServerStream.
+ * Anime-only servers — 19 servers.
  */
 enum class AnimeServer(
     val displayName: String,
@@ -206,22 +172,17 @@ enum class AnimeServer(
     SENSHI("Server 11", "Senshi", false, 11, "senshi"),
     KAA("Server 12", "KickAssAnime", false, 12, "kaa"),
     ANIMEDUNYA("Server 13", "AnimeDunya", false, 13, "animedunya"),
-    // ── Anivault trio (device-side scrapers → residential IP, mirrors the
-    //    repo owner's working play-by-page-in-browser trick) ──────────────
     ANIMEHEAVEN("Server 14", "AnimeHeaven", false, 14, null, "animeheaven"),
     ANIMEPAHE("Server 15", "AnimePahe", false, 15, null, "animepahe"),
     ANIDAO("Server 16", "AniDao", false, 16, null, "anidao"),
     VIDLINK("Server 17", "VidLink", true, 17, null),
-    VIDSRC_TO("Server 18", "VidSrc.to", true, 18, null);
+    VIDSRC_TO("Server 18", "VidSrc.to", true, 18, null),
+    AUTOEMBED("Server 19", "AutoEmbed", true, 19, null);
 
-    /** True for the 13 Anivexa-API provider servers (backend, AniList-keyed). */
     val isAnivexa: Boolean get() = anivexaProviderKey != null
-
-    /** True for the 3 Anivault servers resolved by device-side scrapers. */
     val usesClientScraper: Boolean get() = clientScraperKey != null
 
     companion object {
-        /** All anime servers in display order: Anivexa first, then Anivault, VidLink last. */
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
     }
 }
@@ -230,30 +191,32 @@ enum class AnimeServer(
 fun AnimeServer.toStreamServer(): StreamServer? = when (this) {
     AnimeServer.VIDLINK -> StreamServer.VIDLINK
     AnimeServer.VIDSRC_TO -> StreamServer.VIDSRC_TO
+    AnimeServer.AUTOEMBED -> StreamServer.AUTOEMBED
     else -> null
 }
 
-/** Convert a StreamServer into the anime server slot (VidLink and VidSrc.to map). */
+/** Convert a StreamServer into the anime server slot. */
 fun StreamServer.toAnimeServer(): AnimeServer? = when (this) {
     StreamServer.VIDLINK -> AnimeServer.VIDLINK
     StreamServer.VIDSRC_TO -> AnimeServer.VIDSRC_TO
+    StreamServer.AUTOEMBED -> AnimeServer.AUTOEMBED
     else -> null
 }
 
 /**
  * Build an embed URL for the given server, extracting parameters from
- * an existing VidLink embed URL (used by the episode playback flow).
- *
- * VidLink format: https://vidlink.pro/movie/{id} or https://vidlink.pro/tv/{id}/{s}/{e}
- * Other servers: same id/type/season/episode mapped to their own URL structure.
+ * an existing embed URL or TMDB marker.
  */
 fun buildEmbedUrlForServer(vidLinkUrl: String, server: StreamServer): String {
     val cleanUrl = vidLinkUrl.trim()
     val movieMatch = Regex("""vidlink\.pro/movie/(\d+)""").find(cleanUrl)
     val tvMatch = Regex("""vidlink\.pro/tv/(\d+)/(\d+)/(\d+)""").find(cleanUrl)
     val tmdbTvMarkerMatch = Regex("""^tv:(\d+):(\d+):(\d+)$""").find(cleanUrl)
-    val twoEmbedMovieMatch = Regex("""2embed\.skin/embed/movie/(\d+)""").find(cleanUrl)
-    val twoEmbedTvMatch = Regex("""2embed\.skin/embed/tv/(\d+)/(\d+)/(\d+)""").find(cleanUrl)
+    val tmdbMovieMarkerMatch = Regex("""^movie:(\d+)$""").find(cleanUrl)
+    val twoEmbedMovieMatch = Regex("""2embed\.(?:skin|online|cc)/embed/movie/([^/?&]+)""").find(cleanUrl)
+    val twoEmbedTvMatch = Regex("""2embed\.(?:skin|online|cc)/embed/tv/([^/?&]+)/(\d+)/(\d+)""").find(cleanUrl)
+    val autoembedMovieMatch = Regex("""autoembed\.(?:co|app|cc)/movie/tmdb/(\d+)""").find(cleanUrl)
+    val autoembedTvMatch = Regex("""autoembed\.(?:co|app|cc)/tv/tmdb/(\d+)-(\d+)-(\d+)""").find(cleanUrl)
 
     return if (tvMatch != null) {
         val id = tvMatch.groupValues[1]
@@ -270,11 +233,22 @@ fun buildEmbedUrlForServer(vidLinkUrl: String, server: StreamServer): String {
         val season = twoEmbedTvMatch.groupValues[2]
         val episode = twoEmbedTvMatch.groupValues[3]
         server.buildEmbedUrl(id, "tv", season, episode)
+    } else if (autoembedTvMatch != null) {
+        val id = autoembedTvMatch.groupValues[1]
+        val season = autoembedTvMatch.groupValues[2]
+        val episode = autoembedTvMatch.groupValues[3]
+        server.buildEmbedUrl(id, "tv", season, episode)
     } else if (movieMatch != null) {
         val id = movieMatch.groupValues[1]
         server.buildEmbedUrl(id, "movie", "1", "1")
+    } else if (tmdbMovieMarkerMatch != null) {
+        val id = tmdbMovieMarkerMatch.groupValues[1]
+        server.buildEmbedUrl(id, "movie", "1", "1")
     } else if (twoEmbedMovieMatch != null) {
         val id = twoEmbedMovieMatch.groupValues[1]
+        server.buildEmbedUrl(id, "movie", "1", "1")
+    } else if (autoembedMovieMatch != null) {
+        val id = autoembedMovieMatch.groupValues[1]
         server.buildEmbedUrl(id, "movie", "1", "1")
     } else {
         cleanUrl

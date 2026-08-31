@@ -44,6 +44,7 @@ fun App(
 ) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
+    val tabHistory = remember { mutableStateListOf<BottomTab>() }
     var showSplash by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
@@ -239,6 +240,7 @@ fun App(
             selectedAnime.value != null -> selectedAnime.value = null
             selectedMedia.value != null -> selectedMedia.value = null
             selectedNovel.value != null -> selectedNovel.value = null
+            tabHistory.isNotEmpty() -> currentTab.value = tabHistory.removeLast()
             currentTab.value != BottomTab.DISCOVER -> currentTab.value = BottomTab.DISCOVER
         }
     }
@@ -480,7 +482,12 @@ fun App(
 
                 animeStreamUrl.value != null -> AnimePlayerScreen(
                     animeStreamUrl.value!!, animeEpisodeTitle.value, appTheme.value,
-                    initialPositionMs = downloadRepo.getWatchProgress(animeStreamUrl.value!!)?.positionMs ?: 0L,
+                    initialPositionMs = downloadRepo.getWatchProgress(
+                        streamUrl = animeStreamUrl.value!!,
+                        parentId = selectedAnime.value?.id,
+                        episodeNumber = animeEpisodeNumber.value,
+                        title = animeEpisodeTitle.value
+                    )?.positionMs ?: 0L,
                     onProgress = { ms ->
                         val a = selectedAnime.value
                         downloadRepo.recordWatchProgress(WatchHistoryItem(parentId = a?.id ?: animeStreamUrl.value!!, title = a?.displayTitle ?: animeEpisodeTitle.value, coverUrl = a?.coverUrl.orEmpty(), episodeTitle = animeEpisodeTitle.value, streamUrl = animeStreamUrl.value!!, episodeNumber = animeEpisodeNumber.value, positionMs = ms))
@@ -599,11 +606,22 @@ fun App(
                                                 // TMDB Nollywood movie → MediaDetailScreen
                                                 selectedMedia.value = i
                                             }
-                                        } else if (i.isAnime && i.animeResult != null) selectedAnime.value = i.animeResult
-                                        else if (i.isVideo) selectedMedia.value = i
+                                        } else if (i.isAnime || i.mediaKind.equals("ANIME", ignoreCase = true) || i.genre.contains("Anime", ignoreCase = true)) {
+                                            selectedAnime.value = i.animeResult ?: i.toAnimeResult()
+                                        } else if (i.isVideo) selectedMedia.value = i
                                         else selectedNovel.value = i
                                     },
                                     onSearchHistorySaved = { t, q -> downloadRepo.recordSearchQuery(t, q); searchHistoryPulse++; queueCloudSync() }
+                                )
+                                BottomTab.LIVE_TV -> LiveChannelScreen(
+                                    currentTheme = appTheme.value,
+                                    onPlayChannel = { streamUrl, title ->
+                                        // All live channels are direct HLS streams — play via native ExoPlayer
+                                        animeStreamUrl.value = streamUrl
+                                        animeEpisodeTitle.value = title
+                                        animeEpisodeNumber.value = 0
+                                        animePreviewLimitMs.value = null
+                                    }
                                 )
                                 BottomTab.NMC -> NmcHomeScreen(
                                     currentTheme = appTheme.value, repository = repository, downloadRepo = downloadRepo,
@@ -657,7 +675,15 @@ fun App(
                                 }
                             }
                         }
-                        GlassBottomBar(currentTab = currentTab.value, onTabSelected = { currentTab.value = it })
+                        GlassBottomBar(
+                            currentTab = currentTab.value,
+                            onTabSelected = {
+                                if (currentTab.value != it) {
+                                    tabHistory.add(currentTab.value)
+                                    currentTab.value = it
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -760,6 +786,7 @@ fun App(
 
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.PlayCircle),
+    LIVE_TV("Live TV", Icons.Default.LiveTv),
     NMC("NMC", Icons.Default.Book),
     SPORTS("Sports", Icons.Default.EmojiEvents),
     READ("Read", Icons.Filled.MenuBook),

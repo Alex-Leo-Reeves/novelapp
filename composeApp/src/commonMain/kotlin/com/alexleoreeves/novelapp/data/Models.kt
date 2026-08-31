@@ -169,3 +169,29 @@ data class AnimeSeasonChoice(
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
 }
+
+fun AnimeResult.toUnifiedSearchResult(): UnifiedSearchResult =
+    UnifiedSearchResult(
+        id = id,
+        title = displayTitle,
+        coverUrl = coverUrl,
+        detailPageUrl = "anilist://$id",
+        sourceName = sourceName,
+        genre = genres.joinToString(", "),
+        synopsis = synopsis,
+        isAnime = true,
+        isVideo = true,
+        mediaKind = "ANIME",
+        animeResult = this
+    )
+
+fun UnifiedSearchResult.toAnimeResult(): AnimeResult =
+    animeResult ?: AnimeResult(
+        id = id,
+        titleRomaji = title,
+        titleEnglish = title,
+        coverUrl = coverUrl,
+        synopsis = synopsis,
+        episodeCount = 0,
+        sourceName = sourceName
+    )

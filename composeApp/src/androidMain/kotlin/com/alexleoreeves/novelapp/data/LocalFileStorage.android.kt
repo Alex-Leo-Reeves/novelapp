@@ -309,50 +309,87 @@ private fun selectMediaPlaylist(sourceUrl: String, playlistText: String, headers
 private fun resolveUrl(baseUrl: String, value: String): String =
     URI(baseUrl).resolve(value).toString()
 
-private fun downloadText(url: String, headersJson: String?): String =
-    openConnection(url, headersJson).inputStream.bufferedReader().use { it.readText() }
+private fun downloadText(url: String, headersJson: String?): String {
+    return runCatching {
+        openConnection(url, headersJson).inputStream.bufferedReader().use { it.readText() }
+    }.getOrElse {
+        val proxyUrl = "${AppReleaseConfig.API_BASE_URL}/anivexa/proxy?url=" + java.net.URLEncoder.encode(url, "UTF-8")
+        openConnection(proxyUrl, headersJson).inputStream.bufferedReader().use { it.readText() }
+    }
+}
 
 private fun downloadToFile(url: String, file: File, headersJson: String?): Long {
     file.parentFile?.mkdirs()
-    openConnection(url, headersJson).inputStream.use { input ->
-        file.outputStream().use { output ->
-            input.copyTo(output)
+    val downloaded = runCatching {
+        openConnection(url, headersJson).inputStream.use { input ->
+            file.outputStream().use { output ->
+                input.copyTo(output)
+            }
         }
-    }
-    return file.length()
+        file.length()
+    }.getOrElse { 0L }
+
+    if (downloaded > 0L) return downloaded
+
+    // Fallback via backend proxy if CDN returned 403/error
+    return runCatching {
+        val proxyUrl = "${AppReleaseConfig.API_BASE_URL}/anivexa/proxy?url=" + java.net.URLEncoder.encode(url, "UTF-8")
+        openConnection(proxyUrl, headersJson).inputStream.use { input ->
+            file.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        file.length()
+    }.getOrElse { 0L }
 }
 
 /**
  * Opens a connection with the download UA plus any provider-required headers
- * (Referer/Origin/User-Agent) parsed from the Anivexa watch payload. Provider
- * CDNs like anikoto's kryntal host 403 plain requests — the Referer is what
- * makes offline downloads work at all.
+ * (Referer/Origin/User-Agent). Provider CDNs like kryntal/megaplay require Referers.
  */
-private fun openConnection(url: String, headersJson: String? = null): HttpURLConnection =
-    (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 20_000
-        readTimeout = 60_000
-        instanceFollowRedirects = true
-        var userAgent = DOWNLOAD_USER_AGENT
-        if (!headersJson.isNullOrBlank()) {
-            runCatching {
-                val obj = org.json.JSONObject(headersJson)
-                for (key in obj.keys()) {
-                    val value = obj.optString(key)
-                    if (value.isBlank()) continue
-                    if (key.equals("User-Agent", ignoreCase = true)) {
-                        userAgent = value
-                    } else {
-                        setRequestProperty(key, value)
-                    }
+private fun openConnection(url: String, headersJson: String? = null): HttpURLConnection {
+    var connection = URL(url).openConnection() as HttpURLConnection
+    connection.connectTimeout = 25_000
+    connection.readTimeout = 60_000
+    connection.instanceFollowRedirects = true
+    var userAgent = DOWNLOAD_USER_AGENT
+    var hasReferer = false
+
+    if (!headersJson.isNullOrBlank()) {
+        runCatching {
+            val obj = org.json.JSONObject(headersJson)
+            for (key in obj.keys()) {
+                val value = obj.optString(key)
+                if (value.isBlank()) continue
+                if (key.equals("User-Agent", ignoreCase = true)) {
+                    userAgent = value
+                } else {
+                    if (key.equals("Referer", ignoreCase = true)) hasReferer = true
+                    connection.setRequestProperty(key, value)
                 }
             }
         }
-        setRequestProperty("User-Agent", userAgent)
-        setRequestProperty("Accept", "*/*")
-        // Allow chunked streaming for large files
-        setRequestProperty("Accept-Encoding", "identity")
     }
+
+    if (!hasReferer) {
+        val lowerUrl = url.lowercase()
+        val autoRef = when {
+            lowerUrl.contains("kryntal") || lowerUrl.contains("megaplay") -> "https://megaplay.buzz/"
+            lowerUrl.contains("akirax") || lowerUrl.contains("vidtube") -> "https://vidtube.site/"
+            lowerUrl.contains("kwik") || lowerUrl.contains("animepahe") -> "https://animepahe.pw/"
+            else -> runCatching { URL(url).protocol + "://" + URL(url).host + "/" }.getOrNull()
+        }
+        if (!autoRef.isNullOrBlank()) {
+            connection.setRequestProperty("Referer", autoRef)
+            connection.setRequestProperty("Origin", autoRef.trimEnd('/'))
+        }
+    }
+
+    connection.setRequestProperty("User-Agent", userAgent)
+    connection.setRequestProperty("Accept", "*/*")
+    connection.setRequestProperty("Accept-Encoding", "identity")
+    return connection
+}
 
 private const val DOWNLOAD_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"

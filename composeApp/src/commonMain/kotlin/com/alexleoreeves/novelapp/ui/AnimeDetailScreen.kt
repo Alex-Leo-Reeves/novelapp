@@ -539,11 +539,7 @@ fun AnimeDetailScreen(
                                             else -> null
                                         }
                                         val embedRef = when (server) {
-                                            AnimeServer.VIDLINK -> repository.resolveAnivexaVidLinkEmbed(
-                                                selectedSeason.id.toString(),
-                                                episode.episodeNumber
-                                            )
-                                            AnimeServer.VIDSRC_TO -> repository.resolveAnivexaVidLinkEmbed(
+                                            AnimeServer.VIDLINK, AnimeServer.VIDSRC_TO, AnimeServer.AUTOEMBED -> repository.resolveAnivexaVidLinkEmbed(
                                                 selectedSeason.id.toString(),
                                                 episode.episodeNumber
                                             )
@@ -557,10 +553,18 @@ fun AnimeDetailScreen(
                                             if (embedRef.type == "movie") "https://vidsrc.to/embed/movie/$tmdb"
                                             else "https://vidsrc.to/embed/tv/$tmdb/$s/$ep"
                                         } else null
+                                        val autoembedUrl = if (server == AnimeServer.AUTOEMBED && embedRef != null) {
+                                            val tmdb = embedRef.tmdbId
+                                            val ep = embedRef.episode
+                                            val s = embedRef.season
+                                            if (embedRef.type == "movie") "https://autoembed.co/movie/tmdb/$tmdb"
+                                            else "https://autoembed.co/tv/tmdb/$tmdb-$s-$ep"
+                                        } else null
                                         val playUrl = resolvedStream?.url
                                             ?: vidsrcToUrl
+                                            ?: autoembedUrl
                                             ?: embedRef?.buildEmbedUrl()
-                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK && server != AnimeServer.VIDSRC_TO) {
+                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK && server != AnimeServer.VIDSRC_TO && server != AnimeServer.AUTOEMBED) {
                                                 repository.extractStreamUrl(episode.url)
                                             } else {
                                                 null

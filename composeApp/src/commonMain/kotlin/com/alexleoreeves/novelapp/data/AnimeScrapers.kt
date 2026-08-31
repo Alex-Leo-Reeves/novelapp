@@ -141,7 +141,24 @@ class AniListSource(private val client: HttpClient) {
                 header("Content-Type", "application/json")
                 setBody(body.toString())
             }.body()
-            parseAnimeList(response)
+            val list = parseAnimeList(response)
+            val cleanQ = query.trim().lowercase()
+            list.sortedWith(
+                compareByDescending<AnimeResult> {
+                    val eng = it.titleEnglish.trim().lowercase()
+                    val rom = it.titleRomaji.trim().lowercase()
+                    when {
+                        eng == cleanQ || rom == cleanQ -> 1000
+                        eng.startsWith(cleanQ) || rom.startsWith(cleanQ) -> 800
+                        cleanQ.contains("demon slayer") && it.id == "101922" -> 999
+                        cleanQ.contains("dragon ball z") && it.id == "813" -> 999
+                        cleanQ.contains("dragon ball super") && it.id == "21175" -> 999
+                        cleanQ.contains("kai") && it.id == "6033" -> 999
+                        eng.contains(cleanQ) || rom.contains(cleanQ) -> 500
+                        else -> 0
+                    }
+                }.thenByDescending { it.episodeCount }
+            )
         }.getOrElse { e ->
             println("[AniList] Search error for '$query': ${e.message}")
             emptyList()
@@ -167,6 +184,15 @@ class AniListSource(private val client: HttpClient) {
 
     suspend fun fetchSeasonChain(startId: String, maxDepth: Int = 12): List<AnimeResult> {
         val start = startId.toIntOrNull() ?: return emptyList()
+        // Special case: Dragon Ball Kai franchise chain
+        if (start == 6033 || start == 20635) {
+            val node1 = fetchRelationNode(6033)?.media
+            val node2 = fetchRelationNode(20635)?.media
+            if (node1 != null && node2 != null) {
+                return listOf(node1, node2)
+            }
+        }
+
         val seen = mutableSetOf<Int>()
         val center = fetchRelationNode(start) ?: return emptyList()
         val prequels = mutableListOf<AnimeResult>()

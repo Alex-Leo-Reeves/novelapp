@@ -535,10 +535,10 @@ actual fun AnimePlayerScreen(
 
                         Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
                             val position by produceState(initialValue = 0L) { while (true) { value = player.currentPosition; delay(500) } }
-                            val duration = player.duration.takeIf { it > 0 } ?: 1L
+                            val duration by produceState(initialValue = player.duration.coerceAtLeast(1L)) { while (true) { value = player.duration.coerceAtLeast(1L); delay(500) } }
                             val maxAllowedMs = previewLimitMs ?: duration
                             Slider(
-                                value = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f),
+                                value = if (duration > 0) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f,
                                 onValueChange = { fraction ->
                                     val target = (fraction * duration).toLong()
                                     if (previewLimitMs != null && target >= previewLimitMs) {

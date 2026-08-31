@@ -721,6 +721,19 @@ fun TvApp(
                                             resumeDecided = false
                                         )
                                     },
+                                    onPlayLiveChannel = { url, title ->
+                                        // Live TV channels are all direct HLS streams
+                                        nav = nav.copy(
+                                            screen = TvScreen.PLAYER,
+                                            playUrl = url,
+                                            playTitle = title,
+                                            playerFromSection = TvSection.LIVE_TV,
+                                            bingeSession = null,
+                                            selectedItem = null,
+                                            resumePositionMs = null,
+                                            resumeDecided = false
+                                        )
+                                    },
                                     onSignOut = {
                                         scope.launch {
                                             nav.account?.let { authLogout(it.authToken) }
@@ -783,7 +796,7 @@ fun TvApp(
                                     title = (if (session != null) current?.chapter?.title?.let { "${session.item.title} - $it" } else null).orEmpty().ifBlank { nav.playTitle },
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
-                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
+                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || nav.playerFromSection == TvSection.LIVE_TV || session?.current?.kind?.isEpisodic == true,
                                     // Prefer the position the user chose in the
                                     // pre-player dialog; fall back to the store.
                                     resumePositionMs = nav.resumePositionMs ?: watchProgressStore.loadResumeKey(progressKey),
@@ -840,7 +853,7 @@ fun TvApp(
                                     title = (if (session != null) current?.chapter?.title?.let { "${session.item.title} - $it" } else null).orEmpty().ifBlank { nav.playTitle },
                                     account = nav.account,
                                     previewLimitMs = nav.playPreviewLimitMs,
-                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || session?.current?.kind?.isEpisodic == true,
+                                    isEpisodic = nav.playerFromSection == TvSection.SPORTS || nav.playerFromSection == TvSection.LIVE_TV || session?.current?.kind?.isEpisodic == true,
                                     // Prefer the position the user chose in the
                                     // pre-player dialog; fall back to the store.
                                     resumePositionMs = nav.resumePositionMs ?: watchProgressStore.loadResumeKey(progressKey),
@@ -1332,7 +1345,7 @@ private fun iconForSection(section: TvSection): ImageVector? = when (section) {
     TvSection.CARTOON -> Icons.Default.Animation
     TvSection.CLASSIC -> Icons.Default.Theaters
     TvSection.MOVIES -> Icons.Default.Movie
-    TvSection.NOLLYWOOD -> Icons.Default.Flag
+    TvSection.LIVE_TV -> Icons.Default.LiveTv
     TvSection.SPORTS -> Icons.Default.SportsSoccer
     TvSection.DOWNLOADS -> Icons.Default.Download
     TvSection.YOU -> Icons.Default.AccountCircle

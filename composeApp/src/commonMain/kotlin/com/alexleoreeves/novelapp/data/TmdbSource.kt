@@ -549,6 +549,26 @@ class TmdbSource(
         emptyList()
     }
 
+    suspend fun fetchRecommendations(type: String, tmdbId: String, page: Int = 1): List<UnifiedSearchResult> = runCatching {
+        val endpointType = if (type.lowercase() == "movie") "movie" else "tv"
+        val response = client.get("$baseUrl/$endpointType/$tmdbId/recommendations") {
+            tmdbAuth()
+            parameter("page", page)
+            parameter("include_adult", "false")
+        }.bodyAsText()
+        val results = parseResults(response)
+        if (results.isEmpty()) {
+            val similarRes = client.get("$baseUrl/$endpointType/$tmdbId/similar") {
+                tmdbAuth()
+                parameter("page", page)
+                parameter("include_adult", "false")
+            }.bodyAsText()
+            parseResults(similarRes).mapNotNull { it.jsonObject.toUnified(endpointType, if (endpointType == "movie") VideoCategory.MOVIES else VideoCategory.CARTOON) }
+        } else {
+            results.mapNotNull { it.jsonObject.toUnified(endpointType, if (endpointType == "movie") VideoCategory.MOVIES else VideoCategory.CARTOON) }
+        }
+    }.getOrElse { emptyList() }
+
     private fun HttpRequestBuilder.tmdbAuth() {
         usableToken?.let {
             header("Authorization", "Bearer $it")

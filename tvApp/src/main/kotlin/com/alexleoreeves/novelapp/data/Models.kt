@@ -28,7 +28,7 @@ enum class TvSection(val label: String) {
     CARTOON("Cartoon"),
     CLASSIC("Classic"),
     MOVIES("Movies"),
-    NOLLYWOOD("Nollywood"),
+    LIVE_TV("Live TV"),
     SPORTS("Sports"),
     DOWNLOADS("Downloads"),
     YOU("You")

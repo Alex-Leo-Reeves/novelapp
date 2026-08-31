@@ -390,11 +390,11 @@ fun GlassBottomBar(
                 onClick = { onTabSelected(BottomTab.DISCOVER) }
             )
             GlassBottomNavItem(
-                tab = BottomTab.NMC,
-                label = "NMC",
-                icon = Icons.Rounded.AutoStories,
-                isSelected = currentTab == BottomTab.NMC,
-                onClick = { onTabSelected(BottomTab.NMC) }
+                tab = BottomTab.LIVE_TV,
+                label = "Live TV",
+                icon = Icons.Rounded.LiveTv,
+                isSelected = currentTab == BottomTab.LIVE_TV,
+                onClick = { onTabSelected(BottomTab.LIVE_TV) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.SPORTS,

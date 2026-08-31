@@ -47,6 +47,7 @@ fun TvHomeScreen(
     onSearch: (String) -> Unit,
     onReadNovel: (String, String) -> Unit = { _, _ -> },
     onPlaySports: (String, String) -> Unit = { _, _ -> },
+    onPlayLiveChannel: (String, String) -> Unit = { _, _ -> },
     onSignOut: () -> Unit = {},
     onBackHome: () -> Unit = {},
     onGoPremium: () -> Unit = {}
@@ -91,7 +92,7 @@ fun TvHomeScreen(
                     TvSection.CARTOON -> fetchContentHome("cartoon")
                     TvSection.CLASSIC -> fetchContentHome("classic")
                     TvSection.MOVIES -> fetchContentHome("movie")
-                    TvSection.NOLLYWOOD -> fetchContentHome("nigerian")
+                    TvSection.LIVE_TV -> emptyList()
                     TvSection.SPORTS -> emptyList()
                     TvSection.DOWNLOADS -> emptyList()
                     TvSection.YOU -> emptyList()
@@ -236,7 +237,7 @@ fun TvHomeScreen(
                 TvSection.CARTOON -> "cartoon"
                 TvSection.CLASSIC -> "classic"
                 TvSection.MOVIES -> "movie"
-                TvSection.NOLLYWOOD -> "nigerian"
+                TvSection.LIVE_TV -> "all"
                 else -> "all"
             }
             TvSearchScreen(
@@ -280,6 +281,11 @@ fun TvHomeScreen(
                 account = account,
                 onReadNovel = onReadNovel,
                 onBackHome = onBackHome
+            )
+
+            section == TvSection.LIVE_TV -> TvLiveChannelScreen(
+                onPlay = onPlayLiveChannel,
+                onBack = onBackHome
             )
 
             section == TvSection.SPORTS -> TvSportsScreen(
@@ -440,7 +446,11 @@ private fun TvHomeFeed(
         val fetched = rows.map { row ->
             async {
                 row.key to runCatching {
-                    if (row.type == "novel") {
+                    if (row.type == "recommended") {
+                        val movies = fetchContentHome("movie", 1).take(15)
+                        val anime = fetchContentHome("anime", 1).take(15)
+                        (movies + anime).shuffled().take(20)
+                    } else if (row.type == "novel") {
                         novelRepo.fetchPopularNovels(1)
                     } else {
                         fetchContentHome(row.type, 1)
@@ -463,7 +473,11 @@ private fun TvHomeFeed(
         rowLoadingMore = rowLoadingMore + rowKey
         rowScope.launch {
             try {
-                val more = if (rowType == "novel") {
+                val more = if (rowType == "recommended") {
+                    val movies = fetchContentHome("movie", page).take(10)
+                    val anime = fetchContentHome("anime", page).take(10)
+                    (movies + anime).shuffled()
+                } else if (rowType == "novel") {
                     novelRepo.fetchPopularNovels(page)
                 } else {
                     fetchContentHome(rowType, page)

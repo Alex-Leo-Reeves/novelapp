@@ -175,6 +175,7 @@ async function handleAnivexaWatch(response, pathname) {
 }
 
 /** /api/anivexa/embed/{anilistId}?ep={n} — build a VidLink-compatible embed reference. */
+/** /api/anivexa/embed/{anilistId}?ep={n} — build a VidLink/VidSrc/AutoEmbed-compatible embed reference. */
 async function handleAnivexaEmbed(response, pathname, requestUrl) {
     const anilistId = pathname.replace("/api/anivexa/embed/", "").split("/")[0];
     if (!/^\d+$/.test(anilistId)) return sendApiError(response, 400, "anilistId must be numeric.");
@@ -191,21 +192,45 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
         });
     }
 
-    const result = await forwardWorker(`/map/${anilistId}`);
-    if (!result) return sendApiError(response, 503, "Anivexa anime API is unavailable right now.");
-    if (!result.ok || !result.payload || !result.payload.mappings) {
-        const msg = (result.payload && result.payload.error) || "AniList to TMDB mapping not found.";
-        return sendApiError(response, result.status >= 400 ? result.status : 502, msg);
+    // 1. Try internal worker mapping
+    let tmdbId = null;
+    let format = "";
+    let season = "1";
+    let isMovie = false;
+
+    try {
+        const result = await forwardWorker(`/map/${anilistId}`);
+        if (result && result.ok && result.payload && result.payload.mappings) {
+            const mappings = result.payload.mappings || {};
+            const tid = String(mappings.themoviedbId || mappings.tmdbId || "").trim();
+            if (tid && /^\d+$/.test(tid)) {
+                tmdbId = tid;
+                format = String(mappings.format || "").toUpperCase();
+                const hasSeason = Boolean(mappings.tmdbSeason || mappings.defaultTvdbSeason);
+                isMovie = format === "MOVIE" || (format === "SPECIAL" && !hasSeason);
+                season = String(mappings.tmdbSeason || mappings.defaultTvdbSeason || "1").trim();
+            }
+        }
+    } catch (_) {}
+
+    // 2. Fallback: ARM / MAL-Sync mapping API
+    if (!tmdbId) {
+        try {
+            const malSyncRes = await fetch(`https://api.malsync.moe/mal/anime/${anilistId}`);
+            if (malSyncRes.ok) {
+                const malSyncData = await malSyncRes.json();
+                const malTid = malSyncData && malSyncData.id;
+                if (malTid) {
+                    tmdbId = String(malTid);
+                    isMovie = malSyncData.type === "movie";
+                }
+            }
+        } catch (_) {}
     }
 
-    const mappings = result.payload.mappings || {};
-    const tmdbId = String(mappings.themoviedbId || mappings.tmdbId || "").trim();
-    if (!tmdbId || !/^\d+$/.test(tmdbId)) return sendApiError(response, 404, "No TMDB id mapping exists for this anime.");
-
-    const format = String(mappings.format || "").toUpperCase();
-    const hasSeason = Boolean(mappings.tmdbSeason || mappings.defaultTvdbSeason);
-    const isMovie = format === "MOVIE" || (format === "SPECIAL" && !hasSeason);
-    const season = String(mappings.tmdbSeason || mappings.defaultTvdbSeason || "1").trim();
+    if (!tmdbId || !/^\d+$/.test(tmdbId)) {
+        return sendApiError(response, 404, "No TMDB id mapping exists for this anime.");
+    }
 
     mapCache.set(cacheKey, {
         tmdbId: tmdbId,
@@ -222,17 +247,7 @@ async function handleAnivexaEmbed(response, pathname, requestUrl) {
 }
 
 /**
- * /api/anivexa/map/{anilistId} — passthrough of the worker's raw AniList ->
- * TMDB/AniDB/TVDb id mapping payload.
- *
- * AnivexaApi.resolveTmdbIdForAnilist() calls GET {base}/map/{anilistId} and
- * reads data.mappings.themoviedbId to VERIFY a bridged title actually maps to
- * the expected TMDB show before keying the 13 Anivexa providers off it. The
- * embedded nodebridge implements /map, but the backend handler only exposed
- * episodes/watch/embed/search — so on the Render fallback path /map 404'd,
- * resolveTmdbIdForAnilist returned null, and every TMDB-sourced anime
- * (Dragon Ball Z included) silently lost its AniList id → 0 episodes on the
- * 13 Anivexa servers. This route mirrors the bridge's normalizer exactly.
+ * /api/anivexa/map/{anilistId} — raw AniList -> TMDB/AniDB/TVDb id mapping payload.
  */
 async function handleAnivexaMap(response, pathname) {
     const anilistId = pathname.replace("/api/anivexa/map/", "").split("/")[0];
@@ -242,16 +257,37 @@ async function handleAnivexaMap(response, pathname) {
     const cached = freshFrom(mapPayloadCache, cacheKey, EMBED_CACHE_TTL_MS);
     if (cached) return sendApiData(response, 200, cached.payload);
 
-    const result = await forwardWorker(`/map/${anilistId}`);
-    if (!result) return sendApiError(response, 503, "Anivexa anime API is unavailable right now.");
-    if (!result.ok || !result.payload || result.payload.error) {
-        const msg = (result.payload && result.payload.error) || result.errorText || "Anivexa map lookup failed.";
-        return sendApiError(response, result.status >= 400 ? result.status : 502, msg);
+    let payload = null;
+    try {
+        const result = await forwardWorker(`/map/${anilistId}`);
+        if (result && result.ok && result.payload && !result.payload.error) {
+            payload = result.payload;
+        }
+    } catch (_) {}
+
+    // Fallback: construct standard mapping payload via MAL-Sync if worker had none
+    if (!payload || !payload.mappings) {
+        try {
+            const malSyncRes = await fetch(`https://api.malsync.moe/mal/anime/${anilistId}`);
+            if (malSyncRes.ok) {
+                const ms = await malSyncRes.json();
+                payload = {
+                    anilistId: anilistId,
+                    mappings: {
+                        themoviedbId: ms.id ? String(ms.id) : null,
+                        tmdbId: ms.id ? String(ms.id) : null,
+                        format: ms.type === "movie" ? "MOVIE" : "TV"
+                    }
+                };
+            }
+        } catch (_) {}
     }
 
-    // Cache the FULL payload so repeat /map + /embed calls share one worker hit.
-    mapPayloadCache.set(cacheKey, { payload: result.payload, cachedAt: Date.now() });
-    return sendApiData(response, 200, result.payload);
+    if (!payload) {
+        return sendApiError(response, 404, "Anivexa map lookup failed for " + anilistId);
+    }
+    mapPayloadCache.set(cacheKey, { payload, cachedAt: Date.now() });
+    return sendApiData(response, 200, payload);
 }
 
 /**
@@ -290,7 +326,6 @@ function rewriteHlsToProxy(body, baseUrl, referer, userAgent) {
         const trimmed = line.trim();
         if (!trimmed) return line;
         if (trimmed.startsWith("#")) {
-            // Rewrite URI="..." attributes (EXT-X-KEY / EXT-X-MAP / EXT-X-MEDIA ...)
             return line.replace(/URI="([^"]+)"/g, (match, uri) => {
                 try {
                     return 'URI="' + proxied(new URL(uri, baseUrl).toString()) + '"';
@@ -314,7 +349,16 @@ async function handleAnivexaProxy(response, requestUrl) {
     if (!target || proxyTargetBlocked(target)) {
         return sendApiError(response, 400, "A valid http(s) url parameter is required.");
     }
-    const referer = ref || new URL(target).origin + "/";
+    let referer = ref;
+    if (!referer) {
+        if (target.includes("kryntal") || target.includes("megaplay")) {
+            referer = "https://megaplay.buzz/";
+        } else if (target.includes("akirax") || target.includes("vidtube")) {
+            referer = "https://vidtube.site/";
+        } else {
+            referer = new URL(target).origin + "/";
+        }
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
@@ -352,7 +396,6 @@ async function handleAnivexaProxy(response, requestUrl) {
         return response.end(rewritten);
     }
 
-    // Segments / binary payloads: stream straight through.
     response.writeHead(upstream.status, {
         "content-type": contentType || "application/octet-stream",
         "cache-control": "no-store",
@@ -367,29 +410,48 @@ async function handleAnivexaProxy(response, requestUrl) {
     });
 }
 
-/**
- * Rank AniList candidates against the queried title and pick the strongest,
- * well-matched one. Returns null when NO candidate is a good match.
- *
- * This is the fix for "some contents showing the WRONG episodes": the old
- * handler took AniList's first SEARCH_MATCH hit with zero validation. For
- * sequels ("Bleach: Thousand-Year Blood War"), romanized titles, or broad
- * names, that first hit is a DIFFERENT show — which then mis-keyed all 13
- * Anivexa providers. We now fetch the top candidates and require a real
- * normalized-title match before returning an id.
- */
-function pickBestAnilistCandidate(query, mediaList) {
-    const normalized = (value) => String(value || "")
+function normalized(value) {
+    return String(value || "")
         .toLowerCase()
         .replace("&", "and")
         .replace(/[^a-z0-9]+/g, " ")
         .trim()
         .replace(/\s+/g, " ");
+}
+
+const CANONICAL_ANILIST_OVERRIDES = {
+    "demon slayer": "101922",
+    "demon slayer kimetsu no yaiba": "101922",
+    "kimetsu no yaiba": "101922",
+    "dragon ball z": "813",
+    "dragon ball super": "21175",
+    "dragon ball kai": "6033",
+    "dbz": "813",
+    "naruto": "20",
+    "naruto shippuden": "1735",
+    "one piece": "21",
+    "bleach": "269",
+    "attack on titan": "16498",
+    "jujutsu kaisen": "113415"
+};
+
+/**
+ * Rank AniList candidates against the queried title and pick the strongest.
+ */
+function pickBestAnilistCandidate(query, mediaList) {
     const q = normalized(query);
     if (!q) return null;
 
-    // Stopwords dropped from token coverage so "battle of the gods" and
-    // "battle of gods" score identically.
+    if (CANONICAL_ANILIST_OVERRIDES[q]) {
+        const overriddenId = CANONICAL_ANILIST_OVERRIDES[q];
+        const matched = (mediaList || []).find((m) => m && String(m.id) === overriddenId);
+        if (matched) {
+            const titleObj = matched.title || {};
+            return { media: matched, title: titleObj.english || titleObj.romaji || query, score: 99999 };
+        }
+        return { media: { id: overriddenId }, title: query, score: 99999 };
+    }
+
     const STOP_WORDS = new Set(["the", "a", "an", "of", "no", "wa"]);
     const qTokens = q.split(" ").filter((w) => w && !STOP_WORDS.has(w));
     const minimumTokenHits = Math.min(2, qTokens.length);
@@ -401,9 +463,9 @@ function pickBestAnilistCandidate(query, mediaList) {
                 .filter(Boolean);
             if (!rawTitles.length) return null;
 
-            // Sequel/special penalty keeps chibi spin-offs and numbered seasons
-            // from winning. NOTE: "movie" is deliberately NOT penalized — when
-            // the user asks for a film, the film must be allowed to win.
+            const format = String((media && media.format) || "").toUpperCase();
+            const isShortOrSpecial = format === "TV_SHORT" || format === "SPECIAL" || format === "MUSIC";
+            const shortPenalty = isShortOrSpecial && !q.includes("short") && !q.includes("special") ? 4000 : 0;
             const penalty = 900;
             let bestScore = 0;
             let bestTitle = rawTitles[0];
@@ -416,15 +478,6 @@ function pickBestAnilistCandidate(query, mediaList) {
                 else if (t.startsWith(q + " ") || q.startsWith(t + " ")) score = 8000 - sequelly;
                 else if (t.includes(q) || q.includes(t)) score = 5000 - sequelly;
                 else {
-                    // Token-overlap fallback. Pure substring matching fails when
-                    // the query drops or adds tokens the title has —
-                    // "dragon ball battle of gods" vs the actual
-                    // "Dragon Ball Z: Battle of Gods" (the stray "z" breaks
-                    // includes()), which made the title bridge return null and
-                    // pushed movies to the TMDB/vidlink fallback with the wrong
-                    // episode list. Require most of the query's meaningful
-                    // tokens to appear in the title so unrelated shows
-                    // (e.g. anything merely containing "gods") still lose.
                     const tTokens = t.split(" ").filter(Boolean);
                     const hits = qTokens.filter((w) => tTokens.includes(w)).length;
                     const coverage = qTokens.length ? hits / qTokens.length : 0;
@@ -432,6 +485,7 @@ function pickBestAnilistCandidate(query, mediaList) {
                         ? Math.round(2200 * coverage) - sequelly
                         : 0;
                 }
+                score -= shortPenalty;
                 if (score > bestScore) {
                     bestScore = score;
                     bestTitle = raw;
@@ -443,13 +497,10 @@ function pickBestAnilistCandidate(query, mediaList) {
         .filter(Boolean)
         .sort((a, b) => {
             if (b.score !== a.score) return b.score - a.score;
-            // Tiebreaks when titles score identically: prefer a full TV series,
-            // then higher AniList popularity, then more episodes — so shorts,
-            // chibi spin-offs and specials lose to the main show.
             const af = String((a.media && a.media.format) || "").toUpperCase();
             const bf = String((b.media && b.media.format) || "").toUpperCase();
-            const aTv = af === "TV" ? 2 : af === "TV_SHORT" ? 1 : 0;
-            const bTv = bf === "TV" ? 2 : bf === "TV_SHORT" ? 1 : 0;
+            const aTv = af === "TV" ? 2 : af === "TV_SHORT" ? 0 : 1;
+            const bTv = bf === "TV" ? 2 : bf === "TV_SHORT" ? 0 : 1;
             if (aTv !== bTv) return bTv - aTv;
             const ap = Number((a.media && a.media.popularity) || 0);
             const bp = Number((b.media && b.media.popularity) || 0);
