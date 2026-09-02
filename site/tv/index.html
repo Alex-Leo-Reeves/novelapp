@@ -17,12 +17,12 @@
 <body>
 
 <!-- ═══════════════════════════════════════════════════════════════════
-     SPLASH / QR PAIRING SCREEN
+     SPLASH SCREEN (always shown) + QR PAIRING
      ═══════════════════════════════════════════════════════════════════ -->
 <div id="tv-splash-view" class="tv-splash-view">
-  <div style="text-align: center; margin-bottom: 48px;">
-    <img src="assets/icon.svg" alt="NovaRead TV" width="80" height="80" style="border-radius: 16px; margin-bottom: 20px;" />
-    <h1 style="font-family: var(--tv-font-display); font-size: 42px; font-weight: 800; margin-bottom: 8px;
+  <div style="text-align: center; margin-bottom: 34px;">
+    <img src="assets/icon.svg" alt="NovaRead TV" width="84" height="84" class="tv-splash-logo" />
+    <h1 style="font-family: var(--tv-font-display); font-size: 44px; font-weight: 800; margin-bottom: 8px;
       background: linear-gradient(135deg, #fff 40%, #e84d8a); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
       NovaRead TV
     </h1>
@@ -30,27 +30,70 @@
   </div>
 
   <div class="tv-pair-card">
-    <div class="tv-qr-box">
+    <div class="tv-qr-box" id="tv-splash-qr">
       <img id="tv-qr-image" src="" alt="Scan QR Code to pair" />
     </div>
     <div class="tv-pair-info">
-      <h2 style="font-family: var(--tv-font-display); font-size: 28px; font-weight: 700; margin-bottom: 12px;">
+      <h2 style="font-family: var(--tv-font-display); font-size: 26px; font-weight: 700; margin-bottom: 12px;">
         Sign in with your Phone
       </h2>
-      <p style="color: var(--tv-text-muted); font-size: 17px; line-height: 1.6; margin-bottom: 16px;">
+      <p style="color: var(--tv-text-muted); font-size: 16px; line-height: 1.6; margin-bottom: 14px;">
         Scan the QR code with your phone camera, or enter this pairing code at
         <span style="color: var(--tv-pink); font-weight: 600;">novelapp1.onrender.com/tv-pair</span>
       </p>
       <div class="tv-pair-code" id="tv-pair-code">------</div>
-      <p style="color: var(--tv-text-dim); font-size: 14px; margin-top: 16px;">Code expires in 5 minutes</p>
+      <p style="color: var(--tv-text-dim); font-size: 13px; margin-top: 12px;">Code expires in 5 minutes</p>
     </div>
   </div>
 
-  <div style="margin-top: 36px;">
-    <button class="tv-btn tv-btn-primary" tabindex="0" data-nav="true" id="tv-btn-guest-login" style="font-size: 20px; padding: 16px 40px;">
-      Skip — Continue as Guest
+  <div style="margin-top: 30px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+    <button class="tv-btn tv-btn-primary" tabindex="0" data-nav="true" id="tv-btn-guest-login" style="font-size: 19px; padding: 15px 36px;">
+      Continue as Guest
     </button>
-    <p style="margin-top:14px; color:var(--tv-text-muted); text-align:center; font-size:15px;">New here? Scan the QR code and select <strong style="color:var(--tv-pink);">Create Account</strong> on your phone.</p>
+    <button class="tv-btn" tabindex="0" data-nav="true" id="tv-btn-create-account" style="font-size: 19px; padding: 15px 36px;">
+      Create Account
+    </button>
+    <button class="tv-btn" tabindex="0" data-nav="true" id="tv-btn-login" style="font-size: 19px; padding: 15px 36px;">
+      Sign In
+    </button>
+  </div>
+  <p style="margin-top:14px; color:var(--tv-text-muted); text-align:center; font-size:14px;">
+    Guest mode works instantly — create an account anytime to sync your library and refer friends.
+  </p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     CREATE ACCOUNT / SIGN IN VIEW
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tv-auth-view" class="tv-auth-view">
+  <div class="tv-auth-card">
+    <h2 class="tv-auth-title" id="tv-auth-title">Create your account</h2>
+    <div class="tv-auth-tabs">
+      <button class="tv-auth-tab active" id="tv-auth-tab-signup" tabindex="0" data-nav="true">Sign Up</button>
+      <button class="tv-auth-tab" id="tv-auth-tab-login" tabindex="0" data-nav="true">Sign In</button>
+    </div>
+
+    <div id="tv-auth-signup-fields">
+      <label class="tv-auth-label">Username</label>
+      <input class="tv-auth-input" id="tv-auth-username" type="text" placeholder="your_name" />
+      <label class="tv-auth-label">Recovery secret (to recover your account)</label>
+      <input class="tv-auth-input" id="tv-auth-recovery" type="text" placeholder="e.g. my first pet's name" />
+      <label class="tv-auth-label">Referral code (optional)</label>
+      <input class="tv-auth-input" id="tv-auth-referral" type="text" placeholder="NOVA-XXXXXX" />
+    </div>
+
+    <label class="tv-auth-label">Email</label>
+    <input class="tv-auth-input" id="tv-auth-email" type="email" placeholder="you@email.com" />
+    <label class="tv-auth-label">Password</label>
+    <input class="tv-auth-input" id="tv-auth-password" type="password" placeholder="••••••••" />
+
+    <p id="tv-auth-error" style="color: var(--tv-pink); min-height: 22px; font-size: 15px; margin: 6px 0 0;"></p>
+
+    <div style="display:flex; gap:14px; margin-top:14px; flex-wrap:wrap;">
+      <button class="tv-btn tv-btn-primary" id="tv-auth-btn-signup" tabindex="0" data-nav="true">Create Account</button>
+      <button class="tv-btn tv-btn-primary" id="tv-auth-btn-login" tabindex="0" data-nav="true" style="display:none;">Sign In</button>
+      <button class="tv-btn" id="tv-auth-btn-back" tabindex="0" data-nav="true">← Back</button>
+    </div>
   </div>
 </div>
 
@@ -67,66 +110,21 @@
     </div>
 
     <div class="tv-sidebar-nav" data-nav-row="true">
-      <button class="tv-sidebar-item active" tabindex="0" data-nav="true" data-section="home">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        Home
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="anime">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-        Anime
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="movie">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>
-        Movies &amp; TV
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="kdrama">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
-        K-Drama
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="donghua">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        Donghua
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="cartoon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-        Cartoons
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="classic">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Classics
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="nigerian">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-        Nollywood
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="sports">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Sports Live
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="live">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 3v4M16 3v4M8 17v4M16 17v4"/></svg>
-        Live TV
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="novel">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-        Novels
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="manga">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Manga
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="comic">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-        Comics
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="you">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
-        My Library
-      </button>
-      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        Search
-      </button>
+      <button class="tv-sidebar-item active" tabindex="0" data-nav="true" data-section="home">🏠 Home</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="novels">📚 Novels</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="manga">🎨 Manga</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="comics">💥 Comics</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="anime">🎌 Anime</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="donghua">🐉 Donghua</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="kdrama">🇰🇷 K-Drama</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="cartoon">😄 Cartoons</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="classic">🕰️ Classics</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="movies">🎬 Movies &amp; TV</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="sports">⚽ Sports Live</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="live">📡 Live TV</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="downloads">⬇️ Downloads</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="you">👤 My Library</button>
+      <button class="tv-sidebar-item" tabindex="0" data-nav="true" data-section="search">🔍 Search</button>
     </div>
 
     <div class="tv-sidebar-footer">
@@ -144,6 +142,8 @@
 
 </div><!-- end #tv-app-root -->
 
+<!-- App toast -->
+<div id="tv-app-toast" class="tv-app-toast"></div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
      DETAIL VIEW (Full-screen overlay)
@@ -155,6 +155,10 @@
       <img class="tv-detail-poster" id="tv-detail-poster" src="" alt="Poster" />
     </div>
     <div class="tv-detail-main">
+      <div class="tv-detail-badges">
+        <span class="tv-pill tv-pill-kind" id="tv-detail-kind">MOVIE</span>
+        <span class="tv-pill tv-pill-source" id="tv-detail-source">NovaCloud</span>
+      </div>
       <h1 class="tv-detail-title" id="tv-detail-title">Title</h1>
       <div class="tv-detail-pills">
         <span class="tv-pill" id="tv-detail-rating">⭐ 8.8</span>
@@ -167,9 +171,10 @@
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Play
         </button>
+        <button class="tv-btn" tabindex="0" data-nav="true" id="tv-detail-btn-episodes" style="display:none;">☰ Browse All Episodes</button>
         <button class="tv-btn" tabindex="0" data-nav="true" id="tv-detail-btn-watchlist">+ Add to Watchlist</button>
       </div>
-      <div class="tv-episodes-section">
+      <div class="tv-episodes-section" id="tv-detail-episodes-section">
         <h3 class="tv-rail-title">Episodes &amp; Chapters</h3>
         <div class="tv-episodes-grid" id="tv-detail-episodes-grid" data-nav-row="true"></div>
       </div>
@@ -177,6 +182,16 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════
+     FULL-SCREEN EPISODE CHOOSER (separate UI)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tv-episodes-view" class="tv-episodes-view">
+  <div class="tv-episodes-view-header">
+    <h2 id="tv-episodes-view-title" style="font-family: var(--tv-font-display); font-size: 30px; font-weight: 800;">Episodes</h2>
+    <button class="tv-btn" id="tv-episodes-view-back" tabindex="0" data-nav="true">← Back</button>
+  </div>
+  <div class="tv-episodes-view-grid tv-vertical-scroll" id="tv-episodes-view-grid" data-nav-row="true"></div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
      NOVEL / MANGA READER VIEW
@@ -184,49 +199,40 @@
 <div id="tv-reader-view" class="tv-reader-view">
   <div class="tv-reader-header">
     <h2 id="tv-reader-title" style="font-family: var(--tv-font-display); font-size: 28px; font-weight: 700;">Reader</h2>
-    <button class="tv-btn" tabindex="0" data-nav="true" onclick="document.getElementById('tv-reader-view').classList.remove('active'); SpatialNav.popScope();">
-      ← Back
-    </button>
+    <button class="tv-btn" id="tv-reader-btn-back" tabindex="0" data-nav="true">← Back</button>
   </div>
+  <div class="tv-reader-chips" id="tv-reader-chips" data-nav-row="true" style="display:flex; gap:14px; padding:0 40px 14px; flex-wrap:wrap;"></div>
   <div class="tv-reader-body tv-vertical-scroll" id="tv-reader-body" tabindex="0" data-nav="true"></div>
 </div>
-
 
 <!-- ═══════════════════════════════════════════════════════════════════
      YOUTUBE TV TYPE SEARCH VIEW
      ═══════════════════════════════════════════════════════════════════ -->
 <div id="tv-search-view" class="tv-search-view">
   <div class="tv-yt-search-container">
-    <!-- Left Column: Search Bar & YouTube TV Keyboard -->
     <div class="tv-yt-search-left">
       <div style="display: flex; align-items: center; gap: 12px;">
-        <button id="tv-search-btn-back" class="tv-btn" tabindex="0" data-nav="true" style="padding: 12px 18px; font-size: 15px; font-weight: 700; white-space: nowrap;">
-          ← Back
-        </button>
+        <button id="tv-search-btn-back" class="tv-btn" tabindex="0" data-nav="true" style="padding: 12px 18px; font-size: 15px; font-weight: 700; white-space: nowrap;">← Back</button>
         <div class="tv-yt-search-input-wrap" style="flex: 1;">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <span id="tv-search-input-text" class="tv-yt-search-input-text">Search...</span>
           <button id="tv-search-btn-clear" class="tv-btn tv-yt-clear-btn" tabindex="0" data-nav="true" title="Clear">✕</button>
         </div>
       </div>
-
       <div id="tv-search-keyboard" class="tv-yt-keyboard" data-nav-row="true"></div>
     </div>
 
-    <!-- Middle Column: Recent Searches & Suggestions -->
     <div class="tv-yt-search-middle">
       <div class="tv-yt-panel-section">
         <h4 class="tv-yt-section-title">🕒 Recent Searches</h4>
         <div id="tv-recent-searches-list" class="tv-yt-suggestions-list" data-nav-row="true"></div>
       </div>
-
       <div class="tv-yt-panel-section">
         <h4 class="tv-yt-section-title">💡 Suggestions</h4>
         <div id="tv-suggestions-list" class="tv-yt-suggestions-list" data-nav-row="true"></div>
       </div>
     </div>
 
-    <!-- Right Column: Live Results Grid -->
     <div class="tv-yt-search-right tv-vertical-scroll">
       <h3 id="tv-search-results-title" class="tv-rail-title" style="margin-bottom: 16px;">Top Results</h3>
       <div id="tv-search-results" class="tv-yt-results-grid" data-nav-row="true"></div>
@@ -234,22 +240,49 @@
   </div>
 </div>
 
-
 <!-- ═══════════════════════════════════════════════════════════════════
      FULLSCREEN VIDEO PLAYER
      ═══════════════════════════════════════════════════════════════════ -->
 <div id="tv-player-view">
   <video id="tv-video-element" playsinline></video>
   <iframe id="tv-embed-iframe" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+  <!-- hidden host for the parallel-server probe iframes -->
+  <div id="tv-probe-host" style="position:absolute; width:0; height:0; overflow:hidden;"></div>
 
   <!-- Loading Overlay -->
-  <div id="tv-player-loading" style="display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.85); align-items: center; justify-content: center; z-index: 110;">
+  <div id="tv-player-loading" style="display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.85); align-items: center; justify-content: center; flex-direction: column; z-index: 110;">
     <div class="tv-loading-spinner" style="width: 60px; height: 60px;"></div>
   </div>
+
+  <!-- Parallel-server status strip -->
+  <div id="tv-player-server-status" class="tv-server-status">
+    <span class="tv-server-status-dot"></span>
+    <span id="tv-player-server-status-text">Searching servers…</span>
+  </div>
+
+  <!-- Ad-click guard: absorbs mouse/touch over the embed so provider ad
+       pages can never hijack the click. Remote keys still work. -->
+  <div id="tv-embed-guard" style="display:none; position:absolute; inset:0; z-index:90; background:transparent;"></div>
+
+  <!-- Exit button (mouse-friendly, always available) -->
+  <button id="tv-player-exit" class="tv-player-exit" tabindex="0" data-nav="true" title="Exit player">✕ Exit</button>
 
   <!-- Seek Toast -->
   <div class="tv-seek-toast" id="tv-player-seek-feedback"></div>
 
+  <!-- Fatal error overlay -->
+  <div id="tv-player-fatal" class="tv-modal">
+    <div class="tv-modal-card" style="text-align:center; max-width: 640px;">
+      <h3 class="tv-modal-title">:( Stream unavailable</h3>
+      <p class="tv-fatal-message" style="color: var(--tv-text-muted); margin: 0 0 22px;">Every server failed for this stream.</p>
+      <div style="display:flex; gap:14px; justify-content:center;">
+        <button class="tv-btn tv-btn-primary" id="tv-player-btn-retry" tabindex="0" data-nav="true">↻ Retry</button>
+        <button class="tv-btn" id="tv-player-btn-fatal-back" tabindex="0" data-nav="true">← Back</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume Modal -->
   <div class="tv-modal" id="tv-player-resume-modal">
     <div class="tv-modal-card" style="text-align: center; max-width: 620px;">
       <h3 class="tv-modal-title">Continue watching?</h3>
@@ -260,8 +293,6 @@
       </div>
     </div>
   </div>
-
-
 
   <!-- Episodes Drawer (slide-up from bottom) -->
   <div id="tv-player-episodes-drawer" class="tv-modal" style="position: absolute; top: auto; bottom: 0; left: 0; right: 0; max-height: 50vh; background: rgba(13, 16, 27, 0.95); backdrop-filter: blur(20px); border-top: 1px solid var(--tv-line); padding: 24px 40px; overflow-y: auto; z-index: 120; align-items: flex-end;">

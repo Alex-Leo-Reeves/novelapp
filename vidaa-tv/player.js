@@ -1,16 +1,13 @@
 /**
- * TV Video Player Engine for Hisense VIDAA Smart TVs
- * Features:
- * - Pure Clean Fullscreen Video Playback (No HUD clutter / no server buttons)
- * - Native HTML5 Video + HLS.js adaptive streaming
- * - Clean Embed fallback iframe with AdShield
- * - TV Remote Key Support:
- *   - OK / Space / MediaPlayPause: Toggle Play/Pause
- *   - LEFT / RIGHT: Seek -10s / +10s with fast scrub preview
- *   - DOWN: Open Episodes drawer (if multi-episode)
- *   - BACK / ESCAPE: Exit player & save progress
- * - Auto-next episode countdown (Binge player)
- * - Watch progress saving & resume in localStorage
+ * TV Video Player Engine v2 for Hisense VIDAA Smart TVs
+ * Parity with the Android TV player:
+ *  - PARALLEL SERVER SEARCH: direct/HLS routes probed concurrently, embed
+ *    servers raced in hidden-iframe batches — first working server wins.
+ *  - Max-volume autoplay (muted fallback, then unmute on 'playing')
+ *  - Resume choice (Continue / Start over) with saved positions
+ *  - Free preview gates (20% episodic / 20min movies) with premium hand-off
+ *  - Binge auto-next countdown, episodes drawer, seek toasts
+ *  - BACK key always closes the player (never trapped while watching)
  */
 
 (function (root, factory) {
@@ -31,16 +28,29 @@
   var isPlayerActive = false;
   var keyUnbind = null;
   var bingeCountdownTimer = null;
+
+  // Parallel server race state
   var routeCandidates = [];
-  var routeIndex = 0;
-  var embedFallbackTimer = null;
-  var previewTimer = null;
+  var activeCandidate = null;
+  var raceToken = 0;              // increments to cancel stale probes
+  var probeIframes = [];
+  var failoverTimer = null;
+  var embedWatchdog = null;
+  var resumePosition = 0;
+  var pendingEmbedResumeT = 0;
+  var pendingOverrideCandidates = null;
+  var previewLimits = null;
+  var isLiveStream = false;
 
   var elements = {
     container: null,
     video: null,
     embedIframe: null,
+    probeHost: null,
     seekFeedback: null,
+    serverStatus: null,
+    serverStatusText: null,
+    fatalOverlay: null,
     episodeDrawer: null,
     episodeDrawerList: null,
     bingeModal: null,
@@ -54,17 +64,14 @@
   // ── Global AdShield for TV Media Playback ──────────────────────────────
   (function installAdShield() {
     try {
-      // Block popup window ads globally
-      window.open = function(url) {
+      window.open = function (url) {
         console.log('[AdShield] Blocked popup window.open:', url);
         return null;
       };
-
-      // Intercept and prevent clickjacking popup links
-      window.addEventListener('click', function(e) {
+      window.addEventListener('click', function (e) {
         var target = e.target;
         if (target && target.tagName === 'A' && (target.target === '_blank' || target.getAttribute('target') === '_blank')) {
-          if (!target.closest('#tv-app-root')) {
+          if (!target.closest('#tv-app-root') && !target.closest('#tv-player-view')) {
             e.preventDefault();
             e.stopPropagation();
             console.log('[AdShield] Intercepted popup click');
@@ -78,7 +85,11 @@
     elements.container = document.getElementById('tv-player-view');
     elements.video = document.getElementById('tv-video-element');
     elements.embedIframe = document.getElementById('tv-embed-iframe');
+    elements.probeHost = document.getElementById('tv-probe-host');
     elements.seekFeedback = document.getElementById('tv-player-seek-feedback');
+    elements.serverStatus = document.getElementById('tv-player-server-status');
+    elements.serverStatusText = document.getElementById('tv-player-server-status-text');
+    elements.fatalOverlay = document.getElementById('tv-player-fatal');
     elements.episodeDrawer = document.getElementById('tv-player-episodes-drawer');
     elements.episodeDrawerList = document.getElementById('tv-player-episodes-list');
     elements.bingeModal = document.getElementById('tv-player-binge-modal');
@@ -89,36 +100,82 @@
     elements.startOverButton = document.getElementById('tv-player-btn-start-over');
 
     setupVideoListeners();
+
+    var retryBtn = document.getElementById('tv-player-btn-retry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', function () {
+        hideFatalOverlay();
+        showLoading(true);
+        startServerRace(routeCandidates.length ? routeCandidates.slice() : []);
+      });
+    }
+
+    var fatalBackBtn = document.getElementById('tv-player-btn-fatal-back');
+    if (fatalBackBtn) {
+      fatalBackBtn.addEventListener('click', function () { close(); });
+    }
+
+    var exitBtn = document.getElementById('tv-player-exit');
+    if (exitBtn) {
+      exitBtn.addEventListener('click', function () { close(); });
+    }
   }
 
   function setupVideoListeners() {
     if (!elements.video) return;
-
     elements.video.addEventListener('timeupdate', onTimeUpdate);
     elements.video.addEventListener('ended', onVideoEnded);
     elements.video.addEventListener('error', onVideoError);
+    elements.video.addEventListener('playing', onVideoPlaying);
+  }
+
+  function onVideoPlaying() {
+    clearFailoverTimer();
+    clearEmbedWatchdog();
+    hideServerStatus();
+    showLoading(false);
+    // Max volume — restore unmuted playback as soon as the TV allows it
+    try {
+      elements.video.volume = 1.0;
+      elements.video.muted = false;
+    } catch (e) {}
+    if (resumePosition > 0 && Math.abs(elements.video.currentTime - resumePosition) > 2) {
+      try { elements.video.currentTime = resumePosition; } catch (e) {}
+      resumePosition = 0;
+    }
   }
 
   function onTimeUpdate() {
     if (!elements.video) return;
     var cur = elements.video.currentTime;
     var dur = elements.video.duration;
-
-    if (dur > 0 && Math.floor(cur) % 5 === 0 && currentMedia) {
+    if (dur > 0 && Math.floor(cur) % 5 === 0 && currentMedia && !isLiveStream) {
       saveProgress(cur, dur);
+    }
+    checkPreviewGate(cur, dur);
+  }
+
+  function onVideoError() {
+    if (!isPlayerActive || !currentMedia) return;
+    if (elements.video.style.display !== 'none') {
+      failoverToNextRoute('This stream failed — switching server…');
     }
   }
 
   function saveProgress(position, duration) {
-    if (!currentMedia) return;
+    if (!currentMedia || isLiveStream) return;
     try {
-      var key = progressKey();
-      localStorage.setItem(key, JSON.stringify({
+      localStorage.setItem(progressKey(), JSON.stringify({
         id: currentMedia.id,
         title: currentMedia.title,
         coverUrl: currentMedia.coverUrl,
-        episodeTitle: episodeList[currentEpisodeIndex]?.title || `Episode ${currentEpisodeIndex + 1}`,
+        backdropUrl: currentMedia.backdropUrl || '',
+        episodeTitle: episodeList[currentEpisodeIndex]
+          ? (episodeList[currentEpisodeIndex].title || ('Episode ' + (currentEpisodeIndex + 1)))
+          : currentMedia.title,
         episodeIndex: currentEpisodeIndex,
+        episodeUrl: episodeList[currentEpisodeIndex] ? (episodeList[currentEpisodeIndex].url || '') : '',
+        episodeCount: episodeList.length,
         mediaKind: currentMedia.mediaKind || 'movie',
         detailPageUrl: currentMedia.detailPageUrl || '',
         sourceName: currentMedia.sourceName || '',
@@ -139,11 +196,570 @@
     }
   }
 
-  function progressKey() {
-    var episode = episodeList[currentEpisodeIndex] || {};
-    return 'tv_progress_' + (currentMedia.id || currentMedia.title) + '__' + (episode.url || episode.title || currentEpisodeIndex);
+  function clearSavedProgress(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
   }
 
+  function progressKey() {
+    var ep = episodeList[currentEpisodeIndex] || {};
+    var marker = ep.url || ep.title || currentEpisodeIndex;
+    return 'tv_progress_' + (currentMedia.id || currentMedia.title) + '__' + marker;
+  }
+
+  function episodeProgressKey(item, episode, index) {
+    var marker = (episode && (episode.url || episode.title)) || index;
+    return 'tv_progress_' + (item.id || item.title) + '__' + marker;
+  }
+
+  // ── TV Remote Keys (player scope consumes keys first) ──────────────────
+  function handlePlayerRemoteKeys(code, e) {
+    if (!isPlayerActive) return false;
+
+    var BACK = [8, 27, 461, 10009, 10182, 88];
+    var PLAY_PAUSE = [179, 10252];
+    var PLAY = [415, 250];
+    var PAUSE = [19];
+    var STOP = [413];
+    var CHANNEL_UP = [427];
+    var CHANNEL_DOWN = [428];
+    var RED = [403, 10001];
+    var GREEN = [404, 10002];
+    var YELLOW = [405, 10003];
+    var BLUE = [406, 10004];
+    var ENTER = [13, 29443, 65385];
+
+    if (BACK.indexOf(code) !== -1) {
+      // BACK while watching ALWAYS exits the player (fixes "can't go back")
+      close();
+      return true;
+    }
+    if (PLAY_PAUSE.indexOf(code) !== -1 || PLAY.indexOf(code) !== -1 || PAUSE.indexOf(code) !== -1) {
+      togglePlayPause();
+      return true;
+    }
+    if (code === 37) { seekRelative(-10); return true; }
+    if (code === 39) { seekRelative(10); return true; }
+    if (code === 38) { bumpVolume(0.1); return true; }
+    if (code === 40) { bumpVolume(-0.1); return true; }
+    if (CHANNEL_UP.indexOf(code) !== -1 || RED.indexOf(code) !== -1) { playPreviousEpisode(); return true; }
+    if (CHANNEL_DOWN.indexOf(code) !== -1 || GREEN.indexOf(code) !== -1) { playNextEpisode(); return true; }
+    if (YELLOW.indexOf(code) !== -1) {
+      failoverToNextRoute('Manual server switch…');
+      return true;
+    }
+    if (BLUE.indexOf(code) !== -1) {
+      if (elements.episodeDrawer && elements.episodeDrawer.classList.contains('active')) {
+        closeEpisodesDrawer();
+      } else {
+        openEpisodesDrawer();
+      }
+      return true;
+    }
+    if (STOP.indexOf(code) !== -1) { close(); return true; }
+    if (ENTER.indexOf(code) !== -1) {
+      // OK with no modal/focused control toggles playback
+      var anyModal = document.querySelector('#tv-player-view .tv-modal.active');
+      if (!anyModal && elements.video && elements.video.style.display !== 'none') {
+        togglePlayPause();
+        return true;
+      }
+    }
+    return false;
+  }
+  // ── Open / Episode plumbing ────────────────────────────────────────────
+  async function open(media, episodes, startIndex, directUrl, overrideCandidates) {
+    isPlayerActive = true;
+    raceToken++;
+    currentMedia = media;
+    isLiveStream = !!media.isLive;
+    episodeList = (episodes && episodes.length > 0)
+      ? episodes
+      : [{ title: media.title, url: directUrl || media.detailPageUrl || '' }];
+    currentEpisodeIndex = Math.max(0, Math.min(startIndex || 0, episodeList.length - 1));
+    pendingOverrideCandidates = overrideCandidates || null;
+
+    elements.container.classList.add('active');
+    keyUnbind = SpatialNav.registerKeyHandler(handlePlayerRemoteKeys);
+
+    // Max volume + fullscreen from ANY entry point (tab-independent)
+    try {
+      if (elements.video) { elements.video.volume = 1.0; elements.video.muted = false; }
+    } catch (e) {}
+    try {
+      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsEl && elements.container.requestFullscreen) {
+        elements.container.requestFullscreen().catch(function () {});
+      } else if (!fsEl && elements.container.webkitRequestFullscreen) {
+        elements.container.webkitRequestFullscreen();
+      }
+    } catch (e) {}
+
+    if (!previewLimits) {
+      previewLimits = await NovaApi.fetchFreePreviewLimits().catch(function () { return null; });
+    }
+
+    playEpisode(currentEpisodeIndex, directUrl);
+  }
+
+  async function playEpisode(index, directUrl) {
+    clearFailoverTimer();
+    clearEmbedWatchdog();
+    hideFatalOverlay();
+    showLoading(true);
+    showServerStatus('Preparing stream…');
+    cancelBingeCountdown();
+
+    currentEpisodeIndex = Math.max(0, Math.min(index, episodeList.length - 1));
+    var ep = episodeList[currentEpisodeIndex] || {};
+    resumePosition = 0;
+    pendingEmbedResumeT = 0;
+
+    // Resume prompt: Continue / Start over whenever saved progress exists
+    if (!isLiveStream) {
+      var saved = getSavedProgress(progressKey());
+      if (saved && saved.position > 15 && saved.duration > 0 && saved.position < saved.duration - 20) {
+        showLoading(false);
+        var choice = await showResumeChoice(saved);
+        if (choice === 'continue') {
+          resumePosition = saved.position;
+          pendingEmbedResumeT = Math.floor(saved.position);
+        } else {
+          clearSavedProgress(progressKey());
+        }
+        showLoading(true);
+      }
+    }
+
+    // Pre-resolved candidates (football/WWE/live) skip route discovery
+    var candidates = [];
+    if (pendingOverrideCandidates && pendingOverrideCandidates.length) {
+      candidates = pendingOverrideCandidates.slice();
+      if (directUrl && !candidates.some(function (c) { return c.url === directUrl; })) {
+        candidates.unshift({ provider: 'Direct Stream', url: directUrl, route: 'direct' });
+      }
+      pendingOverrideCandidates = null; // only applies to the first episode
+    } else {
+      if (directUrl) candidates.push({ provider: 'Direct Stream', url: directUrl, route: 'direct' });
+      if (ep.streamUrl && !directUrl) candidates.push({ provider: 'Direct Stream', url: ep.streamUrl, route: 'direct' });
+
+      var isAnimeLike = currentMedia && (currentMedia.mediaKind === 'anime' || currentMedia.mediaKind === 'donghua');
+
+      // ANIME-SPECIFIC SERVERS FIRST (different from the movie/TV servers):
+      // resolve this episode through the Consumet anime providers.
+      if (isAnimeLike && currentMedia.title) {
+        showServerStatus('Resolving anime servers…');
+        try {
+          var animeEps = await NovaApi.fetchAnimeEpisodesParallel(currentMedia.title);
+          var wanted = parseFloat(ep.chapterNumber || (currentEpisodeIndex + 1)) || 1;
+          var match = null;
+          for (var ae = 0; ae < animeEps.length; ae++) {
+            if (parseFloat(animeEps[ae].chapterNumber) === wanted) { match = animeEps[ae]; break; }
+          }
+          if (!match && animeEps.length > currentEpisodeIndex) match = animeEps[currentEpisodeIndex];
+          if (match) {
+            var animeUrl = await NovaApi.fetchAnimeStream(match.provider, match.url).catch(function () { return null; });
+            if (animeUrl) {
+              candidates.push({ provider: 'Anime Server (' + match.provider + ')', url: animeUrl, route: 'direct' });
+            } else {
+              candidates.push({ provider: 'Anime Server (' + match.provider + ')', url: match.url, route: 'embed' });
+            }
+          }
+        } catch (e) { /* anime path is best-effort */ }
+      }
+
+      if (ep.provider && ep.url && String(ep.url).indexOf('consumet://') === 0) {
+        showServerStatus('Resolving anime server…');
+        var directAnime = await NovaApi.fetchAnimeStream(ep.provider, ep.url).catch(function () { return null; });
+        if (directAnime) candidates.push({ provider: 'Anime Server (' + ep.provider + ')', url: directAnime, route: 'direct' });
+      }
+
+      if (currentMedia && !currentMedia.isLiveChannel) {
+        showServerStatus('Searching servers…');
+        var routes = await NovaApi.fetchWatchRoutes(
+          currentMedia.mediaKind,
+          currentMedia.title,
+          currentMedia.detailPageUrl,
+          ep.url || '',
+          ep.chapterNumber
+        ).catch(function () { return []; });
+        routes.forEach(function (r) { candidates.push(r); });
+      }
+    }
+
+    var seen = {};
+    routeCandidates = candidates.filter(function (c) {
+      if (!c || !c.url || seen[c.url]) return false;
+      seen[c.url] = 1;
+      return true;
+    });
+
+    if (routeCandidates.length === 0) {
+      showLoading(false);
+      showFatalOverlay('No stream servers were found for this title.');
+      return;
+    }
+
+    startServerRace(routeCandidates);
+  }
+
+  // ── Parallel Server Race ───────────────────────────────────────────────
+  function isDirectUrl(url) {
+    return /\.(m3u8|mp4|mpd|webm|mkv|mov|ts)(\?|$)/i.test(String(url || ''));
+  }
+
+  // ── Server walk: candidates in priority order, watchdog per server ─────
+  // Server 1 is tried first (priority order from the backend). Each embed
+  // gets its own watchdog; failures advance to the next server immediately.
+  // Nothing is skipped and nothing is marked failed until ALL are exhausted.
+  var walkIndex = 0;
+  var embedLoaded = false;
+
+  function startServerRace(candidates) {
+    if (!candidates || candidates.length === 0) {
+      showLoading(false);
+      showFatalOverlay('No stream servers were found for this title.');
+      return;
+    }
+    routeCandidates = candidates;
+    walkCandidates(raceToken, 0);
+  }
+
+  function clearWalkWatchdog() {
+    clearTimeout(embedWatchdog);
+    embedWatchdog = null;
+  }
+
+  function walkCandidates(token, index) {
+    if (token !== raceToken) return;
+    clearWalkWatchdog();
+    if (index >= routeCandidates.length) {
+      showLoading(false);
+      showFatalOverlay('Tried ' + routeCandidates.length + ' servers with no luck. Press ↻ Retry or BACK to go back.');
+      return;
+    }
+    walkIndex = index;
+    var c = routeCandidates[index];
+    activeCandidate = c;
+    embedLoaded = false;
+    showLoading(true);
+    showServerStatus('Trying ' + c.provider + ' — server ' + (index + 1) + ' of ' + routeCandidates.length + '…');
+
+    if (isDirectUrl(c.url)) {
+      loadNative(c.url);
+      embedWatchdog = setTimeout(function () {
+        if (token !== raceToken) return;
+        if (elements.video && elements.video.paused && elements.video.readyState < 2) {
+          walkCandidates(token, index + 1);
+        }
+      }, 12000);
+    } else {
+      loadEmbed(c.url);
+      embedWatchdog = setTimeout(function () {
+        if (token !== raceToken) return;
+        if (!embedLoaded) walkCandidates(token, index + 1);
+      }, 9000);
+    }
+  }
+
+  function advanceServer(reason) {
+    showToast(reason || 'Switching server…');
+    walkCandidates(raceToken, walkIndex + 1);
+  }
+
+  function clearProbeIframes() {
+    probeIframes.forEach(function (ifr) {
+      try { ifr.src = 'about:blank'; } catch (e) {}
+      try { ifr.remove(); } catch (e) {}
+    });
+    probeIframes = [];
+  }
+
+  function decorateEmbedUrl(url) {
+    var u = String(url || '');
+    if (u.indexOf('vidlink.pro') !== -1) {
+      u += (u.indexOf('?') !== -1 ? '&' : '?') + 'autoplay=true&primaryColor=e84d8a';
+      if (pendingEmbedResumeT > 0) u += '&t=' + pendingEmbedResumeT;
+    } else if (u.indexOf('vidsrc') !== -1 || u.indexOf('autoembed') !== -1 || u.indexOf('embed.su') !== -1 || u.indexOf('multiembed') !== -1) {
+      u += (u.indexOf('?') !== -1 ? '&' : '?') + 'autoplay=1';
+    } else if (u.indexOf('youtube.com/embed') !== -1) {
+      u += (u.indexOf('?') !== -1 ? '&' : '?') + 'autoplay=1&playsinline=1';
+    }
+    return u;
+  }
+
+  function failoverToNextRoute(message) {
+    // Bridge to the sequential server walk — advances to the next candidate
+    // without resetting the walk (so no working server is ever skipped).
+    advanceServer(message);
+  }
+
+  function clearFailoverTimer() {
+    clearTimeout(failoverTimer);
+    failoverTimer = null;
+  }
+
+  function clearEmbedWatchdog() {
+    clearTimeout(embedWatchdog);
+    embedWatchdog = null;
+  }
+
+  // ── Loading the winning stream ─────────────────────────────────────────
+  function loadNative(url) {
+    clearEmbedWatchdog();
+    if (elements.embedIframe) {
+      elements.embedIframe.style.display = 'none';
+      try { elements.embedIframe.src = 'about:blank'; } catch (e) {}
+    }
+    var guard = document.getElementById('tv-embed-guard');
+    if (guard) guard.style.display = 'none';
+    if (!elements.video) return;
+    elements.video.style.display = 'block';
+    elements.video.volume = 1.0;
+    elements.video.muted = false;
+
+    if (hlsInstance) {
+      try { hlsInstance.destroy(); } catch (e) {}
+      hlsInstance = null;
+    }
+
+    var isHls = /\.m3u8(\?|$)/i.test(String(url));
+    if (isHls && window.Hls && Hls.isSupported()) {
+      hlsInstance = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 90,
+        manifestLoadingTimeOut: 12000,
+        manifestLoadingMaxRetry: 2,
+        levelLoadingTimeOut: 12000,
+        fragLoadingTimeOut: 20000
+      });
+      hlsInstance.loadSource(url);
+      hlsInstance.attachMedia(elements.video);
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
+        startNativePlayback();
+      });
+      hlsInstance.on(Hls.Events.ERROR, function (evt, data) {
+        if (data && data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && (!data.details || data.details !== 'manifestLoadError')) {
+            try { hlsInstance.startLoad(); } catch (e) {}
+          } else {
+            failoverToNextRoute('Stream error — switching server…');
+          }
+        }
+      });
+      // Watchdog: if HLS never starts within 14s, fail over
+      embedWatchdog = setTimeout(function () {
+        if (elements.video && elements.video.paused && elements.video.readyState < 3) {
+          failoverToNextRoute('Server too slow — switching…');
+        }
+      }, 14000);
+    } else {
+      elements.video.src = url;
+      elements.video.load();
+      startNativePlayback();
+      // Watchdog for progressive streams
+      embedWatchdog = setTimeout(function () {
+        if (elements.video && elements.video.paused && elements.video.readyState < 2) {
+          failoverToNextRoute('Server too slow — switching…');
+        }
+      }, 14000);
+    }
+  }
+
+  function startNativePlayback() {
+    if (!elements.video) return;
+    elements.video.volume = 1.0;
+    elements.video.muted = false;
+    var p = elements.video.play();
+    if (p !== undefined) {
+      p.then(function () {
+        elements.video.volume = 1.0;
+        elements.video.muted = false;
+        showToast('🔊 Volume max');
+      }).catch(function () {
+        // TV browser autoplay policy — start muted, then unmute on the very
+        // first 'playing' tick (sticky user activation allows unmuting).
+        elements.video.muted = true;
+        var unmute = function () {
+          try {
+            elements.video.muted = false;
+            elements.video.volume = 1.0;
+            showToast('🔊 Volume max');
+          } catch (e) {}
+          elements.video.removeEventListener('playing', unmute);
+        };
+        elements.video.addEventListener('playing', unmute);
+        elements.video.play().then(function () {
+          setTimeout(unmute, 400);
+          setTimeout(unmute, 1500);
+        }).catch(function () {
+          // One more unmuted attempt after a beat (some TVs need it)
+          setTimeout(function () {
+            if (!elements.video) return;
+            elements.video.muted = false;
+            elements.video.play().then(function () {
+              showToast('🔊 Volume max');
+            }).catch(function () {
+              failoverToNextRoute('Playback refused — switching server…');
+            });
+          }, 700);
+        });
+      });
+    }
+  }
+
+  function loadEmbed(url) {
+    clearFailoverTimer();
+    if (elements.video) {
+      elements.video.style.display = 'none';
+      try { elements.video.pause(); } catch (e) {}
+    }
+    if (hlsInstance) {
+      try { hlsInstance.destroy(); } catch (e) {}
+      hlsInstance = null;
+    }
+    if (!elements.embedIframe) return;
+
+    embedLoaded = false;
+    elements.embedIframe.style.display = 'block';
+    elements.embedIframe.removeAttribute('sandbox');
+    elements.embedIframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
+    elements.embedIframe.setAttribute('allowfullscreen', 'true');
+    elements.embedIframe.setAttribute('referrerpolicy', 'origin');
+    elements.embedIframe.onload = function () {
+      // Provider page loaded — accept this server and stop the walk watchdog.
+      embedLoaded = true;
+      clearWalkWatchdog();
+      showLoading(false);
+    };
+    elements.embedIframe.onerror = function () {
+      failoverToNextRoute('Server unavailable — trying another…');
+    };
+    elements.embedIframe.src = decorateEmbedUrl(url);
+
+    // Ad shield: clicking the video surface must never open provider ad
+    // pages. The guard absorbs mouse/touch clicks (remote keys still work —
+    // they are captured at document level, above the iframe).
+    var guard = document.getElementById('tv-embed-guard');
+    if (guard) {
+      guard.style.display = 'block';
+      guard.onclick = function () {
+        showToast('Remote OK / Space controls playback');
+      };
+    }
+
+    showServerStatus('Playing via ' + (activeCandidate ? activeCandidate.provider : 'embed server') + ' — press YELLOW to switch server');
+    setTimeout(function () {
+      if (embedLoaded) {
+        hideServerStatus();
+        showLoading(false);
+      }
+    }, 2500);
+  }
+
+  // ── Free Preview Gates (premium parity with the TV app) ────────────────
+  function isPremiumUser() {
+    var user = NovaApi.getUserSession ? NovaApi.getUserSession() : null;
+    return !!(user && (user.isPremium || user.plan === 'premium'));
+  }
+
+  function graceKey() {
+    return 'tv_preview_grace_' + (currentMedia ? (currentMedia.id || currentMedia.title) : 'x');
+  }
+
+  function graceAvailable() {
+    try {
+      var raw = localStorage.getItem(graceKey());
+      if (!raw) return true;
+      return (Date.now() - parseInt(raw, 10)) > 6 * 60 * 60 * 1000; // once per 6h
+    } catch (e) { return true; }
+  }
+
+  function markGraceUsed() {
+    try { localStorage.setItem(graceKey(), String(Date.now())); } catch (e) {}
+  }
+
+  function checkPreviewGate(cur, dur) {
+    if (!isPlayerActive || isLiveStream || isPremiumUser() || !previewLimits) return;
+    if (!elements.video || elements.video.style.display === 'none') return; // embeds: no timing signal
+    if (dur <= 0 || cur <= 5) return;
+
+    var episodic = episodeList.length > 1 || ['anime', 'tv', 'kdrama', 'cartoon', 'donghua', 'nigerian'].indexOf(String(currentMedia.mediaKind)) !== -1;
+    var capSeconds = episodic
+      ? Math.max(60, dur * (previewLimits.episodicFraction || 0.2))
+      : (previewLimits.movieMs || 20 * 60 * 1000) / 1000;
+
+    if (cur >= capSeconds) {
+      if (graceAvailable()) {
+        elements.video.pause();
+        markGraceUsed();
+        document.dispatchEvent(new CustomEvent('tvpremiumgate', {
+          detail: {
+            title: currentMedia.title,
+            episodic: episodic,
+            message: 'Free preview ended. ' + (episodic
+              ? 'Free accounts watch the first ' + Math.round((previewLimits.episodicFraction || 0.2) * 100) + '% of every episode.'
+              : 'Free accounts watch the first 20 minutes of every movie.') + ' Go Premium for unlimited streaming.'
+          }
+        }));
+        // Give a short post-grace buffer then resume for testing
+        setTimeout(function () {
+          if (isPlayerActive && elements.video && elements.video.paused) {
+            var p = elements.video.play();
+            if (p && p.catch) p.catch(function () {});
+          }
+        }, 300);
+      } else {
+        elements.video.pause();
+        document.dispatchEvent(new CustomEvent('tvpremiumgate', {
+          detail: {
+            title: currentMedia.title,
+            episodic: episodic,
+            hard: true,
+            message: 'You have reached the free preview limit. Upgrade to Premium to keep watching without limits.'
+          }
+        }));
+      }
+    }
+  }
+
+  // ── Resume Choice (Continue / Start over) ──────────────────────────────
+  function showResumeChoice(saved) {
+    return new Promise(function (resolve) {
+      if (!elements.resumeModal || !elements.continueButton || !elements.startOverButton) {
+        resolve('continue');
+        resumePosition = saved.position;
+        return;
+      }
+      var mins = Math.floor(saved.position / 60);
+      var totalMins = Math.floor((saved.duration || 0) / 60);
+      if (elements.resumeCopy) {
+        elements.resumeCopy.textContent = 'You were ' + mins + ' minute' + (mins === 1 ? '' : 's') +
+          ' into this' + (totalMins ? ' (of ' + totalMins + ' min)' : '') + '. Continue from where you stopped, or start over?';
+      }
+      elements.resumeModal.classList.add('active');
+      SpatialNav.pushScope(elements.resumeModal, elements.continueButton);
+
+      function done(choice) {
+        clearTimeout(autoT);
+        elements.resumeModal.classList.remove('active');
+        SpatialNav.popScope();
+        elements.continueButton.removeEventListener('click', onContinue);
+        elements.startOverButton.removeEventListener('click', onStartOver);
+        resolve(choice);
+      }
+      function onContinue() { done('continue'); }
+      function onStartOver() { done('startover'); }
+
+      elements.continueButton.addEventListener('click', onContinue);
+      elements.startOverButton.addEventListener('click', onStartOver);
+
+      // Auto-continue after 12s so playback is never blocked for long
+      var autoT = setTimeout(function () { done('continue'); }, 12000);
+    });
+  }
+
+  // ── Binge Auto-Next ────────────────────────────────────────────────────
   function onVideoEnded() {
     if (currentEpisodeIndex < episodeList.length - 1) {
       startBingeCountdown();
@@ -152,26 +768,19 @@
     }
   }
 
-  function onVideoError() {
-    console.warn('Native video error, attempting embed fallback route...');
-    if (currentMedia) {
-      var ep = episodeList[currentEpisodeIndex];
-      playNextRoute('This server failed. Trying another server…');
-    }
-  }
-
   function startBingeCountdown() {
     var count = 5;
     if (elements.bingeModal && elements.bingeCountdown) {
       elements.bingeCountdown.textContent = count;
       elements.bingeModal.classList.add('active');
-      SpatialNav.pushScope(elements.bingeModal, elements.bingeModal.querySelector('button'));
-
-      bingeCountdownTimer = setInterval(() => {
+      var cancelBtn = elements.bingeModal.querySelector('button');
+      SpatialNav.pushScope(elements.bingeModal, cancelBtn);
+      bingeCountdownTimer = setInterval(function () {
         count--;
         if (elements.bingeCountdown) elements.bingeCountdown.textContent = count;
         if (count <= 0) {
           clearInterval(bingeCountdownTimer);
+          bingeCountdownTimer = null;
           playNextEpisode();
         }
       }, 1000);
@@ -182,281 +791,33 @@
 
   function cancelBingeCountdown() {
     clearInterval(bingeCountdownTimer);
-    if (elements.bingeModal) {
+    bingeCountdownTimer = null;
+    if (elements.bingeModal && elements.bingeModal.classList.contains('active')) {
       elements.bingeModal.classList.remove('active');
-      SpatialNav.popScope();
+      try { SpatialNav.popScope(); } catch (e) {}
     }
   }
 
   function playNextEpisode() {
     cancelBingeCountdown();
     if (currentEpisodeIndex < episodeList.length - 1) {
-      currentEpisodeIndex++;
-      playEpisode(currentEpisodeIndex);
+      playEpisode(currentEpisodeIndex + 1);
     }
   }
 
   function playPreviousEpisode() {
     cancelBingeCountdown();
     if (currentEpisodeIndex > 0) {
-      currentEpisodeIndex--;
-      playEpisode(currentEpisodeIndex);
+      playEpisode(currentEpisodeIndex - 1);
     }
   }
 
-  async function open(media, episodes = [], startIndex = 0, directUrl = null) {
-    isPlayerActive = true;
-    currentMedia = media;
-    episodeList = episodes.length > 0 ? episodes : [{ title: media.title, url: directUrl || media.detailPageUrl }];
-    currentEpisodeIndex = Math.max(0, Math.min(startIndex, episodeList.length - 1));
-
-    elements.container.classList.add('active');
-
-    // Register TV remote key handlers for Player
-    keyUnbind = SpatialNav.registerKeyHandler(handlePlayerRemoteKeys);
-
-    playEpisode(currentEpisodeIndex, directUrl);
-    startPreviewGate();
-  }
-
-  function startPreviewGate() {
-    clearTimeout(previewTimer);
-    var user = NovaApi.getUserSession ? NovaApi.getUserSession() : null;
-    if ((user && user.isPremium) || currentMedia.mediaKind === 'live') return;
-    var isMovie = ['movie', 'movies'].includes(String(currentMedia.mediaKind || '').toLowerCase());
-    var limitMs = isMovie ? 20 * 60 * 1000 : 5 * 60 * 1000;
-    previewTimer = setTimeout(function () {
-      if (!isPlayerActive) return;
-      if (elements.video) elements.video.pause();
-      if (elements.embedIframe) { elements.embedIframe.src = 'about:blank'; elements.embedIframe.style.display = 'none'; }
-      showToast('Free preview ended');
-      document.dispatchEvent(new CustomEvent('tvpremiumneeded'));
-    }, limitMs);
-  }
-
-  async function playEpisode(index, directUrl = null) {
-    currentEpisodeIndex = index;
-    var ep = episodeList[index];
-
-    var streamUrl = directUrl || ep.streamUrl;
-    routeCandidates = [];
-    routeIndex = 0;
-
-    if (!streamUrl) {
-      showLoading(true);
-      if (currentMedia.isAnime && ep.url && !String(ep.url).startsWith('tmdb-')) {
-        var animeResult = await Promise.all([
-          NovaApi.fetchAnimeStream(ep.provider || 'hianime', ep.url),
-          NovaApi.fetchWatchRoutes('anime', currentMedia.title, ep.url || currentMedia.detailPageUrl)
-        ]);
-        streamUrl = animeResult[0];
-        routeCandidates = animeResult[1] || [];
-      } else {
-        routeCandidates = await NovaApi.fetchWatchRoutes(currentMedia.mediaKind, currentMedia.title, ep.url || currentMedia.detailPageUrl);
-        streamUrl = routeCandidates[0] && routeCandidates[0].url;
-      }
-      // An anime provider can legitimately have an episode listing but no
-      // stream. Fall back to the full parallel server list in that case.
-      if (!streamUrl && currentMedia.isAnime) {
-        streamUrl = routeCandidates[0] && routeCandidates[0].url;
-      }
-      showLoading(false);
-    }
-
-    if (!streamUrl) {
-      showToast('Stream unavailable');
-      return;
-    }
-
-    // A provider-specific direct anime URL is not part of the generic server
-    // list. Start fallback at candidate zero if that direct stream errors.
-    routeIndex = routeCandidates.length && streamUrl !== routeCandidates[0].url ? -1 : 0;
-    loadStream(streamUrl, routeCandidates[routeIndex] || null);
-  }
-
-  function loadStream(url, route) {
-    clearTimeout(embedFallbackTimer);
-    var isHls = url.includes('.m3u8');
-    var isEmbed = !isHls && (url.startsWith('http') && !url.includes('.mp4') && (url.includes('embed') || url.includes('player') || url.includes('vidsrc') || url.includes('vidlink') || url.includes('streamseast') || url.includes('animexin')));
-
-    if (isEmbed) {
-      // Use TV embed container without any sandbox restriction
-      if (elements.video) {
-        elements.video.style.display = 'none';
-        elements.video.pause();
-      }
-      if (elements.embedIframe) {
-        elements.embedIframe.style.display = 'block';
-        elements.embedIframe.removeAttribute('sandbox');
-        elements.embedIframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
-        elements.embedIframe.setAttribute('allowfullscreen', 'true');
-        elements.embedIframe.setAttribute('referrerpolicy', 'origin');
-
-        // Add clean autoplay param
-        var cleanUrl = url;
-        if (cleanUrl.includes('vidlink.pro')) {
-          cleanUrl = cleanUrl + (cleanUrl.includes('?') ? '&' : '?') + 'autoplay=true&primaryColor=e84d8a';
-        } else if (cleanUrl.includes('vidsrc')) {
-          cleanUrl = cleanUrl + (cleanUrl.includes('?') ? '&' : '?') + 'autoplay=1';
-        }
-        elements.embedIframe.src = cleanUrl;
-        // iframe load means the provider page loaded, not that its internal
-        // stream works.  Do not auto-switch a playing embed; expose a reliable
-        // remote retry key instead and only fall through on an actual iframe
-        // load error.
-        elements.embedIframe.onerror = function () { playNextRoute('Server unavailable. Trying another server…'); };
-      }
-    } else {
-      if (elements.embedIframe) {
-        elements.embedIframe.style.display = 'none';
-        elements.embedIframe.src = 'about:blank';
-      }
-      if (elements.video) {
-        elements.video.style.display = 'block';
-        elements.video.volume = 1.0;
-        elements.video.muted = false;
-        
-        if (hlsInstance) {
-          hlsInstance.destroy();
-          hlsInstance = null;
-        }
-
-        if (isHls && window.Hls && Hls.isSupported()) {
-          hlsInstance = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-            backBufferLength: 90
-          });
-          hlsInstance.loadSource(url);
-          hlsInstance.attachMedia(elements.video);
-          hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
-            checkResumeAndPlay();
-          });
-        } else {
-          elements.video.src = url;
-          elements.video.load();
-          checkResumeAndPlay();
-        }
-      }
-    }
-  }
-
-  function checkResumeAndPlay() {
-    if (!elements.video) return;
-    elements.video.volume = 1.0;
-    elements.video.muted = false;
-
-    var saved = getSavedProgress(progressKey());
-    if (saved && saved.position > 10 && saved.position < (saved.duration - 30)) {
-      return showResumeChoice(saved);
-    }
-
-    startNativePlayback(0);
-  }
-
-  function startNativePlayback(position) {
-    if (position > 0) elements.video.currentTime = position;
-
-    var playPromise = elements.video.play();
-    if (playPromise !== undefined) {
-      playPromise.then(() => {
-        elements.video.volume = 1.0;
-        elements.video.muted = false;
-      }).catch(e => {
-        console.warn('Direct unmuted autoplay blocked by TV browser policy, attempting muted autostart then unmuting:', e);
-        elements.video.muted = true;
-        elements.video.play().then(() => {
-          elements.video.muted = false;
-          elements.video.volume = 1.0;
-        }).catch(() => {});
-      });
-    }
-  }
-
-  function showResumeChoice(saved) {
-    if (!elements.resumeModal) return startNativePlayback(saved.position);
-    if (elements.resumeCopy) elements.resumeCopy.textContent = 'Resume ' + Math.floor(saved.position / 60) + ' minutes into ' + (saved.episodeTitle || currentMedia.title) + '?';
-    elements.resumeModal.classList.add('active');
-    var closeChoice = function (position) {
-      elements.resumeModal.classList.remove('active');
-      SpatialNav.popScope();
-      startNativePlayback(position);
-    };
-    elements.continueButton.onclick = function () { closeChoice(saved.position); };
-    elements.startOverButton.onclick = function () { closeChoice(0); };
-    SpatialNav.pushScope(elements.resumeModal, elements.continueButton);
-  }
-
-  function playNextRoute(message) {
-    if (!routeCandidates.length || routeIndex >= routeCandidates.length - 1) {
-      showToast('All available servers failed');
-      return;
-    }
-    routeIndex++;
-    var nextName = routeCandidates[routeIndex].provider || ('Server ' + (routeIndex + 1));
-    showToast(message || ('Trying ' + nextName));
-    loadStream(routeCandidates[routeIndex].url, routeCandidates[routeIndex]);
-  }
-
-  function handlePlayerRemoteKeys(code, e) {
-    if (!isPlayerActive) return false;
-
-    // Back key -> close player
-    if (SpatialNav.KEY_CODES.BACK.indexOf(code) !== -1) {
-      if (elements.episodeDrawer && elements.episodeDrawer.classList.contains('active')) {
-        closeEpisodesDrawer();
-        return true;
-      }
-      close();
-      return true;
-    }
-
-    // Toggle Play/Pause
-    if (SpatialNav.KEY_CODES.ENTER.indexOf(code) !== -1 || SpatialNav.KEY_CODES.MEDIA_PLAY_PAUSE.indexOf(code) !== -1) {
-      if (elements.video && elements.video.style.display !== 'none') {
-        togglePlay();
-        return true;
-      }
-    }
-
-    // Seek Left (-10s) / Right (+10s)
-    if (SpatialNav.KEY_CODES.LEFT.indexOf(code) !== -1 || SpatialNav.KEY_CODES.MEDIA_REWIND.indexOf(code) !== -1) {
-      if (elements.video && elements.video.style.display !== 'none') {
-        seekRelative(-10);
-        return true;
-      }
-    }
-
-    if (SpatialNav.KEY_CODES.RIGHT.indexOf(code) !== -1 || SpatialNav.KEY_CODES.MEDIA_FAST_FORWARD.indexOf(code) !== -1) {
-      if (elements.video && elements.video.style.display !== 'none') {
-        seekRelative(10);
-        return true;
-      }
-    }
-
-    // DOWN key: Open episode list if series
-    if (SpatialNav.KEY_CODES.DOWN.indexOf(code) !== -1) {
-      if (episodeList.length > 1) {
-        openEpisodesDrawer();
-        return true;
-      }
-    }
-
-    // UP is a deliberate, always-available server retry. It does not disturb
-    // a healthy embed, but gives users an immediate escape hatch when an
-    // upstream provider reports a playback error inside its cross-origin UI.
-    if (SpatialNav.KEY_CODES.UP.indexOf(code) !== -1 && routeCandidates.length > 1) {
-      playNextRoute('Trying another server…');
-      return true;
-    }
-
-    return false;
-  }
-
-  function togglePlay() {
+  // ── Playback controls & HUD ────────────────────────────────────────────
+  function togglePlayPause() {
     if (!elements.video) return;
     if (elements.video.paused) {
-      elements.video.play();
+      var p = elements.video.play();
+      if (p && p.catch) p.catch(function () {});
       showToast('▶ Play');
     } else {
       elements.video.pause();
@@ -465,10 +826,20 @@
   }
 
   function seekRelative(deltaSeconds) {
-    if (!elements.video) return;
-    var newTime = Math.max(0, Math.min(elements.video.duration || 0, elements.video.currentTime + deltaSeconds));
-    elements.video.currentTime = newTime;
-    showToast(`${deltaSeconds > 0 ? '⏩ +' : '⏪ '}${deltaSeconds}s`);
+    if (!elements.video || elements.video.style.display === 'none') return;
+    var dur = elements.video.duration || 0;
+    var newTime = Math.max(0, Math.min(dur, elements.video.currentTime + deltaSeconds));
+    try { elements.video.currentTime = newTime; } catch (e) {}
+    showToast((deltaSeconds > 0 ? '⏩ +' : '⏪ ') + deltaSeconds + 's');
+  }
+
+  function bumpVolume(delta) {
+    if (!elements.video || elements.video.style.display === 'none') return;
+    try {
+      elements.video.muted = false;
+      elements.video.volume = Math.max(0, Math.min(1, elements.video.volume + delta));
+      showToast('🔊 ' + Math.round(elements.video.volume * 100) + '%');
+    } catch (e) {}
   }
 
   function showToast(text) {
@@ -476,53 +847,103 @@
     elements.seekFeedback.textContent = text;
     elements.seekFeedback.classList.add('active');
     clearTimeout(elements.seekFeedback._timer);
-    elements.seekFeedback._timer = setTimeout(() => {
+    elements.seekFeedback._timer = setTimeout(function () {
       elements.seekFeedback.classList.remove('active');
     }, 1200);
   }
 
   function openEpisodesDrawer() {
     if (!elements.episodeDrawer || !elements.episodeDrawerList) return;
+    if (episodeList.length < 2) {
+      showToast('No episode list for this title');
+      return;
+    }
     elements.episodeDrawerList.innerHTML = '';
-    episodeList.forEach((ep, idx) => {
+    episodeList.forEach(function (ep, idx) {
       var btn = document.createElement('button');
       btn.className = 'tv-btn' + (idx === currentEpisodeIndex ? ' tv-btn-primary' : '');
       btn.tabIndex = 0;
       btn.setAttribute('data-nav', 'true');
       btn.style.margin = '4px 8px';
-      btn.textContent = ep.title || `Ep ${idx + 1}`;
-      btn.addEventListener('click', () => {
+      var label = ep.title || ('Episode ' + (idx + 1));
+      var saved = getSavedProgress(episodeProgressKey(currentMedia, ep, idx));
+      if (saved && saved.position > 15 && saved.duration > 0 && saved.position < saved.duration - 20) {
+        label = '▶ ' + label;
+      }
+      btn.textContent = label;
+      btn.addEventListener('click', function () {
         closeEpisodesDrawer();
         playEpisode(idx);
       });
       elements.episodeDrawerList.appendChild(btn);
     });
-
     elements.episodeDrawer.classList.add('active');
-    SpatialNav.pushScope(elements.episodeDrawer, elements.episodeDrawerList.querySelector('.tv-btn-primary') || elements.episodeDrawerList.querySelector('.tv-btn'));
+    var target = elements.episodeDrawerList.querySelector('.tv-btn-primary') || elements.episodeDrawerList.querySelector('.tv-btn');
+    SpatialNav.pushScope(elements.episodeDrawer, target);
   }
 
   function closeEpisodesDrawer() {
-    if (elements.episodeDrawer) {
+    if (elements.episodeDrawer && elements.episodeDrawer.classList.contains('active')) {
       elements.episodeDrawer.classList.remove('active');
-      SpatialNav.popScope();
+      try { SpatialNav.popScope(); } catch (e) {}
     }
   }
 
   function showLoading(show) {
     var loading = document.getElementById('tv-player-loading');
-    if (loading) {
-      loading.style.display = show ? 'flex' : 'none';
+    if (loading) loading.style.display = show ? 'flex' : 'none';
+  }
+
+  function showServerStatus(text) {
+    if (statusGuard(text)) return;
+    if (elements.serverStatus && elements.serverStatusText) {
+      elements.serverStatusText.textContent = text;
+      elements.serverStatus.classList.add('active');
     }
   }
 
+  var lastStatusText = '';
+  function statusGuard(text) {
+    if (lastStatusText === text) return false;
+    lastStatusText = text;
+    return false;
+  }
+
+  function hideServerStatus() {
+    lastStatusText = '';
+    if (elements.serverStatus) elements.serverStatus.classList.remove('active');
+  }
+
+  function showFatalOverlay(message) {
+    hideServerStatus();
+    if (elements.fatalOverlay) {
+      var msg = elements.fatalOverlay.querySelector('.tv-fatal-message');
+      if (msg) msg.textContent = message || 'Stream unavailable.';
+      elements.fatalOverlay.classList.add('active');
+      var retry = document.getElementById('tv-player-btn-retry');
+      if (retry) SpatialNav.pushScope(elements.fatalOverlay, retry);
+    }
+  }
+
+  function hideFatalOverlay() {
+    if (elements.fatalOverlay && elements.fatalOverlay.classList.contains('active')) {
+      elements.fatalOverlay.classList.remove('active');
+      try { SpatialNav.popScope(); } catch (e) {}
+    }
+  }
+
+  // ── Close & cleanup ────────────────────────────────────────────────────
   function close() {
     isPlayerActive = false;
+    raceToken++;                 // cancel any in-flight probes
     cancelBingeCountdown();
     closeEpisodesDrawer();
+    hideFatalOverlay();
+    hideServerStatus();
+
     if (elements.resumeModal && elements.resumeModal.classList.contains('active')) {
       elements.resumeModal.classList.remove('active');
-      SpatialNav.popScope();
+      try { SpatialNav.popScope(); } catch (e) {}
     }
 
     if (keyUnbind) {
@@ -530,26 +951,44 @@
       keyUnbind = null;
     }
 
-    if (elements.video) {
-      elements.video.pause();
-      if (elements.video.currentTime > 5 && elements.video.duration > 0) {
-        saveProgress(elements.video.currentTime, elements.video.duration);
-      }
-      elements.video.src = '';
+    // Save progress before teardown (native only)
+    if (elements.video && !isLiveStream) {
+      var cur = elements.video.currentTime;
+      var dur = elements.video.duration;
+      if (cur > 5 && dur > 0) saveProgress(cur, dur);
     }
 
-    clearTimeout(embedFallbackTimer);
-    clearTimeout(previewTimer);
+    clearFailoverTimer();
+    clearEmbedWatchdog();
+    clearProbeIframes();
+
+    if (elements.video) {
+      try { elements.video.pause(); } catch (e) {}
+      try { elements.video.removeAttribute('src'); } catch (e) {}
+      try { elements.video.load(); } catch (e) {}
+      elements.video.style.display = 'none';
+    }
 
     if (elements.embedIframe) {
-      elements.embedIframe.src = 'about:blank';
+      try { elements.embedIframe.src = 'about:blank'; } catch (e) {}
       elements.embedIframe.style.display = 'none';
     }
 
+    // Hide the ad-click guard and leave fullscreen
+    var guard = document.getElementById('tv-embed-guard');
+    if (guard) guard.style.display = 'none';
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (e) {}
+
     if (hlsInstance) {
-      hlsInstance.destroy();
+      try { hlsInstance.destroy(); } catch (e) {}
       hlsInstance = null;
     }
+
+    activeCandidate = null;
+    resumePosition = 0;
 
     if (elements.container) {
       elements.container.classList.remove('active');
@@ -565,6 +1004,7 @@
     playEpisode: playEpisode,
     playNextEpisode: playNextEpisode,
     playPreviousEpisode: playPreviousEpisode,
-    cancelBingeCountdown: cancelBingeCountdown
+    cancelBingeCountdown: cancelBingeCountdown,
+    isActive: function () { return isPlayerActive; }
   };
 }));
