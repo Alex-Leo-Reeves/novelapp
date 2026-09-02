@@ -1675,12 +1675,50 @@ async function contentHome(type, page = 1) {
 }
 
 async function contentSearch(type, query, page = 1) {
+    const raw = String(type || "all").trim().toLowerCase();
+
+    // When searching from Home tab or "all", search across ALL media categories concurrently!
+    if (raw === "all" || raw === "home" || raw === "everything") {
+        const [animeRes, movieRes, kdramaRes, donghuaRes, mangaRes, novelRes] = await Promise.all([
+            tmdbItems("anime", query, page).catch(() => []),
+            tmdbItems("movies", query, page).catch(() => []),
+            tmdbItems("kdrama", query, page).catch(() => []),
+            tmdbItems("donghua", query, page).catch(() => []),
+            mangaUnified.mangaItems(mangadexItems, query, page).catch(() => []),
+            swiftNovelScrapers.searchNovels(query, page).catch(() => [])
+        ]);
+
+        const combined = [];
+        const maxLen = Math.max(animeRes.length, movieRes.length, kdramaRes.length, donghuaRes.length, mangaRes.length, novelRes.length);
+
+        // Interleave results with video media (Anime/Movies) prioritized first
+        for (let i = 0; i < maxLen; i++) {
+            if (animeRes[i]) combined.push(animeRes[i]);
+            if (movieRes[i]) combined.push(movieRes[i]);
+            if (kdramaRes[i]) combined.push(kdramaRes[i]);
+            if (donghuaRes[i]) combined.push(donghuaRes[i]);
+            if (mangaRes[i]) combined.push(mangaRes[i]);
+            if (novelRes[i]) combined.push(novelRes[i]);
+        }
+
+        const seen = new Set();
+        const deduped = combined.filter(item => {
+            const key = item.id || item.detailUrl || item.title;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        if (deduped.length) return deduped;
+        return fixtureItems("anime", query);
+    }
+
     const normalizedType = normalizeContentType(type);
     // Donghua, Anime, K-Drama, Cartoon, Classic, Movies, Nigerian: all go through TMDB multi-pipeline
     if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
-        // Search multiple TMDB pages for better coverage (aggregate pages 1-3)
+        // Search multiple TMDB pages for better coverage
         const pagePromises = [];
-        const maxPages = normalizedType === "movies" ? 3 : 2; // movies get deeper search
+        const maxPages = normalizedType === "movies" ? 3 : 2;
         for (let p = page; p < page + maxPages; p++) {
             pagePromises.push(tmdbItems(normalizedType, query, p).catch(() => []));
         }
@@ -4808,8 +4846,15 @@ function serveStatic(request, response, pathname) {
   const safePath = path
     .normalize(decodeURIComponent(pathname))
     .replace(/^(\.\.(\/|\\|$))+/, "");
-  const requestedPath = safePath === "/" ? "/index.html" : safePath;
-  const filePath = path.join(SITE_DIR, requestedPath);
+  let requestedPath = safePath === "/" ? "/index.html" : safePath;
+  if (requestedPath === "/tv" || requestedPath === "/tv/") {
+    requestedPath = "/tv/index.html";
+  }
+  let filePath = path.join(SITE_DIR, requestedPath);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+    const subIndex = path.join(filePath, "index.html");
+    if (fs.existsSync(subIndex)) filePath = subIndex;
+  }
   const resolvedPath = fs.existsSync(filePath) && fs.statSync(filePath).isFile()
     ? filePath
     : path.join(SITE_DIR, "index.html");

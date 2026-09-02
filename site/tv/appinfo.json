@@ -1,0 +1,20 @@
+{
+  "id": "com.alexleoreeves.novareadtv",
+  "version": "1.0.0",
+  "vendor": "Alex Leo Reeves",
+  "type": "web",
+  "main": "index.html",
+  "title": "NovaRead TV",
+  "description": "Every Story, One Screen — Stream Anime, Movies, K-Drama, Donghua, Novels, Manga, and Live Sports on your Smart TV.",
+  "icon": "assets/icon.png",
+  "largeIcon": "assets/largeIcon.png",
+  "splashBackground": "assets/splash.png",
+  "resolution": "1920x1080",
+  "category": "Entertainment",
+  "uiRevision": "2",
+  "supportTouch": false,
+  "supportSpatialNavigation": true,
+  "requiredPermissions": [
+    "network"
+  ]
+}

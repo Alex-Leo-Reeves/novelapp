@@ -1,0 +1,17 @@
+{
+  "name": "NovaRead TV",
+  "short_name": "NovaRead",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#05060b",
+  "theme_color": "#05060b",
+  "description": "Every Story, One Screen — Stream Anime, Movies, K-Drama, Donghua, Novels, Manga, and Live Sports on your Smart TV.",
+  "icons": [
+    {
+      "src": "assets/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
