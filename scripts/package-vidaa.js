@@ -25,6 +25,7 @@ const FILES_TO_COPY = [
   'spatial-nav.js',
   'qrcode.js',
   'api.js',
+  'autoplay.js',
   'player.js',
   'app.js',
   'appinfo.json',

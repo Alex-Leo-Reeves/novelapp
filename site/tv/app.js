@@ -74,6 +74,20 @@
     if (epBack) epBack.addEventListener('click', closeEpisodesView);
     var readerBack = document.getElementById('tv-reader-btn-back');
     if (readerBack) readerBack.addEventListener('click', closeReaderView);
+
+    // Auto-scroll focused episode cards / rail cards into view — remote
+    // navigation must always reveal the row the user is on.
+    document.addEventListener('focusin', function (e) {
+      var el = e.target;
+      if (!el || !el.classList) return;
+      var isEpisode = el.classList.contains('tv-episode-card');
+      var inEpisodeArea = el.closest && el.closest('.tv-episodes-grid, .tv-episodes-view-grid, #tv-player-episodes-list');
+      var isCard = el.classList.contains('tv-card') && el.closest && el.closest('.tv-rail-content');
+      if (isEpisode || inEpisodeArea || isCard) {
+        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+        catch (err) { try { el.scrollIntoView(); } catch (e2) {} }
+      }
+    });
   }
 
   function loadLocalState() {
@@ -1105,7 +1119,38 @@
 
     renderDetailEpisodes(item, episodes);
 
-    playBtn.onclick = function () { startItem(item, appState.currentEpisodes, 0); };
+    // Resume support (TV-app parity): the most recent saved progress for this
+    // title turns Play into "▶ Resume · <episode>" and jumps straight to it.
+    var resumeIdx = -1;
+    var resumeSaved = null;
+    try {
+      var prefix = 'tv_progress_' + (item.id || item.title) + '__';
+      for (var li = 0; li < localStorage.length; li++) {
+        var lk = localStorage.key(li);
+        if (lk && lk.indexOf(prefix) === 0) {
+          var lsaved = JSON.parse(localStorage.getItem(lk));
+          if (lsaved && lsaved.position > 15 && lsaved.duration > 0 &&
+              lsaved.position < lsaved.duration - 20 &&
+              (!resumeSaved || (lsaved.updatedAt || 0) > (resumeSaved.updatedAt || 0))) {
+            resumeSaved = lsaved;
+          }
+        }
+      }
+    } catch (e) {}
+    if (resumeSaved && typeof resumeSaved.episodeIndex === 'number' &&
+        resumeSaved.episodeIndex >= 0 && resumeSaved.episodeIndex < episodes.length) {
+      resumeIdx = resumeSaved.episodeIndex;
+    } else if (resumeSaved && episodes.length === 0) {
+      resumeIdx = 0;
+    }
+
+    if (resumeIdx >= 0) {
+      playBtn.innerHTML = '▶ Resume · ' + (resumeSaved.episodeTitle || ('Episode ' + (resumeIdx + 1)));
+      playBtn.onclick = function () { startItem(item, appState.currentEpisodes, resumeIdx); };
+    } else {
+      playBtn.innerHTML = kindOf(item) === 'novel' ? '📖 Read Novel' : (kindOf(item) === 'manga' ? '📖 Read' : '▶ Play');
+      playBtn.onclick = function () { startItem(item, appState.currentEpisodes, 0); };
+    }
     browseBtn.onclick = function () { openEpisodesView(item, appState.currentEpisodes); };
     updateWatchlistBtnState(watchlistBtn, item);
     watchlistBtn.onclick = function () {
@@ -1282,6 +1327,29 @@
     TvPlayer.open(item, episodes, index);
   }
 
+  // ── Reader scrolling (TV remote: UP/DOWN scroll, CH+/− page) ───────────
+  var readerKeyUnbind = null;
+
+  function readerKeyHandler(code) {
+    var body = document.getElementById('tv-reader-body');
+    if (!body) return false;
+    var step = Math.max(260, Math.round((body.clientHeight || 600) * 0.55));
+    if (code === 40) { body.scrollBy(0, step); return true; }
+    if (code === 38) { body.scrollBy(0, -step); return true; }
+    if (code === 34 || code === 428) { body.scrollBy(0, (body.clientHeight || 600) * 0.92); return true; }
+    if (code === 33 || code === 427) { body.scrollBy(0, -(body.clientHeight || 600) * 0.92); return true; }
+    return false; // LEFT/RIGHT still navigate chapter chips
+  }
+
+  function bindReaderKeys() {
+    if (readerKeyUnbind) readerKeyUnbind();
+    readerKeyUnbind = SpatialNav.registerKeyHandler(readerKeyHandler);
+  }
+
+  function unbindReaderKeys() {
+    if (readerKeyUnbind) { readerKeyUnbind(); readerKeyUnbind = null; }
+  }
+
   // ── Novel Reader (paged, progress tracked) ─────────────────────────────
   async function openNovelReader(item, chapters, index) {
     var view = document.getElementById('tv-reader-view');
@@ -1301,6 +1369,7 @@
     if (chipRow) chipRow.innerHTML = '';
     view.classList.add('active');
     SpatialNav.pushScope(view, document.getElementById('tv-reader-btn-back'));
+    bindReaderKeys();
 
     await loadNovelChapter(appState.readerIndex);
   }
@@ -1391,6 +1460,7 @@
     if (chipRow) chipRow.innerHTML = '';
     view.classList.add('active');
     SpatialNav.pushScope(view, document.getElementById('tv-reader-btn-back'));
+    bindReaderKeys();
 
     await loadMangaChapter(appState.mangaIndex);
   }
@@ -1464,6 +1534,7 @@
     var view = document.getElementById('tv-reader-view');
     if (view && view.classList.contains('active')) {
       view.classList.remove('active');
+      unbindReaderKeys();
       try { SpatialNav.popScope(); } catch (e) {}
       restoreFocus();
       return true;

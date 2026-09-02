@@ -294,9 +294,14 @@
     </div>
   </div>
 
+  <!-- Unmute Prompt (when TV browser blocks unmuted autostart) -->
+  <div id="tv-player-unmute-prompt" style="display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 105; background: rgba(13, 16, 27, 0.9); border: 2px solid var(--tv-cyan); border-radius: 30px; padding: 12px 28px; color: #fff; font-size: 18px; font-weight: 700; box-shadow: 0 8px 32px rgba(0,0,0,0.6); pointer-events: none; align-items: center; gap: 12px;">
+    <span style="font-size: 24px;">▶</span> Press <span style="background: var(--tv-cyan); color: #05060b; padding: 2px 10px; border-radius: 6px;">OK</span> to Unmute &amp; Play (Max Volume)
+  </div>
+
   <!-- Episodes Drawer (slide-up from bottom) -->
   <div id="tv-player-episodes-drawer" class="tv-modal" style="position: absolute; top: auto; bottom: 0; left: 0; right: 0; max-height: 50vh; background: rgba(13, 16, 27, 0.95); backdrop-filter: blur(20px); border-top: 1px solid var(--tv-line); padding: 24px 40px; overflow-y: auto; z-index: 120; align-items: flex-end;">
-    <h3 class="tv-rail-title" style="margin-bottom: 16px;">Episodes</h3>
+    <h3 class="tv-rail-title" style="margin-bottom: 16px;">Episodes (Blue)</h3>
     <div id="tv-player-episodes-list" class="tv-rail-content" data-nav-row="true"></div>
   </div>
 
@@ -326,6 +331,7 @@
 <script src="spatial-nav.js"></script>
 <script src="qrcode.js"></script>
 <script src="api.js"></script>
+<script src="autoplay.js"></script>
 <script src="player.js"></script>
 <script src="app.js"></script>
 

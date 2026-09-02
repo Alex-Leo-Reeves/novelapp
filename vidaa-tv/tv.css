@@ -1655,3 +1655,29 @@ body {
   .tv-yt-keyboard .tv-yt-key { font-size: 17px; padding: 10px 0; }
 }
 
+/* ── Scroll containers: the reader body MUST scroll (flex fix) ───────── */
+.tv-vertical-scroll {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.tv-reader-body {
+  flex: 1 1 auto;
+  min-height: 0;      /* REQUIRED inside a flex column — without it the
+                         body grows to content height and never scrolls */
+  overflow-y: auto;
+  height: auto;
+}
+.tv-reader-header,
+.tv-reader-chips {
+  flex: 0 0 auto;
+}
+/* Focused episode chips / cards must always be visible while navigating */
+.tv-episode-card:focus,
+.tv-episode-card.tv-focused {
+  scroll-margin: 24px;
+}
+.tv-card:focus,
+.tv-card.tv-focused {
+  scroll-margin: 16px;
+}
+

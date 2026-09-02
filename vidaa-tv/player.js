@@ -257,12 +257,16 @@
     }
     if (STOP.indexOf(code) !== -1) { close(); return true; }
     if (ENTER.indexOf(code) !== -1) {
-      // OK with no modal/focused control toggles playback
       var anyModal = document.querySelector('#tv-player-view .tv-modal.active');
-      if (!anyModal && elements.video && elements.video.style.display !== 'none') {
+      if (anyModal) return false; // modal scope handles it
+      if (elements.video && elements.video.style.display !== 'none') {
         togglePlayPause();
-        return true;
+      } else {
+        // Embed playing: OK must NEVER re-trigger stale buttons / restart
+        // the server walk — just acknowledge.
+        showToast('Playing via ' + (activeCandidate ? activeCandidate.provider : 'embed'));
       }
+      return true; // always consumed while the player is open
     }
     return false;
   }
@@ -280,6 +284,10 @@
 
     elements.container.classList.add('active');
     keyUnbind = SpatialNav.registerKeyHandler(handlePlayerRemoteKeys);
+
+    // Blur whatever had focus (a hidden detail Play button would otherwise
+    // swallow OK/Enter and restart the whole server walk)
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
 
     // Max volume + fullscreen from ANY entry point (tab-independent)
     try {
@@ -407,63 +415,13 @@
     return /\.(m3u8|mp4|mpd|webm|mkv|mov|ts)(\?|$)/i.test(String(url || ''));
   }
 
-  // ── Server walk: candidates in priority order, watchdog per server ─────
-  // Server 1 is tried first (priority order from the backend). Each embed
-  // gets its own watchdog; failures advance to the next server immediately.
-  // Nothing is skipped and nothing is marked failed until ALL are exhausted.
+  // ── Parallel Server Search & Race ───────────────────────────────────────
   var walkIndex = 0;
   var embedLoaded = false;
-
-  function startServerRace(candidates) {
-    if (!candidates || candidates.length === 0) {
-      showLoading(false);
-      showFatalOverlay('No stream servers were found for this title.');
-      return;
-    }
-    routeCandidates = candidates;
-    walkCandidates(raceToken, 0);
-  }
 
   function clearWalkWatchdog() {
     clearTimeout(embedWatchdog);
     embedWatchdog = null;
-  }
-
-  function walkCandidates(token, index) {
-    if (token !== raceToken) return;
-    clearWalkWatchdog();
-    if (index >= routeCandidates.length) {
-      showLoading(false);
-      showFatalOverlay('Tried ' + routeCandidates.length + ' servers with no luck. Press ↻ Retry or BACK to go back.');
-      return;
-    }
-    walkIndex = index;
-    var c = routeCandidates[index];
-    activeCandidate = c;
-    embedLoaded = false;
-    showLoading(true);
-    showServerStatus('Trying ' + c.provider + ' — server ' + (index + 1) + ' of ' + routeCandidates.length + '…');
-
-    if (isDirectUrl(c.url)) {
-      loadNative(c.url);
-      embedWatchdog = setTimeout(function () {
-        if (token !== raceToken) return;
-        if (elements.video && elements.video.paused && elements.video.readyState < 2) {
-          walkCandidates(token, index + 1);
-        }
-      }, 12000);
-    } else {
-      loadEmbed(c.url);
-      embedWatchdog = setTimeout(function () {
-        if (token !== raceToken) return;
-        if (!embedLoaded) walkCandidates(token, index + 1);
-      }, 9000);
-    }
-  }
-
-  function advanceServer(reason) {
-    showToast(reason || 'Switching server…');
-    walkCandidates(raceToken, walkIndex + 1);
   }
 
   function clearProbeIframes() {
@@ -487,9 +445,126 @@
     return u;
   }
 
+  function startServerRace(candidates) {
+    if (!candidates || candidates.length === 0) {
+      showLoading(false);
+      showFatalOverlay('No stream servers were found for this title.');
+      return;
+    }
+    routeCandidates = candidates;
+    clearWalkWatchdog();
+    clearProbeIframes();
+    raceToken++;
+    var currentToken = raceToken;
+
+    if (candidates.length === 1) {
+      playWinningServer(candidates[0], 0);
+      return;
+    }
+
+    showLoading(true);
+    showServerStatus('Searching ' + candidates.length + ' servers in parallel…');
+
+    var hasWinner = false;
+    var completedCount = 0;
+    var totalCandidates = Math.min(candidates.length, 6);
+
+    function declareWinner(candidate, index, reason) {
+      if (hasWinner || currentToken !== raceToken) return;
+      hasWinner = true;
+      clearTimeout(raceTimeout);
+      clearProbeIframes();
+      console.log('[ParallelRace] Winner selected:', candidate.provider, reason);
+      playWinningServer(candidate, index);
+    }
+
+    // Probe up to 6 candidate servers in parallel
+    for (var i = 0; i < totalCandidates; i++) {
+      (function (cand, idx) {
+        if (isDirectUrl(cand.url)) {
+          fetch(cand.url, { method: 'HEAD', mode: 'no-cors' })
+            .then(function () {
+              declareWinner(cand, idx, 'direct stream ready');
+            })
+            .catch(function () {
+              declareWinner(cand, idx, 'direct stream priority');
+            });
+        } else {
+          try {
+            var ifr = document.createElement('iframe');
+            ifr.style.width = '1px';
+            ifr.style.height = '1px';
+            ifr.style.opacity = '0.01';
+            ifr.setAttribute('referrerpolicy', 'origin');
+
+            var probeTimer = setTimeout(function () {
+              checkAllProbes();
+            }, 8000);
+
+            ifr.onload = function () {
+              clearTimeout(probeTimer);
+              declareWinner(cand, idx, 'iframe loaded');
+            };
+            ifr.onerror = function () {
+              clearTimeout(probeTimer);
+              checkAllProbes();
+            };
+
+            ifr.src = decorateEmbedUrl(cand.url);
+            if (elements.probeHost) elements.probeHost.appendChild(ifr);
+            probeIframes.push(ifr);
+          } catch (e) {
+            checkAllProbes();
+          }
+        }
+      })(candidates[i], i);
+    }
+
+    function checkAllProbes() {
+      completedCount++;
+      if (!hasWinner && completedCount >= totalCandidates) {
+        declareWinner(candidates[0], 0, 'fallback to first priority');
+      }
+    }
+
+    // Safety timeout: after 6 seconds, if no candidate has loaded first, pick priority server
+    var raceTimeout = setTimeout(function () {
+      if (!hasWinner && currentToken === raceToken) {
+        declareWinner(candidates[0], 0, 'priority timeout');
+      }
+    }, 6000);
+  }
+
+  function playWinningServer(candidate, index) {
+    clearWalkWatchdog();
+    clearProbeIframes();
+    walkIndex = index;
+    activeCandidate = candidate;
+    embedLoaded = false;
+    showLoading(true);
+    showServerStatus('Playing via ' + candidate.provider + ' (' + (index + 1) + ' of ' + routeCandidates.length + ')');
+
+    if (isDirectUrl(candidate.url)) {
+      loadNative(candidate.url);
+    } else {
+      loadEmbed(candidate.url);
+    }
+
+    setTimeout(function () {
+      hideServerStatus();
+    }, 4000);
+  }
+
+  function advanceServer(reason) {
+    if (walkIndex + 1 >= routeCandidates.length) {
+      showToast('Tried all ' + routeCandidates.length + ' servers');
+      return;
+    }
+    showToast(reason || 'Switching server…');
+    playWinningServer(routeCandidates[walkIndex + 1], walkIndex + 1);
+  }
+
   function failoverToNextRoute(message) {
-    // Bridge to the sequential server walk — advances to the next candidate
-    // without resetting the walk (so no working server is ever skipped).
     advanceServer(message);
   }
 
@@ -503,7 +578,7 @@
     embedWatchdog = null;
   }
 
-  // ── Loading the winning stream ─────────────────────────────────────────
+  // ── Loading the winning stream with Max-Volume Autoplay ─────────────────
   function loadNative(url) {
     clearEmbedWatchdog();
     if (elements.embedIframe) {
@@ -528,10 +603,10 @@
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
-        manifestLoadingTimeOut: 12000,
+        manifestLoadingTimeOut: 15000,
         manifestLoadingMaxRetry: 2,
-        levelLoadingTimeOut: 12000,
-        fragLoadingTimeOut: 20000
+        levelLoadingTimeOut: 15000,
+        fragLoadingTimeOut: 25000
       });
       hlsInstance.loadSource(url);
       hlsInstance.attachMedia(elements.video);
@@ -543,26 +618,14 @@
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR && (!data.details || data.details !== 'manifestLoadError')) {
             try { hlsInstance.startLoad(); } catch (e) {}
           } else {
-            failoverToNextRoute('Stream error — switching server…');
+            advanceServer('Stream error — switching server…');
           }
         }
       });
-      // Watchdog: if HLS never starts within 14s, fail over
-      embedWatchdog = setTimeout(function () {
-        if (elements.video && elements.video.paused && elements.video.readyState < 3) {
-          failoverToNextRoute('Server too slow — switching…');
-        }
-      }, 14000);
     } else {
       elements.video.src = url;
       elements.video.load();
       startNativePlayback();
-      // Watchdog for progressive streams
-      embedWatchdog = setTimeout(function () {
-        if (elements.video && elements.video.paused && elements.video.readyState < 2) {
-          failoverToNextRoute('Server too slow — switching…');
-        }
-      }, 14000);
     }
   }
 
@@ -575,41 +638,44 @@
       p.then(function () {
         elements.video.volume = 1.0;
         elements.video.muted = false;
+        hideUnmutePrompt();
         showToast('🔊 Volume max');
       }).catch(function () {
-        // TV browser autoplay policy — start muted, then unmute on the very
-        // first 'playing' tick (sticky user activation allows unmuting).
+        // TV browser autoplay restriction: start muted to buffer immediately,
+        // and display the prompt for remote OK to unmute to 100% volume.
         elements.video.muted = true;
+        showUnmutePrompt();
         var unmute = function () {
           try {
             elements.video.muted = false;
             elements.video.volume = 1.0;
+            hideUnmutePrompt();
             showToast('🔊 Volume max');
           } catch (e) {}
           elements.video.removeEventListener('playing', unmute);
         };
         elements.video.addEventListener('playing', unmute);
         elements.video.play().then(function () {
-          setTimeout(unmute, 400);
+          setTimeout(unmute, 500);
           setTimeout(unmute, 1500);
-        }).catch(function () {
-          // One more unmuted attempt after a beat (some TVs need it)
-          setTimeout(function () {
-            if (!elements.video) return;
-            elements.video.muted = false;
-            elements.video.play().then(function () {
-              showToast('🔊 Volume max');
-            }).catch(function () {
-              failoverToNextRoute('Playback refused — switching server…');
-            });
-          }, 700);
-        });
+        }).catch(function () {});
       });
     }
   }
 
+  function showUnmutePrompt() {
+    var p = document.getElementById('tv-player-unmute-prompt');
+    if (p) p.style.display = 'flex';
+  }
+
+  function hideUnmutePrompt() {
+    var p = document.getElementById('tv-player-unmute-prompt');
+    if (p) p.style.display = 'none';
+  }
+
   function loadEmbed(url) {
     clearFailoverTimer();
+    clearEmbedWatchdog();
     if (elements.video) {
       elements.video.style.display = 'none';
       try { elements.video.pause(); } catch (e) {}
@@ -627,34 +693,48 @@
     elements.embedIframe.setAttribute('allowfullscreen', 'true');
     elements.embedIframe.setAttribute('referrerpolicy', 'origin');
     elements.embedIframe.onload = function () {
-      // Provider page loaded — accept this server and stop the walk watchdog.
       embedLoaded = true;
       clearWalkWatchdog();
       showLoading(false);
+      if (window.TvAutoplay && window.TvAutoplay.simulateCenterClick) {
+        setTimeout(function () {
+          window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+        }, 800);
+        setTimeout(function () {
+          window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+        }, 2200);
+      }
     };
     elements.embedIframe.onerror = function () {
-      failoverToNextRoute('Server unavailable — trying another…');
+      advanceServer('Server unavailable — trying another…');
     };
     elements.embedIframe.src = decorateEmbedUrl(url);
 
-    // Ad shield: clicking the video surface must never open provider ad
-    // pages. The guard absorbs mouse/touch clicks (remote keys still work —
-    // they are captured at document level, above the iframe).
+    // Watchdog: only advance if the iframe completely fails to load after 28 seconds
+    embedWatchdog = setTimeout(function () {
+      if (!embedLoaded) {
+        advanceServer('Server response timeout — switching…');
+      }
+    }, 28000);
+
     var guard = document.getElementById('tv-embed-guard');
     if (guard) {
       guard.style.display = 'block';
       guard.onclick = function () {
-        showToast('Remote OK / Space controls playback');
+        if (window.TvAutoplay && window.TvAutoplay.simulateCenterClick) {
+          window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+        }
+        showToast('Remote OK controls playback');
       };
     }
 
-    showServerStatus('Playing via ' + (activeCandidate ? activeCandidate.provider : 'embed server') + ' — press YELLOW to switch server');
+    showServerStatus('Playing via ' + (activeCandidate ? activeCandidate.provider : 'embed server') + ' — press YELLOW to switch');
     setTimeout(function () {
       if (embedLoaded) {
         hideServerStatus();
         showLoading(false);
       }
-    }, 2500);
+    }, 3500);
   }
 
   // ── Free Preview Gates (premium parity with the TV app) ────────────────
@@ -961,6 +1041,7 @@
     clearFailoverTimer();
     clearEmbedWatchdog();
     clearProbeIframes();
+    if (window.TvAutoplay) window.TvAutoplay.cancel();
 
     if (elements.video) {
       try { elements.video.pause(); } catch (e) {}

@@ -512,6 +512,9 @@
   async function weebCentralHome(page) {
     page = Math.max(1, page || 1);
     if (page > 1) return mangadexHome(page); // deeper pages from MangaDex
+    // CORS-blocked browsers: items AND chapters must come from the same
+    // source — MangaDex is instantly available and fully consistent.
+    if (wcDirectState === 'blocked') return mangadexHome(page);
 
     var html = await wcFetch('/', { html: true, directTimeout: 12000 });
     if (!html) return mangadexHome(1);
@@ -696,9 +699,21 @@
     var chapters = parseWcChapters(html);
     if (chapters.length) {
       lsSetJson('wc_chapters_' + id, chapters);
+      return chapters;
     }
-    // NOTE: no reader fallback here — fetchChapters tries the fast
-    // MangaDex fallback first and only then the reader proxy.
+
+    // Direct unavailable (CORS-blocked desktop or source hiccup) — the reader
+    // proxy carries the CORRECT WeebCentral list; MangaDex is only a
+    // title-matched fallback and runs after this in fetchChapters.
+    var md = await jinaFetch(WEEBCENTRAL_BASE + '/series/' + encodeURIComponent(id) + '/full-chapter-list', { timeout: 40000 });
+    chapters = parseWcChapters(md);
+    if (!chapters.length) {
+      // Reader can 429 under burst — one patient retry clears it
+      await new Promise(function (r) { setTimeout(r, 2500); });
+      md = await jinaFetch(WEEBCENTRAL_BASE + '/series/' + encodeURIComponent(id) + '/full-chapter-list', { timeout: 40000 });
+      chapters = parseWcChapters(md);
+    }
+    if (chapters.length) lsSetJson('wc_chapters_' + id, chapters);
     return chapters;
   }
 
@@ -782,33 +797,45 @@
 
   /** Chapter list straight from MangaDex, sorted by chapter number ascending. */
   async function mangadexChapters(mangaId) {
+    var cached = lsGetJson('md_chapters_' + mangaId, 30 * 60 * 1000);
+    if (cached && cached.length) return cached;
+
+    var chapters = [];
     try {
-      var url = MANGADEX_URL + '/manga/' + encodeURIComponent(mangaId) +
-        '/feed?translatedLanguage[]=en&limit=500&order[chapter]=asc&order[volume]=asc' +
-        '&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica' +
-        '&includeExternalUrl=0';
-      var resp = await fetch(url);
-      var json = await resp.json();
-      var list = (json && json.data) || [];
-      var chapters = [];
-      list.forEach(function (ch) {
-        var a = ch.attributes || {};
-        if (a.externalUrl) return; // skip aggregator-only chapters
-        var num = parseFloat(a.chapter || '0') || 0;
-        chapters.push({
-          id: ch.id,
-          title: a.title || ('Chapter ' + (a.chapter || '0')),
-          url: 'mangadex-chapter:' + ch.id,
-          chapterNumber: Math.round(num * 10) / 10,
-          volumeNumber: a.volume ? parseFloat(a.volume) : 0,
-          sortKey: num
+      // Paginate (500 per page) — long series like One Piece need it.
+      // NOTE: no contentRating[]=erotica and no includeExternalUrl filter —
+      // both silently return an empty feed for anonymous requests.
+      for (var page = 0; page < 5; page++) {
+        var offset = page * 500;
+        var url = MANGADEX_URL + '/manga/' + encodeURIComponent(mangaId) +
+          '/feed?translatedLanguage[]=en&limit=500&offset=' + offset +
+          '&order[chapter]=asc&order[volume]=asc' +
+          '&contentRating[]=safe&contentRating[]=suggestive';
+        var resp = await fetch(url);
+        if (!resp.ok) break;
+        var json = await resp.json();
+        var list = (json && json.data) || [];
+        if (!list.length) break;
+        list.forEach(function (ch) {
+          var a = ch.attributes || {};
+          if (a.externalUrl) return; // external-only chapters have no pages here
+          var num = parseFloat(a.chapter || '0') || 0;
+          chapters.push({
+            id: ch.id,
+            title: a.title || ('Chapter ' + (a.chapter || '0')),
+            url: 'mangadex-chapter:' + ch.id,
+            chapterNumber: Math.round(num * 10) / 10,
+            volumeNumber: a.volume ? parseFloat(a.volume) : 0,
+            sortKey: num
+          });
         });
-      });
-      chapters.sort(function (a, b) { return a.sortKey - b.sortKey; });
-      return chapters;
-    } catch (e) {
-      return [];
-    }
+        if (list.length < 500) break;
+        offset += 500;
+      }
+    } catch (e) { /* return whatever was collected */ }
+    chapters.sort(function (a, b) { return a.sortKey - b.sortKey; });
+    if (chapters.length) lsSetJson('md_chapters_' + mangaId, chapters);
+    return chapters;
   }
 
   /** Page image URLs via the at-home server (same flow as the Android app). */
@@ -828,15 +855,43 @@
     }
   }
 
-  /** Find a title on MangaDex and return its chapters (WeebCentral fallback). */
+  /** Find a title on MangaDex and return its chapters (WeebCentral fallback).
+   *  Fuzzy title matching: the best-matching result wins, and up to three
+   *  candidates are tried before giving up. */
+  function normMangaTitle(t) {
+    return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function mangaTitleScore(candidate, want) {
+    var a = normMangaTitle(candidate);
+    var b = normMangaTitle(want);
+    if (!a || !b) return 0;
+    if (a === b) return 100;
+    if (a.indexOf(b) !== -1 || b.indexOf(a) !== -1) return 80;
+    // Word-overlap scoring for cases like "Na Honjaman Level-Up" vs "Solo Leveling"
+    var wa = a.split(/(?=[A-Z0-9])/).join(' ').split(' ').filter(Boolean);
+    var wb = b.split(/(?=[A-Z0-9])/).join(' ').split(' ').filter(Boolean);
+    var common = 0;
+    wb.forEach(function (w) { if (wa.indexOf(w) !== -1) common++; });
+    return Math.round((common / Math.max(1, wb.length)) * 60);
+  }
+
   async function mangadexChaptersByTitle(title) {
     try {
       var results = await mangadexSearch(title);
       if (!results.length) return [];
-      var first = results[0];
-      var id = String(first.detailPageUrl || '').replace(/^mangadex:/i, '');
-      if (!id) return [];
-      return mangadexChapters(id);
+      results.sort(function (a, b) {
+        return mangaTitleScore(b.title, title) - mangaTitleScore(a.title, title);
+      });
+      var tried = 0;
+      for (var i = 0; i < results.length && tried < 3; i++) {
+        var id = String(results[i].detailPageUrl || '').replace(/^mangadex:/i, '');
+        if (!id) continue;
+        tried++;
+        var chs = await mangadexChapters(id);
+        if (chs.length) return chs;
+      }
+      return [];
     } catch (e) {
       return [];
     }
@@ -1655,6 +1710,7 @@
     mangadexHome: mangadexHome,
     mangadexSearch: mangadexSearch,
     mangadexChapters: mangadexChapters,
+    mangadexChaptersByTitle: mangadexChaptersByTitle,
     mangadexPages: mangadexPages,
     weebCentralHome: weebCentralHome,
     weebCentralSearch: weebCentralSearch,
