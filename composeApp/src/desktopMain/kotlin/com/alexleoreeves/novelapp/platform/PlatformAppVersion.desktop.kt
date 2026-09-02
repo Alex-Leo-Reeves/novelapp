@@ -6,6 +6,6 @@ package com.alexleoreeves.novelapp.platform
  * in build.gradle.kts.
  */
 actual object PlatformAppVersion {
-    actual val versionCode: Int = 44
-    actual val versionName: String = "1.44"
+    actual val versionCode: Int = 45
+    actual val versionName: String = "1.45"
 }

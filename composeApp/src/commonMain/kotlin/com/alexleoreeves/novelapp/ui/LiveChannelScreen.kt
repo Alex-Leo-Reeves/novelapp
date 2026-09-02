@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -29,10 +30,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.alexleoreeves.novelapp.data.AppTheme
 import com.alexleoreeves.novelapp.data.LiveChannel
 import com.alexleoreeves.novelapp.data.LiveChannelCategory
 import com.alexleoreeves.novelapp.data.LiveChannelSource
-import com.alexleoreeves.novelapp.ui.theme.AppTheme
 import kotlin.math.ceil
 
 private const val CHANNELS_PER_PAGE = 20

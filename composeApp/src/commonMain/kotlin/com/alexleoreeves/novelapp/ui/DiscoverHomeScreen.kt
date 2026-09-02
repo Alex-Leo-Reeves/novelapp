@@ -199,7 +199,7 @@ fun DiscoverHomeScreen(
                     val recs = engine.getRecommendations()
                     recommendedItems = if (recs.isNotEmpty()) recs else {
                         val movies = tmdb.fetchVideo(VideoCategory.MOVIES, 1).take(15)
-                        val anime = aniList.fetchTrending(1).take(15)
+                        val anime = aniList.fetchTrending(1).map { it.toUnifiedSearchResult() }.take(15)
                         (movies + anime).shuffled()
                     }
                 } catch (_: Exception) {
@@ -211,7 +211,7 @@ fun DiscoverHomeScreen(
                         )
                         val aniList = com.alexleoreeves.novelapp.data.AniListSource(io.ktor.client.HttpClient())
                         val movies = tmdb.fetchVideo(VideoCategory.MOVIES, 1).take(15)
-                        val anime = aniList.fetchTrending(1).take(15)
+                        val anime = aniList.fetchTrending(1).map { it.toUnifiedSearchResult() }.take(15)
                         recommendedItems = (movies + anime).shuffled()
                     } catch (_: Exception) {}
                 }

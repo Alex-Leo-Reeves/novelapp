@@ -491,10 +491,9 @@ fun TvPlayerScreen(
         }
 
         // Movie-end recommendations rail — shown when a movie reaches the end
-        // (isMovieEnded + endedFired). Loads similar titles from the backend;
-        // selecting one opens its detail screen (server picker) via
-        // onOpenRecommendations.
-        if (isMovieEnded && endedFired) {
+        // (endedFired + no next episode). Loads similar titles from the backend;
+        // selecting one opens its detail screen via onOpenRecommendations.
+        if (endedFired && (isMovieEnded || bingeSession?.hasNext != true)) {
             Row(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier.weight(1f).fillMaxHeight().background(Color.Black.copy(0.65f)),

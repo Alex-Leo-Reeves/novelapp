@@ -138,8 +138,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 44
-        versionName = "1.44"
+        versionCode = 45
+        versionName = "1.45"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }

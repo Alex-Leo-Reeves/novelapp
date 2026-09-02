@@ -474,7 +474,9 @@ fun MediaDetailScreen(
                                 provider = providerKey,
                                 anilistId = anilistId,
                                 preferredAudio = preferredAudio
-                            )
+                            ).map { ep ->
+                                MediaEpisode(episodeNumber = ep.episodeNumber, title = ep.title, url = ep.url)
+                            }
                         } else {
                             // Fallback to TMDB if no AniList ID
                             if (tmdbId.isNotBlank()) tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
@@ -842,22 +844,24 @@ fun MediaDetailScreen(
                 )
             }
 
-            // ── Server Selector ─────────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isDonghuaItem) {
-                    DonghuaServer.ALL_IN_ORDER.forEach { server ->
-                        val isSelected = selectedDonghuaServer == server
+            // Toggle this to true to restore the manual server selector chips.
+            val showServerSelector = false
+
+            // ── Audio preference selector (anime — always visible) ──────
+            if (isAnimeItem) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("sub" to "SUB", "dub" to "DUB").forEach { (key, label) ->
                         FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedDonghuaServer = server },
+                            selected = preferredAudio == key,
+                            onClick = { preferredAudio = key },
                             label = {
                                 Text(
-                                    server.displayName,
-                                    color = if (isSelected) Color.White else currentTheme.subTextColor(),
+                                    label,
+                                    color = if (preferredAudio == key) Color.White else currentTheme.subTextColor(),
                                     style = MaterialTheme.typography.labelSmall
                                 )
                             },
@@ -867,101 +871,102 @@ fun MediaDetailScreen(
                                 labelColor = currentTheme.subTextColor()
                             ),
                             border = FilterChipDefaults.filterChipBorder(
-                                enabled = true, selected = isSelected,
+                                enabled = true,
+                                selected = preferredAudio == key,
                                 selectedBorderColor = currentTheme.accentColor(),
                                 borderColor = currentTheme.subTextColor().copy(0.3f)
                             ),
                             shape = RoundedCornerShape(20.dp)
                         )
                     }
-                } else if (isAnimeItem) {
-                    // ── Dub/Sub selector — above the server chips, like AniVault ──
-                    if (selectedAnimeServer.isAnivexa) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp, vertical = 4.dp)
-                        ) {
-                            listOf("sub" to "SUB", "dub" to "DUB").forEach { (key, label) ->
-                                FilterChip(
-                                    selected = preferredAudio == key,
-                                    onClick = { preferredAudio = key },
-                                    label = {
-                                        Text(
-                                            label,
-                                            color = if (preferredAudio == key) Color.White else currentTheme.subTextColor(),
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = currentTheme.accentColor(),
-                                        containerColor = currentTheme.cardColor(),
-                                        labelColor = currentTheme.subTextColor()
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = preferredAudio == key,
-                                        selectedBorderColor = currentTheme.accentColor(),
-                                        borderColor = currentTheme.subTextColor().copy(0.3f)
-                                    ),
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                            }
-                        }
-                    }
-                    // Anime-only selector: 13 Anivexa providers + VidLink LAST.
-                    AnimeServer.ALL_IN_ORDER.forEach { server ->
-                        val isSelected = selectedAnimeServer == server
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedAnimeServer = server },
-                            label = {
-                                Text(
-                                    server.displayName,
-                                    color = if (isSelected) Color.White else currentTheme.subTextColor(),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = currentTheme.accentColor(),
-                                containerColor = currentTheme.cardColor(),
-                                labelColor = currentTheme.subTextColor()
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true, selected = isSelected,
-                                selectedBorderColor = currentTheme.accentColor(),
-                                borderColor = currentTheme.subTextColor().copy(0.3f)
-                            ),
-                            shape = RoundedCornerShape(20.dp)
-                        )
-                    }
-                } else {
-                    StreamServer.ALL_IN_ORDER.forEach { server ->
-                        val isSelected = selectedServer == server
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedServer = server },
-                        label = {
-                            Text(
-                                server.displayName,
-                                color = if (isSelected) Color.White else currentTheme.subTextColor(),
-                                style = MaterialTheme.typography.labelSmall
+                }
+            }
+
+            // ── Server Selector (hidden behind showServerSelector flag) ─
+            if (showServerSelector) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isDonghuaItem) {
+                        DonghuaServer.ALL_IN_ORDER.forEach { server ->
+                            val isSelected = selectedDonghuaServer == server
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedDonghuaServer = server },
+                                label = {
+                                    Text(
+                                        server.displayName,
+                                        color = if (isSelected) Color.White else currentTheme.subTextColor(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = currentTheme.accentColor(),
+                                    containerColor = currentTheme.cardColor(),
+                                    labelColor = currentTheme.subTextColor()
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true, selected = isSelected,
+                                    selectedBorderColor = currentTheme.accentColor(),
+                                    borderColor = currentTheme.subTextColor().copy(0.3f)
+                                ),
+                                shape = RoundedCornerShape(20.dp)
                             )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = currentTheme.accentColor(),
-                            containerColor = currentTheme.cardColor(),
-                            labelColor = currentTheme.subTextColor()
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true, selected = isSelected,
-                            selectedBorderColor = currentTheme.accentColor(),
-                            borderColor = currentTheme.subTextColor().copy(0.3f)
-                        ),
-                        shape = RoundedCornerShape(20.dp)
-                    )
+                        }
+                    } else if (isAnimeItem) {
+                        AnimeServer.ALL_IN_ORDER.forEach { server ->
+                            val isSelected = selectedAnimeServer == server
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedAnimeServer = server },
+                                label = {
+                                    Text(
+                                        server.displayName,
+                                        color = if (isSelected) Color.White else currentTheme.subTextColor(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = currentTheme.accentColor(),
+                                    containerColor = currentTheme.cardColor(),
+                                    labelColor = currentTheme.subTextColor()
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true, selected = isSelected,
+                                    selectedBorderColor = currentTheme.accentColor(),
+                                    borderColor = currentTheme.subTextColor().copy(0.3f)
+                                ),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                        }
+                    } else {
+                        StreamServer.ALL_IN_ORDER.forEach { server ->
+                            val isSelected = selectedServer == server
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedServer = server },
+                                label = {
+                                    Text(
+                                        server.displayName,
+                                        color = if (isSelected) Color.White else currentTheme.subTextColor(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = currentTheme.accentColor(),
+                                    containerColor = currentTheme.cardColor(),
+                                    labelColor = currentTheme.subTextColor()
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true, selected = isSelected,
+                                    selectedBorderColor = currentTheme.accentColor(),
+                                    borderColor = currentTheme.subTextColor().copy(0.3f)
+                                ),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                        }
                     }
                 }
             }

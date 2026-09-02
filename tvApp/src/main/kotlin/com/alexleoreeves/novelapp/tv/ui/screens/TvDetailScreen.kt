@@ -36,6 +36,7 @@ import com.alexleoreeves.novelapp.data.mediacache.DownloadPhase
 import com.alexleoreeves.novelapp.data.mediacache.MediaServerCandidate
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.mediacache.UsbVolume
+import com.alexleoreeves.novelapp.tv.ui.components.TvEpisodeDownloadModal
 import androidx.activity.compose.BackHandler
 
 @Composable
@@ -107,6 +108,7 @@ fun TvDetailScreen(
     // server path so live-action shows that got filtered into the anime tab
     // (e.g. Legend of the Seeker) still play on the movie/TV servers.
     var animeFallbackActive by remember { mutableStateOf(false) }
+    var showEpisodeDownloadModal by remember { mutableStateOf(false) }
 
     // Quality selection dialog: shown before storage dialog when user clicks download
     var pendingQualityChapter by remember { mutableStateOf<Chapter?>(null) }
@@ -539,10 +541,16 @@ fun TvDetailScreen(
                             }
                         }
 
-                        if (isSingleDownload && mediaCache != null) {
+                        if (mediaCache != null) {
                             var downloadFocused by remember { mutableStateOf(false) }
                             Surface(
-                                onClick = { enqueueDownload(primaryChapter) },
+                                onClick = {
+                                    if (isSingleDownload) {
+                                        enqueueDownload(primaryChapter)
+                                    } else {
+                                        showEpisodeDownloadModal = true
+                                    }
+                                },
                                 shape = RoundedCornerShape(10.dp),
                                 color = if (downloadFocused) Color(0xFF06D6A0) else Color(0xFF06D6A0).copy(0.12f),
                                 border = if (downloadFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color(0xFF06D6A0).copy(0.4f)),
@@ -632,13 +640,16 @@ fun TvDetailScreen(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
+                // Toggle this to true to restore the manual server selector chips.
+                val showServerSelector = false
+
                 if (isVideoTitle && !item.id.startsWith("youtube_nollywood_")) {
                     // Donghua shows TWO rows: the DonghuaServer row (AnimeXin
                     // device scraper, the original donghua path) AND the anime
                     // 17-server row (13 Anivexa providers + Anivault trio +
                     // VidLink LAST — the Android donghua parity selector).
-                    if (isDonghua) {
-                        // Donghua Server List: 6 dedicated streaming servers
+                    if (isDonghua && showServerSelector) {
+                        // Donghua Server List: dedicated streaming servers
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
@@ -660,58 +671,52 @@ fun TvDetailScreen(
                             }
                         }
                     } else if (item.isAnime && !animeFallbackActive) {
-                        // Anime uses its own 18-server list: 13 Anivexa-API
-                        // providers (keyed by AniList ID) + 3 Anivault +
-                        // VidLink (17) + VidSrc.to LAST (18).
-                        if (selectedAnimeServer.isAnivexa) {
-                            // ── Dub/Sub selector — above the server row, like AniVault ──
+                        // ── Dub/Sub audio preference selector (always visible for anime) ──
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = if (showServerSelector) 8.dp else 12.dp)
+                        ) {
+                            items(listOf("sub" to "SUB", "dub" to "DUB")) { (key, label) ->
+                                val isLangSelected = preferredAudio == key
+                                var langFocused by remember { mutableStateOf(false) }
+                                Surface(
+                                    onClick = { preferredAudio = key },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isLangSelected) Color(0xFF00BFFF) else if (langFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                    border = if (langFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                    modifier = Modifier.height(36.dp).onFocusChanged { langFocused = it.isFocused }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                        Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                        if (showServerSelector) {
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                             ) {
-                                items(listOf("sub" to "SUB", "dub" to "DUB")) { (key, label) ->
-                                    val isLangSelected = preferredAudio == key
-                                    var langFocused by remember { mutableStateOf(false) }
+                                items(AnimeServer.ALL_IN_ORDER) { server ->
+                                    val isSelected = selectedAnimeServer == server
+                                    var sFocused by remember { mutableStateOf(false) }
                                     Surface(
-                                        onClick = { preferredAudio = key },
+                                        onClick = { selectedAnimeServer = server },
                                         shape = RoundedCornerShape(20.dp),
-                                        color = if (isLangSelected) Color(0xFF00BFFF) else if (langFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
-                                        border = if (langFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
-                                        modifier = Modifier.height(36.dp).onFocusChanged { langFocused = it.isFocused }
+                                        color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
+                                        border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
+                                        modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
                                     ) {
                                         Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                                            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                            Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
                                         }
                                     }
                                 }
                             }
                         }
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-                        ) {
-                            items(AnimeServer.ALL_IN_ORDER) { server ->
-                                val isSelected = selectedAnimeServer == server
-                                var sFocused by remember { mutableStateOf(false) }
-                                Surface(
-                                    onClick = { selectedAnimeServer = server },
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if (isSelected) Color(0xFF00BFFF) else if (sFocused) Color(0xFF00BFFF).copy(0.3f) else Color(0xFF14141E),
-                                    border = if (sFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.1f)),
-                                    modifier = Modifier.height(36.dp).onFocusChanged { sFocused = it.isFocused }
-                                ) {
-                                    Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                                        Text(server.displayName, color = Color.White, style = MaterialTheme.typography.labelMedium)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
+                    } else if (showServerSelector) {
                         // Normal TV/movie server row — ALSO shown when an anime
-                        // misroute was detected (animeFallbackActive): the title
-                        // had zero anime episodes and fell back to the generic
-                        // TV/movie list, so these are the servers that can
-                        // actually play it.
+                        // misroute was detected (animeFallbackActive).
                         if (animeFallbackActive) {
                             Text(
                                 "This title may not be anime — the app found no anime episodes. Try a server below.",
@@ -1108,6 +1113,21 @@ fun TvDetailScreen(
                 dismissButton = {
                     TextButton(onClick = { pendingStorageChapter = null }) {
                         Text("Cancel", color = Color(0xFF00BFFF))
+                    }
+                }
+            )
+        }
+
+        if (showEpisodeDownloadModal) {
+            TvEpisodeDownloadModal(
+                item = item,
+                chapters = chapters,
+                cacheTasks = cacheTasks,
+                onDismiss = { showEpisodeDownloadModal = false },
+                onConfirmDownload = { pickedChapters ->
+                    showEpisodeDownloadModal = false
+                    pickedChapters.forEach { ch ->
+                        enqueueDownload(ch)
                     }
                 }
             )

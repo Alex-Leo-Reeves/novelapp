@@ -48,6 +48,17 @@ class TvMediaRepository {
     private val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
     private val anivexaApi = AnivexaApi(httpClient)
     private val youtubeNollywoodScraper = YouTubeNollywoodScraper(httpClient)
+    private val parallelResolver = ParallelStreamResolver(
+        httpClient = httpClient,
+        anivexaApi = anivexaApi,
+        animeXinScraper = animeXinScraper,
+        aninekoScraper = aninekoScraper,
+        animePaheScraper = animePaheScraper,
+        animeHeavenScraper = animeHeavenScraper,
+        aniDaoScraper = aniDaoScraper,
+        donghuaStreamScraper = donghuaStreamScraper,
+        tmdbScraper = tmdbScraper
+    )
 
     /**
      * Resolved AniList IDs memoized by item id (fallback: title) so switching
@@ -428,6 +439,19 @@ class TvMediaRepository {
         donghuaServer: DonghuaServer?,
         animeServer: AnimeServer? = null
     ): String? {
+        // Zero-UI Automated Parallel Sweep mode
+        if (server == null && donghuaServer == null && animeServer == null) {
+            val parallelResult = parallelResolver.resolveBestStream(
+                item = item,
+                chapterUrl = chapter?.url,
+                chapterNumber = chapter?.chapterNumber,
+                seasonNumber = chapter?.seasonNumber
+            )
+            if (!parallelResult?.url.isNullOrBlank()) {
+                return parallelResult!!.url
+            }
+        }
+
         val kind = item.mediaKind.lowercase()
         val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
         val isTmdb = item.detailPageUrl.startsWith("tmdb://")
@@ -500,12 +524,7 @@ class TvMediaRepository {
                     if (AnivexaApi.isAnivexaEpisodeUrl(chapter.url)) {
                         val stream = retryNullable { anivexaApi.resolveStream(chapter.url) }
                         if (stream != null) {
-                            val headersJson = stream.headersJson
-                            if (!headersJson.isNullOrBlank() && stream.url.isNotBlank()) {
-                                buildProxiedStreamUrl(stream.url, headersJson)
-                            } else {
-                                stream.url.takeIf { it.isNotBlank() } ?: chapter.url
-                            }
+                            tvPlayableStreamUrl(stream)
                         } else chapter.url
                     } else {
                         chapter.url
