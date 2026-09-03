@@ -737,27 +737,66 @@
   }
 
   /** Page images for one chapter (reader images endpoint, Android path). */
+  /** Page images for one chapter (reader images endpoint, Android path). */
   async function weebCentralPages(chapterId) {
     var cached = lsGetJson('wc_pages_' + chapterId, 60 * 60 * 1000); // 1 hour
     if (cached && cached.length) return cached;
 
-    var html = await wcFetch(
-      '/chapters/' + encodeURIComponent(chapterId) + '/images?reading_style=long_strip',
-      { directTimeout: 8000, jinaTimeout: 40000 }
-    );
     var pages = [];
-    if (html) {
-      var re = /<img[^>]+src="([^"]+)"|!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi;
-      var m;
-      while ((m = re.exec(html))) {
-        var u = m[1] || m[2];
-        if (!u) continue;
-        if (/broken_image|logo|icon|avatar|badge|brand|\.svg(\?|$)/i.test(u)) continue;
-        if (/\/cover\//i.test(u) && !/\/manga\//i.test(u)) continue;
-        pages.push(u);
+
+    // Method 1: Direct request (works on TV browsers)
+    try {
+      var resp = await fetchWithTimeout(
+        WEEBCENTRAL_BASE + '/chapters/' + encodeURIComponent(chapterId) + '/images?reading_style=long_strip',
+        { headers: WC_HEADERS }, 10000);
+      if (resp.ok) {
+        var html = await resp.text();
+        pages = extractImageUrls(html);
       }
+    } catch (e) {}
+
+    // Method 2: CORS proxy (for desktop browsers)
+    if (!pages.length) {
+      try {
+        var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(
+          WEEBCENTRAL_BASE + '/chapters/' + encodeURIComponent(chapterId) + '/images?reading_style=long_strip');
+        var proxyResp = await fetchWithTimeout(proxyUrl, {}, 15000);
+        if (proxyResp.ok) {
+          var proxyHtml = await proxyResp.text();
+          pages = extractImageUrls(proxyHtml);
+        }
+      } catch (e) {}
     }
+
+    // Method 3: Backend API fallback
+    if (!pages.length) {
+      try {
+        var res = await request('/content/manga-pages', {
+          method: 'POST',
+          body: { chapterUrl: 'weebcentral-chapter:' + chapterId }
+        });
+        if (res.ok && res.data && res.data.data && Array.isArray(res.data.data.pages)) {
+          pages = res.data.data.pages;
+        }
+      } catch (e) {}
+    }
+
     if (pages.length) lsSetJson('wc_pages_' + chapterId, pages);
+    return pages;
+  }
+
+  /** Extract image URLs from HTML */
+  function extractImageUrls(html) {
+    var pages = [];
+    if (!html) return pages;
+    var re = /<img[^>]+src="([^"]+)"/gi;
+    var m;
+    while ((m = re.exec(html))) {
+      var u = m[1];
+      if (/broken_image|logo|icon|avatar|badge|brand|\.svg(\?|$)/i.test(u)) continue;
+      if (/\/cover\//i.test(u) && !/\/manga\//i.test(u)) continue;
+      pages.push(u);
+    }
     return pages;
   }
 
@@ -1009,15 +1048,12 @@
     if (kind === 'manga' && /^mangadex:/i.test(detailUrl)) {
       return mangadexChapters(detailUrl.replace(/^mangadex:/i, ''));
     }
-    // WeebCentral items → direct (TV) → same title on MangaDex (desktop
-    // CORS-safe) → reader proxy last resort.
+    // WeebCentral items → direct (TV) → reader proxy last resort.
+    // Do NOT fall back to MangaDex by title — wrong manga.
     if (kind === 'manga' && /^weebcentral:/i.test(detailUrl)) {
       var wcId = detailUrl.replace(/^weebcentral:/i, '');
       var wcChapters = await weebCentralChapters(wcId);
       if (wcChapters.length) return wcChapters;
-
-      var mdChapters = await mangadexChaptersByTitle(titleStr);
-      if (mdChapters.length) return mdChapters;
 
       var jinaHtml = await jinaFetch(
         WEEBCENTRAL_BASE + '/series/' + encodeURIComponent(wcId) + '/full-chapter-list',

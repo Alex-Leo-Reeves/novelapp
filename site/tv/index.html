@@ -169,8 +169,9 @@
       <div class="tv-detail-actions">
         <button class="tv-btn tv-btn-primary" tabindex="0" data-nav="true" id="tv-detail-btn-play">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Play
+          <span id="tv-detail-btn-play-text">Play</span>
         </button>
+        <button class="tv-btn" tabindex="0" data-nav="true" id="tv-detail-btn-continue" style="display:none;">▶ Continue</button>
         <button class="tv-btn" tabindex="0" data-nav="true" id="tv-detail-btn-episodes" style="display:none;">☰ Browse All Episodes</button>
         <button class="tv-btn" tabindex="0" data-nav="true" id="tv-detail-btn-watchlist">+ Add to Watchlist</button>
       </div>
@@ -244,7 +245,7 @@
      FULLSCREEN VIDEO PLAYER
      ═══════════════════════════════════════════════════════════════════ -->
 <div id="tv-player-view">
-  <video id="tv-video-element" class="video-js vjs-big-play-centered" playsinline controls preload="auto" data-setup='{"fluid": false}'></video>
+  <video id="tv-video-element" playsinline preload="auto" tabindex="-1"></video>
   <iframe id="tv-embed-iframe" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
   <!-- hidden host for the parallel-server probe iframes -->
   <div id="tv-probe-host" style="position:absolute; width:0; height:0; overflow:hidden;"></div>
@@ -308,9 +309,15 @@
     </div>
   </div>
 
-  <!-- Unmute Prompt (when TV browser blocks unmuted autostart) -->
+  <!-- Unmute Prompt (when TV browser blocks muted autostart too) -->
   <div id="tv-player-unmute-prompt" style="display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 105; background: rgba(13, 16, 27, 0.9); border: 2px solid var(--tv-cyan); border-radius: 30px; padding: 12px 28px; color: #fff; font-size: 18px; font-weight: 700; box-shadow: 0 8px 32px rgba(0,0,0,0.6); cursor: pointer; align-items: center; gap: 12px;">
     <span style="font-size: 24px;">▶</span> Click or Press <span style="background: var(--tv-cyan); color: #05060b; padding: 2px 10px; border-radius: 6px;">OK</span> to Unmute &amp; Play (Max Volume)
+  </div>
+
+  <!-- Muted-preview pill: streams auto-start; embeds & rejected native
+       autoplay begin muted. One OK press restores sound. -->
+  <div id="tv-player-muted-pill" class="tv-muted-pill" style="display:none;">
+    <span style="font-size:24px;">🔇</span> Muted preview — press <span class="tv-muted-pill-key">OK</span> for sound
   </div>
 
   <!-- Episodes Drawer (slide-up from bottom) -->
