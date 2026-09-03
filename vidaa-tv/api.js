@@ -610,25 +610,45 @@
     var chapters = [];
     if (!html) return chapters;
     var seen = {};
-    // Match the chapter href, then find "Chapter N" in the anchor content
-    // that follows (badge imgs/spans can push </a> past any fixed window,
-    // so we scan forward from each match instead of pairing with </a>).
-    var re = /href="(?:https:\/\/weebcentral\.com)?\/chapters\/([A-Za-z0-9]+)"/gi;
+    // jina.ai returns markdown format: [text](url) — match both that and raw hrefs
+    var re = /\]\((?:https:\/\/weebcentral\.com)?\/chapters\/([A-Za-z0-9]+)\)/gi;
     var m;
     while ((m = re.exec(html))) {
       if (seen[m[1]]) continue;
       seen[m[1]] = 1;
-      var windowText = html.substr(m.index, 1600).replace(/<[^>]*>/g, ' ');
-      var numM = /chapter\s*([0-9]+(?:\.[0-9]+)?)/i.exec(windowText);
-      var num = numM ? parseFloat(numM[1]) : 0;
+      // Look backward from the match for "Chapter N" or "Episode N" in the link text
+      var before = html.substr(Math.max(0, m.index - 200), 200);
+      var numM = /(chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i.exec(before);
+      var num = numM ? parseFloat(numM[2]) : 0;
+      var label = numM ? numM[1] : 'Chapter';
       chapters.push({
         id: m[1],
-        title: 'Chapter ' + (num || (chapters.length + 1)),
+        title: label.charAt(0).toUpperCase() + label.slice(1) + ' ' + (num || (chapters.length + 1)),
         url: 'weebcentral-chapter:' + m[1],
         chapterNumber: num,
         seasonNumber: 0,
         sortKey: num || 0
       });
+    }
+    // Fallback: also try raw href format (direct HTML)
+    if (!chapters.length) {
+      var re2 = /href="(?:https:\/\/weebcentral\.com)?\/chapters\/([A-Za-z0-9]+)"/gi;
+      while ((m = re2.exec(html))) {
+        if (seen[m[1]]) continue;
+        seen[m[1]] = 1;
+        var windowText = html.substr(m.index, 1600).replace(/<[^>]*>/g, ' ');
+        var numM = /(chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i.exec(windowText);
+        var num = numM ? parseFloat(numM[2]) : 0;
+        var label = numM ? numM[1] : 'Chapter';
+        chapters.push({
+          id: m[1],
+          title: label.charAt(0).toUpperCase() + label.slice(1) + ' ' + (num || (chapters.length + 1)),
+          url: 'weebcentral-chapter:' + m[1],
+          chapterNumber: num,
+          seasonNumber: 0,
+          sortKey: num || 0
+        });
+      }
     }
     // WeebCentral lists newest-first; specials (e.g. "Chapter 10.5" extras)
     // may have no number in the markup. Infer from parsed neighbours:
@@ -727,10 +747,11 @@
     );
     var pages = [];
     if (html) {
-      var re = /<img[^>]+src="(https?:\/\/[^"]+)"/gi;
+      var re = /<img[^>]+src="([^"]+)"|!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi;
       var m;
       while ((m = re.exec(html))) {
-        var u = m[1];
+        var u = m[1] || m[2];
+        if (!u) continue;
         if (/broken_image|logo|icon|avatar|badge|brand|\.svg(\?|$)/i.test(u)) continue;
         if (/\/cover\//i.test(u) && !/\/manga\//i.test(u)) continue;
         pages.push(u);
