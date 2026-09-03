@@ -22,7 +22,6 @@
   'use strict';
 
   var hlsInstance = null;
-  var vjsPlayer = null;             // Video.js player instance
   var currentMedia = null;
   var currentEpisodeIndex = 0;
   var episodeList = [];
@@ -119,10 +118,13 @@
     elements.watchNowTitle = document.getElementById('tv-watch-now-title');
     elements.watchNowServer = document.getElementById('tv-watch-now-server');
 
-    // Initialize Video.js player (lazy — only when first direct stream loads)
-    initVideoJs();
-
-    setupVideoListeners();
+    // Native video event listeners
+    if (elements.video) {
+      elements.video.addEventListener('playing', onVideoPlaying);
+      elements.video.addEventListener('error', onVideoError);
+      elements.video.addEventListener('ended', onVideoEnded);
+      elements.video.addEventListener('timeupdate', onTimeUpdate);
+    }
 
     var retryBtn = document.getElementById('tv-player-btn-retry');
     if (retryBtn) {
@@ -153,53 +155,7 @@
     }
   }
 
-  function initVideoJs() {
-    if (!elements.video || typeof videojs === 'undefined') return;
-    try {
-      // Dispose existing player if any
-      if (vjsPlayer) {
-        vjsPlayer.dispose();
-        vjsPlayer = null;
-      }
-      vjsPlayer = videojs(elements.video, {
-        controls: true,
-        autoplay: false,
-        preload: 'auto',
-        html5: {
-          vhs: {
-            overrideNative: true,
-            limitBitrateByPortal: false
-          },
-          nativeAudioTracks: false,
-          nativeVideoTracks: false
-        }
-      }, function () {
-        // Player is ready
-        this.volume(1.0);
-        this.muted(false);
-      });
-      // Bind Video.js events
-      vjsPlayer.on('playing', onVideoPlaying);
-      vjsPlayer.on('error', onVideoError);
-      vjsPlayer.on('ended', onVideoEnded);
-      vjsPlayer.on('timeupdate', onTimeUpdate);
-      vjsPlayer.on('volumechange', function () {
-        // Keep max volume if not muted by user
-        if (vjsPlayer && !vjsPlayer.muted() && vjsPlayer.volume() < 0.5) {
-          vjsPlayer.volume(1.0);
-        }
-      });
-    } catch (e) {
-      console.error('[Video.js] init failed:', e);
-    }
-  }
 
-  function ensureVideoJs() {
-    if (!vjsPlayer && elements.video) {
-      initVideoJs();
-    }
-    return vjsPlayer;
-  }
 
   function onVideoPlaying() {
     clearFailoverTimer();
@@ -211,15 +167,8 @@
     if (raceState.candidates.length > 0 && !raceState.verified) {
       confirmCandidate();
     }
-    // Max volume — restore unmuted playback via Video.js
-    if (vjsPlayer) {
-      vjsPlayer.volume(1.0);
-      vjsPlayer.muted(false);
-      if (resumePosition > 0 && Math.abs(vjsPlayer.currentTime() - resumePosition) > 2) {
-        vjsPlayer.currentTime(resumePosition);
-        resumePosition = 0;
-      }
-    } else if (elements.video) {
+    // Max volume — restore unmuted playback
+    if (elements.video) {
       try {
         elements.video.volume = 1.0;
         elements.video.muted = false;
@@ -232,17 +181,6 @@
   }
 
   function onTimeUpdate() {
-    var player = vjsPlayer;
-    if (player) {
-      var cur = player.currentTime();
-      var dur = player.duration();
-      if (dur > 0 && Math.floor(cur) % 5 === 0 && currentMedia && !isLiveStream) {
-        saveProgress(cur, dur);
-      }
-      checkPreviewGate(cur, dur);
-      return;
-    }
-    // Fallback: native video
     if (!elements.video) return;
     var cur = elements.video.currentTime;
     var dur = elements.video.duration;
@@ -751,7 +689,7 @@
     showLoading(false);
     hideServerStatus();
     if (elements.watchNowTitle) {
-      elements.watchNowTitle.textContent = currentMediaTitle || 'Ready to Watch';
+      elements.watchNowTitle.textContent = (currentMedia && currentMedia.title) || 'Ready to Watch';
     }
     if (elements.watchNowServer) {
       elements.watchNowServer.textContent = 'Server ' + (index + 1) + ' of ' + routeCandidates.length + ' • ' + (candidate.provider || 'Unknown');
@@ -781,48 +719,62 @@
     hideWatchNowOverlay();
     hideServerStatus();
     showLoading(true);
-    // Enter fullscreen from this user gesture
-    enterFullscreen();
+
+    // Enter fullscreen from this user gesture (don't let failure block playback)
+    try {
+      enterFullscreen();
+    } catch (e) {}
+
     // Load the actual stream now (after the user gesture)
     if (activeCandidate) {
       if (isDirectUrl(activeCandidate.url)) {
         loadNative(activeCandidate.url);
       } else {
         loadEmbed(activeCandidate.url);
+        // For embeds: click into the iframe AFTER it loads to start playback
+        scheduleEmbedAutoplay();
       }
     }
-    // Video.js handles autoplay after user gesture
-    var player = ensureVideoJs();
-    if (player) {
-      player.volume(1.0);
-      player.muted(false);
-      player.play().catch(function () {
-        // If unmuted fails, start muted then unmute
-        player.muted(true);
-        player.play().then(function () {
-          setTimeout(function () {
-            player.muted(false);
-            player.volume(1.0);
-          }, 500);
-        }).catch(function () {});
-      });
+
+    // Native autoplay after user gesture (for direct URLs)
+    if (elements.video) {
+      elements.video.volume = 1.0;
+      elements.video.muted = false;
+      var p = elements.video.play();
+      if (p && p.catch) {
+        p.catch(function () {
+          elements.video.muted = true;
+          elements.video.play().then(function () {
+            setTimeout(function () {
+              elements.video.muted = false;
+              elements.video.volume = 1.0;
+            }, 500);
+          }).catch(function () {});
+        });
+      }
     }
-    // For embeds, click into the iframe to start playback
-    if (elements.embedIframe && (!elements.video || !elements.video.src)) {
-      clickEmbedToPlay();
+  }
+
+  /**
+   * Schedule clicks into the embed iframe to trigger autoplay.
+   * The iframe needs time to load its player, so we click multiple times
+   * with delays to catch when it's ready.
+   */
+  function scheduleEmbedAutoplay() {
+    var delays = [1500, 3000, 5000, 7000];
+    for (var i = 0; i < delays.length; i++) {
+      (function (delay) {
+        setTimeout(function () {
+          if (elements.embedIframe && elements.embedIframe.style.display !== 'none') {
+            clickEmbedToPlay();
+          }
+        }, delay);
+      })(delays[i]);
     }
   }
 
   function enterFullscreen() {
-    // Use Video.js fullscreen API if available
-    var player = ensureVideoJs();
-    if (player && player.requestFullscreen) {
-      try {
-        player.requestFullscreen();
-        return;
-      } catch (e) {}
-    }
-    // Fallback: native fullscreen
+    // Native fullscreen
     var container = elements.container;
     if (!container) return;
     try {
@@ -912,31 +864,16 @@
     var guard = document.getElementById('tv-embed-guard');
     if (guard) guard.style.display = 'none';
 
-    // Ensure Video.js is initialized
-    var player = ensureVideoJs();
-    if (!player) {
-      // Fallback: Video.js failed to init, use native element
-      if (!elements.video) return;
-      elements.video.style.display = 'block';
-      elements.video.volume = 1.0;
-      elements.video.muted = false;
-      elements.video.src = url;
-      elements.video.load();
-      startNativePlayback();
-      return;
-    }
+    // Use native video element
+    if (!elements.video) return;
+    elements.video.style.display = 'block';
+    elements.video.volume = 1.0;
+    elements.video.muted = false;
 
-    // Use Video.js to load and play the stream
     var isHls = /\.m3u8(\?|$)/i.test(String(url));
-    player.volume(1.0);
-    player.muted(false);
 
     if (isHls && window.Hls && Hls.isSupported()) {
-      // HLS via Video.js native VHS (built into Video.js 8)
-      player.src({ src: url, type: 'application/x-mpegURL' });
-      player.play();
-    } else if (isHls && window.Hls) {
-      // Fallback: HLS.js for older browsers
+      // HLS via HLS.js
       if (hlsInstance) {
         try { hlsInstance.destroy(); } catch (e) {}
         hlsInstance = null;
@@ -953,7 +890,10 @@
       hlsInstance.loadSource(url);
       hlsInstance.attachMedia(elements.video);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
-        player.play();
+        elements.video.play().catch(function () {
+          elements.video.muted = true;
+          elements.video.play().catch(function () {});
+        });
       });
       hlsInstance.on(Hls.Events.ERROR, function (evt, data) {
         if (data && data.fatal) {
@@ -966,15 +906,13 @@
       });
     } else {
       // Direct MP4/stream
-      player.src({ src: url, type: 'video/mp4' });
-      player.play();
+      elements.video.src = url;
+      elements.video.load();
+      startNativePlayback();
     }
   }
 
   function startNativePlayback() {
-    // Legacy fallback — now handled by Video.js in loadNative
-    var player = ensureVideoJs();
-    if (player) return; // Video.js handles playback
     if (!elements.video) return;
     var video = elements.video;
     video.volume = 1.0;
@@ -1239,20 +1177,6 @@
 
   // ── Playback controls & HUD ────────────────────────────────────────────
   function togglePlayPause() {
-    var player = ensureVideoJs();
-    if (player) {
-      if (player.paused()) {
-        player.volume(1.0);
-        player.muted(false);
-        player.play();
-        showToast('▶ Play');
-      } else {
-        player.pause();
-        showToast('⏸ Paused');
-      }
-      return;
-    }
-    // Fallback: native video
     if (!elements.video) return;
     if (elements.video.paused) {
       elements.video.muted = false;
@@ -1269,15 +1193,6 @@
   }
 
   function seekRelative(deltaSeconds) {
-    var player = ensureVideoJs();
-    if (player) {
-      var dur = player.duration() || 0;
-      var newTime = Math.max(0, Math.min(dur, player.currentTime() + deltaSeconds));
-      player.currentTime(newTime);
-      showToast((deltaSeconds > 0 ? '⏩ +' : '⏪ ') + deltaSeconds + 's');
-      return;
-    }
-    // Fallback: native video
     if (!elements.video || elements.video.style.display === 'none') return;
     var dur = elements.video.duration || 0;
     var newTime = Math.max(0, Math.min(dur, elements.video.currentTime + deltaSeconds));
@@ -1286,15 +1201,6 @@
   }
 
   function bumpVolume(delta) {
-    var player = ensureVideoJs();
-    if (player) {
-      player.muted(false);
-      var vol = Math.max(0, Math.min(1, player.volume() + delta));
-      player.volume(vol);
-      showToast('🔊 ' + Math.round(vol * 100) + '%');
-      return;
-    }
-    // Fallback: native video
     if (!elements.video || elements.video.style.display === 'none') return;
     try {
       elements.video.muted = false;
@@ -1414,11 +1320,6 @@
     }
 
     // Save progress before teardown
-    if (vjsPlayer && !isLiveStream) {
-      var cur = vjsPlayer.currentTime();
-      var dur = vjsPlayer.duration();
-      if (cur > 5 && dur > 0) saveProgress(cur, dur);
-    }
     if (elements.video && !isLiveStream) {
       var cur = elements.video.currentTime;
       var dur = elements.video.duration;
@@ -1432,12 +1333,6 @@
     raceState.verified = false;
     raceState.candidates = [];
     if (window.TvAutoplay) window.TvAutoplay.cancel();
-
-    // Destroy Video.js player
-    if (vjsPlayer) {
-      try { vjsPlayer.dispose(); } catch (e) {}
-      vjsPlayer = null;
-    }
 
     if (elements.video) {
       try { elements.video.pause(); } catch (e) {}

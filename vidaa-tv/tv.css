@@ -779,6 +779,12 @@ body {
   background: #000;
   z-index: 100;
   display: none;
+  box-sizing: border-box;
+}
+
+/* Remove padding in fullscreen so video fills the entire screen */
+#tv-player-view:fullscreen {
+  padding: 0;
 }
 
 #tv-player-view.active {
@@ -790,6 +796,13 @@ body {
   height: 100%;
   object-fit: contain;
   cursor: pointer;
+  display: block;
+  margin: 0 auto;
+}
+
+/* In fullscreen, make video fill entire screen */
+#tv-player-view:fullscreen #tv-video-element {
+  object-fit: fill;
 }
 
 #tv-embed-iframe {
