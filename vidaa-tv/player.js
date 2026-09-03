@@ -22,6 +22,7 @@
   'use strict';
 
   var hlsInstance = null;
+  var vjsPlayer = null;             // Video.js player instance
   var currentMedia = null;
   var currentEpisodeIndex = 0;
   var episodeList = [];
@@ -36,11 +37,22 @@
   var probeIframes = [];
   var failoverTimer = null;
   var embedWatchdog = null;
+  var embedPlayWatchdog = null;
   var resumePosition = 0;
   var pendingEmbedResumeT = 0;
   var pendingOverrideCandidates = null;
   var previewLimits = null;
   var isLiveStream = false;
+
+  // Sequential priority walk state
+  var raceState = {
+    candidates: [],
+    currentIdx: 0,
+    token: 0,
+    verified: false,
+    verifierTimer: null,
+    epoch: 0  // increments each tryCandidate to invalidate stale iframe onloads
+  };
 
   var elements = {
     container: null,
@@ -58,7 +70,11 @@
     resumeModal: null,
     resumeCopy: null,
     continueButton: null,
-    startOverButton: null
+    startOverButton: null,
+    watchNowOverlay: null,
+    watchNowBtn: null,
+    watchNowTitle: null,
+    watchNowServer: null
   };
 
   // ── Global AdShield for TV Media Playback ──────────────────────────────
@@ -98,6 +114,13 @@
     elements.resumeCopy = document.getElementById('tv-player-resume-copy');
     elements.continueButton = document.getElementById('tv-player-btn-continue');
     elements.startOverButton = document.getElementById('tv-player-btn-start-over');
+    elements.watchNowOverlay = document.getElementById('tv-player-watch-now');
+    elements.watchNowBtn = document.getElementById('tv-watch-now-btn');
+    elements.watchNowTitle = document.getElementById('tv-watch-now-title');
+    elements.watchNowServer = document.getElementById('tv-watch-now-server');
+
+    // Initialize Video.js player (lazy — only when first direct stream loads)
+    initVideoJs();
 
     setupVideoListeners();
 
@@ -119,14 +142,63 @@
     if (exitBtn) {
       exitBtn.addEventListener('click', function () { close(); });
     }
+
+    // Watch Now button: user gesture unlocks fullscreen + autoplay
+    if (elements.watchNowBtn) {
+      elements.watchNowBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        onWatchNowClick();
+      });
+    }
   }
 
-  function setupVideoListeners() {
-    if (!elements.video) return;
-    elements.video.addEventListener('timeupdate', onTimeUpdate);
-    elements.video.addEventListener('ended', onVideoEnded);
-    elements.video.addEventListener('error', onVideoError);
-    elements.video.addEventListener('playing', onVideoPlaying);
+  function initVideoJs() {
+    if (!elements.video || typeof videojs === 'undefined') return;
+    try {
+      // Dispose existing player if any
+      if (vjsPlayer) {
+        vjsPlayer.dispose();
+        vjsPlayer = null;
+      }
+      vjsPlayer = videojs(elements.video, {
+        controls: true,
+        autoplay: false,
+        preload: 'auto',
+        html5: {
+          vhs: {
+            overrideNative: true,
+            limitBitrateByPortal: false
+          },
+          nativeAudioTracks: false,
+          nativeVideoTracks: false
+        }
+      }, function () {
+        // Player is ready
+        this.volume(1.0);
+        this.muted(false);
+      });
+      // Bind Video.js events
+      vjsPlayer.on('playing', onVideoPlaying);
+      vjsPlayer.on('error', onVideoError);
+      vjsPlayer.on('ended', onVideoEnded);
+      vjsPlayer.on('timeupdate', onTimeUpdate);
+      vjsPlayer.on('volumechange', function () {
+        // Keep max volume if not muted by user
+        if (vjsPlayer && !vjsPlayer.muted() && vjsPlayer.volume() < 0.5) {
+          vjsPlayer.volume(1.0);
+        }
+      });
+    } catch (e) {
+      console.error('[Video.js] init failed:', e);
+    }
+  }
+
+  function ensureVideoJs() {
+    if (!vjsPlayer && elements.video) {
+      initVideoJs();
+    }
+    return vjsPlayer;
   }
 
   function onVideoPlaying() {
@@ -134,18 +206,43 @@
     clearEmbedWatchdog();
     hideServerStatus();
     showLoading(false);
-    // Max volume — restore unmuted playback as soon as the TV allows it
-    try {
-      elements.video.volume = 1.0;
-      elements.video.muted = false;
-    } catch (e) {}
-    if (resumePosition > 0 && Math.abs(elements.video.currentTime - resumePosition) > 2) {
-      try { elements.video.currentTime = resumePosition; } catch (e) {}
-      resumePosition = 0;
+    embedActuallyPlaying = true;
+    // Confirm the current candidate as working (sequential walk)
+    if (raceState.candidates.length > 0 && !raceState.verified) {
+      confirmCandidate();
+    }
+    // Max volume — restore unmuted playback via Video.js
+    if (vjsPlayer) {
+      vjsPlayer.volume(1.0);
+      vjsPlayer.muted(false);
+      if (resumePosition > 0 && Math.abs(vjsPlayer.currentTime() - resumePosition) > 2) {
+        vjsPlayer.currentTime(resumePosition);
+        resumePosition = 0;
+      }
+    } else if (elements.video) {
+      try {
+        elements.video.volume = 1.0;
+        elements.video.muted = false;
+      } catch (e) {}
+      if (resumePosition > 0 && Math.abs(elements.video.currentTime - resumePosition) > 2) {
+        try { elements.video.currentTime = resumePosition; } catch (e) {}
+        resumePosition = 0;
+      }
     }
   }
 
   function onTimeUpdate() {
+    var player = vjsPlayer;
+    if (player) {
+      var cur = player.currentTime();
+      var dur = player.duration();
+      if (dur > 0 && Math.floor(cur) % 5 === 0 && currentMedia && !isLiveStream) {
+        saveProgress(cur, dur);
+      }
+      checkPreviewGate(cur, dur);
+      return;
+    }
+    // Fallback: native video
     if (!elements.video) return;
     var cur = elements.video.currentTime;
     var dur = elements.video.duration;
@@ -257,14 +354,20 @@
     }
     if (STOP.indexOf(code) !== -1) { close(); return true; }
     if (ENTER.indexOf(code) !== -1) {
+      // Watch Now overlay: OK starts playback (user gesture unlocks fullscreen + autoplay)
+      if (elements.watchNowOverlay && elements.watchNowOverlay.style.display === 'flex') {
+        onWatchNowClick();
+        return true;
+      }
       var anyModal = document.querySelector('#tv-player-view .tv-modal.active');
       if (anyModal) return false; // modal scope handles it
       if (elements.video && elements.video.style.display !== 'none') {
         togglePlayPause();
-      } else {
-        // Embed playing: OK must NEVER re-trigger stale buttons / restart
-        // the server walk — just acknowledge.
-        showToast('Playing via ' + (activeCandidate ? activeCandidate.provider : 'embed'));
+      } else if (elements.embedIframe && elements.embedIframe.style.display !== 'none') {
+        // Embed playing: OK clicks into the iframe to toggle playback
+        if (window.TvAutoplay && window.TvAutoplay.simulateCenterClick) {
+          window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+        }
       }
       return true; // always consumed while the player is open
     }
@@ -416,12 +519,19 @@
   }
 
   // ── Parallel Server Search & Race ───────────────────────────────────────
+  // Priority-aware sequential walk: tries Server 1 first, verifies it actually
+  // plays, only advances to Server 2 if Server 1 demonstrably fails. This
+  // prevents fast-loading but broken servers from winning the race.
   var walkIndex = 0;
   var embedLoaded = false;
+  var embedActuallyPlaying = false;
+  var currentEpoch = 0;  // set before loadEmbed so onload can verify it's not stale
 
   function clearWalkWatchdog() {
     clearTimeout(embedWatchdog);
     embedWatchdog = null;
+    clearTimeout(embedPlayWatchdog);
+    embedPlayWatchdog = null;
   }
 
   function clearProbeIframes() {
@@ -445,6 +555,13 @@
     return u;
   }
 
+  function clearRaceVerifier() {
+    if (raceState.verifierTimer) {
+      clearTimeout(raceState.verifierTimer);
+      raceState.verifierTimer = null;
+    }
+  }
+
   function startServerRace(candidates) {
     if (!candidates || candidates.length === 0) {
       showLoading(false);
@@ -454,8 +571,12 @@
     routeCandidates = candidates;
     clearWalkWatchdog();
     clearProbeIframes();
+    clearRaceVerifier();
     raceToken++;
-    var currentToken = raceToken;
+    raceState.candidates = candidates;
+    raceState.currentIdx = 0;
+    raceState.token = raceToken;
+    raceState.verified = false;
 
     if (candidates.length === 1) {
       playWinningServer(candidates[0], 0);
@@ -463,76 +584,144 @@
     }
 
     showLoading(true);
-    showServerStatus('Searching ' + candidates.length + ' servers in parallel…');
+    showServerStatus('Trying Server 1 of ' + candidates.length + '…');
 
-    var hasWinner = false;
-    var completedCount = 0;
-    var totalCandidates = Math.min(candidates.length, 6);
+    // Start with the highest-priority candidate
+    tryCandidate(0);
+  }
 
-    function declareWinner(candidate, index, reason) {
-      if (hasWinner || currentToken !== raceToken) return;
-      hasWinner = true;
-      clearTimeout(raceTimeout);
+  /**
+   * Try a candidate by index. Verifies playback before declaring success.
+   * If the candidate fails verification, advances to the next one.
+   */
+  function tryCandidate(idx) {
+    if (raceState.token !== raceToken) return; // stale
+    if (idx >= raceState.candidates.length) {
+      // All candidates exhausted
+      clearRaceVerifier();
       clearProbeIframes();
-      console.log('[ParallelRace] Winner selected:', candidate.provider, reason);
-      playWinningServer(candidate, index);
+      showLoading(false);
+      showFatalOverlay('Tried all ' + raceState.candidates.length + ' servers with no luck.');
+      return;
     }
 
-    // Probe up to 6 candidate servers in parallel
-    for (var i = 0; i < totalCandidates; i++) {
-      (function (cand, idx) {
-        if (isDirectUrl(cand.url)) {
-          fetch(cand.url, { method: 'HEAD', mode: 'no-cors' })
-            .then(function () {
-              declareWinner(cand, idx, 'direct stream ready');
-            })
-            .catch(function () {
-              declareWinner(cand, idx, 'direct stream priority');
-            });
+    raceState.currentIdx = idx;
+    walkIndex = idx;
+    var cand = raceState.candidates[idx];
+    activeCandidate = cand;
+    embedLoaded = false;
+    embedActuallyPlaying = false;
+    raceState.epoch++;
+    currentEpoch = raceState.epoch;
+
+    showServerStatus('Trying Server ' + (idx + 1) + ' of ' + raceState.candidates.length + '…');
+
+    if (isDirectUrl(cand.url)) {
+      // Direct stream: probe the URL first (don't load yet)
+      probeUrl(cand.url, function (ok) {
+        if (raceState.token !== raceToken || raceState.verified) return;
+        if (ok) {
+          confirmCandidate();
         } else {
-          try {
-            var ifr = document.createElement('iframe');
-            ifr.style.width = '1px';
-            ifr.style.height = '1px';
-            ifr.style.opacity = '0.01';
-            ifr.setAttribute('referrerpolicy', 'origin');
-
-            var probeTimer = setTimeout(function () {
-              checkAllProbes();
-            }, 8000);
-
-            ifr.onload = function () {
-              clearTimeout(probeTimer);
-              declareWinner(cand, idx, 'iframe loaded');
-            };
-            ifr.onerror = function () {
-              clearTimeout(probeTimer);
-              checkAllProbes();
-            };
-
-            ifr.src = decorateEmbedUrl(cand.url);
-            if (elements.probeHost) elements.probeHost.appendChild(ifr);
-            probeIframes.push(ifr);
-          } catch (e) {
-            checkAllProbes();
-          }
+          tryCandidate(idx + 1);
         }
-      })(candidates[i], i);
+      });
+    } else {
+      // Embed: probe by loading iframe headlessly
+      probeEmbed(cand.url, function (ok) {
+        if (raceState.token !== raceToken || raceState.verified) return;
+        if (ok) {
+          confirmCandidate();
+        } else {
+          tryCandidate(idx + 1);
+        }
+      });
     }
+  }
 
-    function checkAllProbes() {
-      completedCount++;
-      if (!hasWinner && completedCount >= totalCandidates) {
-        declareWinner(candidates[0], 0, 'fallback to first priority');
-      }
+  /**
+   * Probe a direct URL with a HEAD request to check if it's reachable.
+   * Callback receives true if the URL is reachable, false otherwise.
+   */
+  function probeUrl(url, callback) {
+    try {
+      // Use fetch with HEAD method to check if URL is reachable
+      fetch(url, { method: 'HEAD', mode: 'no-cors' })
+        .then(function () { callback(true); })
+        .catch(function () { callback(false); });
+      // Timeout after 8 seconds
+      setTimeout(function () { callback(false); }, 8000);
+    } catch (e) {
+      callback(false);
     }
+  }
 
-    // Safety timeout: after 6 seconds, if no candidate has loaded first, pick priority server
-    var raceTimeout = setTimeout(function () {
-      if (!hasWinner && currentToken === raceToken) {
-        declareWinner(candidates[0], 0, 'priority timeout');
-      }
-    }, 6000);
+  /**
+   * Probe an embed URL by loading it in a hidden iframe.
+   * Callback receives true if the iframe loads, false otherwise.
+   */
+  function probeEmbed(url, callback) {
+    var probed = false;
+    var iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;';
+    iframe.src = url;
+    iframe.onload = function () {
+      if (probed) return;
+      probed = true;
+      callback(true);
+    };
+    iframe.onerror = function () {
+      if (probed) return;
+      probed = true;
+      callback(false);
+    };
+    document.body.appendChild(iframe);
+    // Timeout after 10 seconds
+    setTimeout(function () {
+      if (probed) return;
+      probed = true;
+      callback(false);
+    }, 10000);
+    // Cleanup
+    setTimeout(function () {
+      try { iframe.remove(); } catch (e) {}
+    }, 12000);
+  }
+
+  /**
+   * Confirm the current candidate as working. Clears all pending verifications.
+   */
+  function confirmCandidate() {
+    if (raceState.token !== raceToken || raceState.verified) return;
+    raceState.verified = true;
+    clearRaceVerifier();
+    clearWalkWatchdog();
+    clearProbeIframes();
+    var cand = raceState.candidates[raceState.currentIdx];
+    showServerStatus('Playing via ' + cand.provider);
+    setTimeout(function () { hideServerStatus(); }, 3000);
+    
+    // Show "Watch Now" overlay — user gesture unlocks fullscreen + autoplay
+    // Don't load the actual stream yet — wait for the user to click Watch Now
+    showWatchNowOverlay(cand, raceState.currentIdx);
+  }
+
+  /**
+   * Advance to the next candidate in priority order.
+   * Called by loadEmbed's watchdog when current server fails.
+   */
+  function advanceToNextCandidate(reason) {
+    if (raceState.token !== raceToken || raceState.verified) return;
+    var nextIdx = raceState.currentIdx + 1;
+    if (nextIdx >= raceState.candidates.length) {
+      clearRaceVerifier();
+      clearProbeIframes();
+      showLoading(false);
+      showFatalOverlay('Tried all ' + raceState.candidates.length + ' servers with no luck.');
+      return;
+    }
+    showToast(reason || 'Switching server…');
+    tryCandidate(nextIdx);
   }
 
   function playWinningServer(candidate, index) {
@@ -541,21 +730,156 @@
     walkIndex = index;
     activeCandidate = candidate;
     embedLoaded = false;
-    showLoading(true);
     showServerStatus('Playing via ' + candidate.provider + ' (' + (index + 1) + ' of ' + routeCandidates.length + ')');
 
-    if (isDirectUrl(candidate.url)) {
-      loadNative(candidate.url);
-    } else {
-      loadEmbed(candidate.url);
-    }
+    // Show "Watch Now" overlay — user gesture unlocks fullscreen + autoplay
+    // Don't load the actual stream yet — wait for the user to click Watch Now
+    showWatchNowOverlay(candidate, index);
 
     setTimeout(function () {
       hideServerStatus();
     }, 4000);
   }
 
+  /**
+   * Show the "Watch Now" overlay when a stream resolves.
+   * The user's click/OK is the user gesture that unlocks fullscreen + autoplay.
+   */
+  function showWatchNowOverlay(candidate, index) {
+    if (!elements.watchNowOverlay) return;
+    // Hide loading overlay so it doesn't compete with Watch Now
+    showLoading(false);
+    hideServerStatus();
+    if (elements.watchNowTitle) {
+      elements.watchNowTitle.textContent = currentMediaTitle || 'Ready to Watch';
+    }
+    if (elements.watchNowServer) {
+      elements.watchNowServer.textContent = 'Server ' + (index + 1) + ' of ' + routeCandidates.length + ' • ' + (candidate.provider || 'Unknown');
+    }
+    elements.watchNowOverlay.style.display = 'flex';
+    // Trap focus inside the overlay so remote navigation can't escape
+    try { SpatialNav.pushScope(elements.watchNowOverlay, elements.watchNowBtn); } catch (e) {}
+    // Auto-focus the button so remote OK triggers it immediately
+    if (elements.watchNowBtn) {
+      elements.watchNowBtn.focus();
+    }
+  }
+
+  function hideWatchNowOverlay() {
+    if (elements.watchNowOverlay) {
+      elements.watchNowOverlay.style.display = 'none';
+    }
+    // Pop the scope we pushed (if active)
+    try { SpatialNav.popScope(); } catch (e) {}
+  }
+
+  /**
+   * Called when the user clicks "Watch Now" or presses OK.
+   * This user gesture unlocks fullscreen + unmuted autoplay.
+   */
+  function onWatchNowClick() {
+    hideWatchNowOverlay();
+    hideServerStatus();
+    showLoading(true);
+    // Enter fullscreen from this user gesture
+    enterFullscreen();
+    // Load the actual stream now (after the user gesture)
+    if (activeCandidate) {
+      if (isDirectUrl(activeCandidate.url)) {
+        loadNative(activeCandidate.url);
+      } else {
+        loadEmbed(activeCandidate.url);
+      }
+    }
+    // Video.js handles autoplay after user gesture
+    var player = ensureVideoJs();
+    if (player) {
+      player.volume(1.0);
+      player.muted(false);
+      player.play().catch(function () {
+        // If unmuted fails, start muted then unmute
+        player.muted(true);
+        player.play().then(function () {
+          setTimeout(function () {
+            player.muted(false);
+            player.volume(1.0);
+          }, 500);
+        }).catch(function () {});
+      });
+    }
+    // For embeds, click into the iframe to start playback
+    if (elements.embedIframe && (!elements.video || !elements.video.src)) {
+      clickEmbedToPlay();
+    }
+  }
+
+  function enterFullscreen() {
+    // Use Video.js fullscreen API if available
+    var player = ensureVideoJs();
+    if (player && player.requestFullscreen) {
+      try {
+        player.requestFullscreen();
+        return;
+      } catch (e) {}
+    }
+    // Fallback: native fullscreen
+    var container = elements.container;
+    if (!container) return;
+    try {
+      if (container.requestFullscreen) {
+        container.requestFullscreen();
+      } else if (container.webkitRequestFullscreen) {
+        container.webkitRequestFullscreen();
+      } else if (container.mozRequestFullScreen) {
+        container.mozRequestFullScreen();
+      }
+    } catch (e) {
+      // Fullscreen request failed — playback still works
+    }
+  }
+
+  function forcePlayMaxVolume() {
+    if (!elements.video) return;
+    elements.video.muted = false;
+    elements.video.volume = 1.0;
+    var playPromise = elements.video.play();
+    if (playPromise && playPromise.then) {
+      playPromise.then(function () {
+        elements.video.volume = 1.0;
+      }).catch(function () {
+        // Play blocked — try muted then unmute
+        elements.video.muted = true;
+        elements.video.play().then(function () {
+          elements.video.muted = false;
+          elements.video.volume = 1.0;
+        }).catch(function () {});
+      });
+    }
+  }
+
+  function clickEmbedToPlay() {
+    // Click into the center of the iframe to trigger embed playback
+    if (!elements.embedIframe) return;
+    try {
+      var rect = elements.embedIframe.getBoundingClientRect();
+      var x = rect.left + rect.width / 2;
+      var y = rect.top + rect.height / 2;
+      var clickEvent = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        clientX: x,
+        clientY: y
+      });
+      elements.embedIframe.dispatchEvent(clickEvent);
+    } catch (e) {}
+  }
+
   function advanceServer(reason) {
+    // Use the new sequential race if active, otherwise fall back to old behavior
+    if (raceState.candidates.length > 0 && raceState.token === raceToken) {
+      advanceToNextCandidate(reason);
+      return;
+    }
     if (walkIndex + 1 >= routeCandidates.length) {
       showToast('Tried all ' + routeCandidates.length + ' servers');
       return;
@@ -587,18 +911,36 @@
     }
     var guard = document.getElementById('tv-embed-guard');
     if (guard) guard.style.display = 'none';
-    if (!elements.video) return;
-    elements.video.style.display = 'block';
-    elements.video.volume = 1.0;
-    elements.video.muted = false;
 
-    if (hlsInstance) {
-      try { hlsInstance.destroy(); } catch (e) {}
-      hlsInstance = null;
+    // Ensure Video.js is initialized
+    var player = ensureVideoJs();
+    if (!player) {
+      // Fallback: Video.js failed to init, use native element
+      if (!elements.video) return;
+      elements.video.style.display = 'block';
+      elements.video.volume = 1.0;
+      elements.video.muted = false;
+      elements.video.src = url;
+      elements.video.load();
+      startNativePlayback();
+      return;
     }
 
+    // Use Video.js to load and play the stream
     var isHls = /\.m3u8(\?|$)/i.test(String(url));
+    player.volume(1.0);
+    player.muted(false);
+
     if (isHls && window.Hls && Hls.isSupported()) {
+      // HLS via Video.js native VHS (built into Video.js 8)
+      player.src({ src: url, type: 'application/x-mpegURL' });
+      player.play();
+    } else if (isHls && window.Hls) {
+      // Fallback: HLS.js for older browsers
+      if (hlsInstance) {
+        try { hlsInstance.destroy(); } catch (e) {}
+        hlsInstance = null;
+      }
       hlsInstance = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -611,7 +953,7 @@
       hlsInstance.loadSource(url);
       hlsInstance.attachMedia(elements.video);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
-        startNativePlayback();
+        player.play();
       });
       hlsInstance.on(Hls.Events.ERROR, function (evt, data) {
         if (data && data.fatal) {
@@ -623,49 +965,42 @@
         }
       });
     } else {
-      elements.video.src = url;
-      elements.video.load();
-      startNativePlayback();
+      // Direct MP4/stream
+      player.src({ src: url, type: 'video/mp4' });
+      player.play();
     }
   }
 
   function startNativePlayback() {
+    // Legacy fallback — now handled by Video.js in loadNative
+    var player = ensureVideoJs();
+    if (player) return; // Video.js handles playback
     if (!elements.video) return;
-    elements.video.volume = 1.0;
-    elements.video.muted = false;
-    var p = elements.video.play();
-    if (p !== undefined) {
-      p.then(function () {
-        elements.video.volume = 1.0;
-        elements.video.muted = false;
-        hideUnmutePrompt();
-        showToast('🔊 Volume max');
-      }).catch(function () {
-        // TV browser autoplay restriction: start muted to buffer immediately,
-        // and display the prompt for remote OK to unmute to 100% volume.
-        elements.video.muted = true;
-        showUnmutePrompt();
-        var unmute = function () {
-          try {
-            elements.video.muted = false;
-            elements.video.volume = 1.0;
-            hideUnmutePrompt();
-            showToast('🔊 Volume max');
-          } catch (e) {}
-          elements.video.removeEventListener('playing', unmute);
-        };
-        elements.video.addEventListener('playing', unmute);
-        elements.video.play().then(function () {
-          setTimeout(unmute, 500);
-          setTimeout(unmute, 1500);
-        }).catch(function () {});
-      });
-    }
+    var video = elements.video;
+    video.volume = 1.0;
+    video.muted = false;
+    video.play().catch(function () {
+      video.muted = true;
+      video.play().catch(function () {});
+    });
   }
 
   function showUnmutePrompt() {
     var p = document.getElementById('tv-player-unmute-prompt');
-    if (p) p.style.display = 'flex';
+    if (p) {
+      p.style.display = 'flex';
+      // Clicking the prompt is a real user gesture — unmute + play at max volume
+      p.onclick = function () {
+        if (elements.video) {
+          elements.video.muted = false;
+          elements.video.volume = 1.0;
+          var playPromise = elements.video.play();
+          if (playPromise && playPromise.catch) playPromise.catch(function () {});
+        }
+        hideUnmutePrompt();
+        showToast('🔊 Volume max');
+      };
+    }
   }
 
   function hideUnmutePrompt() {
@@ -694,8 +1029,17 @@
     elements.embedIframe.setAttribute('referrerpolicy', 'origin');
     elements.embedIframe.onload = function () {
       embedLoaded = true;
+      embedActuallyPlaying = true;
       clearWalkWatchdog();
       showLoading(false);
+      // Verify this onload is for the current candidate (not a stale iframe)
+      if (currentEpoch !== raceState.epoch) return;
+      // For cross-origin iframes we cannot detect internal playback, so
+      // a successful load + autoplay clicks = assume it's working.
+      // Confirm the candidate so the sequential walk doesn't advance.
+      if (raceState.candidates.length > 0 && !raceState.verified) {
+        confirmCandidate();
+      }
       if (window.TvAutoplay && window.TvAutoplay.simulateCenterClick) {
         setTimeout(function () {
           window.TvAutoplay.simulateCenterClick(elements.embedIframe);
@@ -703,29 +1047,30 @@
         setTimeout(function () {
           window.TvAutoplay.simulateCenterClick(elements.embedIframe);
         }, 2200);
+        setTimeout(function () {
+          window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+        }, 4200);
       }
     };
     elements.embedIframe.onerror = function () {
-      advanceServer('Server unavailable — trying another…');
+      advanceToNextCandidate('Server unavailable — trying next…');
     };
     elements.embedIframe.src = decorateEmbedUrl(url);
 
-    // Watchdog: only advance if the iframe completely fails to load after 28 seconds
+    // Watchdog: if iframe fails to load within 15 seconds, advance to next
     embedWatchdog = setTimeout(function () {
-      if (!embedLoaded) {
-        advanceServer('Server response timeout — switching…');
+      if (!embedLoaded && raceState.token === raceToken && !raceState.verified) {
+        advanceToNextCandidate('Server response timeout — trying next…');
       }
-    }, 28000);
+    }, 15000);
 
     var guard = document.getElementById('tv-embed-guard');
     if (guard) {
       guard.style.display = 'block';
-      guard.onclick = function () {
-        if (window.TvAutoplay && window.TvAutoplay.simulateCenterClick) {
-          window.TvAutoplay.simulateCenterClick(elements.embedIframe);
-        }
-        showToast('Remote OK controls playback');
-      };
+      // Guard stays visible to block ad popups, but pointer-events: none
+      // lets mouse clicks pass through to the iframe's play button.
+      // The window.open blocker in installAdShield() catches popup tabs.
+      guard.style.pointerEvents = 'none';
     }
 
     showServerStatus('Playing via ' + (activeCandidate ? activeCandidate.provider : 'embed server') + ' — press YELLOW to switch');
@@ -894,10 +1239,28 @@
 
   // ── Playback controls & HUD ────────────────────────────────────────────
   function togglePlayPause() {
+    var player = ensureVideoJs();
+    if (player) {
+      if (player.paused()) {
+        player.volume(1.0);
+        player.muted(false);
+        player.play();
+        showToast('▶ Play');
+      } else {
+        player.pause();
+        showToast('⏸ Paused');
+      }
+      return;
+    }
+    // Fallback: native video
     if (!elements.video) return;
     if (elements.video.paused) {
-      var p = elements.video.play();
-      if (p && p.catch) p.catch(function () {});
+      elements.video.muted = false;
+      elements.video.volume = 1.0;
+      elements.video.play().catch(function () {
+        elements.video.muted = true;
+        elements.video.play().catch(function () {});
+      });
       showToast('▶ Play');
     } else {
       elements.video.pause();
@@ -906,6 +1269,15 @@
   }
 
   function seekRelative(deltaSeconds) {
+    var player = ensureVideoJs();
+    if (player) {
+      var dur = player.duration() || 0;
+      var newTime = Math.max(0, Math.min(dur, player.currentTime() + deltaSeconds));
+      player.currentTime(newTime);
+      showToast((deltaSeconds > 0 ? '⏩ +' : '⏪ ') + deltaSeconds + 's');
+      return;
+    }
+    // Fallback: native video
     if (!elements.video || elements.video.style.display === 'none') return;
     var dur = elements.video.duration || 0;
     var newTime = Math.max(0, Math.min(dur, elements.video.currentTime + deltaSeconds));
@@ -914,6 +1286,15 @@
   }
 
   function bumpVolume(delta) {
+    var player = ensureVideoJs();
+    if (player) {
+      player.muted(false);
+      var vol = Math.max(0, Math.min(1, player.volume() + delta));
+      player.volume(vol);
+      showToast('🔊 ' + Math.round(vol * 100) + '%');
+      return;
+    }
+    // Fallback: native video
     if (!elements.video || elements.video.style.display === 'none') return;
     try {
       elements.video.muted = false;
@@ -1020,6 +1401,7 @@
     closeEpisodesDrawer();
     hideFatalOverlay();
     hideServerStatus();
+    hideWatchNowOverlay();
 
     if (elements.resumeModal && elements.resumeModal.classList.contains('active')) {
       elements.resumeModal.classList.remove('active');
@@ -1031,7 +1413,12 @@
       keyUnbind = null;
     }
 
-    // Save progress before teardown (native only)
+    // Save progress before teardown
+    if (vjsPlayer && !isLiveStream) {
+      var cur = vjsPlayer.currentTime();
+      var dur = vjsPlayer.duration();
+      if (cur > 5 && dur > 0) saveProgress(cur, dur);
+    }
     if (elements.video && !isLiveStream) {
       var cur = elements.video.currentTime;
       var dur = elements.video.duration;
@@ -1040,8 +1427,17 @@
 
     clearFailoverTimer();
     clearEmbedWatchdog();
+    clearRaceVerifier();
     clearProbeIframes();
+    raceState.verified = false;
+    raceState.candidates = [];
     if (window.TvAutoplay) window.TvAutoplay.cancel();
+
+    // Destroy Video.js player
+    if (vjsPlayer) {
+      try { vjsPlayer.dispose(); } catch (e) {}
+      vjsPlayer = null;
+    }
 
     if (elements.video) {
       try { elements.video.pause(); } catch (e) {}

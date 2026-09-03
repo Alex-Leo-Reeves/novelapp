@@ -11,6 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="tv.css" />
+  <!-- Video.js for robust playback, fullscreen & autoplay handling -->
+  <link href="videojs/video-js.min.css" rel="stylesheet" />
+  <script src="videojs/video.min.js"></script>
   <!-- HLS.js for adaptive streaming on Hisense VIDAA -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
 </head>
@@ -244,7 +247,7 @@
      FULLSCREEN VIDEO PLAYER
      ═══════════════════════════════════════════════════════════════════ -->
 <div id="tv-player-view">
-  <video id="tv-video-element" playsinline></video>
+  <video id="tv-video-element" class="video-js vjs-big-play-centered" playsinline controls preload="auto" data-setup='{"fluid": false}'></video>
   <iframe id="tv-embed-iframe" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
   <!-- hidden host for the parallel-server probe iframes -->
   <div id="tv-probe-host" style="position:absolute; width:0; height:0; overflow:hidden;"></div>
@@ -263,6 +266,20 @@
   <!-- Ad-click guard: absorbs mouse/touch over the embed so provider ad
        pages can never hijack the click. Remote keys still work. -->
   <div id="tv-embed-guard" style="display:none; position:absolute; inset:0; z-index:90; background:transparent;"></div>
+
+  <!-- Watch Now overlay: shown when stream resolves. The user's click/OK
+       is the user gesture that unlocks fullscreen + autoplay per browser policy. -->
+  <div id="tv-player-watch-now" style="display: none; position: absolute; inset: 0; z-index: 115; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); align-items: center; justify-content: center; flex-direction: column;">
+    <div style="text-align: center; max-width: 600px; padding: 40px;">
+      <div style="font-size: 64px; margin-bottom: 20px;">▶</div>
+      <h3 id="tv-watch-now-title" style="font-size: 28px; margin: 0 0 8px;">Ready to Watch</h3>
+      <p id="tv-watch-now-server" style="font-size: 16px; color: var(--tv-text-muted); margin: 0 0 28px;">Server resolved</p>
+      <button id="tv-watch-now-btn" class="tv-btn tv-btn-primary" style="font-size: 22px; padding: 16px 48px; border-radius: 12px;" tabindex="0" data-nav="true">
+        ▶ Watch Now
+      </button>
+      <p style="font-size: 13px; color: var(--tv-text-muted); margin-top: 16px;">Press <span style="background: var(--tv-cyan); color: #05060b; padding: 1px 8px; border-radius: 4px;">OK</span> or click to start</p>
+    </div>
+  </div>
 
   <!-- Exit button (mouse-friendly, always available) -->
   <button id="tv-player-exit" class="tv-player-exit" tabindex="0" data-nav="true" title="Exit player">✕ Exit</button>
@@ -295,8 +312,8 @@
   </div>
 
   <!-- Unmute Prompt (when TV browser blocks unmuted autostart) -->
-  <div id="tv-player-unmute-prompt" style="display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 105; background: rgba(13, 16, 27, 0.9); border: 2px solid var(--tv-cyan); border-radius: 30px; padding: 12px 28px; color: #fff; font-size: 18px; font-weight: 700; box-shadow: 0 8px 32px rgba(0,0,0,0.6); pointer-events: none; align-items: center; gap: 12px;">
-    <span style="font-size: 24px;">▶</span> Press <span style="background: var(--tv-cyan); color: #05060b; padding: 2px 10px; border-radius: 6px;">OK</span> to Unmute &amp; Play (Max Volume)
+  <div id="tv-player-unmute-prompt" style="display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 105; background: rgba(13, 16, 27, 0.9); border: 2px solid var(--tv-cyan); border-radius: 30px; padding: 12px 28px; color: #fff; font-size: 18px; font-weight: 700; box-shadow: 0 8px 32px rgba(0,0,0,0.6); cursor: pointer; align-items: center; gap: 12px;">
+    <span style="font-size: 24px;">▶</span> Click or Press <span style="background: var(--tv-cyan); color: #05060b; padding: 2px 10px; border-radius: 6px;">OK</span> to Unmute &amp; Play (Max Volume)
   </div>
 
   <!-- Episodes Drawer (slide-up from bottom) -->

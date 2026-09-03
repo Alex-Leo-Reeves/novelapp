@@ -789,6 +789,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  cursor: pointer;
 }
 
 #tv-embed-iframe {
@@ -1679,5 +1680,29 @@ body {
 .tv-card:focus,
 .tv-card.tv-focused {
   scroll-margin: 16px;
+}
+
+/* ── Watch Now overlay ──────────────────────────────────────────────── */
+#tv-player-watch-now {
+  z-index: 999;
+  animation: tv-fade-in 0.3s ease;
+}
+/* Ensure video and iframe are below Watch Now overlay */
+#tv-video-element,
+#tv-embed-iframe {
+  z-index: 1;
+}
+#tv-player-watch-now .tv-btn-primary {
+  box-shadow: 0 4px 24px rgba(0, 200, 255, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+#tv-player-watch-now .tv-btn-primary:focus,
+#tv-player-watch-now .tv-btn-primary:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 32px rgba(0, 200, 255, 0.6);
+}
+@keyframes tv-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
