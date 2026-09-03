@@ -512,10 +512,9 @@
   async function weebCentralHome(page) {
     page = Math.max(1, page || 1);
     if (page > 1) return mangadexHome(page); // deeper pages from MangaDex
-    // CORS-blocked browsers: items AND chapters must come from the same
-    // source — MangaDex is instantly available and fully consistent.
-    if (wcDirectState === 'blocked') return mangadexHome(page);
 
+    // Always try wcFetch — it handles direct → jina reader fallback internally.
+    // Only fall back to MangaDex if wcFetch returns nothing.
     var html = await wcFetch('/', { html: true, directTimeout: 12000 });
     if (!html) return mangadexHome(1);
 

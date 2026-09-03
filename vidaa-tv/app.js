@@ -824,10 +824,19 @@
     container.appendChild(grid);
 
     async function loadMangaPage(page, replace) {
-      // Page 1 = WeebCentral front page; deeper pages = MangaDex
-      var items = await (page === 1
-        ? NovaApi.weebCentralHome(1)
-        : NovaApi.mangadexHome(page)).catch(function () { return []; });
+      // Combine WeebCentral + MangaDex on every page
+      // On desktop, weebCentralHome may fall back to MangaDex (CORS blocked),
+      // so filter to only real WeebCentral items to avoid duplicates
+      var wcRaw = await NovaApi.weebCentralHome(page).catch(function () { return []; });
+      var wcItems = wcRaw.filter(function (it) {
+        return (it.sourceName || '').toLowerCase().indexOf('weebcentral') !== -1 ||
+               (it.id || '').indexOf('weebcentral') === 0;
+      });
+      var mdItems = await NovaApi.mangadexHome(page).catch(function () { return []; });
+      var seen = {};
+      var items = [];
+      wcItems.forEach(function (item) { if (item.id && !seen[item.id]) { seen[item.id] = 1; items.push(item); } });
+      mdItems.forEach(function (item) { if (item.id && !seen[item.id]) { seen[item.id] = 1; items.push(item); } });
       items = filterByTab(items, 'manga');
       if (spinner.parentNode) spinner.remove();
       if (replace) grid.innerHTML = '';
@@ -841,7 +850,7 @@
         return;
       }
       items.forEach(function (item) { grid.appendChild(createCard(item)); });
-      if (page === 1 && !loadMoreBtn.parentNode) grid.appendChild(loadMoreBtn);
+      if (!loadMoreBtn.parentNode) grid.appendChild(loadMoreBtn);
       if (replace) focusFirstCard(container);
     }
 
