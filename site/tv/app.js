@@ -1334,6 +1334,23 @@
       more.textContent = '+ ' + (episodes.length - maxShow) + ' more — choose "Browse All Episodes"';
       episodesList.appendChild(more);
     }
+
+    // Free-tier lock summary from the server's gate metadata
+    var gate = (window.NovaApi && NovaApi.getChaptersGate) ? NovaApi.getChaptersGate() : null;
+    if (gate && gate.lockedCount > 0) {
+      var lockNote = document.createElement('div');
+      lockNote.className = 'tv-season-header';
+      lockNote.style.color = '#e84d8a';
+      lockNote.textContent = '🔒 ' + gate.lockedCount + ' episodes locked — Go Premium to unlock all';
+      episodesList.appendChild(lockNote);
+    }
+  }
+
+  function isEpisodeLocked(ep, idx, total) {
+    if (ep && ep.locked) return true;
+    var gate = (window.NovaApi && NovaApi.getChaptersGate) ? NovaApi.getChaptersGate() : null;
+    if (gate && !gate.premium && gate.freeEpisodeLimit != null && idx >= gate.freeEpisodeLimit) return true;
+    return false;
   }
 
   function createEpisodeChip(item, ep, idx) {
@@ -1341,6 +1358,10 @@
     chip.className = 'tv-episode-card';
     chip.tabIndex = 0;
     chip.setAttribute('data-nav', 'true');
+
+    var total = (appState.currentEpisodes || []).length || (arguments.length > 2 ? idx + 1 : 0);
+    var gate = (window.NovaApi && NovaApi.getChaptersGate) ? NovaApi.getChaptersGate() : null;
+    var locked = isEpisodeLocked(ep, idx, total);
 
     var saved = null;
     try {
@@ -1355,8 +1376,21 @@
       chip.classList.add('has-progress');
       label = '▶ ' + label;
     }
+    if (locked) {
+      chip.classList.add('locked');
+      label = '🔒 ' + label;
+    }
     chip.textContent = label;
-    chip.addEventListener('click', function () { startItem(item, appState.currentEpisodes, idx); });
+    chip.addEventListener('click', function () {
+      if (locked) {
+        showToast('🔒 Episode locked — Free tier includes the first ' +
+          (gate ? gate.freeEpisodeLimit + ' episodes. ' : 'few episodes. ') + 'Go Premium to unlock all.');
+        showPremiumCheckout('Free accounts can watch only the first ' +
+          (gate ? gate.freeEpisodeLimit : 'few') + ' episodes of every series. Go Premium — ₦1,000/month for 3 devices or ₦4,000 for unlimited — to unlock every episode.');
+        return;
+      }
+      startItem(item, appState.currentEpisodes, idx);
+    });
     return chip;
   }
 
@@ -1371,6 +1405,15 @@
     (episodes || []).forEach(function (ep, idx) {
       grid.appendChild(createEpisodeChip(item, ep, idx));
     });
+    // Free-tier lock summary from the server's gate metadata
+    var gate = (window.NovaApi && NovaApi.getChaptersGate) ? NovaApi.getChaptersGate() : null;
+    if (gate && gate.lockedCount > 0) {
+      var lockNote = document.createElement('div');
+      lockNote.className = 'tv-season-header';
+      lockNote.style.color = '#e84d8a';
+      lockNote.textContent = '🔒 ' + gate.lockedCount + ' episodes locked — Go Premium to unlock all';
+      grid.appendChild(lockNote);
+    }
     view.classList.add('active');
     var first = grid.querySelector('.tv-episode-card');
     SpatialNav.pushScope(view, first);
@@ -1804,15 +1847,43 @@
   }
 
   // ── Premium checkout (Flutterwave QR, phone-first like the TV app) ─────
-  async function showPremiumCheckout(extraCopy) {
+  var PREMIUM_PLAN_OPTIONS = [
+    { id: 'premium_3_devices', title: 'Premium — 3 devices', amount: '₦1,000 / month', blurb: 'Every episode & movie unlocked, on up to 3 signed-in devices.' },
+    { id: 'premium_unlimited', title: 'Premium — Unlimited devices', amount: '₦4,000 / month', blurb: 'Everything unlocked, on as many devices as you like.' }
+  ];
+
+  function renderPlanOptions(selectedId, copyEl) {
+    var qrBox = document.getElementById('tv-payment-qr');
+    if (!qrBox) return;
+    qrBox.innerHTML = '';
+    var list = document.createElement('div');
+    list.className = 'tv-payment-plans';
+    PREMIUM_PLAN_OPTIONS.forEach(function (plan) {
+      var btn = document.createElement('button');
+      btn.className = 'tv-payment-plan' + (plan.id === selectedId ? ' selected' : '');
+      btn.tabIndex = 0;
+      btn.setAttribute('data-nav', 'true');
+      btn.innerHTML = '<span class="tv-payment-plan-title">' + plan.title + '</span>' +
+        '<span class="tv-payment-plan-amount">' + plan.amount + '</span>' +
+        '<span class="tv-payment-plan-blurb">' + plan.blurb + '</span>';
+      btn.addEventListener('click', function () {
+        showPremiumCheckout('', plan.id);
+      });
+      list.appendChild(btn);
+    });
+    qrBox.appendChild(list);
+    if (copyEl) {
+      copyEl.textContent = 'Pick a plan, then scan the QR with your phone to pay securely with Flutterwave.';
+    }
+  }
+
+  async function showPremiumCheckout(extraCopy, planId) {
     var modal = document.getElementById('tv-payment-modal');
     var titleEl = document.getElementById('tv-payment-title');
     var copyEl = document.getElementById('tv-payment-copy');
     var qrBox = document.getElementById('tv-payment-qr');
     if (!modal) return;
-    titleEl.textContent = 'Premium — ₦1,000/month';
-    copyEl.textContent = extraCopy || 'Creating a secure Flutterwave payment link…';
-    qrBox.innerHTML = '';
+    titleEl.textContent = 'Go Premium';
     modal.classList.add('active');
     var closeBtn = document.getElementById('tv-payment-close');
     closeBtn.onclick = function () {
@@ -1821,11 +1892,39 @@
     };
     SpatialNav.pushScope(modal, closeBtn);
 
-    var checkout = await NovaApi.createBillingCheckout('premium_3_devices').catch(function () { return null; });
+    // Step 1 — no plan chosen yet: show the plan options and wait.
+    if (!planId) {
+      renderPlanOptions(null, copyEl);
+      if (extraCopy) copyEl.textContent = extraCopy;
+      return;
+    }
+
+    // Step 2 — plan chosen: create the Flutterwave checkout and show the QR.
+    var planMeta = PREMIUM_PLAN_OPTIONS.filter(function (p) { return p.id === planId; })[0] || PREMIUM_PLAN_OPTIONS[0];
+    copyEl.textContent = extraCopy || ('Creating a secure Flutterwave payment link for ' + planMeta.title + '…');
+    qrBox.innerHTML = '';
+
+    var checkout = await NovaApi.createBillingCheckout(planMeta.id).catch(function () { return null; });
     if (checkout && checkout.link && window.NovaQR) {
-      NovaQR.render(checkout.link, qrBox, 220);
-      copyEl.textContent = 'Scan to pay with Flutterwave. This TV keeps checking your subscription after payment.';
-    } else {
+      qrBox.innerHTML = '';
+      var heading = document.createElement('div');
+      heading.className = 'tv-payment-selected';
+      heading.textContent = planMeta.title + ' — ' + planMeta.amount;
+      qrBox.appendChild(heading);
+      var qrHolder = document.createElement('div');
+      qrHolder.className = 'tv-qr-box';
+      qrBox.appendChild(qrHolder);
+      NovaQR.render(checkout.link, qrHolder, 220);
+      var changeBtn = document.createElement('button');
+      changeBtn.className = 'tv-btn';
+      changeBtn.tabIndex = 0;
+      changeBtn.setAttribute('data-nav', 'true');
+      changeBtn.textContent = 'Choose a different plan';
+      changeBtn.addEventListener('click', function () { showPremiumCheckout(); });
+      qrBox.appendChild(changeBtn);
+      copyEl.textContent = 'Scan to pay with Flutterwave. Your TV keeps checking your subscription after payment.';
+    } else if (!checkout) {
+      renderPlanOptions(planMeta.id, null);
       copyEl.textContent = 'Checkout is unavailable right now. Confirm the paired account and Flutterwave configuration, then try again.';
     }
   }
@@ -1834,7 +1933,7 @@
     document.addEventListener('tvpremiumgate', function (e) {
       var detail = e.detail || {};
       showPremiumCheckout(detail.message || '');
-      showToast(detail.hard ? 'Free preview limit reached' : 'Preview grace used — enjoy!');
+      showToast(detail.hard ? 'Free preview limit reached — go Premium' : 'Free preview ended — go Premium to keep watching');
     });
   }
 

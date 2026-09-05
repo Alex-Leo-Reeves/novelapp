@@ -1039,6 +1039,20 @@
   }
 
   // ── Chapters / Episodes (unified, mirrors TvMediaRepository) ───────────
+  // ── Free-tier episode gate metadata (server-enforced locks) ────────────
+  var chaptersGate = null;
+  function setChaptersGate(payload) {
+    if (payload && payload.freeEpisodeLimit != null) {
+      chaptersGate = {
+        freeEpisodeLimit: payload.freeEpisodeLimit,
+        lockedCount: payload.lockedCount || 0,
+        premium: !!payload.premium
+      };
+    }
+    return chaptersGate;
+  }
+  function getChaptersGate() { return chaptersGate; }
+
   async function fetchChapters(kind, detailUrl, title, sourceName, chapterNumber) {
     kind = String(kind || '').toLowerCase();
     detailUrl = detailUrl || '';
@@ -1067,12 +1081,14 @@
     });
     var chapters = [];
     if (res.ok && res.data && res.data.data && Array.isArray(res.data.data.chapters)) {
+      setChaptersGate(res.data.data);
       chapters = res.data.data.chapters.map(function (c) {
         return {
           title: c.title || '',
           url: c.url || '',
           chapterNumber: (typeof c.chapterNumber === 'number') ? c.chapterNumber : (parseEpisodeNumber(c.title, 0)),
-          seasonNumber: c.seasonNumber || c.season || 0
+          seasonNumber: c.seasonNumber || c.season || 0,
+          locked: !!c.locked
         };
       });
     }
@@ -1123,14 +1139,19 @@
   async function fetchAnimeEpisodes(provider, query) {
     var res = await request('/content/anime/episodes?provider=' + encodeURIComponent(provider || 'gogoanime') + '&q=' + encodeURIComponent(query || ''));
     if (res.ok && res.data && res.data.data && Array.isArray(res.data.data.episodes)) {
-      return res.data.data.episodes.map(function (ep) {
+      var freeLimit = (res.data.data.freeEpisodeLimit != null) ? res.data.data.freeEpisodeLimit : null;
+      if (freeLimit != null) {
+        setChaptersGate({ freeEpisodeLimit: freeLimit, lockedCount: res.data.data.lockedCount || 0, premium: false });
+      }
+      return res.data.data.episodes.map(function (ep, epIndex) {
         var num = ep.number || ep.episodeNumber || 0;
         return {
           title: ep.title || ('Episode ' + num),
           url: ep.url || '',
           chapterNumber: parseFloat(num) || 0,
           seasonNumber: 0,
-          provider: provider
+          provider: provider,
+          locked: (freeLimit != null && epIndex >= freeLimit) || !!ep.locked
         };
       }).filter(function (e) { return e.url; });
     }
@@ -1459,6 +1480,14 @@
         episodeMarker: detailUrl || ''
       }
     });
+    // Server-side premium gate: locked episodes return 402 PREMIUM_REQUIRED.
+    // Never fall back to client-side embeds — the lock has to hold.
+    if (res.status === 402) {
+      var gateErr = new Error((res.data && (res.data.error || res.data.message)) || 'This episode is locked. Go Premium to unlock all episodes.');
+      gateErr.premiumRequired = true;
+      gateErr.upgrade = res.data && res.data.upgrade;
+      throw gateErr;
+    }
     if (res.ok && res.data && res.data.data && Array.isArray(res.data.data.routes)) {
       res.data.data.routes.forEach(function (r) {
         if (r && r.url) {
@@ -1755,12 +1784,15 @@
     register: authRegister,
     authMe: authMe,
     fetchBillingStatus: fetchBillingStatus,
+    setChaptersGate: setChaptersGate,
+    getChaptersGate: getChaptersGate,
     fetchFreePreviewLimits: fetchFreePreviewLimits,
     createBillingCheckout: createBillingCheckout,
     fetchContentHome: fetchContentHome,
     fetchNovelsMultiSource: fetchNovelsMultiSource,
     searchContent: searchContent,
     fetchChapters: fetchChapters,
+    getChaptersGate: getChaptersGate,
     fetchChapterText: fetchChapterText,
     fetchMangaPages: fetchMangaPages,
     mangadexHome: mangadexHome,

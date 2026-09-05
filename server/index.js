@@ -697,6 +697,173 @@ function userMaxDevices(user) {
     return billingPlanFor(user.plan).maxDevices;
 }
 
+// ── Free-tier episode lock (server-side, mirrors the Android TV app) ────
+// Free users may play only the first EPISODIC_FREE_FRACTION of a series'
+// episodes (min 1); everything else returns HTTP 402 PREMIUM_REQUIRED.
+// Guests (no session) count as free tier. Premium plans bypass the gate.
+// The server learns each series' episode count from its own /content/chapters
+// responses, so the client cannot forge the total.
+const EPISODIC_VIDEO_KINDS = new Set(["anime", "donghua", "tv", "cartoon", "kdrama", "classic", "nigerian"]);
+const chapterTimelineCache = new Map(); // normalized detailUrl -> [{seasonNumber, chapterNumber}]
+const CHAPTER_TIMELINE_CACHE_MAX = 500;
+const freeAnimeEpisodeIds = new Map(); // providerKey -> Set of episode ids served to free users
+const FREE_ANIME_EPISODE_ID_CAP = 4000;
+
+function normalizeEpisodeNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+function freeEpisodeLimitFor(totalEpisodes) {
+    const total = Number(totalEpisodes) || 0;
+    if (total <= 1) return 0;
+    return Math.max(1, Math.floor(total * EPISODIC_FREE_FRACTION));
+}
+
+function normalizeTimelineKey(detailUrl) {
+    return String(detailUrl || "").trim().toLowerCase();
+}
+
+function rememberChapterTimeline(detailUrl, chapters) {
+    const key = normalizeTimelineKey(detailUrl);
+    if (!key || !Array.isArray(chapters) || chapters.length < 2) return;
+    if (chapterTimelineCache.size >= CHAPTER_TIMELINE_CACHE_MAX) {
+        const oldest = chapterTimelineCache.keys().next().value;
+        if (oldest !== undefined) chapterTimelineCache.delete(oldest);
+    }
+    chapterTimelineCache.set(key, chapters.map((chapter) => ({
+        seasonNumber: normalizeEpisodeNumber(chapter && chapter.seasonNumber) || 1,
+        chapterNumber: normalizeEpisodeNumber(chapter && chapter.chapterNumber)
+    })));
+}
+
+// Resolves the signed-in user from the bearer token without failing when the
+// request is a guest (no token / expired session) — guests get free tier.
+async function resolveOptionalUser(request) {
+    const token = getBearerToken(request);
+    if (!token) return null;
+    try {
+        return supabaseEnabled()
+            ? await findSupabaseSessionUser(token)
+            : findSessionUser(readData(), token);
+    } catch (error) {
+        return null;
+    }
+}
+
+// Episodic = anything in the set that is not a TMDB movie (kind strings vary
+// across clients — "tv", "video", "nigerian" — so the URL marker decides).
+function isEpisodicGateKind(kind, detailUrl) {
+    const normalized = normalizeContentType(kind);
+    if (!EPISODIC_VIDEO_KINDS.has(normalized)) return false;
+    return !/^tmdb:\/\/movie\//.test(String(detailUrl || "").trim().toLowerCase());
+}
+
+// Returns null when playback is allowed, otherwise a state object describing
+// the lock. The absolute position inside the cached chapter timeline is
+// preferred (multi-season shows), falling back to the raw episode number.
+function episodeGateState(user, kind, detailUrl, season, episode) {
+    if (isPremiumUser(user)) return null;
+    if (!isEpisodicGateKind(kind, detailUrl)) return null;
+    const timeline = chapterTimelineCache.get(normalizeTimelineKey(detailUrl));
+    const total = timeline ? timeline.length : 0;
+    if (total <= 1) return null;
+    const limit = freeEpisodeLimitFor(total);
+    let position = 0;
+    if (timeline) {
+        const wantedSeason = normalizeEpisodeNumber(season) || 1;
+        const wantedEpisode = normalizeEpisodeNumber(episode);
+        const index = timeline.findIndex((entry) =>
+            (entry.seasonNumber || 1) === wantedSeason && entry.chapterNumber === wantedEpisode);
+        if (index >= 0) position = index + 1;
+    }
+    if (!position) position = normalizeEpisodeNumber(episode);
+    if (!position || position <= limit) return null;
+    return { freeEpisodeLimit: limit, totalEpisodes: total, episode: position };
+}
+
+function premiumRequiredError(state) {
+    const error = new Error(
+        `Free tier includes only the first ${state.freeEpisodeLimit} of ${state.totalEpisodes} episodes. Go Premium to unlock every episode.`
+    );
+    error.statusCode = 402;
+    error.code = "PREMIUM_REQUIRED";
+    error.upgrade = {
+        freeEpisodeLimit: state.freeEpisodeLimit,
+        totalEpisodes: state.totalEpisodes,
+        episode: state.episode,
+        plans: availableBillingPlans()
+    };
+    return error;
+}
+
+// Marks the chapters a free user cannot play and reports the lock metadata.
+function applyEpisodeLocks(user, kind, detailUrl, chapters) {
+    const list = Array.isArray(chapters) ? chapters : [];
+    const total = list.length;
+    const limit = freeEpisodeLimitFor(total);
+    const gatedKind = isEpisodicGateKind(kind, detailUrl);
+    if (gatedKind) {
+        rememberChapterTimeline(detailUrl, list);
+    }
+    const isPremium = isPremiumUser(user);
+    const gated = !isPremium && limit > 0 && gatedKind;
+    if (!gated) {
+        return { chapters: list, freeEpisodeLimit: null, lockedCount: 0, premium: isPremium };
+    }
+    return {
+        chapters: list.map((chapter, index) => (index >= limit ? { ...chapter, locked: true } : chapter)),
+        freeEpisodeLimit: limit,
+        lockedCount: Math.max(0, total - limit),
+        premium: isPremium
+    };
+}
+
+// Free users only ever receive the first N consumet episode ids — anything
+// outside the served set is refused, so locked ids cannot be enumerated.
+function gateConsumetEpisodeList(user, providerKey, payload) {
+    if (!payload || !Array.isArray(payload.episodes) || isPremiumUser(user)) return payload;
+    const total = payload.episodes.length;
+    const limit = freeEpisodeLimitFor(total);
+    if (limit <= 0) return payload;
+    let registry = freeAnimeEpisodeIds.get(providerKey);
+    if (!registry) {
+        registry = new Set();
+        freeAnimeEpisodeIds.set(providerKey, registry);
+    }
+    if (registry.size > FREE_ANIME_EPISODE_ID_CAP) registry.clear();
+    payload.episodes.slice(0, limit).forEach((entry) => {
+        const id = entry && (entry.id != null ? entry.id : (entry.episodeId != null ? entry.episodeId : entry.url));
+        if (id != null) registry.add(String(id));
+    });
+    return {
+        ...payload,
+        episodes: payload.episodes.slice(0, limit),
+        freeEpisodeLimit: limit,
+        lockedCount: Math.max(0, total - limit)
+    };
+}
+
+function assertConsumetEpisodeAllowed(user, provider, episodeId) {
+    if (isPremiumUser(user)) return;
+    const config = consumetAnimeProvider(provider);
+    const registry = config ? freeAnimeEpisodeIds.get(config.key) : null;
+    if (!registry || registry.size === 0) {
+        const error = new Error("Free tier streaming starts from the episode list. Reopen the episode from its title, or go Premium for direct access.");
+        error.statusCode = 402;
+        error.code = "PREMIUM_REQUIRED";
+        error.upgrade = { plans: availableBillingPlans() };
+        throw error;
+    }
+    if (episodeId != null && !registry.has(String(episodeId))) {
+        throw premiumRequiredError({
+            freeEpisodeLimit: registry.size,
+            totalEpisodes: registry.size,
+            episode: episodeId
+        });
+    }
+}
+
 function hashPassword(password, salt = crypto.randomBytes(16).toString("base64")) {
     const hash = crypto
         .pbkdf2Sync(String(password), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
@@ -1218,6 +1385,10 @@ function normalizeContentType(type) {
     if (["donghua", "chineseanime", "chineseanimation", "dongman", "donghua-anime", "chinesedrama"].includes(raw)) return "donghua";
     if (["comic", "comics"].includes(raw)) return "comic";
     if (["anime", "manga"].includes(raw)) return raw;
+    // TV / episodic video kinds — the Vidaa TV sends mediaKind ("tv", "video",
+    // "series"). Without this they fell through to "novels" and /content/chapters
+    // returned empty for every show.
+    if (["tv", "tvshow", "tvshows", "series", "television", "video", "videos", "show", "shows"].includes(raw)) return "tv";
     return "novels";
 }
 
@@ -2823,12 +2994,17 @@ async function handleContentApi(request, response, pathname, url) {
       const query = String(url.searchParams.get("q") || "").trim();
       if (!query) return sendApiError(response, 400, "Anime title query is required.");
       const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 300) || 300));
-      return sendApiData(response, 200, await consumetAnimeEpisodes(provider, query, limit));
+      const gateUser = await resolveOptionalUser(request);
+      const payload = await consumetAnimeEpisodes(provider, query, limit);
+      const config = consumetAnimeProvider(provider);
+      return sendApiData(response, 200, gateConsumetEpisodeList(gateUser, config ? config.key : provider, payload));
     }
     if (request.method === "GET" && pathname === "/api/content/anime/stream") {
       const provider = String(url.searchParams.get("provider") || "hianime").trim();
       const episodeId = String(url.searchParams.get("episodeId") || "").trim();
       if (!episodeId) return sendApiError(response, 400, "Consumet episode id is required.");
+      const streamUser = await resolveOptionalUser(request);
+      assertConsumetEpisodeAllowed(streamUser, provider, episodeId);
       return sendApiData(response, 200, await consumetAnimeStreamRoute(provider, episodeId));
     }
     if (request.method === "GET" && pathname === "/api/content/stream") {
@@ -2838,6 +3014,15 @@ async function handleContentApi(request, response, pathname, url) {
       const season = String(url.searchParams.get("season") || "1");
       const episode = String(url.searchParams.get("episode") || "1");
       const provider = String(url.searchParams.get("provider") || "vidlink");
+      const streamGateUser = await resolveOptionalUser(request);
+      const streamGate = episodeGateState(
+        streamGateUser,
+        mediaType === "movie" ? "movie" : "tv",
+        `tmdb://${mediaType === "movie" ? "movies" : "tv"}/${id}`,
+        season,
+        episode
+      );
+      if (streamGate) throw premiumRequiredError(streamGate);
       return sendApiData(response, 200, await providerStreamRoute(mediaType, id, season, episode, provider));
     }
     if (request.method === "POST" && pathname === "/api/content/cinepro/sources") {
@@ -2845,9 +3030,14 @@ async function handleContentApi(request, response, pathname, url) {
     }
     if (request.method === "POST" && pathname === "/api/content/chapters") {
       const body = await readBody(request);
-      return sendApiData(response, 200, {
-        chapters: await contentChapters(body.kind, body.detailUrl, body.title, body.sourceName)
-      });
+      const chaptersUser = await resolveOptionalUser(request);
+      const lockPayload = applyEpisodeLocks(
+        chaptersUser,
+        body.kind,
+        body.detailUrl,
+        await contentChapters(body.kind, body.detailUrl, body.title, body.sourceName)
+      );
+      return sendApiData(response, 200, lockPayload);
     }
     if (request.method === "POST" && pathname === "/api/content/chapter-text") {
       const body = await readBody(request);
@@ -2863,10 +3053,22 @@ async function handleContentApi(request, response, pathname, url) {
     }
     if (request.method === "POST" && pathname === "/api/content/watch-route") {
       const body = await readBody(request);
+      const routeGateUser = await resolveOptionalUser(request);
+      const routeGate = episodeGateState(routeGateUser, body.kind, body.detailUrl, "1", body.episode || "1");
+      if (routeGate) throw premiumRequiredError(routeGate);
       return sendApiData(response, 200, await watchRoute(body.kind, body.title, body.detailUrl));
     }
     if (request.method === "POST" && pathname === "/api/content/watch-routes") {
       const body = await readBody(request);
+      const routesGateUser = await resolveOptionalUser(request);
+      const routesGate = episodeGateState(
+        routesGateUser,
+        body.kind,
+        body.detailUrl,
+        body.season || "1",
+        body.episode || "1"
+      );
+      if (routesGate) throw premiumRequiredError(routesGate);
       return sendApiData(response, 200, {
         routes: await watchRoutes(
           body.kind,
@@ -2880,7 +3082,19 @@ async function handleContentApi(request, response, pathname, url) {
     }
     return sendApiError(response, 404, "Content API route not found.");
   } catch (error) {
-    return sendApiError(response, 400, error.message || "Content request failed.");
+    const status = error && error.statusCode ? error.statusCode : 400;
+    if (error && error.code) {
+      // Structured errors (e.g. 402 PREMIUM_REQUIRED) carry machine-readable
+      // code + upgrade payload so clients can open the payment sheet.
+      return sendJson(response, status, {
+        ok: false,
+        data: null,
+        error: error.message || "Content request failed.",
+        code: error.code,
+        upgrade: error.upgrade || null
+      });
+    }
+    return sendApiError(response, status, error.message || "Content request failed.");
   }
 }
 

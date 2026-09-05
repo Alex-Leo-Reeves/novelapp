@@ -1489,7 +1489,43 @@ body {
   border-bottom: 1px solid var(--tv-line);
   margin-bottom: 6px;
 }
-.tv-episode-card.has-progress {
+/* ── Free-tier episode locks + premium plan picker ─────────────────────── */
+.tv-episode-card.locked {
+  opacity: 0.55;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+}
+.tv-payment-plans {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.tv-payment-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  padding: 18px 22px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid transparent;
+  border-radius: 14px;
+  color: var(--tv-text);
+  cursor: pointer;
+  min-width: 240px;
+  text-align: center;
+}
+.tv-payment-plan.selected,
+.tv-payment-plan:focus,
+.tv-payment-plan.tv-focused {
+  border-color: var(--tv-cyan);
+  background: rgba(0, 229, 255, 0.10);
+}
+.tv-payment-plan-title { font-size: 18px; font-weight: 700; }
+.tv-payment-plan-amount { font-size: 22px; font-weight: 800; color: var(--tv-cyan); }
+.tv-payment-plan-blurb { font-size: 13px; color: var(--tv-text-muted); line-height: 1.4; }
+.tv-payment-selected { font-size: 16px; font-weight: 700; color: var(--tv-cyan); margin-bottom: 10px; }
+
   border-color: var(--tv-green);
   background: rgba(16, 185, 129, 0.1);
 }

@@ -465,6 +465,18 @@
 
     currentEpisodeIndex = Math.max(0, Math.min(index, episodeList.length - 1));
     var ep = episodeList[currentEpisodeIndex] || {};
+
+    // Server-enforced free-tier lock: this episode was flagged locked by the
+    // backend (402 PREMIUM_REQUIRED tier). Never attempt playback.
+    if (ep && ep.locked) {
+      showLoading(false);
+      showFatalOverlay('This episode is locked. Free access includes only the first episodes — Go Premium to unlock all.');
+      document.dispatchEvent(new CustomEvent('tvpremiumgate', {
+        detail: { hard: true, premiumRequired: true, title: currentMedia && currentMedia.title,
+          message: 'This episode is locked. Go Premium to unlock every episode.' }
+      }));
+      return;
+    }
     resumePosition = 0;
     pendingEmbedResumeT = 0;
 
@@ -529,13 +541,28 @@
 
       if (currentMedia && !currentMedia.isLiveChannel) {
         showServerStatus('Searching servers…');
-        var routes = await NovaApi.fetchWatchRoutes(
-          currentMedia.mediaKind,
-          currentMedia.title,
-          currentMedia.detailPageUrl,
-          ep.url || '',
-          ep.chapterNumber
-        ).catch(function () { return []; });
+        var routes = [];
+        try {
+          routes = await NovaApi.fetchWatchRoutes(
+            currentMedia.mediaKind,
+            currentMedia.title,
+            currentMedia.detailPageUrl,
+            ep.url || '',
+            ep.chapterNumber
+          );
+        } catch (routeErr) {
+          if (routeErr && routeErr.premiumRequired) {
+            // Server refused: locked episode (402 PREMIUM_REQUIRED). Do not
+            // fall back to client embeds — the paywall is server-side.
+            showLoading(false);
+            showFatalOverlay(routeErr.message || 'This episode is locked.');
+            document.dispatchEvent(new CustomEvent('tvpremiumgate', {
+              detail: { hard: true, premiumRequired: true, title: currentMedia && currentMedia.title,
+                message: routeErr.message || 'Go Premium to unlock every episode.' }
+            }));
+            return;
+          }
+        }
         routes.forEach(function (r) { candidates.push(r); });
       }
     }
@@ -1170,36 +1197,20 @@
       : (previewLimits.movieMs || 20 * 60 * 1000) / 1000;
 
     if (cur >= capSeconds) {
-      if (graceAvailable()) {
-        elements.video.pause();
-        markGraceUsed();
-        document.dispatchEvent(new CustomEvent('tvpremiumgate', {
-          detail: {
-            title: currentMedia.title,
-            episodic: episodic,
-            message: 'Free preview ended. ' + (episodic
+      elements.video.pause();
+      document.dispatchEvent(new CustomEvent('tvpremiumgate', {
+        detail: {
+          title: currentMedia.title,
+          episodic: episodic,
+          hard: !graceAvailable(),
+          message: graceAvailable()
+            ? 'Free preview ended. ' + (episodic
               ? 'Free accounts watch the first ' + Math.round((previewLimits.episodicFraction || 0.2) * 100) + '% of every episode.'
               : 'Free accounts watch the first 20 minutes of every movie.') + ' Go Premium for unlimited streaming.'
-          }
-        }));
-        // Give a short post-grace buffer then resume for testing
-        setTimeout(function () {
-          if (isPlayerActive && elements.video && elements.video.paused) {
-            var p = elements.video.play();
-            if (p && p.catch) p.catch(function () {});
-          }
-        }, 300);
-      } else {
-        elements.video.pause();
-        document.dispatchEvent(new CustomEvent('tvpremiumgate', {
-          detail: {
-            title: currentMedia.title,
-            episodic: episodic,
-            hard: true,
-            message: 'You have reached the free preview limit. Upgrade to Premium to keep watching without limits.'
-          }
-        }));
-      }
+            : 'You have reached the free preview limit. Upgrade to Premium to keep watching without limits.'
+        }
+      }));
+      if (graceAvailable()) markGraceUsed();
     }
   }
 
