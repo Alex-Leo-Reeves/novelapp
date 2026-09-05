@@ -115,8 +115,8 @@ class TvMediaRepository {
                         val urlParts = chapter.url.split(":")
                         val s = urlParts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "1"
                         val e = urlParts.getOrNull(3)?.takeIf { it.isNotBlank() } ?: chapter.chapterNumber.coerceAtLeast(1).toString()
-                        if (detailType == "movie") "https://nontongo.win/embed/movie/$detailTmdbId"
-                        else "https://nontongo.win/embed/tv/$detailTmdbId/$s/$e"
+                        if (detailType == "movie") "https://www.nontongo.win/embed/movie/$detailTmdbId"
+                        else "https://www.nontongo.win/embed/tv/$detailTmdbId/$s/$e"
                     } else null
                 }
                 DonghuaServer.AUTOEMBED -> {

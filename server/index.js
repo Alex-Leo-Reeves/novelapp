@@ -1940,7 +1940,7 @@ function syntheticMangaPages(chapterUrl) {
  * Used for movies, TV, K-Dramas, cartoons, classics, Nollywood, AND anime —
  * the Android app uses the same list for all of them.
  */
-function embedProviders(mediaType, id, season = "1", episode = "1") {
+function embedProviders(mediaType, id, season = "1", episode = "1", nontongoOverride = "") {
   const movie = mediaType === "movie";
     return [
       {
@@ -1953,7 +1953,11 @@ function embedProviders(mediaType, id, season = "1", episode = "1") {
       },
       {
         provider: "Server 3 (Nontongo)",
-        url: movie ? `https://nontongo.win/embed/movie/${id}` : `https://nontongo.win/embed/tv/${id}/${season}/${episode}`
+        // The bare nontongo.win embeds hang in browsers ("dead website"); movies
+        // and TV must use the www (NontonGo) host. Anime is a different beast:
+        // its TMDB embed is dead too, so it uses the dedicated /anime/ route
+        // (nontongoOverride) when an AniList id is known.
+        url: nontongoOverride || (movie ? `https://www.nontongo.win/embed/movie/${id}` : `https://www.nontongo.win/embed/tv/${id}/${season}/${episode}`)
       },
       {
         provider: "Server 4 (Auto-Link)",
@@ -2605,12 +2609,56 @@ async function watchRoute(kind, title, detailUrl) {
   };
 }
 
+// Best-effort title → AniList id bridge, used so Nontongo's anime route
+// (/anime/{anilistId}/{ep}/play) works even when the title came from a TMDB
+// feed and no anilist:{id} marker was attached. Cached per normalized title.
+const nontongoAnimeTitleCache = new Map();
+async function nontongoAnimeId(title) {
+  try {
+    const q = String(title || "").trim();
+    if (!q) return null;
+    const normalized = q.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (normalized && nontongoAnimeTitleCache.has(normalized)) return nontongoAnimeTitleCache.get(normalized);
+    const res = await Promise.race([
+      fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        },
+        body: JSON.stringify({
+          query: "query($s: String){Page(page:1,perPage:5){media(search:$s,type:ANIME,sort:SEARCH_MATCH){id title{english romaji} synonyms}}}",
+          variables: { s: q }
+        })
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("anilist timeout")), 6000))
+    ]);
+    if (!res || !res.ok) {
+      if (normalized) nontongoAnimeTitleCache.set(normalized, null);
+      return null;
+    }
+    const data = await res.json();
+    const list = (data && data.data && data.data.Page && data.data.Page.media) || [];
+    const m = list[0];
+    const id = (m ? String(m.id) : null);
+    if (normalized) nontongoAnimeTitleCache.set(normalized, id);
+    return id;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function watchRoutes(kind, title, detailUrl, season = "1", episode = "1", episodeMarker = "") {
   const normalizedKind = normalizeContentType(kind);
   const isAnimeKind = normalizedKind === "anime";
   const isDonghuaKind = normalizedKind === "donghua";
   let resolvedDetailUrl = String(detailUrl || "");
   const marker = String(episodeMarker || "").trim();
+  // Keep the AniList id when present (anilist:{id} detail URLs). Nontongo
+  // serves anime from /anime/{anilistId}/{ep}/play — its TMDB embed route is
+  // dead for anime titles.
+  const anilistMatch = /^anilist:(\d+)/i.exec(resolvedDetailUrl);
   // Chapter URLs carry the exact season/episode: tmdb-episode://{id}/{s}/{e}
   // and tmdb-movie://{id}. Let them override the generic 1/1 default so the
   // returned routes point at the EXACT episode the user selected.
@@ -2677,7 +2725,20 @@ async function watchRoutes(kind, title, detailUrl, season = "1", episode = "1", 
 
     const omss = await omssRoute(mediaType, id, season, episode, title);
     if (omss) routes.push(omss);
-    routes.push(...embedProviders(mediaType, id, season, episode).map((provider) => ({
+
+    // Nontongo Server 3: movies/TV use the www embed; anime (when we know the
+    // AniList id) uses the dedicated /anime/ route because the TMDB embed is
+    // dead for anime on this host.
+    let nontongoOverride = "";
+    if (isAnimeKind) {
+      let anilistId = anilistMatch ? anilistMatch[1] : null;
+      if (!anilistId && title) anilistId = await nontongoAnimeId(title);
+      if (anilistId) {
+        nontongoOverride = `https://nontongo.win/anime/${anilistId}/${episode}/play`;
+      }
+    }
+
+    routes.push(...embedProviders(mediaType, id, season, episode, nontongoOverride).map((provider) => ({
       // Server 5 (VidLink ExoPlayer) must be exposed as a NATIVE route: the
       // TV app scrapes the VidLink page in a hidden WebView and plays the
       // resulting .m3u8/.mp4 in LibVLC. All other servers open in the

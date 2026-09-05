@@ -51,8 +51,8 @@ enum class StreamServer(
         "Server 5 (Nontongo)",
         5,
         { id, type, s, e ->
-            if (type == "movie") "https://nontongo.win/embed/movie/$id"
-            else "https://nontongo.win/embed/tv/$id/$s/$e"
+            if (type == "movie") "https://www.nontongo.win/embed/movie/$id"
+            else "https://www.nontongo.win/embed/tv/$id/$s/$e"
         }
     ),
     MULTI_EMBED(
