@@ -9,7 +9,7 @@
  *  - Resume question (Continue / Start over) wherever progress exists
  *  - Nollywood = LIVE Nigerian TV channels + on-demand rails
  *  - Sports = football fixtures (flat ESPN shape) + WWE
- *  - Create Account page + referral codes + guest mode for testing
+ *  - Create Account page + referral codes
  *  - Premium gates wired to the Flutterwave checkout
  */
 
@@ -185,13 +185,12 @@
     toast._timer = setTimeout(function () { toast.classList.remove('active'); }, 2200);
   }
 
-  // ── Splash / Pairing / Guest ───────────────────────────────────────────
+  // ── Splash / Pairing ──────────────────────────────────────────────────
   async function checkAuthAndPairing() {
     var user = NovaApi.getUserSession();
     var splash = document.getElementById('tv-splash-view');
     var pairCodeEl = document.getElementById('tv-pair-code');
     var qrBox = document.getElementById('tv-splash-qr');
-    var guestBtn = document.getElementById('tv-btn-guest-login');
 
     function dismissSplash() {
       if (splash && !splash.classList.contains('hidden')) {
@@ -206,14 +205,6 @@
     }
     appState.dismissSplash = dismissSplash;
 
-    if (guestBtn) {
-      guestBtn.addEventListener('click', function () {
-        var guestUser = { id: 'guest_' + Date.now(), username: 'Guest', plan: 'free', isGuest: true };
-        NovaApi.saveUserSession(guestUser);
-        updateUserBadge(guestUser);
-        dismissSplash();
-      });
-    }
     var accountBtn = document.getElementById('tv-btn-create-account');
     if (accountBtn) accountBtn.addEventListener('click', function () { openAuthView('signup'); });
     var loginBtn = document.getElementById('tv-btn-login');
@@ -230,7 +221,7 @@
       return;
     }
 
-    if (guestBtn) SpatialNav.pushScope(splash, guestBtn);
+    if (accountBtn) SpatialNav.pushScope(splash, accountBtn);
 
     var fallbackUrl = 'https://novelapp1.onrender.com/tv-pair.html';
     if (window.NovaQR && qrBox) NovaQR.render(fallbackUrl, qrBox, 190);
@@ -265,7 +256,7 @@
     var avatar = document.getElementById('tv-user-avatar');
     if (user && name && avatar) {
       var isPrem = user.isPremium || user.plan === 'premium';
-      name.textContent = (user.username || 'Guest') + (isPrem ? ' · PREMIUM' : '');
+      name.textContent = (user.username || 'Account') + (isPrem ? ' · PREMIUM' : '');
       avatar.textContent = (user.username || 'G').charAt(0).toUpperCase();
     }
   }
@@ -1763,7 +1754,7 @@
 
   function referralCodeFor(user) {
     if (!user) return '';
-    var base = (user.id || user.username || 'guest').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    var base = (user.id || user.username || 'NOVA').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     return ('NOVA-' + base).slice(0, 12);
   }
 
@@ -1771,22 +1762,21 @@
     var user = NovaApi.getUserSession();
     var panel = document.createElement('div');
     panel.style.cssText = 'margin:10px 60px 24px;padding:24px;border:1px solid var(--tv-line);border-radius:var(--tv-radius);background:var(--tv-panel-elevated);display:flex;align-items:center;gap:24px;flex-wrap:wrap;';
-    var guest = !user || user.isGuest;
-    var isPrem = user && (user.isPremium || user.plan === 'premium');
-    var statusText = guest
-      ? 'Guest playback is enabled for testing. Create an account to sync your library, refer friends and go Premium.'
+    var isPrem = !!(user && (user.isPremium || user.plan === 'premium'));
+    var statusText = !user
+      ? 'Sign in to sync your library, refer friends and go Premium.'
       : (isPrem ? 'Premium active — unlimited streaming on all your devices.' : 'Free plan — previews are limited. Upgrade for unlimited streaming.');
 
     panel.innerHTML = '<div style="flex:1;min-width:300px;">' +
-      '<h3 class="tv-rail-title">' + (guest ? 'Guest account' : (isPrem ? 'Premium account' : 'Free account')) + '</h3>' +
+      '<h3 class="tv-rail-title">' + (!user ? 'Not signed in' : (isPrem ? 'Premium account' : 'Free account')) + '</h3>' +
       '<p style="color:var(--tv-text-muted);margin-top:6px;">' + statusText + '</p>' +
-      (guest ? '' : '<p style="color:var(--tv-text-muted);margin-top:6px;">Your referral code: <strong style="color:var(--tv-cyan);" id="tv-referral-code"></strong> <button class="tv-btn" id="tv-referral-copy" style="font-size:13px;padding:6px 14px;">Copy</button></p>') +
+      (user ? '<p style="color:var(--tv-text-muted);margin-top:6px;">Your referral code: <strong style="color:var(--tv-cyan);" id="tv-referral-code"></strong> <button class="tv-btn" id="tv-referral-copy" style="font-size:13px;padding:6px 14px;">Copy</button></p>' : '') +
       '</div>';
 
     var actions = document.createElement('div');
     actions.style.cssText = 'display:flex;gap:14px;flex-wrap:wrap;';
 
-    if (guest) {
+    if (!user) {
       var signupBtn = document.createElement('button');
       signupBtn.className = 'tv-btn tv-btn-primary';
       signupBtn.textContent = 'Create Account';
@@ -1795,13 +1785,8 @@
       loginBtn2.className = 'tv-btn';
       loginBtn2.textContent = 'Sign In';
       loginBtn2.addEventListener('click', function () { openAuthView('login'); });
-      var premBtn = document.createElement('button');
-      premBtn.className = 'tv-btn';
-      premBtn.textContent = 'Go Premium';
-      premBtn.addEventListener('click', function () { showPremiumCheckout('Free preview limits apply to guests too — Premium unlocks everything.'); });
       actions.appendChild(signupBtn);
       actions.appendChild(loginBtn2);
-      actions.appendChild(premBtn);
     } else {
       if (!isPrem) {
         var upgradeBtn = document.createElement('button');
@@ -1815,15 +1800,15 @@
       logoutBtn.textContent = 'Sign Out';
       logoutBtn.addEventListener('click', function () {
         NovaApi.saveUserSession(null);
-        updateUserBadge({ username: 'Guest' });
-        switchSection('you');
+        // Guest mode is gone — signing out returns to the pairing splash.
+        location.reload();
       });
       actions.appendChild(logoutBtn);
     }
     panel.appendChild(actions);
     container.appendChild(panel);
 
-    if (!guest) {
+    if (user) {
       var codeEl = panel.querySelector('#tv-referral-code');
       if (codeEl) codeEl.textContent = referralCodeFor(user);
       var copyBtn = panel.querySelector('#tv-referral-copy');

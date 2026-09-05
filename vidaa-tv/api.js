@@ -159,7 +159,7 @@
     };
   }
 
-  // ── Auth (guest stays available; register enables full accounts) ──────
+  // ── Auth (register enables full accounts) ─────────────────────────────
   async function authRegister(username, email, password, recoverySecret, referralCode) {
     var body = {
       username: username || '',
@@ -175,7 +175,7 @@
         id: u.id || '', username: u.username || username || '', email: u.email || email || '',
         authToken: res.data.token, plan: u.plan || 'free',
         billingStatus: u.billingStatus || 'none', paidUntil: u.paidUntil || null,
-        isPremium: !!u.isPremium, isGuest: false
+        isPremium: !!u.isPremium
       };
       saveUserSession(session);
       return session;
@@ -191,7 +191,7 @@
         id: u.id || '', username: u.username || '', email: u.email || email || '',
         authToken: res.data.token, plan: u.plan || 'free',
         billingStatus: u.billingStatus || 'none', paidUntil: u.paidUntil || null,
-        isPremium: !!u.isPremium, isGuest: false
+        isPremium: !!u.isPremium
       };
       saveUserSession(session);
       return session;
