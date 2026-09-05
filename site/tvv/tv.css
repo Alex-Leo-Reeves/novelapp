@@ -66,6 +66,24 @@ body {
   50% { transform: scale(1.05); box-shadow: 0 0 40px 6px rgba(232, 77, 138, 0.25); }
 }
 
+/* Splash footer — Developed by / Reach me here (parity with the TV app) */
+.tv-splash-footer {
+  margin-top: 34px;
+  text-align: center;
+}
+.tv-splash-dev {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--tv-gold);
+  letter-spacing: 0.5px;
+}
+.tv-splash-contact {
+  margin-top: 6px;
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+
 /* ── Auth (Create Account / Sign In) ─────────────────────────────────── */
 .tv-auth-view {
   position: fixed;
