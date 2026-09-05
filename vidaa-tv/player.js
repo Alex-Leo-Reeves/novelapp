@@ -42,6 +42,8 @@
   var pendingOverrideCandidates = null;
   var previewLimits = null;
   var isLiveStream = false;
+  var fsBackTrapActive = false;   // true while the history back-trap is pushed
+  var docBackKeyBound = false;    // true while the document keydown safety net is on
 
   // Sequential priority walk state
   var raceState = {
@@ -159,6 +161,58 @@
         e.stopPropagation();
         onWatchNowClick();
       });
+    }
+
+    // ── Focus retention (critical for Vidaa remote BACK) ──────────────
+    // Vidaa's WebKit delivers remote keys to the focused element. If the
+    // embed iframe ever gets focus, BACK goes INSIDE the cross-origin iframe
+    // and our player never sees it. Keep focus on OUR container so every
+    // key press (BACK, OK, …) hits the page's key handlers instead.
+    if (elements.container) elements.container.tabIndex = -1;
+    if (elements.embedIframe) elements.embedIframe.tabIndex = -1;
+    window.addEventListener('blur', onWindowBlur);
+    document.addEventListener('focusin', onFocusIn);
+  }
+
+  function onFocusIn() {
+    if (!isPlayerActive) return;
+    try {
+      if (document.activeElement === elements.embedIframe) {
+        refocusContainer();
+      }
+    } catch (e) {}
+  }
+
+  function onWindowBlur() {
+    if (!isPlayerActive) return;
+    // The OS-native player or a TV overlay took focus; pull it back once
+    // things settle — but never steal focus from visible modals/overlays.
+    setTimeout(refocusContainer, 0);
+  }
+
+  function refocusContainer() {
+    if (!isPlayerActive || !elements.container) return;
+    try {
+      if (elements.watchNowOverlay && elements.watchNowOverlay.style.display === 'flex') return;
+      var anyModal = document.querySelector('#tv-player-view .tv-modal.active');
+      if (anyModal) return;
+    } catch (e) {}
+    var ae = document.activeElement;
+    if (!ae || ae === document.body || ae === elements.embedIframe) {
+      try { elements.container.focus(); } catch (e) {}
+    }
+  }
+
+  // Extra BACK safety net: even if SpatialNav's handler chain is bypassed,
+  // a BACK keycode that reaches this page ALWAYS closes the player.
+  function onPlayerBackKey(e) {
+    if (!isPlayerActive) return;
+    var code = e.keyCode || e.which;
+    var BACK = [8, 27, 461, 10009, 10182, 88];
+    if (BACK.indexOf(code) !== -1) {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
     }
   }
 
@@ -355,9 +409,31 @@
     // swallow OK/Enter and restart the whole server walk)
     try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
 
-    // Detect when the user exits fullscreen via Esc/Browser BACK key
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    // Keep focus on OUR page so every remote key (BACK especially) hits our
+    // handlers instead of getting swallowed inside the embed iframe.
+    try { elements.container.focus(); } catch (e) {}
+
+    // Detect when the user exits fullscreen via Esc/Browser BACK key or the
+    // OS-native video player (Vidaa/WebKit). Any fullscreen exit while the
+    // player is active should take the user back.
+    bindExitHandlers();
+
+    // Extra BACK safety net (document capture): closes the player even if the
+    // SpatialNav custom-handler chain is bypassed for any reason.
+    if (!docBackKeyBound) {
+      document.addEventListener('keydown', onPlayerBackKey, true);
+      docBackKeyBound = true;
+    }
+
+    // Push a history state so the TV browser's BACK key always has somewhere
+    // to go. When it pops this entry the player closes (onPopState), even on
+    // browsers that swallow the keydown while fullscreen and never fire
+    // page-level fullscreenchange events.
+    if (window.history && window.history.pushState && !fsBackTrapActive) {
+      window.history.pushState({ tvPlayer: true }, '');
+      fsBackTrapActive = true;
+      window.addEventListener('popstate', onPopState);
+    }
 
     // Max volume + fullscreen from ANY entry point (tab-independent)
     try {
@@ -796,9 +872,15 @@
     } catch (e) {
       // Fullscreen request failed — playback still works
     }
-    // Trap the browser back button: push a state so back exits fullscreen
+    // Trap the browser back button: push a state so back exits fullscreen.
+    // Only push once per player session so repeated Watch Now / episode
+    // presses can't pile up history entries; one BACK press always pops it
+    // and closes the player.
     if (window.history && window.history.pushState) {
-      window.history.pushState({ tvPlayer: true }, '');
+      if (!fsBackTrapActive) {
+        window.history.pushState({ tvPlayer: true }, '');
+        fsBackTrapActive = true;
+      }
       window.addEventListener('popstate', onPopState);
     }
   }
@@ -887,6 +969,13 @@
     elements.video.style.display = 'block';
     elements.video.volume = 1.0;
     elements.video.muted = false;
+    // Force inline playback: without playsinline, Vidaa's WebKit launches the
+    // OS-native fullscreen player which swallows the remote BACK key. Inline
+    // playback inside this full-screen overlay looks identical to the user.
+    try {
+      elements.video.setAttribute('playsinline', '');
+      elements.video.setAttribute('webkit-playsinline', '');
+    } catch (e) {}
 
     var isHls = /\.m3u8(\?|$)/i.test(String(url));
 
@@ -982,8 +1071,13 @@
     embedLoaded = false;
     elements.embedIframe.style.display = 'block';
     elements.embedIframe.removeAttribute('sandbox');
-    elements.embedIframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
-    elements.embedIframe.setAttribute('allowfullscreen', 'true');
+    // IMPORTANT: do NOT grant fullscreen/PiP to the embed. Granting them lets
+    // the embed's <video> launch the OS-native fullscreen player, which then
+    // consumes the remote BACK key so our page never sees it (and the exit
+    // event fires inside the cross-origin iframe). The player view already
+    // fills the screen, so inline playback looks identical to the user.
+    elements.embedIframe.setAttribute('allow', 'autoplay; encrypted-media');
+    elements.embedIframe.removeAttribute('allowfullscreen');
     elements.embedIframe.setAttribute('referrerpolicy', 'origin');
     elements.embedIframe.onload = function () {
       embedLoaded = true;
@@ -1001,12 +1095,15 @@
       if (window.TvAutoplay && window.TvAutoplay.simulateCenterClick) {
         setTimeout(function () {
           window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+          refocusContainer();
         }, 800);
         setTimeout(function () {
           window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+          refocusContainer();
         }, 2200);
         setTimeout(function () {
           window.TvAutoplay.simulateCenterClick(elements.embedIframe);
+          refocusContainer();
         }, 4200);
       }
     };
@@ -1319,15 +1416,71 @@
     }
   }
 
-  // When the user exits fullscreen via Esc/Browser BACK, close the player
+  // When the user exits fullscreen via Esc/Browser BACK, close the player.
+  // Some WebKit builds fire this BEFORE document.webkitFullscreenElement is
+  // cleared, so re-check on the next tick before deciding.
   function onFullscreenChange() {
-    if (isPlayerActive && !document.fullscreenElement && !document.webkitFullscreenElement) {
+    if (!isPlayerActive) return;
+    setTimeout(function () {
+      if (isPlayerActive && !document.fullscreenElement && !document.webkitFullscreenElement) {
+        close();
+      }
+    }, 0);
+  }
+
+  // OS-native video player (Vidaa/WebKit) entered fullscreen — do nothing.
+  function onVideoFullscreenStart() {
+    // No-op: entering native video fullscreen must not close the player.
+  }
+
+  // OS-native video player fullscreen ended — the user pressed BACK while
+  // watching. Vidaa's WebKit plays <video> in its own fullscreen player (or
+  // the embed did) and the BACK key is consumed by it. Close UNCONDITIONALLY:
+  // at this moment document.webkitFullscreenElement may not be cleared yet,
+  // so gating on it can wrongly skip the close.
+  function onVideoFullscreenEnd() {
+    if (isPlayerActive) {
       close();
+    }
+  }
+
+  // Wire up every fullscreen-exit path: Web-API fullscreen change on the
+  // document, the OS-native video player lifecycle (element AND document —
+  // different WebKit builds fire on either), and the history back trap.
+  function bindExitHandlers() {
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitbeginfullscreen', onVideoFullscreenStart);
+    document.addEventListener('webkitendfullscreen', onVideoFullscreenEnd);
+    if (elements.video) {
+      elements.video.addEventListener('webkitbeginfullscreen', onVideoFullscreenStart);
+      elements.video.addEventListener('webkitendfullscreen', onVideoFullscreenEnd);
+    }
+  }
+
+  function unbindExitHandlers() {
+    document.removeEventListener('fullscreenchange', onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+    document.removeEventListener('webkitbeginfullscreen', onVideoFullscreenStart);
+    document.removeEventListener('webkitendfullscreen', onVideoFullscreenEnd);
+    if (elements.video) {
+      elements.video.removeEventListener('webkitbeginfullscreen', onVideoFullscreenStart);
+      elements.video.removeEventListener('webkitendfullscreen', onVideoFullscreenEnd);
+    }
+    window.removeEventListener('popstate', onPopState);
+    fsBackTrapActive = false;
+    if (docBackKeyBound) {
+      document.removeEventListener('keydown', onPlayerBackKey, true);
+      docBackKeyBound = false;
     }
   }
 
   // ── Close & cleanup ────────────────────────────────────────────────────
   function close() {
+    // Already closed: don't double-run cleanup or re-dispatch tvplayerclosed
+    if (!isPlayerActive && elements.container && !elements.container.classList.contains('active')) {
+      return;
+    }
     isPlayerActive = false;
     raceToken++;                 // cancel any in-flight probes
     cancelBingeCountdown();
@@ -1336,11 +1489,8 @@
     hideServerStatus();
     hideWatchNowOverlay();
 
-    // Remove fullscreen change listener
-    document.removeEventListener('fullscreenchange', onFullscreenChange);
-    document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-    // Remove back button trap
-    window.removeEventListener('popstate', onPopState);
+    // Remove fullscreen / native-video / back-button-trap handlers
+    unbindExitHandlers();
 
     if (elements.resumeModal && elements.resumeModal.classList.contains('active')) {
       elements.resumeModal.classList.remove('active');
