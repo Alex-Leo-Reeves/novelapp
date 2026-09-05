@@ -610,25 +610,45 @@
     var chapters = [];
     if (!html) return chapters;
     var seen = {};
-    // Match the chapter href, then find "Chapter N" in the anchor content
-    // that follows (badge imgs/spans can push </a> past any fixed window,
-    // so we scan forward from each match instead of pairing with </a>).
-    var re = /href="(?:https:\/\/weebcentral\.com)?\/chapters\/([A-Za-z0-9]+)"/gi;
+    // jina.ai returns markdown format: [text](url) — match both that and raw hrefs
+    var re = /\]\((?:https:\/\/weebcentral\.com)?\/chapters\/([A-Za-z0-9]+)\)/gi;
     var m;
     while ((m = re.exec(html))) {
       if (seen[m[1]]) continue;
       seen[m[1]] = 1;
-      var windowText = html.substr(m.index, 1600).replace(/<[^>]*>/g, ' ');
-      var numM = /chapter\s*([0-9]+(?:\.[0-9]+)?)/i.exec(windowText);
-      var num = numM ? parseFloat(numM[1]) : 0;
+      // Look backward from the match for "Chapter N" or "Episode N" in the link text
+      var before = html.substr(Math.max(0, m.index - 200), 200);
+      var numM = /(chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i.exec(before);
+      var num = numM ? parseFloat(numM[2]) : 0;
+      var label = numM ? numM[1] : 'Chapter';
       chapters.push({
         id: m[1],
-        title: 'Chapter ' + (num || (chapters.length + 1)),
+        title: label.charAt(0).toUpperCase() + label.slice(1) + ' ' + (num || (chapters.length + 1)),
         url: 'weebcentral-chapter:' + m[1],
         chapterNumber: num,
         seasonNumber: 0,
         sortKey: num || 0
       });
+    }
+    // Fallback: also try raw href format (direct HTML)
+    if (!chapters.length) {
+      var re2 = /href="(?:https:\/\/weebcentral\.com)?\/chapters\/([A-Za-z0-9]+)"/gi;
+      while ((m = re2.exec(html))) {
+        if (seen[m[1]]) continue;
+        seen[m[1]] = 1;
+        var windowText = html.substr(m.index, 1600).replace(/<[^>]*>/g, ' ');
+        var numM = /(chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i.exec(windowText);
+        var num = numM ? parseFloat(numM[2]) : 0;
+        var label = numM ? numM[1] : 'Chapter';
+        chapters.push({
+          id: m[1],
+          title: label.charAt(0).toUpperCase() + label.slice(1) + ' ' + (num || (chapters.length + 1)),
+          url: 'weebcentral-chapter:' + m[1],
+          chapterNumber: num,
+          seasonNumber: 0,
+          sortKey: num || 0
+        });
+      }
     }
     // WeebCentral lists newest-first; specials (e.g. "Chapter 10.5" extras)
     // may have no number in the markup. Infer from parsed neighbours:
@@ -717,26 +737,66 @@
   }
 
   /** Page images for one chapter (reader images endpoint, Android path). */
+  /** Page images for one chapter (reader images endpoint, Android path). */
   async function weebCentralPages(chapterId) {
     var cached = lsGetJson('wc_pages_' + chapterId, 60 * 60 * 1000); // 1 hour
     if (cached && cached.length) return cached;
 
-    var html = await wcFetch(
-      '/chapters/' + encodeURIComponent(chapterId) + '/images?reading_style=long_strip',
-      { directTimeout: 8000, jinaTimeout: 40000 }
-    );
     var pages = [];
-    if (html) {
-      var re = /<img[^>]+src="(https?:\/\/[^"]+)"/gi;
-      var m;
-      while ((m = re.exec(html))) {
-        var u = m[1];
-        if (/broken_image|logo|icon|avatar|badge|brand|\.svg(\?|$)/i.test(u)) continue;
-        if (/\/cover\//i.test(u) && !/\/manga\//i.test(u)) continue;
-        pages.push(u);
+
+    // Method 1: Direct request (works on TV browsers)
+    try {
+      var resp = await fetchWithTimeout(
+        WEEBCENTRAL_BASE + '/chapters/' + encodeURIComponent(chapterId) + '/images?reading_style=long_strip',
+        { headers: WC_HEADERS }, 10000);
+      if (resp.ok) {
+        var html = await resp.text();
+        pages = extractImageUrls(html);
       }
+    } catch (e) {}
+
+    // Method 2: CORS proxy (for desktop browsers)
+    if (!pages.length) {
+      try {
+        var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(
+          WEEBCENTRAL_BASE + '/chapters/' + encodeURIComponent(chapterId) + '/images?reading_style=long_strip');
+        var proxyResp = await fetchWithTimeout(proxyUrl, {}, 15000);
+        if (proxyResp.ok) {
+          var proxyHtml = await proxyResp.text();
+          pages = extractImageUrls(proxyHtml);
+        }
+      } catch (e) {}
     }
+
+    // Method 3: Backend API fallback
+    if (!pages.length) {
+      try {
+        var res = await request('/content/manga-pages', {
+          method: 'POST',
+          body: { chapterUrl: 'weebcentral-chapter:' + chapterId }
+        });
+        if (res.ok && res.data && res.data.data && Array.isArray(res.data.data.pages)) {
+          pages = res.data.data.pages;
+        }
+      } catch (e) {}
+    }
+
     if (pages.length) lsSetJson('wc_pages_' + chapterId, pages);
+    return pages;
+  }
+
+  /** Extract image URLs from HTML */
+  function extractImageUrls(html) {
+    var pages = [];
+    if (!html) return pages;
+    var re = /<img[^>]+src="([^"]+)"/gi;
+    var m;
+    while ((m = re.exec(html))) {
+      var u = m[1];
+      if (/broken_image|logo|icon|avatar|badge|brand|\.svg(\?|$)/i.test(u)) continue;
+      if (/\/cover\//i.test(u) && !/\/manga\//i.test(u)) continue;
+      pages.push(u);
+    }
     return pages;
   }
 
@@ -988,15 +1048,12 @@
     if (kind === 'manga' && /^mangadex:/i.test(detailUrl)) {
       return mangadexChapters(detailUrl.replace(/^mangadex:/i, ''));
     }
-    // WeebCentral items → direct (TV) → same title on MangaDex (desktop
-    // CORS-safe) → reader proxy last resort.
+    // WeebCentral items → direct (TV) → reader proxy last resort.
+    // Do NOT fall back to MangaDex by title — wrong manga.
     if (kind === 'manga' && /^weebcentral:/i.test(detailUrl)) {
       var wcId = detailUrl.replace(/^weebcentral:/i, '');
       var wcChapters = await weebCentralChapters(wcId);
       if (wcChapters.length) return wcChapters;
-
-      var mdChapters = await mangadexChaptersByTitle(titleStr);
-      if (mdChapters.length) return mdChapters;
 
       var jinaHtml = await jinaFetch(
         WEEBCENTRAL_BASE + '/series/' + encodeURIComponent(wcId) + '/full-chapter-list',

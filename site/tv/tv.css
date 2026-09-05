@@ -779,6 +779,12 @@ body {
   background: #000;
   z-index: 100;
   display: none;
+  box-sizing: border-box;
+}
+
+/* Remove padding in fullscreen so video fills the entire screen */
+#tv-player-view:fullscreen {
+  padding: 0;
 }
 
 #tv-player-view.active {
@@ -790,6 +796,13 @@ body {
   height: 100%;
   object-fit: contain;
   cursor: pointer;
+  display: block;
+  margin: 0 auto;
+}
+
+/* In fullscreen, make video fill entire screen */
+#tv-player-view:fullscreen #tv-video-element {
+  object-fit: fill;
 }
 
 #tv-embed-iframe {
@@ -1224,6 +1237,52 @@ body {
 
 .tv-reader-view.active {
   display: flex;
+}
+
+/* Fullscreen manga reader: hide all UI, show only images */
+.tv-reader-view.tv-reader-fullscreen {
+  padding: 0;
+  background: #000;
+}
+
+.tv-reader-view.tv-reader-fullscreen .tv-reader-header,
+.tv-reader-view.tv-reader-fullscreen .tv-reader-chips {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 16px 24px;
+  margin: 0;
+  border: none;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.tv-reader-view.tv-reader-fullscreen .tv-reader-chips {
+  top: auto;
+  bottom: 0;
+}
+
+.tv-reader-view.tv-reader-fullscreen.tv-reader-hide-ui .tv-reader-header,
+.tv-reader-view.tv-reader-fullscreen.tv-reader-hide-ui .tv-reader-chips {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+.tv-reader-view.tv-reader-fullscreen.tv-reader-hide-ui .tv-reader-chips {
+  transform: translateY(100%);
+}
+
+.tv-reader-view.tv-reader-fullscreen .tv-reader-body {
+  padding: 0;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+}
+
+.tv-reader-view.tv-reader-fullscreen .tv-reader-body img {
+  scroll-snap-align: start;
 }
 
 .tv-reader-header {
@@ -1704,5 +1763,37 @@ body {
 @keyframes tv-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* ── Muted-preview pill (auto-start streams begin muted) ─────────────── */
+.tv-muted-pill {
+  position: absolute;
+  bottom: 92px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 106;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: rgba(13, 16, 27, 0.9);
+  border: 2px solid var(--tv-cyan);
+  border-radius: 30px;
+  padding: 12px 28px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  white-space: nowrap;
+  animation: tv-fade-in 0.25s ease;
+}
+.tv-muted-pill-key {
+  background: var(--tv-cyan);
+  color: #05060b;
+  padding: 2px 10px;
+  border-radius: 6px;
+}
+.tv-muted-pill-hidden {
+  display: none !important;
 }
 

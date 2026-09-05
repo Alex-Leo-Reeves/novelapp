@@ -24,6 +24,38 @@
     'House of the Dragon', 'Stranger Things', 'Squid Game', 'Wednesday', 'All of Us Are Dead'
   ];
 
+  // Tab-aware suggestion pools — only show suggestions relevant to the tab
+  var TAB_SUGGESTIONS = {
+    all: POPULAR_SUGGESTIONS,
+    anime: [
+      'Solo Leveling', 'Jujutsu Kaisen', 'Demon Slayer', 'One Piece', 'Attack on Titan',
+      'Naruto Shippuden', 'Bleach: Thousand-Year Blood War', 'Chainsaw Man',
+      'My Hero Academia', 'Death Note', 'Dragon Ball Z', 'Hunter x Hunter',
+      'Mushoku Tensei', 'Frieren', 'Vinland Saga', 'Frieren: Beyond Journey\'s End'
+    ],
+    movie: [
+      'Interstellar', 'Dune: Part Two', 'Oppenheimer', 'Spider-Man', 'Avengers: Endgame',
+      'Inception', 'The Dark Knight', 'Gladiator', 'John Wick', 'The Batman'
+    ],
+    manga: [
+      'Solo Leveling', 'One Piece', 'Berserk', 'Vagabond', 'Kingdom',
+      'Chainsaw Man', 'Jujutsu Kaisen', 'One Punch Man', 'Sakamoto Days',
+      'Lookism', 'Tower of God', 'The Beginning After the End'
+    ],
+    novel: [
+      'Mother of Learning', 'The Beginning After the End', 'Cradle', 'Solo Leveling',
+      'Reverend Insanity', 'Lord of the Mysteries', 'Mushoku Tensei', 'Overgeared',
+      'The Legendary Mechanic', 'I\'m a Spider, So What?'
+    ],
+    comic: ['Batman', 'Spider-Man', 'Superman', 'X-Men', 'Invincible', 'Spawn', 'Watchmen'],
+    kdrama: ['Squid Game', 'Crash Landing on You', 'Goblin', 'Itaewon Class', 'Vincenzo', 'Parasite'],
+    cartoon: ['Avatar', 'Ben 10', 'Teen Titans', 'Rick and Morty', 'Family Guy', 'Adventure Time'],
+    classic: ['The Godfather', 'Casablanca', 'Citizen Kane', 'Psycho', 'Gone with the Wind'],
+    sports: ['Premier League', 'La Liga', 'Champions League', 'WWE', 'NBA', 'UFC'],
+    live: ['Nigerian Channels', 'Ghana TV', 'Sports Live', 'News Live'],
+    nigerian: ['Nollywood Movies', 'Nigerian Series', 'Ghana Movies']
+  };
+
   var appState = {
     currentSection: 'home',
     previousSection: 'home',
@@ -42,6 +74,17 @@
     mangaChapters: [],
     mangaIndex: 0
   };
+
+  // Guard against fast tab-switches (only the latest render writes content)
+  var sectionRenderToken = 0;
+  var lastSectionToken = 0;
+
+  // True when `section` is still the section the user is currently viewing —
+  // stale in-flight renders (from rapid tab switching) abort at their await
+  // points instead of overwriting the newer tab's content.
+  function isLatestSection(section) {
+    return lastSectionToken === sectionRenderToken && appState.currentSection === section;
+  }
 
   document.addEventListener('DOMContentLoaded', initApp);
 
@@ -400,10 +443,18 @@
     var authView = document.getElementById('tv-auth-view');
     if (authView) authView.classList.remove('active');
 
+    // Guard against fast tab-switches: only the LATEST requested section may
+    // write to mainContent. Older in-flight renders are discarded.
+    var myToken = ++sectionRenderToken;
+    lastSectionToken = myToken;
+
     var mainContent = document.getElementById('tv-main-content');
     mainContent.style.display = 'block';
     mainContent.innerHTML = '<div class="tv-loading-spinner"></div>';
     mainContent.scrollTop = 0;
+    window.scrollTo(0, 0); // reset any outer scroll position too
+    var side = document.getElementById('tv-sidebar');
+    if (side) side.scrollTop = 0;
 
     try {
       if (section === 'home') await renderHomeSection(mainContent);
@@ -423,11 +474,16 @@
       else if (section === 'search') renderSearchView();
       else await renderCategorySection(mainContent, section);
     } catch (e) {
-      mainContent.innerHTML = '<div style="padding:60px;color:var(--tv-text-muted);font-size:20px;">' +
-        'Something went wrong loading this section. Press BACK and try again.</div>';
+      // Only show the error if this section is still the one the user wants
+      if (isLatestSection(section)) {
+        mainContent.innerHTML = '<div style="padding:60px;color:var(--tv-text-muted);font-size:20px;">' +
+          'Something went wrong loading this section. Press BACK and try again.</div>';
+      }
     }
-    // Landing at the TOP of every tab, always
-    mainContent.scrollTop = 0;
+    // Only the latest render may reset scroll & focus
+    if (isLatestSection(section)) {
+      mainContent.scrollTop = 0;
+    }
   }
 
   // ── Shared UI helpers ──────────────────────────────────────────────────
@@ -449,7 +505,7 @@
     nigerian: 'NOLLYWOOD', novel: 'NOVEL', manga: 'MANGA', comic: 'COMIC'
   };
 
-  function createCard(item, progressPct) {
+  function createCard(item, progressPct, onClick) {
     var card = document.createElement('div');
     card.className = 'tv-card';
     card.tabIndex = 0;
@@ -470,7 +526,7 @@
 
     card.querySelector('.tv-card-title').textContent = item.title || 'Untitled';
     card.querySelector('.tv-card-subtitle').textContent = item.genre || item.mediaKind || 'NovaRead';
-    card.addEventListener('click', function () { openDetail(item); });
+    card.addEventListener('click', onClick || function () { openDetail(item); });
     return card;
   }
 
@@ -553,10 +609,14 @@
     setTimeout(function () {
       var main = document.getElementById('tv-main-content');
       if (main) main.scrollTop = 0;
-      var first = container.querySelector('.tv-card, .tv-match-card, .tv-channel-card');
-      if (first) {
-        try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); }
-        SpatialNav.focus(first);
+      // Focus the top-most element (search trigger) so the view stays pinned
+      // at the top instead of jumping down to the first poster card.
+      var target = container.querySelector('.tv-search-bar-trigger') ||
+        container.querySelector('.tv-card, .tv-match-card, .tv-channel-card');
+      if (target) {
+        try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+        SpatialNav.focus(target);
+        if (main) main.scrollTop = 0;
       }
     }, 120);
   }
@@ -584,6 +644,7 @@
     container.appendChild(createSearchBarTrigger('🔍 Search all anime, movies, series, light novels...'));
 
     var trendingAnime = await NovaApi.fetchContentHome('anime');
+    if (!isLatestSection('home')) return; // user switched away while loading
     var heroItem = trendingAnime[0] || null;
 
     if (heroItem) {
@@ -612,15 +673,19 @@
     container.appendChild(createRail('🔥 Trending Anime', trendingAnime.slice(0, 18)));
 
     var novels = await NovaApi.fetchNovelsMultiSource(1).catch(function () { return []; });
+    if (!isLatestSection('home')) return; // user switched away while loading
     if (novels.length) container.appendChild(createRail('📚 Popular Novels', novels.slice(0, 18)));
 
     var manga = await NovaApi.fetchContentHome('manga').catch(function () { return []; });
+    if (!isLatestSection('home')) return;
     if (manga.length) container.appendChild(createRail('🎨 Top Manga', manga.slice(0, 18)));
 
     var movies = await NovaApi.fetchContentHome('movie').catch(function () { return []; });
+    if (!isLatestSection('home')) return;
     if (movies.length) container.appendChild(createRail('🎬 New Movies & Series', movies.slice(0, 18)));
 
     var kdrama = await NovaApi.fetchContentHome('kdrama').catch(function () { return []; });
+    if (!isLatestSection('home')) return;
     if (kdrama.length) container.appendChild(createRail('🇰🇷 K-Drama Picks', kdrama.slice(0, 12)));
 
     setTimeout(function () {
@@ -638,6 +703,15 @@
 
   async function renderCategorySection(container, category) {
     var displayName = CATEGORY_LABELS[category] || (category || '').toUpperCase();
+    // Map a fetch-category back to the sidebar section name so the stale-token
+    // guard compares apples to apples (movies↔movie, comics↔comic, …).
+    var mySection = (category === 'movie') ? 'movies' :
+      (category === 'comic') ? 'comics' :
+      (category === 'nigerian') ? 'nollywood' : category;
+    var guard = function () {
+      if (!isLatestSection(mySection)) return true; // stale render — abort
+      return false;
+    };
 
     container.innerHTML = '';
     container.appendChild(createSearchBarTrigger('🔍 Search in ' + displayName + '...'));
@@ -651,6 +725,7 @@
     var hasMore = true;
 
     var items = await NovaApi.fetchContentHome(category, currentPage);
+    if (guard()) return;
     items = filterByTab(items, category);
     spinner.remove();
 
@@ -683,6 +758,7 @@
       loadMoreBtn.textContent = '⏳ Loading more titles...';
       currentPage++;
       var nextItems = await NovaApi.fetchContentHome(category, currentPage);
+      if (guard()) { isLoading = false; return; } // stale — user switched tab
       nextItems = filterByTab(nextItems, category);
       // Skip pages that are entirely wrong-kind (up to 3 tries) instead of
       // showing nothing — keeps "Load More" useful when the backend mixes.
@@ -690,6 +766,7 @@
       while ((!nextItems || nextItems.length === 0) && skipped < 3) {
         currentPage++;
         nextItems = await NovaApi.fetchContentHome(category, currentPage);
+        if (guard()) { isLoading = false; return; }
         nextItems = filterByTab(nextItems, category);
         skipped++;
       }
@@ -1154,10 +1231,26 @@
     }
 
     if (resumeIdx >= 0) {
-      playBtn.innerHTML = '▶ Resume · ' + (resumeSaved.episodeTitle || ('Episode ' + (resumeIdx + 1)));
-      playBtn.onclick = function () { startItem(item, appState.currentEpisodes, resumeIdx); };
+      // Assign Continue button (keep Play button as plain Play)
+      var continueBtn = document.getElementById('tv-detail-btn-continue');
+      if (continueBtn) {
+        continueBtn.style.display = 'inline-block';
+        continueBtn.innerHTML = '▶ Continue · ' + (resumeSaved.episodeTitle || ('Episode ' + (resumeIdx + 1)));
+        continueBtn.onclick = function () {
+          // Jump straight to the saved timestamp (no second modal), then play.
+          if (resumeSaved && resumeSaved.position > 0 && window.TvPlayer) {
+            window.TvPlayer.setResumeSeek(resumeSaved.position);
+          }
+          startItem(item, appState.currentEpisodes, resumeIdx);
+        };
+      }
+      playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span id="tv-detail-btn-play-text">Play</span>';
+      playBtn.onclick = function () { startItem(item, appState.currentEpisodes, 0); };
     } else {
-      playBtn.innerHTML = kindOf(item) === 'novel' ? '📖 Read Novel' : (kindOf(item) === 'manga' ? '📖 Read' : '▶ Play');
+      var continueBtn = document.getElementById('tv-detail-btn-continue');
+      if (continueBtn) continueBtn.style.display = 'none';
+      playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span id="tv-detail-btn-play-text">' +
+        (kindOf(item) === 'novel' ? 'Read Novel' : (kindOf(item) === 'manga' ? 'Read' : 'Play')) + '</span>';
       playBtn.onclick = function () { startItem(item, appState.currentEpisodes, 0); };
     }
     browseBtn.onclick = function () { openEpisodesView(item, appState.currentEpisodes); };
@@ -1468,6 +1561,19 @@
     body.innerHTML = '<div class="tv-loading-spinner"></div>';
     if (chipRow) chipRow.innerHTML = '';
     view.classList.add('active');
+
+    // Enter fullscreen for immersive reading
+    var container = document.getElementById('tv-player-view');
+    if (container) {
+      try {
+        if (container.requestFullscreen) {
+          container.requestFullscreen();
+        } else if (container.webkitRequestFullscreen) {
+          container.webkitRequestFullscreen();
+        }
+      } catch (e) {}
+    }
+
     SpatialNav.pushScope(view, document.getElementById('tv-reader-btn-back'));
     bindReaderKeys();
 
@@ -1513,10 +1619,21 @@
       nextBtn.textContent = 'Next Chapter →';
       nextBtn.addEventListener('click', function () { loadMangaChapter(idx + 1); });
 
+      var backBtn = document.createElement('button');
+      backBtn.className = 'tv-btn';
+      backBtn.tabIndex = 0;
+      backBtn.setAttribute('data-nav', 'true');
+      backBtn.textContent = '📋 Chapters';
+      backBtn.addEventListener('click', function () {
+        closeReaderView();
+        showMangaDetail(appState.readerItem);
+      });
+
       var label = document.createElement('span');
       label.style.cssText = 'color:var(--tv-text-muted);align-self:center;';
-      label.textContent = 'Chapter ' + (ch.chapterNumber || (idx + 1)) + ' of ' + chapters.length;
+      label.textContent = (ch.chapterNumber ? 'Ch. ' + ch.chapterNumber : 'Chapter ' + (idx + 1)) + ' of ' + chapters.length;
 
+      chipRow.appendChild(backBtn);
       chipRow.appendChild(prevBtn);
       chipRow.appendChild(label);
       chipRow.appendChild(nextBtn);
@@ -1525,18 +1642,35 @@
     var pages = await NovaApi.fetchMangaPages(ch.url);
     body.innerHTML = '';
     if (!pages || pages.length === 0) {
-      body.innerHTML = '<p style="color:var(--tv-text-muted)">No pages available for this chapter — try the next one.</p>';
+      body.innerHTML = '<div style="text-align:center;padding:40px 20px;">' +
+        '<p style="color:var(--tv-text-muted);font-size:18px;margin-bottom:16px;">' +
+        'No pages available for this chapter.</p>' +
+        '<p style="color:var(--tv-text-muted);font-size:14px;">' +
+        'WeebCentral images may not load in this browser. Try the same title on MangaDex for reliable reading.</p>' +
+        '</div>';
       return;
     }
+    // Fullscreen mode: hide all UI, show only images
+    view.classList.add('tv-reader-fullscreen');
     pages.forEach(function (pg) {
       var img = document.createElement('img');
       img.src = pg;
       img.referrerPolicy = 'no-referrer';
-      img.style.cssText = 'display:block;max-width:70%;margin:0 auto 12px;border-radius:6px;';
+      img.style.cssText = 'display:block;width:100%;height:100vh;object-fit:contain;margin:0;';
+      img.onerror = function () { this.style.display = 'none'; };
       body.appendChild(img);
     });
     body.scrollTop = 0;
-    if (chipRow) SpatialNav.focus(chipRow.querySelector('.tv-btn-primary'));
+    // Auto-hide UI after 2 seconds, show on mouse move/keypress
+    var hideTimer = setTimeout(function () { view.classList.add('tv-reader-hide-ui'); }, 2000);
+    var showUI = function () {
+      view.classList.remove('tv-reader-hide-ui');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () { view.classList.add('tv-reader-hide-ui'); }, 3000);
+    };
+    document.addEventListener('mousemove', showUI);
+    document.addEventListener('keydown', showUI);
+    document.addEventListener('click', showUI);
   }
 
   function closeReaderView() {
@@ -1797,9 +1931,24 @@
     if (!listEl) return;
     listEl.innerHTML = '';
     var q = (query || '').trim().toLowerCase();
-    var matches = POPULAR_SUGGESTIONS.filter(function (s) {
+    // Tab-aware suggestion pool: while the search view is open, suggestions
+    // follow the tab the user typed from (previousSection), not 'search'.
+    var srcSection = appState.currentSection === 'search'
+      ? (appState.previousSection || 'all')
+      : appState.currentSection;
+    var tabPool = TAB_SUGGESTIONS[tabToSearchType(srcSection)] ||
+      TAB_SUGGESTIONS.all;
+    var matches = tabPool.filter(function (s) {
       return s.toLowerCase().indexOf(q) !== -1;
     }).slice(0, 8);
+    if (matches.length === 0 && q.length >= 2) {
+      // Live results mirror: fetch as-you-type via debounce
+      clearTimeout(appState.searchDebounceTimer);
+      appState.searchDebounceTimer = setTimeout(function () {
+        performSearchAndShowResults(appState.searchQuery, true); // silent (replaces below)
+      }, 500);
+      matches = [q + '…']; // placeholder while searching
+    }
     matches.forEach(function (s) {
       var btn = document.createElement('button');
       btn.className = 'tv-yt-suggestion';
@@ -1842,37 +1991,96 @@
     return false;
   }
 
-  async function performSearchAndShowResults(query) {
+  // Hide search without switching section — used when opening a detail page
+  // from search results so BACK returns to the search results, not the tab.
+  function hideSearchViewOnly() {
+    var searchView = document.getElementById('tv-search-view');
+    if (searchView && searchView.classList.contains('active')) {
+      searchView.classList.remove('active');
+      try { SpatialNav.popScope(); } catch (e) {}
+      return true;
+    }
+    return false;
+  }
+
+  // Map tab name to search type
+  function tabToSearchType(section) {
+    var map = {
+      home: 'all',
+      anime: 'anime',
+      donghua: 'anime',
+      manga: 'manga',
+      comics: 'comic',
+      novels: 'novel',
+      kdrama: 'kdrama',
+      cartoon: 'cartoon',
+      classic: 'classic',
+      movies: 'movie',
+      nollywood: 'nigerian',
+      sports: 'sports',
+      live: 'live'
+    };
+    return map[section] || 'all';
+  }
+
+  async function performSearchAndShowResults(query, silent) {
     addRecentSearch(query);
     var cleanQuery = String(query).trim();
     var mainContent = document.getElementById('tv-search-results');
     var titleEl = document.getElementById('tv-search-results-title');
-    titleEl.textContent = 'Top Results for "' + cleanQuery + '"';
-    mainContent.innerHTML = '<div class="tv-loading-spinner"></div>';
+    // Silent mode = as-you-type live results: always REPLACE the previous
+    // grid so results track what the user is typing (never stack).
+    if (!silent) {
+      titleEl.textContent = 'Top Results for "' + cleanQuery + '"';
+      mainContent.innerHTML = '<div class="tv-loading-spinner"></div>';
+    }
 
-    var results = await NovaApi.searchContent('all', cleanQuery).catch(function () { return []; });
-    mainContent.innerHTML = '';
+    // Filter search by the tab the user is browsing (when typing from within
+    // the search view, that's the tab they came from — previousSection).
+    var srcSection = appState.currentSection === 'search'
+      ? (appState.previousSection || appState.currentSection)
+      : appState.currentSection;
+    var tabType = tabToSearchType(srcSection);
+    var results = await NovaApi.searchContent(tabType, cleanQuery).catch(function () { return []; });
+    // Extra client-side filter to ensure tab purity
+    var kindMap = { all: null, anime: ['anime'], manga: ['manga'], novel: ['novel'], comic: ['comic'], movie: ['movie', 'tv'] };
+    var allowedKinds = kindMap[tabType];
+    if (allowedKinds) {
+      results = results.filter(function(it) { return allowedKinds.indexOf(it.mediaKind) !== -1; });
+    }
+    mainContent.innerHTML = ''; // clear spinner / previous results (silent or not)
 
     if (!results || results.length === 0) {
-      var empty = document.createElement('div');
-      empty.style.cssText = 'padding:60px;font-size:22px;color:var(--tv-text-muted);text-align:center;';
-      empty.textContent = 'No titles found matching "' + cleanQuery + '". Try another keyword.';
-      mainContent.appendChild(empty);
+      if (!silent) {
+        var empty = document.createElement('div');
+        empty.style.cssText = 'padding:60px;font-size:22px;color:var(--tv-text-muted);text-align:center;';
+        empty.textContent = 'No titles found matching "' + cleanQuery + '". Try another keyword.';
+        mainContent.appendChild(empty);
+      }
       return;
     }
 
     var grid = document.createElement('div');
     grid.className = 'tv-search-result-grid';
     grid.setAttribute('data-nav-row', 'true');
-    results.forEach(function (item) { grid.appendChild(createCard(item)); });
+    results.forEach(function (item) {
+      // Pass custom click: hide search (without switching tab) then open detail.
+      var card = createCard(item, null, function () {
+        hideSearchViewOnly();
+        openDetail(item);
+      });
+      grid.appendChild(card);
+    });
     mainContent.appendChild(grid);
-    setTimeout(function () {
-      var first = grid.querySelector('.tv-card');
-      if (first) {
-        try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); }
-        SpatialNav.focus(first);
-      }
-    }, 120);
+    if (!silent) {
+      setTimeout(function () {
+        var first = grid.querySelector('.tv-card');
+        if (first) {
+          try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); }
+          SpatialNav.focus(first);
+        }
+      }, 120);
+    }
   }
 
   // ── Global Back stack (player consumes its own BACK first) ─────────────
