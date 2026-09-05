@@ -212,7 +212,11 @@
 
     if (user) {
       updateUserBadge(user);
-      splash.classList.add('hidden');
+      // Signed-in users still get the branded TV boot splash — just without
+      // the pairing card. It auto-dismisses after a moment.
+      var pairingUi = document.getElementById('tv-splash-pairing');
+      if (pairingUi) pairingUi.style.display = 'none';
+      setTimeout(dismissSplash, 1600);
       if (user.authToken) {
         NovaApi.authMe().then(function (freshUser) {
           if (freshUser) updateUserBadge(freshUser);
@@ -258,6 +262,19 @@
       var isPrem = user.isPremium || user.plan === 'premium';
       name.textContent = (user.username || 'Account') + (isPrem ? ' · PREMIUM' : '');
       avatar.textContent = (user.username || 'G').charAt(0).toUpperCase();
+    }
+    // Header Sign Out — visible whenever an account is signed in.
+    var signoutTop = document.getElementById('tv-signout-top');
+    if (signoutTop) {
+      signoutTop.style.display = user ? '' : 'none';
+      if (user && !signoutTop._wired) {
+        signoutTop._wired = true;
+        signoutTop.addEventListener('click', function () {
+          NovaApi.saveUserSession(null);
+          // Signing out returns to the pairing splash.
+          location.reload();
+        });
+      }
     }
   }
 

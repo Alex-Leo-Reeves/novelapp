@@ -29,30 +29,32 @@
     <p style="color: var(--tv-text-muted); font-size: 18px;">Every Story, One Screen</p>
   </div>
 
-  <div class="tv-pair-card">
-    <div class="tv-qr-box" id="tv-splash-qr">
-      <img id="tv-qr-image" src="" alt="Scan QR Code to pair" />
+  <div id="tv-splash-pairing">
+    <div class="tv-pair-card">
+      <div class="tv-qr-box" id="tv-splash-qr">
+        <img id="tv-qr-image" src="" alt="Scan QR Code to pair" />
+      </div>
+      <div class="tv-pair-info">
+        <h2 style="font-family: var(--tv-font-display); font-size: 26px; font-weight: 700; margin-bottom: 12px;">
+          Sign in with your Phone
+        </h2>
+        <p style="color: var(--tv-text-muted); font-size: 16px; line-height: 1.6; margin-bottom: 14px;">
+          Scan the QR code with your phone camera, or enter this pairing code at
+          <span style="color: var(--tv-pink); font-weight: 600;">novelapp1.onrender.com/tv-pair</span>
+        </p>
+        <div class="tv-pair-code" id="tv-pair-code">------</div>
+        <p style="color: var(--tv-text-dim); font-size: 13px; margin-top: 12px;">Code expires in 5 minutes</p>
+      </div>
     </div>
-    <div class="tv-pair-info">
-      <h2 style="font-family: var(--tv-font-display); font-size: 26px; font-weight: 700; margin-bottom: 12px;">
-        Sign in with your Phone
-      </h2>
-      <p style="color: var(--tv-text-muted); font-size: 16px; line-height: 1.6; margin-bottom: 14px;">
-        Scan the QR code with your phone camera, or enter this pairing code at
-        <span style="color: var(--tv-pink); font-weight: 600;">novelapp1.onrender.com/tv-pair</span>
-      </p>
-      <div class="tv-pair-code" id="tv-pair-code">------</div>
-      <p style="color: var(--tv-text-dim); font-size: 13px; margin-top: 12px;">Code expires in 5 minutes</p>
-    </div>
-  </div>
 
-  <div style="margin-top: 30px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
-    <button class="tv-btn tv-btn-primary" tabindex="0" data-nav="true" id="tv-btn-create-account" style="font-size: 19px; padding: 15px 36px;">
-      Create Account
-    </button>
-    <button class="tv-btn" tabindex="0" data-nav="true" id="tv-btn-login" style="font-size: 19px; padding: 15px 36px;">
-      Sign In
-    </button>
+    <div style="margin-top: 30px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+      <button class="tv-btn tv-btn-primary" tabindex="0" data-nav="true" id="tv-btn-create-account" style="font-size: 19px; padding: 15px 36px;">
+        Create Account
+      </button>
+      <button class="tv-btn" tabindex="0" data-nav="true" id="tv-btn-login" style="font-size: 19px; padding: 15px 36px;">
+        Sign In
+      </button>
+    </div>
   </div>
 </div>
 
@@ -126,6 +128,10 @@
         <div class="tv-avatar" id="tv-user-avatar">G</div>
         <span id="tv-user-name" style="font-weight: 600; font-size: 15px;">Account</span>
       </div>
+      <button class="tv-btn" id="tv-signout-top" tabindex="0" data-nav="true"
+        style="display:none; width:100%; margin-top:10px; justify-content:center; font-size:14px; padding:10px 14px;">
+        ⏏ Sign Out
+      </button>
     </div>
   </nav>
 
