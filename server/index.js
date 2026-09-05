@@ -308,6 +308,7 @@ const CONSUMET_ANIME_ALIASES = {
     unity: "animeunity",
     sama: "animesama",
     pahe: "consumetpahe",
+    animepahe: "consumetpahe",
     animepaheconsumet: "consumetpahe",
     "consumet-pahe": "consumetpahe",
     kaa: "kickassanime",
@@ -1953,10 +1954,12 @@ function embedProviders(mediaType, id, season = "1", episode = "1", nontongoOver
       },
       {
         provider: "Server 3 (Nontongo)",
-        // The bare nontongo.win embeds hang in browsers ("dead website"); movies
-        // and TV must use the www (NontonGo) host. Anime is a different beast:
-        // its TMDB embed is dead too, so it uses the dedicated /anime/ route
-        // (nontongoOverride) when an AniList id is known.
+        // www host: movie serves 200 directly; /embed/tv 301s to the bare host
+        // (same page, frameable either way — no X-Frame-Options). Anime uses
+        // this same TMDB embed when a TMDB id resolved; only AniList-only
+        // anime fall back to nontongoOverride (embed-new.php — the iframe
+        // nontongo.win itself loads; the /anime/{id}/{ep}/play router page
+        // sends X-Frame-Options: sameorigin and can never be framed).
         url: nontongoOverride || (movie ? `https://www.nontongo.win/embed/movie/${id}` : `https://www.nontongo.win/embed/tv/${id}/${season}/${episode}`)
       },
       {
@@ -2726,15 +2729,19 @@ async function watchRoutes(kind, title, detailUrl, season = "1", episode = "1", 
     const omss = await omssRoute(mediaType, id, season, episode, title);
     if (omss) routes.push(omss);
 
-    // Nontongo Server 3: movies/TV use the www embed; anime (when we know the
-    // AniList id) uses the dedicated /anime/ route because the TMDB embed is
-    // dead for anime on this host.
+    // Nontongo Server 3: movies/TV and anime alike use the TMDB embed on the
+    // www host — it is frameable (frame-ancestors *) and works for most anime
+    // titles (e.g. Doraemon, TMDB 65733). The /anime/{id}/{ep}/play router
+    // page sends X-Frame-Options: sameorigin, so it can NEVER be framed from
+    // our app. Only when no TMDB id resolved do we fall back to Nontongo's
+    // own anime embed (embed-new.php) — the exact iframe nontongo.win itself
+    // loads inside that router page.
     let nontongoOverride = "";
-    if (isAnimeKind) {
+    if (isAnimeKind && !tmdbMatch) {
       let anilistId = anilistMatch ? anilistMatch[1] : null;
       if (!anilistId && title) anilistId = await nontongoAnimeId(title);
       if (anilistId) {
-        nontongoOverride = `https://nontongo.win/anime/${anilistId}/${episode}/play`;
+        nontongoOverride = `https://nontongo.win/anime/embed-new.php?id=${anilistId}&e=${encodeURIComponent(episode)}`;
       }
     }
 
