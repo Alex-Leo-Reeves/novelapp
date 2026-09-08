@@ -1,0 +1,7 @@
+[build]
+  # No build step required for the static landing directory
+  command = "echo 'no build'"
+  publish = "site"
+
+[context.production.environment]
+  NODE_ENV = "production"
