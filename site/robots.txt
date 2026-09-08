@@ -1,4 +1,8 @@
 User-agent: *
-Allow: /
+Disallow:
+
+# Allow Googlebot explicitly (redundant but explicit)
+User-agent: Googlebot
+Disallow:
 
 Sitemap: https://novelapp1.onrender.com/sitemap.xml
