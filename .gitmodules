@@ -1,0 +1,3 @@
+[submodule "server/ma-server"]
+	path = server/ma-server
+	url = https://github.com/JustANormalChurro/SimplStream.git
