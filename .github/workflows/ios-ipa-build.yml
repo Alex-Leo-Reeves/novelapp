@@ -14,6 +14,7 @@ on:
       - "gradlew"
       - "iosApp/**"
       - "local.defaults.properties"
+      - "scripts/verify-ios-info-plist.py"
       - "settings.gradle.kts"
 
 permissions:
