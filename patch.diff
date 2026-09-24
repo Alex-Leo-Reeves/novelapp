@@ -1,0 +1,10 @@
+--- iosApp/project.yml
++++ iosApp/project.yml
+@@ -32,2 +32,3 @@
+           cd "$SRCROOT/.."
++          ./gradlew :composeApp:syncComposeResourcesForIos
+           ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
+@@ -53,2 +54,3 @@
+           - "-framework"
+           - "ComposeApp"
++          - "-ObjC"
