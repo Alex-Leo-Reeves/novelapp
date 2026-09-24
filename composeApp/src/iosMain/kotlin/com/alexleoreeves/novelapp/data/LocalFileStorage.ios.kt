@@ -120,7 +120,8 @@ actual suspend fun saveDownloadedVideo(
     parentId: String,
     episodeNumber: Int,
     sourceUrl: String,
-    headersJson: String?
+    headersJson: String?,
+    onProgress: ((Float) -> Unit)?
 ): DownloadedVideoFile = withContext(Dispatchers.Default) {
     runCatching {
         if (!sourceUrl.startsWith("http", ignoreCase = true)) {

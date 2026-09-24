@@ -455,7 +455,7 @@ fun MediaDetailScreen(
 
                         if (downloadQualities.isNotEmpty()) {
                             val processDownload = { quality: CineProSource ->
-                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Default) {
                                     val saved = saveDownloadedVideo(
                                         parentId = item.id,
                                         episodeNumber = ep.episodeNumber,
@@ -1248,7 +1248,7 @@ fun MediaDetailScreen(
                                             val downloadQualities = resolveDownloadableQualitiesCommon(httpClient, sourceUrl, tmdbContext = movieTmdbContext, onStatus = { msg -> statusText = msg })
                                             if (downloadQualities.isNotEmpty()) {
                                                 val processDownload = { quality: CineProSource ->
-                                                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Default) {
                                                         val saved = saveDownloadedVideo(
                                                             parentId = item.id,
                                                             episodeNumber = 1,
