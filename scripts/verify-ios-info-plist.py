@@ -10,7 +10,7 @@ XcodeGen reads `info:` as "generate a plist at this path", not "use this file",
 so `xcodegen generate` overwrote the authored plist with its own stub. The stub
 hardcodes CFBundleShortVersionString=1.0 and CFBundleVersion=1, and carries none
 of this app's keys (no NSAppTransportSecurity, no UIApplicationSceneManifest, no
-UILaunchStoryboardName, no UIBackgroundModes, no UIScreenFullScreen, and no API
+UILaunchStoryboardName, no UIBackgroundModes, no UIRequiresFullScreen, and no API
 keys). The app still installed and launched, then showed a blank screen because
 BuildKonfig.ios.kt silently falls back to mock credentials for missing keys.
 
