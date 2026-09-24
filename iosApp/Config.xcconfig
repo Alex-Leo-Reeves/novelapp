@@ -1,0 +1,23 @@
+// NovaRead — API credentials passed into the iOS bundle via $(VAR) expansion in Info.plist.
+//
+// This file holds PLACEHOLDER values only and contains no secrets. It exists so that
+// `xcodegen generate` succeeds on a fresh clone: project.yml lists it under `configFiles`
+// for Debug and Release, and XcodeGen fails when a referenced config file is missing.
+//
+// The iOS CI workflow (.github/workflows/ios-ipa-build.yml, step "Write API key xcconfig")
+// overwrites this file with the real values from repository secrets before generating the
+// project, so committed placeholders never reach a release build.
+//
+// Any value defined here becomes a build setting, which is what makes the
+// `$(RAPID_API_KEY)`-style entries in Info.plist expand correctly.
+
+RAPID_API_KEY = mock_rapid_api_key
+RAPID_API_HOST = webnovel.p.rapidapi.com
+MANGADEX_CLIENT_ID = mock_client_id
+MANGADEX_CLIENT_SECRET = mock_client_secret
+MANGADEX_USERNAME = mock_user
+MANGADEX_PASSWORD = mock_pass
+TMDB_API_KEY = mock_tmdb_api_key
+TMDB_READ_ACCESS_TOKEN = mock_tmdb_read_access_token
+GROQ_API_KEY = mock_groq_api_key
+GROQ_CLOUD_API_KEY = mock_groq_api_key
