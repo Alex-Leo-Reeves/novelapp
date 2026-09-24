@@ -46,9 +46,7 @@ kotlin {
     ).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
-            isStatic = false
-            binaryOption("bundleId", "com.alexleoreeves.novelapp.ios")
-            freeCompilerArgs += listOf("-Xdisable-phases=Devirtualization")
+            isStatic = true
         }
     }
 

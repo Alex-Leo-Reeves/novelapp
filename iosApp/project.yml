@@ -50,9 +50,9 @@ targets:
           - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         OTHER_LDFLAGS:
           - "$(inherited)"
-    dependencies:
-      - framework: "../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/ComposeApp.framework"
-        embed: true
+          - "-framework"
+          - "ComposeApp"
+
 schemes:
   NovaRead:
     build:
