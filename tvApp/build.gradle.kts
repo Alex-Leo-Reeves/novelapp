@@ -32,8 +32,8 @@ android {
         applicationId = "com.alexleoreeves.novelapp.tv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 45
-        versionName = "1.45"
+        versionCode = 46
+        versionName = "1.46"
 
         // Exclude x86/x86_64 to cut APK size in half for TV
         ndk {

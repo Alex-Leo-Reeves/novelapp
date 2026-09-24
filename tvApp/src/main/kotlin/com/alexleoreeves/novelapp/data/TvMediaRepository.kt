@@ -34,6 +34,7 @@ class TvMediaRepository {
     }
 
     private val httpClient = platformHttpClient()
+    val client get() = httpClient
     private val tmdbScraper = TMDBMovieScraper(httpClient)
     private val dramaScraper = DramaCoolScraper(httpClient)
     private val cartoonScraper = KimCartoonScraper(httpClient)
@@ -123,7 +124,7 @@ class TvMediaRepository {
                 isDonghua -> {
                     val effectiveDonghua = donghuaServer ?: DonghuaServer.MOVIE_SERVER_1
                     when (effectiveDonghua) {
-                        DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2 -> {
+                        DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2, DonghuaServer.VIDSRC_SBS -> {
                             // TMDB-embed servers
                             val tmdbEps = fetchTmdbChaptersForAnime(item)
                             if (tmdbEps.isNotEmpty()) tmdbEps
@@ -518,6 +519,11 @@ class TvMediaRepository {
                     parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
                         StreamServer.VIDSRC_TO.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)
                     } ?: StreamServer.VIDSRC_TO.buildEmbedUrl(item.id, "tv", "1", chapter.chapterNumber.toString())
+                }
+                DonghuaServer.VIDSRC_SBS -> {
+                    parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
+                        StreamServer.VIDSRC_SBS.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)
+                    } ?: StreamServer.VIDSRC_SBS.buildEmbedUrl(item.id, "tv", "1", chapter.chapterNumber.toString())
                 }
                 DonghuaServer.ANIME_SERVER_5, DonghuaServer.ANIME_SERVER_3 -> {
                     // Anivexa-backed: resolve stream through the backend

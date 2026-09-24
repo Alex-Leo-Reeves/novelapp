@@ -225,7 +225,6 @@ actual fun AnimePlayerScreen(
     val exoPlayer = remember(resolvedUrl) {
         if (resolvedUrl != null) {
             val url = resolvedUrl!!
-            val cache = NovelAppVideoCache.get(context)
             val requestHeaders = resolvedSourceUrl.playerHeaders(streamHeadersJson)
             val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent(PLAYER_USER_AGENT)
@@ -279,7 +278,7 @@ actual fun AnimePlayerScreen(
 
                     setMediaItem(mediaItem)
                     prepare()
-                    if (initialPositionMs > 0L) seekTo(initialPositionMs)
+                    seekTo(initialPositionMs.coerceAtLeast(0L))
                     playWhenReady = true
                 }
         } else null
@@ -946,13 +945,7 @@ private fun PlayerLoadingOverlay(
     }
 }
 
-@androidx.annotation.OptIn(UnstableApi::class)
-private object NovelAppVideoCache {
-    private var cache: SimpleCache? = null
-    fun get(context: android.content.Context): SimpleCache = cache ?: synchronized(this) {
-        cache ?: SimpleCache(File(context.cacheDir, "video-cache"), LeastRecentlyUsedCacheEvictor(512L * 1024L * 1024L), StandaloneDatabaseProvider(context)).also { cache = it }
-    }
-}
+
 
 /**
  * Route a stream through our backend HLS proxy (`/api/anivexa/proxy?url=&ref=`),

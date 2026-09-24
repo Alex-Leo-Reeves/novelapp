@@ -71,12 +71,16 @@ class ChunkScheduler(
         try {
             _active.value += 1
             val end = chunk.startOffset + chunk.byteLength - 1L
-            val data = transport.fetchRange(
-                request.sourceUrl,
-                chunk.startOffset,
-                end,
-                parseDownloadHeaders(request.headersJson)
-            )
+            val data = if (chunk.chunkUrl != null) {
+                transport.fetchFull(chunk.chunkUrl, parseDownloadHeaders(request.headersJson))
+            } else {
+                transport.fetchRange(
+                    request.sourceUrl,
+                    chunk.startOffset,
+                    end,
+                    parseDownloadHeaders(request.headersJson)
+                )
+            }
             if (data == null) return FetchOutcome.Retry
             tokenLock.withLock { bucket.consume(data.size.toLong()) }
             return FetchOutcome.Data(data)

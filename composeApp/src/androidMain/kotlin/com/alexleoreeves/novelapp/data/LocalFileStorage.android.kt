@@ -134,7 +134,8 @@ actual suspend fun saveDownloadedVideo(
     parentId: String,
     episodeNumber: Int,
     sourceUrl: String,
-    headersJson: String?
+    headersJson: String?,
+    onProgress: ((Float) -> Unit)?
 ): DownloadedVideoFile = withContext(Dispatchers.IO) {
     runCatching {
         if (!sourceUrl.startsWith("http", ignoreCase = true)) {
@@ -154,7 +155,7 @@ actual suspend fun saveDownloadedVideo(
         val mediaTitle = "${parentId.safePathPart()}_EP${episodeNumber}"
 
         if (sourceUrl.isHlsLikeUrl()) {
-            val saved = saveHlsDownload(sourceUrl, internalDir, headersJson)
+            val saved = saveHlsDownload(sourceUrl, internalDir, headersJson, onProgress)
             // Copy to public MediaStore as a playlist marker
             val ctx = AppContextHolder.applicationContext
             if (ctx != null && saved.success) {
@@ -168,7 +169,7 @@ actual suspend fun saveDownloadedVideo(
                 .takeIf { it.length in 2..5 }
                 ?: "mp4"
             val file = File(internalDir, "episode.$extension")
-            val size = downloadToFile(sourceUrl, file, headersJson)
+            val size = downloadToFile(sourceUrl, file, headersJson, onProgress)
 
             // Copy to public MediaStore for user access
             val ctx = AppContextHolder.applicationContext
@@ -250,43 +251,49 @@ private fun String.isHlsLikeUrl(): Boolean {
         Regex("""/(playlist|manifest|hls)(/|$)""").containsMatchIn(clean)
 }
 
-private fun saveHlsDownload(sourceUrl: String, dir: File, headersJson: String?): DownloadedVideoFile {
+private fun saveHlsDownload(sourceUrl: String, dir: File, headersJson: String?, onProgress: ((Float) -> Unit)?): DownloadedVideoFile {
     val masterText = downloadText(sourceUrl, headersJson)
     val (playlistUrl, playlistText) = selectMediaPlaylist(sourceUrl, masterText, headersJson)
     val playlistFile = File(dir, "playlist.m3u8")
     var totalBytes = 0L
     var segmentIndex = 0
     var keyIndex = 0
-    val rewritten = playlistText
-        .lineSequence()
-        .map { line ->
-            val trimmed = line.trim()
-            when {
-                trimmed.startsWith("#EXT-X-KEY", ignoreCase = true) && "URI=\"" in trimmed -> {
-                    val keyUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
-                    if (keyUri.isNullOrBlank()) line else {
-                        val keyUrl = resolveUrl(playlistUrl, keyUri)
-                        val keyFile = File(dir, "key_${keyIndex++}.bin")
-                        totalBytes += downloadToFile(keyUrl, keyFile, headersJson)
-                        line.replace("""URI="$keyUri"""", """URI="${keyFile.name}"""")
-                    }
-                }
-                trimmed.isBlank() || trimmed.startsWith("#") -> line
-                else -> {
-                    val segmentUrl = resolveUrl(playlistUrl, trimmed)
-                    val extension = segmentUrl.substringBefore("?")
-                        .substringBefore("#")
-                        .substringAfterLast(".", "ts")
-                        .takeIf { it.length in 2..5 }
-                        ?: "ts"
-                    val segmentFile = File(dir, "seg_${segmentIndex.toString().padStart(5, '0')}.$extension")
-                    segmentIndex += 1
-                    totalBytes += downloadToFile(segmentUrl, segmentFile, headersJson)
-                    segmentFile.name
+    
+    val lines = playlistText.lines()
+    val totalSegments = lines.count { it.isNotBlank() && !it.startsWith("#") }.coerceAtLeast(1)
+    var processedSegments = 0
+
+    val rewritten = lines.map { line ->
+        val trimmed = line.trim()
+        when {
+            trimmed.startsWith("#EXT-X-KEY", ignoreCase = true) && "URI=\"" in trimmed -> {
+                val keyUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
+                if (keyUri.isNullOrBlank()) line else {
+                    val keyUrl = resolveUrl(playlistUrl, keyUri)
+                    val keyFile = File(dir, "key_${keyIndex++}.bin")
+                    totalBytes += downloadToFile(keyUrl, keyFile, headersJson)
+                    line.replace("""URI="$keyUri"""", """URI="${keyFile.name}"""")
                 }
             }
+            trimmed.isBlank() || trimmed.startsWith("#") -> line
+            else -> {
+                val segmentUrl = resolveUrl(playlistUrl, trimmed)
+                val extension = segmentUrl.substringBefore("?")
+                    .substringBefore("#")
+                    .substringAfterLast(".", "ts")
+                    .takeIf { it.length in 2..5 }
+                    ?: "ts"
+                val segmentFile = File(dir, "seg_${segmentIndex.toString().padStart(5, '0')}.$extension")
+                segmentIndex += 1
+                totalBytes += downloadToFile(segmentUrl, segmentFile, headersJson)
+                
+                processedSegments++
+                onProgress?.invoke(processedSegments.toFloat() / totalSegments.toFloat())
+                
+                segmentFile.name
+            }
         }
-        .joinToString("\n")
+    }.joinToString("\n")
     playlistFile.writeText(rewritten)
     return DownloadedVideoFile(playlistFile.toURI().toString(), totalBytes + playlistFile.length())
 }
@@ -319,12 +326,26 @@ private fun downloadText(url: String, headersJson: String?): String {
     }
 }
 
-private fun downloadToFile(url: String, file: File, headersJson: String?): Long {
+private fun downloadToFile(url: String, file: File, headersJson: String?, onProgress: ((Float) -> Unit)? = null): Long {
     file.parentFile?.mkdirs()
     val downloaded = runCatching {
-        openConnection(url, headersJson).inputStream.use { input ->
+        val conn = openConnection(url, headersJson)
+        val totalLen = conn.contentLength.takeIf { it > 0 } ?: 0
+        conn.inputStream.use { input ->
             file.outputStream().use { output ->
-                input.copyTo(output)
+                if (onProgress != null && totalLen > 0) {
+                    val buffer = ByteArray(8 * 1024)
+                    var bytesCopied = 0L
+                    var bytes = input.read(buffer)
+                    while (bytes >= 0) {
+                        output.write(buffer, 0, bytes)
+                        bytesCopied += bytes
+                        onProgress.invoke(bytesCopied.toFloat() / totalLen.toFloat())
+                        bytes = input.read(buffer)
+                    }
+                } else {
+                    input.copyTo(output)
+                }
             }
         }
         file.length()

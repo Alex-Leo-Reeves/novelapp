@@ -104,6 +104,27 @@ class NovelSearchRepository(
     private val wcoStreamScraper = WcoStreamScraper(httpClient)
     private val youtubeNollywoodScraper = YouTubeNollywoodScraper(httpClient)
 
+    private val parallelResolver = ParallelStreamResolver(
+        httpClient = httpClient,
+        anivexaApi = anivexaApi,
+        animeXinScraper = AnimeXinScraper(httpClient),
+        aninekoScraper = aninekoScraper,
+        animePaheScraper = animePaheScraper,
+        animeHeavenScraper = animeHeavenScraper,
+        aniDaoScraper = aniDaoScraper,
+        donghuaStreamScraper = DonghuaSiteScraper.donghuaStream(httpClient),
+        tmdbScraper = TMDBMovieScraper(httpClient)
+    )
+
+    suspend fun resolveBestStream(
+        item: UnifiedSearchResult,
+        chapterUrl: String?,
+        chapterNumber: Int?,
+        seasonNumber: Int? = null,
+        preferredAudio: String = "sub"
+    ) = parallelResolver.resolveBestStream(item, chapterUrl, chapterNumber, seasonNumber, preferredAudio)
+
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Unified Search — Novels + Manga + Anime all simultaneously
     // ─────────────────────────────────────────────────────────────────────────

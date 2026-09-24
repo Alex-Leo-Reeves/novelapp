@@ -241,12 +241,13 @@ class LocalDownloadRepository {
         title: String? = null
     ): WatchHistoryItem? {
         val history = loadIndex().watchHistory
-        return history.firstOrNull { it.streamUrl == streamUrl }
-            ?: if (!parentId.isNullOrBlank() && episodeNumber != null && episodeNumber > 0) {
-                history.firstOrNull { it.parentId == parentId && it.episodeNumber == episodeNumber }
-            } else if (!title.isNullOrBlank()) {
-                history.firstOrNull { it.title.equals(title, ignoreCase = true) || it.episodeTitle.equals(title, ignoreCase = true) }
-            } else null
+        return if (!parentId.isNullOrBlank() && episodeNumber != null) {
+            history.firstOrNull { it.parentId == parentId && it.episodeNumber == episodeNumber }
+        } else if (!title.isNullOrBlank() && episodeNumber != null) {
+            history.firstOrNull { it.title.equals(title, ignoreCase = true) && it.episodeNumber == episodeNumber }
+        } else {
+            history.firstOrNull { it.streamUrl == streamUrl }
+        }
     }
 
     fun getSearchHistory(tab: String): List<SearchHistoryItem> {
@@ -320,11 +321,39 @@ class LocalDownloadRepository {
         saveIndex(
             idx.copy(
                 watchHistory = (listOf(updated) + idx.watchHistory.filter {
-                    val sameParentAndEp = item.parentId.isNotBlank() && item.episodeNumber > 0 &&
-                        it.parentId == item.parentId && it.episodeNumber == item.episodeNumber
-                    val sameStream = it.streamUrl == item.streamUrl
-                    !sameParentAndEp && !sameStream
+                    val sameParent = item.parentId.isNotBlank() && it.parentId == item.parentId
+                    val sameTitle = item.title.isNotBlank() && it.title.equals(item.title, ignoreCase = true)
+                    
+                    val isMatch = if (sameParent) {
+                        it.episodeNumber == item.episodeNumber
+                    } else if (sameTitle) {
+                        it.episodeNumber == item.episodeNumber
+                    } else {
+                        it.streamUrl == item.streamUrl
+                    }
+                    !isMatch
                 }).take(MAX_HISTORY_ITEMS)
+            )
+        )
+    }
+
+    fun clearWatchProgress(item: WatchHistoryItem) {
+        val idx = loadIndex()
+        saveIndex(
+            idx.copy(
+                watchHistory = idx.watchHistory.filter {
+                    val sameParent = item.parentId.isNotBlank() && it.parentId == item.parentId
+                    val sameTitle = item.title.isNotBlank() && it.title.equals(item.title, ignoreCase = true)
+                    
+                    val isMatch = if (sameParent) {
+                        it.episodeNumber == item.episodeNumber
+                    } else if (sameTitle) {
+                        it.episodeNumber == item.episodeNumber
+                    } else {
+                        it.streamUrl == item.streamUrl
+                    }
+                    !isMatch
+                }
             )
         )
     }

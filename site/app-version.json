@@ -1,7 +1,7 @@
 {
-    "_instructions": "PERMANENT release-channel URLs — do NOT change apkUrl / tvApkUrl / desktopUrl / ipaUrl for a routine release. To ship a new build you REPLACE the binary behind each URL and update ONLY the version fields + release notes plus the matching sha256/bytes. Per-platform overrides (tvVersion*, desktopVersion*, iosVersion*) let TV, Windows EXE, and iOS ship on their OWN tracks; when null they fall back to the top-level Android values. ⚠️ Each per-platform versionCode MUST equal the versionCode that platform actually BUILDS with (tvApp/build.gradle.kts for TV, PlatformAppVersion.desktop.kt + composeApp packageVersion for EXE, iosApp/project.yml for iOS) — a mismatch makes that platform show a false 'update available'. AFTER BUILDING, fill in the sha256 + bytes for every platform (empty string / 0 = the app skips integrity verification for that platform until you provide them). Compute with: sha256sum <file>  and  stat --format=%s <file>",
-    "versionCode": 45,
-    "versionName": "1.45",
+    "_instructions": "PERMANENT release-channel URLs \u2014 do NOT change apkUrl / tvApkUrl / desktopUrl / ipaUrl for a routine release. To ship a new build you REPLACE the binary behind each URL and update ONLY the version fields + release notes plus the matching sha256/bytes. Per-platform overrides (tvVersion*, desktopVersion*, iosVersion*) let TV, Windows EXE, and iOS ship on their OWN tracks; when null they fall back to the top-level Android values. \u26a0\ufe0f Each per-platform versionCode MUST equal the versionCode that platform actually BUILDS with (tvApp/build.gradle.kts for TV, PlatformAppVersion.desktop.kt + composeApp packageVersion for EXE, iosApp/project.yml for iOS) \u2014 a mismatch makes that platform show a false 'update available'. AFTER BUILDING, fill in the sha256 + bytes for every platform (empty string / 0 = the app skips integrity verification for that platform until you provide them). Compute with: sha256sum <file>  and  stat --format=%s <file>",
+    "versionCode": 46,
+    "versionName": "1.46",
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
     "apkSha256": "d916ff9ffada32172af80391a3a94492af919f38222a68207ce5ad27e516b59e",
     "apkBytes": 151289243,
@@ -14,28 +14,28 @@
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "ipaSha256": "",
     "ipaBytes": 0,
-    "tvVersionCode": 45,
-    "tvVersionName": "1.45",
+    "tvVersionCode": 46,
+    "tvVersionName": "1.46",
     "tvReleaseNotes": [
-        "Android TV (TV): v1.45 — Automated Parallel Server Resolution engine with concurrent health check sweeps and multi-server fallback",
+        "Android TV (TV): v1.46 \u2014 Automated Parallel Server Resolution engine with concurrent health check sweeps and multi-server fallback",
         "Android TV (TV): Seamless post-playback episodic auto-advance & D-pad accessible movie completion recommendations rail",
         "Android TV (TV): Granular episode download selection modal with Season tabs and batch queueing",
         "Android TV (TV): Reconfigured Donghua streaming servers & updated anime embed playback engine"
     ],
-    "desktopVersionCode": 45,
-    "desktopVersionName": "1.45",
+    "desktopVersionCode": 46,
+    "desktopVersionName": "1.46",
     "desktopReleaseNotes": [
-        "Windows (EXE): v1.45 — Parallel stream resolution and multi-tier server failover",
+        "Windows (EXE): v1.46 \u2014 Parallel stream resolution and multi-tier server failover",
         "Windows (EXE): Episodic download management and updated scrapers"
     ],
-    "iosVersionCode": 45,
-    "iosVersionName": "1.45",
+    "iosVersionCode": 46,
+    "iosVersionName": "1.46",
     "iosReleaseNotes": [
-        "iOS (IPA): v1.45 — Parallel stream resolution and multi-tier server failover",
+        "iOS (IPA): v1.46 \u2014 Parallel stream resolution and multi-tier server failover",
         "iOS (IPA): Episodic auto-advance and post-playback transitions"
     ],
     "releaseNotes": [
-        "Android: version 1.45 — Automated Parallel Server Resolution engine with concurrent health check sweeps and multi-server fallback",
+        "Android: version 1.46 \u2014 Automated Parallel Server Resolution engine with concurrent health check sweeps and multi-server fallback",
         "Android: Episodic download picker UI with multi-select and season filtering",
         "Android: Seamless post-playback auto-advance and movie completion transitions",
         "Android: Updated Donghua and Anime embed scrapers"

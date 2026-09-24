@@ -1,0 +1,32 @@
+--- composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data/mediacache/MediaCacheModels.kt
++++ composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data/mediacache/MediaCacheModels.kt
+@@ -167,7 +167,8 @@
+     val encryptedLength: Long,   // on-disk length ([tag][iv][ciphertext])
+     val sha256Hex: String = "",  // plaintext digest (integrity sweep)
+-    val verified: Boolean = false
++    val verified: Boolean = false,
++    val chunkUrl: String? = null
+ )
+ 
+--- composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data/mediacache/ChunkScheduler.kt
++++ composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data/mediacache/ChunkScheduler.kt
+@@ -72,11 +72,15 @@
+             _active.value += 1
+             val end = chunk.startOffset + chunk.byteLength - 1L
+-            val data = transport.fetchRange(
+-                request.sourceUrl,
+-                chunk.startOffset,
+-                end,
+-                parseDownloadHeaders(request.headersJson)
+-            )
++            val data = if (chunk.chunkUrl != null) {
++                transport.fetchFull(chunk.chunkUrl, parseDownloadHeaders(request.headersJson))
++            } else {
++                transport.fetchRange(
++                    request.sourceUrl,
++                    chunk.startOffset,
++                    end,
++                    parseDownloadHeaders(request.headersJson)
++                )
++            }
+             if (data == null) return FetchOutcome.Retry

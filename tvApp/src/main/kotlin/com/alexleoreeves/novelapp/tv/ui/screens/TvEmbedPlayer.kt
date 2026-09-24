@@ -213,7 +213,9 @@ fun TvEmbedPlayer(
                                 "popup", "/pop.js", "/popunder", "/ad.js",
                                 "/analytics.", "/track.",
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
-                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
+                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com",
+                                // vidSrc.sbs popup/ad network (from HAR capture)
+                                "luugy.com", "swiwetduchan.shop", "llvpn.com", "imagesharerhost.com"
                             )
                             val isAd = blockedDomains.any { domain -> lowerUrl.contains(domain) }
                             if (isAd) return true
@@ -272,8 +274,13 @@ fun TvEmbedPlayer(
                             val url = request?.url?.toString() ?: return null
                             val lowerUrl = url.lowercase()
 
+                            // Whitelist Cloudflare, router embeds, and the vidSrc.sbs
+                            // player backbone (web.nxsha.app + HLS host) so real video
+                            // segments are never intercepted.
                             if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") ||
                                 lowerUrl.contains("vidsrc.cc") || lowerUrl.contains("vidsrc.to") ||
+                                lowerUrl.contains("vidsrc.sbs") || lowerUrl.contains("nxsha.app") ||
+                                lowerUrl.contains("itsnitrox.tech") ||
                                 lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") ||
                                 lowerUrl.contains("turnstile")
                             ) {
@@ -304,7 +311,9 @@ fun TvEmbedPlayer(
                                 "/banner", "/ads/", "/advert",
                                 "/analytics.", "/track.",
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
-                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
+                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com",
+                                // vidSrc.sbs popup/ad network (from HAR capture)
+                                "luugy.com", "swiwetduchan.shop", "llvpn.com", "imagesharerhost.com"
                             )
                             val isAd = adDomains.any { domain -> lowerUrl.contains(domain) }
                             if (isAd) {

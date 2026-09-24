@@ -442,23 +442,26 @@ fun AnimeDetailScreen(
                         }
                     }
                 }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                ) {
-                    animeServers.forEachIndexed { index, server ->
-                        FilterChip(
-                            selected = selectedServer == index,
-                            onClick = { selectedServer = index },
-                            label = { Text(server.providerName, style = MaterialTheme.typography.labelSmall) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = currentTheme.accentColor(),
-                                selectedLabelColor = Color.White
+                val showServerSelector = false
+                if (showServerSelector) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                    ) {
+                        animeServers.forEachIndexed { index, server ->
+                            FilterChip(
+                                selected = selectedServer == index,
+                                onClick = { selectedServer = index },
+                                label = { Text(server.providerName, style = MaterialTheme.typography.labelSmall) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = currentTheme.accentColor(),
+                                    selectedLabelColor = Color.White
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -539,7 +542,7 @@ fun AnimeDetailScreen(
                                             else -> null
                                         }
                                         val embedRef = when (server) {
-                                            AnimeServer.VIDLINK, AnimeServer.VIDSRC_TO, AnimeServer.AUTOEMBED -> repository.resolveAnivexaVidLinkEmbed(
+                                            AnimeServer.VIDLINK, AnimeServer.VIDSRC_TO, AnimeServer.AUTOEMBED, AnimeServer.VIDSRC_SBS -> repository.resolveAnivexaVidLinkEmbed(
                                                 selectedSeason.id.toString(),
                                                 episode.episodeNumber
                                             )
@@ -560,11 +563,19 @@ fun AnimeDetailScreen(
                                             if (embedRef.type == "movie") "https://autoembed.co/movie/tmdb/$tmdb"
                                             else "https://autoembed.co/tv/tmdb/$tmdb-$s-$ep"
                                         } else null
+                                        val vidsrcSbsUrl = if (server == AnimeServer.VIDSRC_SBS && embedRef != null) {
+                                            val tmdb = embedRef.tmdbId
+                                            val ep = embedRef.episode
+                                            val s = embedRef.season
+                                            if (embedRef.type == "movie") "https://vidsrc.sbs/embed/movie/$tmdb"
+                                            else "https://vidsrc.sbs/embed/tv/$tmdb/$s/$ep"
+                                        } else null
                                         val playUrl = resolvedStream?.url
                                             ?: vidsrcToUrl
                                             ?: autoembedUrl
+                                            ?: vidsrcSbsUrl
                                             ?: embedRef?.buildEmbedUrl()
-                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK && server != AnimeServer.VIDSRC_TO && server != AnimeServer.AUTOEMBED) {
+                                            ?: if (!server.isAnivexa && !server.usesClientScraper && server != AnimeServer.VIDLINK && server != AnimeServer.VIDSRC_TO && server != AnimeServer.AUTOEMBED && server != AnimeServer.VIDSRC_SBS) {
                                                 repository.extractStreamUrl(episode.url)
                                             } else {
                                                 null

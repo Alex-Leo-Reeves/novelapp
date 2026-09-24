@@ -49,8 +49,44 @@ class MediaTaskRunner(
             ?: return TaskRunResult.Failure(DownloadFailureReason.USB_UNMOUNTED, "Requested volume is not mounted")
         val bundlePath = bundlePathFor(request, volume)
 
+        var hlsSegments: List<String>? = null
+        val isHls = request.sourceUrl.substringBefore("?").endsWith(".m3u8") || 
+                    Regex("""/(playlist|manifest|hls)(/|$)""").containsMatchIn(request.sourceUrl)
+        if (isHls) {
+            val m3u8Bytes = try {
+                transport.fetchFull(request.sourceUrl, parseDownloadHeaders(request.headersJson))
+            } catch (e: Exception) {
+                null
+            } ?: return TaskRunResult.Failure(DownloadFailureReason.NETWORK, "Failed to fetch HLS playlist")
+
+            val text = m3u8Bytes.decodeToString()
+            val lines = text.lines()
+            val segmentUrls = mutableListOf<String>()
+            val baseUrl = request.sourceUrl.substringBeforeLast("/") + "/"
+
+            for (line in lines) {
+                val trimmed = line.trim()
+                if (trimmed.isNotBlank() && !trimmed.startsWith("#")) {
+                    val url = if (trimmed.startsWith("http")) trimmed else "$baseUrl$trimmed"
+                    segmentUrls.add(url)
+                }
+            }
+            if (segmentUrls.isEmpty()) {
+                return TaskRunResult.Failure(DownloadFailureReason.NETWORK, "Empty HLS playlist")
+            }
+            hlsSegments = segmentUrls
+        }
+
         val probe = try {
-            transport.probe(request.sourceUrl, parseDownloadHeaders(request.headersJson))
+            if (hlsSegments != null) {
+                MediaProbe(
+                    totalBytes = hlsSegments.size * 2_000_000L, // ~2MB per segment estimate
+                    supportsRanges = true, // We bypass ranges via chunkUrl
+                    contentType = "video/mp2t"
+                )
+            } else {
+                transport.probe(request.sourceUrl, parseDownloadHeaders(request.headersJson))
+            }
         } catch (e: Exception) {
             return TaskRunResult.Failure(DownloadFailureReason.NETWORK, e.message)
         }
@@ -80,7 +116,7 @@ class MediaTaskRunner(
         // Fetch + persist the English subtitle exactly once, at fresh-task time.
         // Resumed tasks keep the path already recorded in their WAL.
         val subtitlePath = if (existing == null) subtitleBundler.bundle(request) else ""
-        val manifest = existing ?: buildManifest(request, probe, subtitlePath)
+        val manifest = existing ?: buildManifest(request, probe, subtitlePath, hlsSegments)
         manifests.save(manifest)
 
         val ivSeed = manifest.ivSeedHex.hexToBytes()
@@ -148,22 +184,36 @@ class MediaTaskRunner(
         )
     }
 
-    private fun buildManifest(request: MediaDownloadRequest, probe: MediaProbe, subtitleBundlePath: String): DownloadManifest {
+    private fun buildManifest(request: MediaDownloadRequest, probe: MediaProbe, subtitleBundlePath: String, hlsSegments: List<String>? = null): DownloadManifest {
         // Free-tier 20% cap: absolute maxBytes takes priority, then maxFraction.
         val effectiveBytes = when {
             request.maxBytes in 1L until probe.totalBytes -> request.maxBytes
             request.maxFraction in 0.01f..0.99f -> (probe.totalBytes * request.maxFraction).toLong().coerceAtLeast(MEDIA_CHUNK_SIZE)
             else -> probe.totalBytes
         }
-        val chunkCount = chunkCountFor(effectiveBytes)
-        val chunks = List(chunkCount) { index ->
-            val byteLen = chunkLengthAt(index, effectiveBytes)
-            ChunkRecord(
-                index = index,
-                startOffset = index.toLong() * MEDIA_CHUNK_SIZE,
-                byteLength = byteLen,
-                encryptedLength = tagAndIvBytes + paddedCipherLen(byteLen)
-            )
+        
+        val chunks = if (hlsSegments != null) {
+            hlsSegments.mapIndexed { index, url ->
+                val byteLen = 2_000_000L // Estimate for padding
+                ChunkRecord(
+                    index = index,
+                    startOffset = index.toLong() * byteLen,
+                    byteLength = byteLen,
+                    encryptedLength = tagAndIvBytes + paddedCipherLen(byteLen),
+                    chunkUrl = url
+                )
+            }
+        } else {
+            val chunkCount = chunkCountFor(effectiveBytes)
+            List(chunkCount) { index ->
+                val byteLen = chunkLengthAt(index, effectiveBytes)
+                ChunkRecord(
+                    index = index,
+                    startOffset = index.toLong() * MEDIA_CHUNK_SIZE,
+                    byteLength = byteLen,
+                    encryptedLength = tagAndIvBytes + paddedCipherLen(byteLen)
+                )
+            }
         }
         return DownloadManifest(
             taskId = request.taskId,

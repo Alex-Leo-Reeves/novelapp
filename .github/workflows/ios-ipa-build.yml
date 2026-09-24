@@ -155,6 +155,9 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/NovaRead.mobileprovision"
 
+      - name: Pre-build Compose Framework (Fail fast on Kotlin errors)
+        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64 --no-daemon
+
       - name: Build unsigned iPhone app for compile check
         if: steps.signing.outputs.can_sign != 'true'
         run: |

@@ -16,7 +16,7 @@ enum class StreamServer(
     val buildEmbedUrl: (tmdbId: String, type: String, season: String, episode: String) -> String
 ) {
     VIDLINK(
-        "Server 1",
+        "Nebula",
         1,
         { id, type, s, e ->
             if (type == "movie") "https://vidlink.pro/movie/$id"
@@ -24,7 +24,7 @@ enum class StreamServer(
         }
     ),
     VIDSRC_TO(
-        "Server 2 (VidSrc.to)",
+        "Quasar",
         2,
         { id, type, s, e ->
             if (type == "movie") "https://vidsrc.to/embed/movie/$id"
@@ -32,7 +32,7 @@ enum class StreamServer(
         }
     ),
     AUTOEMBED(
-        "Server 3 (AutoEmbed)",
+        "Pulsar",
         3,
         { id, type, s, e ->
             if (type == "movie") "https://autoembed.co/movie/tmdb/$id"
@@ -40,76 +40,104 @@ enum class StreamServer(
         }
     ),
     TWO_EMBED_ONLINE(
-        "Server 4 (2Embed.online)",
+        "Comet",
         4,
         { id, type, s, e ->
             if (type == "movie") "https://www.2embed.online/embed/movie/$id"
             else "https://www.2embed.online/embed/tv/$id/$s/$e"
         }
     ),
-    NONTONGO(
-        "Server 5 (Nontongo)",
+    VIDSRC_SBS(
+        "Astra",
         5,
+        { id, type, s, e ->
+            if (type == "movie") "https://vidsrc.sbs/embed/movie/$id"
+            else "https://vidsrc.sbs/embed/tv/$id/$s/$e"
+        }
+    ),
+    NONTONGO(
+        "Orion",
+        6,
         { id, type, s, e ->
             if (type == "movie") "https://www.nontongo.win/embed/movie/$id"
             else "https://www.nontongo.win/embed/tv/$id/$s/$e"
         }
     ),
     MULTI_EMBED(
-        "Server 6 (MultiEmbed)",
-        6,
+        "Lyra",
+        7,
         { id, type, s, e ->
             if (type == "movie") "https://multiembed.mov/?video_id=$id&tmdb=1"
             else "https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e"
         }
     ),
     VIDSRC_NET(
-        "Server 7 (VidSrc Net)",
-        7,
+        "Vega",
+        8,
         { id, type, s, e ->
             if (type == "movie") "https://vidsrc.net/embed/movie?tmdb=$id"
             else "https://vidsrc.net/embed/tv?tmdb=$id&season=$s&episode=$e"
         }
     ),
     SMASHY(
-        "Server 8 (SmashyStream)",
-        8,
+        "Sirius",
+        9,
         { id, type, s, e ->
             if (type == "movie") "https://embed.smashystream.com/playere.php?tmdb=$id"
             else "https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&ep=$e"
         }
     ),
     CINEPRO(
-        "Server 9 (CinePro)",
-        9,
+        "CinePro",
+        10,
         { id, type, s, e ->
             if (type == "movie") "https://cinepro-core-esmh.onrender.com/v1/movies/$id"
             else "https://cinepro-core-esmh.onrender.com/v1/tv/$id/seasons/$s/episodes/$e"
         }
     ),
     VIDLINK_EXO(
-        "Server 10 (ExoPlayer)",
-        10,
+        "Eclipse",
+        11,
         { id, type, s, e ->
             if (type == "movie") "https://vidlink.pro/movie/$id"
             else "https://vidlink.pro/tv/$id/$s/$e"
         }
     ),
     ANINEKO(
-        "Server 11 (AniNeko)",
-        11,
+        "Kitsune",
+        12,
         { id, type, s, e ->
             if (type == "movie") "https://vidlink.pro/movie/$id"
             else "https://vidlink.pro/tv/$id/$s/$e"
         }
     );
 
+    /** Raw provider host behind this chip (e.g. "VidSrc.sbs"). */
+    val providerName: String
+        get() = when (this) {
+            VIDLINK -> "VidLink"
+            VIDSRC_TO -> "VidSrc.to"
+            AUTOEMBED -> "AutoEmbed"
+            TWO_EMBED_ONLINE -> "2Embed.online"
+            VIDSRC_SBS -> "VidSrc.sbs"
+            NONTONGO -> "Nontongo"
+            MULTI_EMBED -> "MultiEmbed"
+            VIDSRC_NET -> "VidSrc.net"
+            SMASHY -> "SmashyStream"
+            CINEPRO -> "CinePro"
+            VIDLINK_EXO -> "VidLink (ExoPlayer)"
+            ANINEKO -> "AniNeko"
+        }
+
     companion object {
         /** All servers in display order */
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
+        /** Curated movie/TV selector chips shown in the UI. */
+        val MOVIE_SELECTOR = listOf(VIDLINK, VIDSRC_TO, AUTOEMBED, TWO_EMBED_ONLINE, VIDSRC_SBS)
+
         /** WebView servers that load the embed directly */
-        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_TO, AUTOEMBED, TWO_EMBED_ONLINE, NONTONGO, MULTI_EMBED, VIDSRC_NET, SMASHY)
+        val WEBVIEW_SERVERS = setOf(VIDLINK, VIDSRC_TO, AUTOEMBED, TWO_EMBED_ONLINE, VIDSRC_SBS, NONTONGO, MULTI_EMBED, VIDSRC_NET, SMASHY)
 
         /** ExoPlayer servers that scrape the embed for a direct stream */
         val EXOPLAYER_SERVERS = setOf(VIDLINK_EXO)
@@ -134,22 +162,29 @@ enum class DonghuaServer(
     val scraperKey: String? = null,
     val anivexaProviderKey: String? = null
 ) {
-    MOVIE_SERVER_1("Movie Server 1", "VidLink (TMDB)", 1),
-    MOVIE_SERVER_2("Movie Server 2", "VidSrc.to (TMDB)", 2),
-    ANIME_SERVER_5("Anime Server 5", "AniNeko", 3, anivexaProviderKey = "anineko"),
-    ANIME_SERVER_3("Anime Server 3", "AniKoto", 4, anivexaProviderKey = "anikoto"),
-    ANIMEXIN("AnimeXin", "AnimeXin", 5, isScraper = true, scraperKey = "animexin");
+    MOVIE_SERVER_1("Nebula", "VidLink", 1),
+    MOVIE_SERVER_2("Quasar", "VidSrc.to", 2),
+    ANIME_SERVER_5("Kitsune", "AniNeko", 3, anivexaProviderKey = "anineko"),
+    ANIME_SERVER_3("Shogun", "AniKoto", 4, anivexaProviderKey = "anikoto"),
+    ANIMEXIN("Loong", "AnimeXin", 5, isScraper = true, scraperKey = "animexin"),
+    VIDSRC_SBS("Astra", "VidSrc.sbs", 6);
 
     val isAnivexa: Boolean get() = anivexaProviderKey != null
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
+
+        /** Curated donghua selector chips shown in the UI. */
+        val DONGHUA_SELECTOR = listOf(
+            MOVIE_SERVER_1, MOVIE_SERVER_2, ANIME_SERVER_5, ANIME_SERVER_3, ANIMEXIN, VIDSRC_SBS
+        )
     }
 }
 
 fun DonghuaServer.toStreamServer(): StreamServer? = when (this) {
     DonghuaServer.MOVIE_SERVER_1 -> StreamServer.VIDLINK
     DonghuaServer.MOVIE_SERVER_2 -> StreamServer.VIDSRC_TO
+    DonghuaServer.VIDSRC_SBS -> StreamServer.VIDSRC_SBS
     else -> null
 }
 
@@ -160,7 +195,8 @@ fun DonghuaServer.toAnimeServer(): AnimeServer? = when (this) {
 }
 
 /**
- * Anime-only servers — 19 servers.
+ * Anime-only servers — 20 servers. The curated UI subset lives in
+ * `AnimeServer.ANIME_SELECTOR`.
  */
 enum class AnimeServer(
     val displayName: String,
@@ -170,31 +206,39 @@ enum class AnimeServer(
     val anivexaProviderKey: String?,
     val clientScraperKey: String? = null
 ) {
-    MKISSA("Server 1", "MKissa", false, 1, "mkissa"),
-    REANIME("Server 2", "Reanime", false, 2, "reanime"),
-    ANIKOTO("Server 3", "AniKoto", false, 3, "anikoto"),
-    ANIMEGG("Server 4", "AnimeGG", false, 4, "animegg"),
-    ANINEKO("Server 5", "AniNeko", false, 5, "anineko"),
-    ANIDBAPP("Server 6", "AniDB App", false, 6, "anidbapp"),
-    TWO_DHIVE("Server 7", "2DHive", false, 7, "2dhive"),
-    ANIMENOSUB("Server 8", "AnimeNoSub", false, 8, "animenosub"),
-    ANIZONE("Server 9", "AniZone", false, 9, "anizone"),
-    ANIBD("Server 10", "AniBD", false, 10, "anibd"),
-    SENSHI("Server 11", "Senshi", false, 11, "senshi"),
-    KAA("Server 12", "KickAssAnime", false, 12, "kaa"),
-    ANIMEDUNYA("Server 13", "AnimeDunya", false, 13, "animedunya"),
-    ANIMEHEAVEN("Server 14", "AnimeHeaven", false, 14, null, "animeheaven"),
-    ANIMEPAHE("Server 15", "AnimePahe", false, 15, null, "animepahe"),
-    ANIDAO("Server 16", "AniDao", false, 16, null, "anidao"),
-    VIDLINK("Server 17", "VidLink", true, 17, null),
-    VIDSRC_TO("Server 18", "VidSrc.to", true, 18, null),
-    AUTOEMBED("Server 19", "AutoEmbed", true, 19, null);
+    MKISSA("Kaiju", "MKissa", false, 1, "mkissa"),
+    REANIME("Sakura", "Reanime", false, 2, "reanime"),
+    ANIKOTO("Shogun", "AniKoto", false, 3, "anikoto"),
+    ANIMEGG("Ronin", "AnimeGG", false, 4, "animegg"),
+    ANINEKO("Kitsune", "AniNeko", false, 5, "anineko"),
+    ANIDBAPP("Sensei", "AniDB App", false, 6, "anidbapp"),
+    TWO_DHIVE("Torii", "2DHive", false, 7, "2dhive"),
+    ANIMENOSUB("Neko", "AnimeNoSub", false, 8, "animenosub"),
+    ANIZONE("Zen", "AniZone", false, 9, "anizone"),
+    ANIBD("Bushido", "AniBD", false, 10, "anibd"),
+    SENSHI("Samurai", "Senshi", false, 11, "senshi"),
+    KAA("Kaze", "KickAssAnime", false, 12, "kaa"),
+    ANIMEDUNYA("Tanuki", "AnimeDunya", false, 13, "animedunya"),
+    ANIMEHEAVEN("Tenjin", "AnimeHeaven", false, 14, null, "animeheaven"),
+    ANIMEPAHE("Raijin", "AnimePahe", false, 15, null, "animepahe"),
+    ANIDAO("Susanoo", "AniDao", false, 16, null, "anidao"),
+    VIDLINK("Nebula", "VidLink", true, 17, null),
+    VIDSRC_TO("Quasar", "VidSrc.to", true, 18, null),
+    AUTOEMBED("Pulsar", "AutoEmbed", true, 19, null),
+    VIDSRC_SBS("Astra", "VidSrc.sbs", true, 20, null);
 
     val isAnivexa: Boolean get() = anivexaProviderKey != null
     val usesClientScraper: Boolean get() = clientScraperKey != null
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
+
+        /**
+         * Curated anime selector chips shown in the UI (order = preference).
+         * Anivexa providers first (AniNeko, AnimeGG, Reanime, MKissa), then the
+         * TMDB-embed hosts (VidLink, VidSrc.to, VidSrc.sbs).
+         */
+        val ANIME_SELECTOR = listOf(ANINEKO, ANIMEGG, REANIME, MKISSA, VIDLINK, VIDSRC_TO, VIDSRC_SBS)
     }
 }
 
@@ -203,6 +247,7 @@ fun AnimeServer.toStreamServer(): StreamServer? = when (this) {
     AnimeServer.VIDLINK -> StreamServer.VIDLINK
     AnimeServer.VIDSRC_TO -> StreamServer.VIDSRC_TO
     AnimeServer.AUTOEMBED -> StreamServer.AUTOEMBED
+    AnimeServer.VIDSRC_SBS -> StreamServer.VIDSRC_SBS
     else -> null
 }
 
@@ -211,6 +256,7 @@ fun StreamServer.toAnimeServer(): AnimeServer? = when (this) {
     StreamServer.VIDLINK -> AnimeServer.VIDLINK
     StreamServer.VIDSRC_TO -> AnimeServer.VIDSRC_TO
     StreamServer.AUTOEMBED -> AnimeServer.AUTOEMBED
+    StreamServer.VIDSRC_SBS -> AnimeServer.VIDSRC_SBS
     else -> null
 }
 

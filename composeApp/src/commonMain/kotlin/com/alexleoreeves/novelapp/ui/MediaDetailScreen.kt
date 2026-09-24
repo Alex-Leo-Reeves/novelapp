@@ -60,6 +60,10 @@ fun MediaDetailScreen(
     val luciferDonghuaScraper = remember { DonghuaSiteScraper.luciferDonghua(httpClient) }
     val animeXinScraper = remember { AnimeXinScraper(httpClient) }
     val anivexaApi = remember { AnivexaApi(httpClient) }
+    val aninekoScraper = remember { AninekoScraper(httpClient) }
+    val animePaheScraper = remember { AnimePaheScraper(httpClient) }
+    val animeHeavenScraper = remember { AnimeHeavenScraper(httpClient) }
+    val aniDaoScraper = remember { AniDaoScraper(httpClient) }
 
     val parts = item.detailPageUrl.removePrefix("tmdb://").split("/")
     val mediaType = parts.getOrNull(0) ?: "movie"
@@ -71,6 +75,69 @@ fun MediaDetailScreen(
     var providerTmdbId by remember(item.detailPageUrl) { mutableStateOf("") }
     var providerTmdbType by remember(item.detailPageUrl) { mutableStateOf("tv") }
     var providerAnilistId by remember(item.detailPageUrl) { mutableStateOf("") }
+    
+    var pendingResumeDialog by remember { mutableStateOf<WatchHistoryItem?>(null) }
+    var pendingPlayAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val tryPlayStream: (streamUrl: String, title: String, previewLimitMs: Long?, subtitlesJson: String?, headersJson: String?, epNum: Int) -> Unit = { u, t, l, sj, hj, epNum ->
+        val progress = downloadRepo.getWatchProgress(streamUrl = u, parentId = item.id, episodeNumber = epNum, title = t)
+        if (progress != null && progress.positionMs > 30_000L) {
+            pendingResumeDialog = progress
+            pendingPlayAction = { onPlayStream(u, t, l, sj, hj) }
+        } else {
+            onPlayStream(u, t, l, sj, hj)
+        }
+    }
+
+    val tryPlayEmbed: (embedUrl: String, title: String, previewLimitMs: Long?, epNum: Int) -> Unit = { u, t, l, epNum ->
+        val progress = downloadRepo.getWatchProgress(streamUrl = u, parentId = item.id, episodeNumber = epNum, title = t)
+        if (progress != null && progress.positionMs > 30_000L) {
+            pendingResumeDialog = progress
+            pendingPlayAction = { onPlayMaEmbedWithLimit(u, t, l) }
+        } else {
+            onPlayMaEmbedWithLimit(u, t, l)
+        }
+    }
+
+    if (pendingResumeDialog != null) {
+        val progress = pendingResumeDialog!!
+        fun formatMs(ms: Long): String {
+            val totalSec = ms / 1000
+            val h = totalSec / 3600
+            val m = (totalSec % 3600) / 60
+            val s = totalSec % 60
+            return if (h > 0) "${h}h ${m}m" else "${m}m ${s}s"
+        }
+        AlertDialog(
+            onDismissRequest = {
+                pendingResumeDialog = null
+                pendingPlayAction = null
+            },
+            title = { Text("Resume Playback", color = currentTheme.textColor()) },
+            text = { Text("You left off at ${formatMs(progress.positionMs)}. Continue from there, or start from the beginning.", color = currentTheme.subTextColor()) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingResumeDialog = null
+                        pendingPlayAction?.invoke()
+                        pendingPlayAction = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = currentTheme.accentColor(), contentColor = currentTheme.textColor())
+                ) { Text("Continue") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingResumeDialog = null
+                        downloadRepo.clearWatchProgress(progress)
+                        pendingPlayAction?.invoke()
+                        pendingPlayAction = null
+                    }
+                ) { Text("Start from beginning", color = currentTheme.accentColor()) }
+            },
+            containerColor = currentTheme.cardColor()
+        )
+    }
 
     var isMovieContent by remember(mediaType) { mutableStateOf(mediaType == "movie") }
     val isYouTubeNollywood = item.id.startsWith("youtube_nollywood_")
@@ -117,11 +184,11 @@ fun MediaDetailScreen(
     val freeEpisodePreviewMs = 5 * 60 * 1000L
 
     fun playWithServer(embedUrl: String, title: String, previewLimitMs: Long?) {
-        onPlayStream(embedUrl, title, previewLimitMs, null, null)
+        tryPlayStream(embedUrl, title, previewLimitMs, null, null, 0)
     }
 
     fun playEpisodeWithServer(embedUrl: String, title: String) {
-        onPlayStream(embedUrl, title, if (isPremium) null else freeEpisodePreviewMs, null, null)
+        tryPlayStream(embedUrl, title, if (isPremium) null else freeEpisodePreviewMs, null, null, 0)
     }
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper = donghuaStreamScraper
@@ -195,6 +262,11 @@ fun MediaDetailScreen(
             DonghuaServer.MOVIE_SERVER_2 -> {
                 val tmdb = tmdbId.ifBlank { providerTmdbId }
                 if (tmdb.isNotBlank()) StreamServer.VIDSRC_TO.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
+                else null
+            }
+            DonghuaServer.VIDSRC_SBS -> {
+                val tmdb = tmdbId.ifBlank { providerTmdbId }
+                if (tmdb.isNotBlank()) StreamServer.VIDSRC_SBS.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
                 else null
             }
             DonghuaServer.ANIME_SERVER_5, DonghuaServer.ANIME_SERVER_3 -> {
@@ -378,17 +450,20 @@ fun MediaDetailScreen(
                         }
 
                         val downloadQualities = sourceUrl?.let {
-                            resolveDownloadableQualities(it, tmdbContext = downloadTmdbContext, onStatus = { msg -> statusText = msg })
+                            resolveDownloadableQualitiesCommon(httpClient, it, tmdbContext = downloadTmdbContext, onStatus = { msg -> statusText = msg })
                         } ?: emptyList()
 
                         if (downloadQualities.isNotEmpty()) {
-                            val processDownload = { finalUrl: String ->
-                                scope.launch {
-                                    statusText = "Downloading Episode ${ep.episodeNumber}..."
+                            val processDownload = { quality: CineProSource ->
+                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                     val saved = saveDownloadedVideo(
                                         parentId = item.id,
                                         episodeNumber = ep.episodeNumber,
-                                        sourceUrl = finalUrl
+                                        sourceUrl = quality.url,
+                                        headersJson = quality.headersJson,
+                                        onProgress = { progress ->
+                                            statusText = "Downloading Ep ${ep.episodeNumber}: ${(progress * 100).toInt()}%"
+                                        }
                                     )
                                     if (saved.success) {
                                         downloadRepo.addEpisode(
@@ -411,24 +486,23 @@ fun MediaDetailScreen(
                                             )
                                         )
                                         downloadRepo.recordMediaDownload(ct)
-                                        statusText = "Episode ${ep.episodeNumber} saved offline."
                                     } else {
-                                        statusText = saved.error.ifBlank { "Download failed." }
                                         if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
                                             downloadRepo.deleteItem(item.id)
                                         }
                                     }
-                                    downloadingEpisodes = downloadingEpisodes - ep.episodeNumber
-                                    refreshTrigger++
                                 }
+                                statusText = "Download started in background..."
+                                downloadingEpisodes = downloadingEpisodes - ep.episodeNumber
+                                refreshTrigger++
                                 Unit
                             }
 
                             if (downloadQualities.size == 1) {
-                                processDownload(downloadQualities.first().url)
+                                processDownload(downloadQualities.first())
                             } else {
                                 downloadQualityOptions = downloadQualities
-                                pendingDownloadAction = processDownload
+                                pendingDownloadAction = { processDownload(CineProSource(it)) }
                             }
                         } else {
                             statusText = "Stream unavailable for download."
@@ -457,7 +531,7 @@ fun MediaDetailScreen(
         val initialEpisodes = when {
             isDonghuaItem -> {
                 when (selectedDonghuaServer) {
-                    DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2 -> {
+                    DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2, DonghuaServer.VIDSRC_SBS -> {
                         // TMDB-embed servers: load episode list from TMDB
                         if (tmdbId.isNotBlank()) {
                             tmdbScraper.fetchTVSeasonsAndEpisodes(tmdbId)
@@ -609,6 +683,57 @@ fun MediaDetailScreen(
             }
             statusText = "Resolving stream via $serverLabel..."
 
+            val shouldResolveInParallel = isDonghuaItem || isAnimeItem || isTmdbDetail
+            if (shouldResolveInParallel) {
+                statusText = "Resolving best stream in parallel..."
+                val urlParts = ep.url.split(":")
+                val s = urlParts.getOrNull(2)?.toIntOrNull() ?: 1
+                val e = urlParts.getOrNull(3)?.toIntOrNull() ?: ep.episodeNumber.takeIf { it > 0 } ?: 1
+                
+                val resolver = ParallelStreamResolver(
+                    httpClient = httpClient,
+                    anivexaApi = anivexaApi,
+                    animeXinScraper = animeXinScraper,
+                    aninekoScraper = aninekoScraper,
+                    animePaheScraper = animePaheScraper,
+                    animeHeavenScraper = animeHeavenScraper,
+                    aniDaoScraper = aniDaoScraper,
+                    donghuaStreamScraper = donghuaStreamScraper,
+                    tmdbScraper = tmdbScraper
+                )
+                val parallelStream = resolver.resolveBestStream(
+                    item = item,
+                    chapterUrl = ep.url,
+                    chapterNumber = e,
+                    seasonNumber = s,
+                    preferredAudio = preferredAudio
+                )
+                if (parallelStream == null) {
+                    statusText = "Stream unavailable for this episode. Try a different server."
+                    return@launch
+                }
+                
+                statusText = ""
+                if (parallelStream.isDirect) {
+                    tryPlayStream(
+                        parallelStream.url,
+                        "${item.title} - ${ep.title}",
+                        if (isPremium) null else freeEpisodePreviewMs,
+                        null,
+                        parallelStream.headersJson,
+                        ep.episodeNumber
+                    )
+                } else {
+                    tryPlayEmbed(
+                        parallelStream.url,
+                        "${item.title} - ${ep.title}",
+                        if (isPremium) null else freeEpisodePreviewMs,
+                        ep.episodeNumber
+                    )
+                }
+                return@launch
+            }
+
             // ── CinePro: Fetch ALL direct stream sources from the server ─────
             if (!isDonghuaItem && selectedServer == StreamServer.CINEPRO) {
                 val urlParts = ep.url.split(":")
@@ -639,10 +764,11 @@ fun MediaDetailScreen(
                 // Try vidsrc.to first (widest anime/TV coverage), then nontongo, then vidlink.
                 statusText = "CinePro direct stream unavailable. Loading embed..."
                 val fallbackEmbed = "https://vidsrc.to/embed/tv/$tvId/$s/$e"
-                onPlayMaEmbedWithLimit(
+                tryPlayEmbed(
                     fallbackEmbed,
                     "${item.title} - ${ep.title}",
-                    if (isPremium) null else freeEpisodePreviewMs
+                    if (isPremium) null else freeEpisodePreviewMs,
+                    ep.episodeNumber
                 )
                 return@launch
             }
@@ -693,7 +819,7 @@ fun MediaDetailScreen(
                             )
                             return@launch
                         }
-                        onPlayMaEmbedWithLimit(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs)
+                        tryPlayEmbed(stream.url, "${item.title} - ${ep.title}", if (isPremium) null else freeMoviePreviewMs, ep.episodeNumber)
                         return@launch
                     }
                     // VidLink / VidSrc.to (TMDB-embed anime servers): use whichever is selected.
@@ -757,10 +883,11 @@ fun MediaDetailScreen(
             // All embed paths pass a 20-minute hard cap for free users — the
             // WebView player can't read duration reliably, so a flat cap
             // guarantees free users can never finish a full episode/movie.
-            onPlayMaEmbedWithLimit(
+            tryPlayEmbed(
                 embedUrl,
                 "${item.title} - ${ep.title}",
-                if (isPremium) null else freeMoviePreviewMs
+                if (isPremium) null else freeMoviePreviewMs,
+                ep.episodeNumber
             )
         }
     }
@@ -844,7 +971,9 @@ fun MediaDetailScreen(
                 )
             }
 
-            // Toggle this to true to restore the manual server selector chips.
+            // Manual server selector chips (restored). Each content type shows
+            // its curated set: movies → MOVIE_SELECTOR, anime → ANIME_SELECTOR,
+            // donghua → DONGHUA_SELECTOR.
             val showServerSelector = false
 
             // ── Audio preference selector (anime — always visible) ──────
@@ -890,7 +1019,7 @@ fun MediaDetailScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (isDonghuaItem) {
-                        DonghuaServer.ALL_IN_ORDER.forEach { server ->
+                        DonghuaServer.DONGHUA_SELECTOR.forEach { server ->
                             val isSelected = selectedDonghuaServer == server
                             FilterChip(
                                 selected = isSelected,
@@ -916,7 +1045,7 @@ fun MediaDetailScreen(
                             )
                         }
                     } else if (isAnimeItem) {
-                        AnimeServer.ALL_IN_ORDER.forEach { server ->
+                        AnimeServer.ANIME_SELECTOR.forEach { server ->
                             val isSelected = selectedAnimeServer == server
                             FilterChip(
                                 selected = isSelected,
@@ -942,7 +1071,7 @@ fun MediaDetailScreen(
                             )
                         }
                     } else {
-                        StreamServer.ALL_IN_ORDER.forEach { server ->
+                        StreamServer.MOVIE_SELECTOR.forEach { server ->
                             val isSelected = selectedServer == server
                             FilterChip(
                                 selected = isSelected,
@@ -989,7 +1118,7 @@ fun MediaDetailScreen(
                             val videoId = item.id.removePrefix(prefix)
                             val streamUrl = youtubeNollywoodScraper.extractStreamUrl(videoId)
                             if (streamUrl != null) {
-                                onPlayStream(streamUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null)
+                                tryPlayStream(streamUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null, 0)
                             } else {
                                 statusText = "Could not resolve stream."
                             }
@@ -1048,7 +1177,7 @@ fun MediaDetailScreen(
                                         statusText = "CinePro: trying link ${idx + 1}/${sources.size} (${source.provider.ifBlank { "direct" }})..."
                                         if (source.url.isDirectPlayableStreamUrl()) {
                                             statusText = ""
-                                            onPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson, null)
+                                            tryPlayStream(source.url, item.title, if (isPremium) null else freeMoviePreviewMs, subtitlesJson, null, 0)
                                             return@launch
                                         }
                                     }
@@ -1056,10 +1185,11 @@ fun MediaDetailScreen(
                                 // Fallback to vidsrc.to embed — wider movie coverage than vidlink.pro alone
                                 statusText = "CinePro direct stream unavailable. Loading embed..."
                                 val fallbackEmbed = "https://vidsrc.to/embed/movie/$resolvedTmdbId"
-                                onPlayMaEmbedWithLimit(
+                                tryPlayEmbed(
                                     fallbackEmbed,
                                     item.title,
-                                    if (isPremium) null else freeMoviePreviewMs
+                                    if (isPremium) null else freeMoviePreviewMs,
+                                    0
                                 )
                                 return@launch
                             }
@@ -1068,14 +1198,15 @@ fun MediaDetailScreen(
                                 statusText = "Server 5: Passing VidLink to ExoPlayer scraper..."
                                 val embedUrl = StreamServer.VIDLINK_EXO.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
                                 statusText = ""
-                                onPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null)
+                                tryPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null, 0)
                                 return@launch
                             }
                             val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                            onPlayMaEmbedWithLimit(
+                            tryPlayEmbed(
                                 embedUrl,
                                 item.title,
-                                if (isPremium) null else freeMoviePreviewMs
+                                if (isPremium) null else freeMoviePreviewMs,
+                                0
                             )
                         }
                     },
@@ -1114,12 +1245,19 @@ fun MediaDetailScreen(
                                             val sourceUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
                                             // CinePro context for movie download
                                             val movieTmdbContext = if (resolvedTmdbId.isNotBlank()) Triple(resolvedTmdbId, "movie", "1:1") else null
-                                            val downloadQualities = resolveDownloadableQualities(sourceUrl, tmdbContext = movieTmdbContext, onStatus = { msg -> statusText = msg })
+                                            val downloadQualities = resolveDownloadableQualitiesCommon(httpClient, sourceUrl, tmdbContext = movieTmdbContext, onStatus = { msg -> statusText = msg })
                                             if (downloadQualities.isNotEmpty()) {
-                                                val processDownload = { finalUrl: String ->
-                                                    scope.launch {
-                                                        statusText = "Downloading movie..."
-                                                        val saved = saveDownloadedVideo(item.id, 1, finalUrl)
+                                                val processDownload = { quality: CineProSource ->
+                                                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                        val saved = saveDownloadedVideo(
+                                                            parentId = item.id,
+                                                            episodeNumber = 1,
+                                                            sourceUrl = quality.url,
+                                                            headersJson = quality.headersJson,
+                                                            onProgress = { progress ->
+                                                                statusText = "Downloading Movie: ${(progress * 100).toInt()}%"
+                                                            }
+                                                        )
                                                         if (saved.success) {
                                                             downloadRepo.addEpisode(
                                                             DownloadedEpisode(
@@ -1140,22 +1278,21 @@ fun MediaDetailScreen(
                                                                 }
                                                             )
                                                         )
-                                                            statusText = "Movie saved offline."
                                                         } else { 
-                                                            statusText = saved.error.ifBlank { "Download failed." }
                                                             if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id) 
                                                         }
-                                                        downloadingMovie = false
-                                                        refreshTrigger++
                                                     }
+                                                    statusText = "Download started in background..."
+                                                    downloadingMovie = false
+                                                    refreshTrigger++
                                                     Unit
                                                 }
                                                 
                                                 if (downloadQualities.size == 1) {
-                                                    processDownload(downloadQualities.first().url)
+                                                    processDownload(downloadQualities.first())
                                                 } else {
                                                     downloadQualityOptions = downloadQualities
-                                                    pendingDownloadAction = processDownload
+                                                    pendingDownloadAction = { processDownload(CineProSource(it)) }
                                                 }
                                             } else { 
                                                 statusText = "Movie stream unavailable for download."

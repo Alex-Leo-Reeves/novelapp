@@ -235,12 +235,16 @@ fun TvPlayerScreen(
         // the player reports playing.
         LaunchedEffect(vlcMediaPlayer) {
             val mp = vlcMediaPlayer ?: return@LaunchedEffect
+            if (resumeMs <= 0L) {
+                hasAppliedResume = true
+                return@LaunchedEffect
+            }
             while (!hasAppliedResume && !previewExpired) {
-                if (resumeMs > 0 && mp.isPlaying) {
+                if (resumeMs > 0 && mp.isPlaying && mp.length > 0) {
                     hasAppliedResume = true
                     currentPosition = resumeMs
                     runCatching {
-                        mp.time = resumeMs.coerceIn(0L, mp.length.takeIf { it > 0 } ?: resumeMs)
+                        mp.time = resumeMs.coerceIn(0L, mp.length)
                     }
                 }
                 delay(300)

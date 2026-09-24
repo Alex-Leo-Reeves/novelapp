@@ -1,6 +1,8 @@
 package com.alexleoreeves.novelapp.data
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.head
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -117,6 +119,12 @@ class ParallelStreamResolver(
         candidates.add {
             val start = System.currentTimeMillis()
             val url = StreamServer.VIDLINK.buildEmbedUrl(tmdbId, "tv", sNum, epNum)
+            
+            val isAlive = runCatching {
+                httpClient.head(url).status.value < 500
+            }.getOrDefault(false)
+            if (!isAlive) return@add null
+
             val latency = System.currentTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
@@ -129,6 +137,12 @@ class ParallelStreamResolver(
         candidates.add {
             val start = System.currentTimeMillis()
             val url = StreamServer.VIDSRC_TO.buildEmbedUrl(tmdbId, "tv", sNum, epNum)
+            
+            val isAlive = runCatching {
+                httpClient.head(url).status.value != 404
+            }.getOrDefault(false)
+            if (!isAlive) return@add null
+
             val latency = System.currentTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
@@ -207,6 +221,12 @@ class ParallelStreamResolver(
         candidates.add {
             val start = System.currentTimeMillis()
             val url = StreamServer.VIDLINK.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
+            
+            val isAlive = runCatching {
+                httpClient.head(url).status.value < 500
+            }.getOrDefault(false)
+            if (!isAlive) return@add null
+
             val latency = System.currentTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
@@ -219,6 +239,12 @@ class ParallelStreamResolver(
         candidates.add {
             val start = System.currentTimeMillis()
             val url = StreamServer.VIDSRC_TO.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
+
+            val isAlive = runCatching {
+                httpClient.head(url).status.value != 404
+            }.getOrDefault(false)
+            if (!isAlive) return@add null
+
             val latency = System.currentTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
@@ -230,7 +256,31 @@ class ParallelStreamResolver(
         }
         candidates.add {
             val start = System.currentTimeMillis()
+            val url = StreamServer.VIDSRC_SBS.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
+
+            val isAlive = runCatching {
+                httpClient.head(url).status.value != 404
+            }.getOrDefault(false)
+            if (!isAlive) return@add null
+
+            val latency = System.currentTimeMillis() - start
+            ResolvedStreamResult(
+                url = url,
+                isDirect = false,
+                serverName = "VidSrc.sbs",
+                score = 640,
+                latencyMs = latency
+            )
+        }
+        candidates.add {
+            val start = System.currentTimeMillis()
             val url = StreamServer.AUTOEMBED.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
+
+            val isAlive = runCatching {
+                httpClient.head(url).status.value != 404
+            }.getOrDefault(false)
+            if (!isAlive) return@add null
+
             val latency = System.currentTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
@@ -265,6 +315,7 @@ class ParallelStreamResolver(
         // Multi-embed candidate sweeps
         listOf(
             StreamServer.VIDLINK to 750,
+            StreamServer.VIDSRC_SBS to 730,
             StreamServer.VIDSRC_TO to 720,
             StreamServer.AUTOEMBED to 700,
             StreamServer.TWO_EMBED_ONLINE to 680,
@@ -273,6 +324,16 @@ class ParallelStreamResolver(
             candidates.add {
                 val start = System.currentTimeMillis()
                 val embedUrl = server.buildEmbedUrl(tmdbId, type, s, e)
+                
+                // Ping the server to ensure it is alive before claiming it works
+                // Cloudflare challenges might return 503/403, but downtime usually throws or returns 521/522
+                val isAlive = runCatching {
+                    val code = httpClient.head(embedUrl).status.value
+                    code != 521 && code != 522 && code != 523 && code != 502 && code != 404
+                }.getOrDefault(false)
+
+                if (!isAlive) return@add null
+
                 val latency = System.currentTimeMillis() - start
                 ResolvedStreamResult(
                     url = embedUrl,

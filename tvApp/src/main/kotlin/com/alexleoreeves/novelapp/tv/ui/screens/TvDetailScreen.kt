@@ -180,7 +180,7 @@ fun TvDetailScreen(
         val containerExtension = "mp4"
         statusText = "Downloading \"$title\"..."
         scope.launch {
-            val sourceUrl = mediaRepo.resolveStreamUrl(
+            val rawSourceUrl = mediaRepo.resolveStreamUrl(
                 item = item,
                 chapter = ch,
                 server = when {
@@ -191,11 +191,11 @@ fun TvDetailScreen(
                 donghuaServer = if (isDonghua) selectedDonghuaServer else null,
                 animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer else null
             )
-            if (sourceUrl.isNullOrBlank()) {
+            if (rawSourceUrl.isNullOrBlank()) {
                 statusText = "Could not resolve a download link. Try another server."
                 return@launch
             }
-            val downloadHeadersJson = mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
+            
             val derivedMediaType = when {
                 isDonghua -> "DONGHUA"
                 item.isAnime -> "ANIME"
@@ -204,12 +204,34 @@ fun TvDetailScreen(
                 item.isComic -> "COMIC"
                 else -> "NOVEL"
             }
+            
+            val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
+            val tmdbContext = if (isTmdb) {
+                Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
+            } else null
+
+            statusText = "Resolving high quality stream..."
+            val qualities = tvResolveDownloadableQualities(
+                httpClient = mediaRepo.client,
+                sourceUrl = rawSourceUrl,
+                tmdbContext = tmdbContext,
+                onStatus = { msg: String -> statusText = msg }
+            )
+            
+            val bestQuality = qualities.firstOrNull()
+            if (bestQuality == null) {
+                statusText = "Stream unavailable for download. Try another server."
+                return@launch
+            }
+            
+            val downloadHeadersJson = bestQuality.headersJson ?: mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
+            
             // Free-tier: single-content (movies) get 20% file cap via maxFraction.
             // Episode cap is already enforced in enqueueDownload().
             val effectiveMaxFraction = if (account?.isPremium != true && isSingleContent) 0.2f else 0f
             cache.enqueueInternal(
                 taskId = taskId,
-                sourceUrl = sourceUrl,
+                sourceUrl = bestQuality.url,
                 title = title,
                 parentId = item.id,
                 episodeNumber = ch.chapterNumber,
@@ -236,7 +258,7 @@ fun TvDetailScreen(
         val containerExtension = "mp4"
         statusText = "Downloading \"$title\" to $usbLabel..."
         scope.launch {
-            val sourceUrl = mediaRepo.resolveStreamUrl(
+            val rawSourceUrl = mediaRepo.resolveStreamUrl(
                 item = item,
                 chapter = ch,
                 server = when {
@@ -247,14 +269,44 @@ fun TvDetailScreen(
                 donghuaServer = if (isDonghua) selectedDonghuaServer else null,
                 animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer else null
             )
-            if (sourceUrl.isNullOrBlank()) {
+            if (rawSourceUrl.isNullOrBlank()) {
                 statusText = "Could not resolve a download link. Try another server."
                 return@launch
             }
-            val downloadHeadersJson = mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
+            
+            val derivedMediaType = when {
+                isDonghua -> "DONGHUA"
+                item.isAnime -> "ANIME"
+                item.isVideo -> item.mediaKind.uppercase().ifBlank { "MOVIE" }
+                item.isManga -> "MANGA"
+                item.isComic -> "COMIC"
+                else -> "NOVEL"
+            }
+            
+            val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
+            val tmdbContext = if (isTmdb) {
+                Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
+            } else null
+
+            statusText = "Resolving high quality stream..."
+            val qualities = tvResolveDownloadableQualities(
+                httpClient = mediaRepo.client,
+                sourceUrl = rawSourceUrl,
+                tmdbContext = tmdbContext,
+                onStatus = { msg: String -> statusText = msg }
+            )
+            
+            val bestQuality = qualities.firstOrNull()
+            if (bestQuality == null) {
+                statusText = "Stream unavailable for download. Try another server."
+                return@launch
+            }
+            
+            val downloadHeadersJson = bestQuality.headersJson ?: mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
+
             val ok = cache.enqueueUsb(
                 taskId = taskId,
-                sourceUrl = sourceUrl,
+                sourceUrl = bestQuality.url,
                 title = title,
                 parentId = item.id,
                 episodeNumber = ch.chapterNumber,
@@ -640,7 +692,9 @@ fun TvDetailScreen(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
-                // Toggle this to true to restore the manual server selector chips.
+                // Manual server selector chips — curated per content type:
+                // donghua → DONGHUA_SELECTOR, anime → ANIME_SELECTOR,
+                // movies/TV → MOVIE_SELECTOR.
                 val showServerSelector = false
 
                 if (isVideoTitle && !item.id.startsWith("youtube_nollywood_")) {
@@ -654,7 +708,7 @@ fun TvDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                         ) {
-                            items(DonghuaServer.ALL_IN_ORDER) { server ->
+                            items(DonghuaServer.DONGHUA_SELECTOR) { server ->
                                 val isSelected = selectedDonghuaServer == server
                                 var sFocused by remember { mutableStateOf(false) }
                                 Surface(
@@ -697,7 +751,7 @@ fun TvDetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                             ) {
-                                items(AnimeServer.ALL_IN_ORDER) { server ->
+                                items(AnimeServer.ANIME_SELECTOR) { server ->
                                     val isSelected = selectedAnimeServer == server
                                     var sFocused by remember { mutableStateOf(false) }
                                     Surface(
@@ -729,7 +783,7 @@ fun TvDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                         ) {
-                            items(StreamServer.ALL_IN_ORDER) { server ->
+                            items(StreamServer.MOVIE_SELECTOR) { server ->
                                 val isSelected = selectedServer == server
                                 var sFocused by remember { mutableStateOf(false) }
                                 Surface(

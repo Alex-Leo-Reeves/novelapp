@@ -84,7 +84,8 @@ data class CineProSource(
     val url: String,
     val provider: String = "",
     val quality: String = "",
-    val headers: Map<String, String>? = null
+    val headers: Map<String, String>? = null,
+    val headersJson: String? = null
 )
 
 /**
@@ -180,18 +181,28 @@ suspend fun resolveAllCineProSources(
             } else {
                 rawUrl
             }
+            val headersJson = src.headers?.let { h ->
+                val entries = h.entries.joinToString(",") { "\"${it.key}\":\"${it.value}\"" }
+                "{$entries}"
+            }
             results.add(CineProSource(
                 url = rewritten,
                 provider = src.provider.ifBlank { "" },
                 quality = src.quality,
-                headers = src.headers
+                headers = src.headers,
+                headersJson = headersJson
             ))
         } else if (rawUrl.isNotBlank()) {
+            val headersJson = src.headers?.let { h ->
+                val entries = h.entries.joinToString(",") { "\"${it.key}\":\"${it.value}\"" }
+                "{$entries}"
+            }
             results.add(CineProSource(
                 url = rawUrl,
                 provider = src.provider,
                 quality = src.quality,
-                headers = src.headers
+                headers = src.headers,
+                headersJson = headersJson
             ))
         }
         results
@@ -398,4 +409,40 @@ fun String.isBlockedOrErrorPage(): Boolean {
         lower.contains("503 service unavailable") ||
         lower.contains("captcha") ||
         lower.contains("blocked")
+}
+
+suspend fun resolveDownloadableQualitiesCommon(
+    httpClient: io.ktor.client.HttpClient,
+    sourceUrl: String,
+    tmdbContext: Triple<String, String, String>? = null,  // (tmdbId, type, seasonEpisode)
+    onStatus: ((String) -> Unit)? = null
+): List<CineProSource> {
+    // ── Phase 1: Try CinePro Core for any TMDB-based content ──────────
+    if (tmdbContext != null) {
+        val (tmdbIdCtx, mediaTypeCtx, seasonEpisode) = tmdbContext
+        val parts = seasonEpisode.split(":")
+        val season = parts.getOrNull(0) ?: "1"
+        val episode = parts.getOrNull(1) ?: "1"
+        onStatus?.invoke("CinePro: searching 10+ providers for download...")
+        val result = resolveAllCineProSources(httpClient, com.alexleoreeves.novelapp.platform.AppReleaseConfig.SERVER_BASE_URL, mediaTypeCtx, tmdbIdCtx, season, episode)
+        val directSources = result.sources.filter { it.url.isDirectPlayableStreamUrl() }
+        if (directSources.isNotEmpty()) {
+            onStatus?.invoke("CinePro: found direct stream.")
+            return directSources
+        }
+        onStatus?.invoke("CinePro: no sources. Trying embed fallback...")
+    }
+
+    // ── Phase 2: Check if the source itself is a direct stream URL ────
+    val trimmed = sourceUrl.trim()
+    if (trimmed.isNotBlank() && trimmed.isDirectPlayableStreamUrl()) {
+        return listOf(CineProSource(url = trimmed, quality = "Direct"))
+    }
+
+    // ── Phase 3: Hidden WebView scraping ─────────────────────────────
+    onStatus?.invoke("Embed: scraping stream (up to 45s)...")
+    val scrapedUrl = com.alexleoreeves.novelapp.data.extractStreamFromEmbed(trimmed, timeoutMs = 45_000L)
+        ?.takeIf { it.isDirectPlayableStreamUrl() }
+    
+    return if (scrapedUrl != null) listOf(CineProSource(url = scrapedUrl, quality = "Auto")) else emptyList()
 }

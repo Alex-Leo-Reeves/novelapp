@@ -166,7 +166,8 @@ data class ChunkRecord(
     val byteLength: Long,        // plaintext length (last chunk may be short)
     val encryptedLength: Long,   // on-disk length ([tag][iv][ciphertext])
     val sha256Hex: String = "",  // plaintext digest (integrity sweep)
-    val verified: Boolean = false
+    val verified: Boolean = false,
+    val chunkUrl: String? = null
 )
 
 /**

@@ -1,0 +1,42 @@
+--- composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data/mediacache/MediaTaskRunner.kt
++++ composeApp/src/commonMain/kotlin/com/alexleoreeves/novelapp/data/mediacache/MediaTaskRunner.kt
+@@ -48,6 +48,42 @@
+         val bundlePath = bundlePathFor(request, volume)
+         val gate = request.admissionGate ?: MediaAdmissionGate { true }
+ 
++        if (request.sourceUrl.contains(".m3u8") || request.sourceUrl.contains("hls")) {
++            val m3u8Bytes = try {
++                transport.fetchFull(request.sourceUrl, parseDownloadHeaders(request.headersJson))
++            } catch (e: Exception) {
++                null
++            } ?: return TaskRunResult.Failure(DownloadFailureReason.NETWORK, "Failed to fetch HLS playlist")
++            
++            val text = m3u8Bytes.decodeToString()
++            val lines = text.lines()
++            val segmentUrls = mutableListOf<String>()
++            val baseUrl = request.sourceUrl.substringBeforeLast("/") + "/"
++            
++            for (line in lines) {
++                val trimmed = line.trim()
++                if (trimmed.isNotBlank() && !trimmed.startsWith("#")) {
++                    val url = if (trimmed.startsWith("http")) trimmed else "$baseUrl$trimmed"
++                    segmentUrls.add(url)
++                }
++            }
++            
++            if (segmentUrls.isEmpty()) {
++                return TaskRunResult.Failure(DownloadFailureReason.NETWORK, "Empty HLS playlist")
++            }
++            
++            val fakeProbe = MediaProbe(
++                totalBytes = segmentUrls.size * 2_000_000L, // fake total
++                supportsRanges = true,
++                contentType = "application/vnd.apple.mpegurl"
++            )
++            
++            // ... handle HLS manifest building ...
++        }
++
+         val probe = try {
+             transport.probe(request.sourceUrl, parseDownloadHeaders(request.headersJson))
+         } catch (e: Exception) {

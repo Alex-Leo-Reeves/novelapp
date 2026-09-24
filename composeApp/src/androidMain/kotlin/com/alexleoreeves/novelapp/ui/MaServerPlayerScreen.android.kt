@@ -335,7 +335,9 @@ actual fun MaServerPlayerScreen(
                                 "popup", "/pop.js", "/popunder", "/ad.js",
                                 "/analytics.", "/track.",
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
-                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
+                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com",
+                                // vidSrc.sbs popup/ad network (from HAR capture)
+                                "luugy.com", "swiwetduchan.shop", "llvpn.com", "imagesharerhost.com"
                             )
                             val isAd = blockedDomains.any { domain -> lowerUrl.contains(domain) }
                             if (isAd) {
@@ -398,8 +400,11 @@ actual fun MaServerPlayerScreen(
                             val lowerUrl = url.lowercase()
 
                             // ── AD BLOCKING ────────────────────────────────
-                            // Whitelist Cloudflare challenge domains and router embeds
-                            if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") || lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") || lowerUrl.contains("turnstile")) {
+                            // Whitelist Cloudflare challenge domains, router embeds, and the
+                            // vidSrc.sbs player backbone (web.nxsha.app + its HLS/CDN hosts)
+                            // so real video segments are never intercepted.
+                            if (lowerUrl.contains("autoembed") || lowerUrl.contains("embed.su") || lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi") || lowerUrl.contains("turnstile") ||
+                                lowerUrl.contains("nxsha.app") || lowerUrl.contains("itsnitrox.tech") || lowerUrl.contains("vidsrc.sbs")) {
                                 return null
                             }
                             
@@ -427,7 +432,9 @@ actual fun MaServerPlayerScreen(
                                 "/banner", "/ads/", "/advert",
                                 "/analytics.", "/track.",
                                 "bit.ly", "tinyurl", "adf.ly", "ouo.io", "shorte.st",
-                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com"
+                                "adfoc.us", "bc.vc", "linkbucks.com", "adreactor.com",
+                                // vidSrc.sbs popup/ad network (from HAR capture)
+                                "luugy.com", "swiwetduchan.shop", "llvpn.com", "imagesharerhost.com"
                             )
 
                             val isAd = adDomains.any { domain -> lowerUrl.contains(domain) }
