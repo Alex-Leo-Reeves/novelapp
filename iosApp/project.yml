@@ -31,6 +31,7 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           cd "$SRCROOT/.."
+          ./gradlew :composeApp:syncComposeResourcesForIos
           ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
     settings:
       base:
@@ -53,6 +54,7 @@ targets:
           - "-framework"
           - "ComposeApp"
 
+          - "-ObjC"
 schemes:
   NovaRead:
     build:
