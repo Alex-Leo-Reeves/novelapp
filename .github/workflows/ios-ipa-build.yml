@@ -155,8 +155,13 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/NovaRead.mobileprovision"
 
-      - name: Pre-build Compose Framework (Fail fast on Kotlin errors)
-        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64 --no-daemon
+      - name: Compile Kotlin/Native (exits JVM to free memory for linker)
+        run: ./gradlew :composeApp:compileKotlinIosArm64 --no-daemon
+
+      - name: Link iOS Framework (linker gets all available RAM)
+        env:
+          GRADLE_OPTS: "-Xmx512m"
+        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64 --no-daemon -Porg.gradle.jvmargs="-Xmx512m -Dfile.encoding=UTF-8"
 
       - name: Build unsigned iPhone app for compile check
         if: steps.signing.outputs.can_sign != 'true'
