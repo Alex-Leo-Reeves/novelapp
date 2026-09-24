@@ -283,3 +283,35 @@ jobs:
         with:
           name: novelapp-ios-ipa
           path: build/ios/export/*.ipa
+
+      - name: Verify bundled Info.plist
+        run: |
+          set -euo pipefail
+
+          APP_PLIST=""
+          for candidate in \
+            "build/ios/DerivedData/Build/Products/Release-iphoneos/NovaRead.app/Info.plist" \
+            "build/ios/NovaRead.xcarchive/Products/Applications/NovaRead.app/Info.plist"
+          do
+            if [ -f "$candidate" ]; then
+              APP_PLIST="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$APP_PLIST" ]; then
+            echo "::error::No built .app Info.plist was found, so the bundle could not be verified."
+            find build/ios -maxdepth 6 -name "Info.plist" -print 2>/dev/null || true
+            exit 1
+          fi
+
+          EXPECTED_VERSION="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\?\([^"]*\)"\?[[:space:]]*$/\1/p' iosApp/project.yml | head -1)"
+          EXPECTED_BUILD="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"\?\([^"]*\)"\?[[:space:]]*$/\1/p' iosApp/project.yml | head -1)"
+
+          if [ -z "$EXPECTED_VERSION" ] || [ -z "$EXPECTED_BUILD" ]; then
+            echo "::error::Could not read MARKETING_VERSION / CURRENT_PROJECT_VERSION from iosApp/project.yml"
+            exit 1
+          fi
+
+          echo "Verifying bundled plist: $APP_PLIST (expected $EXPECTED_VERSION / $EXPECTED_BUILD)"
+          python3 scripts/verify-ios-info-plist.py "$APP_PLIST" "$EXPECTED_VERSION" "$EXPECTED_BUILD"
