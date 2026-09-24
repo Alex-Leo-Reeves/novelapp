@@ -122,6 +122,19 @@ jobs:
       - name: Generate Xcode project
         run: cd iosApp && xcodegen generate --spec project.yml
 
+      - name: Verify XcodeGen did not overwrite the authored Info.plist
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- iosApp/Info.plist; then
+            echo "::error::xcodegen generate modified iosApp/Info.plist."
+            echo "::error::project.yml must not contain an 'info:' block: XcodeGen reads that as"
+            echo "::error::'generate a plist at this path' and replaces the authored file with a stub"
+            echo "::error::that has version 1.0/1 and none of the app keys."
+            git --no-pager diff --stat -- iosApp/Info.plist
+            exit 1
+          fi
+          echo "OK: iosApp/Info.plist was not modified by xcodegen."
+
       - name: Install Apple signing assets
         if: steps.signing.outputs.can_sign == 'true'
         run: |
@@ -270,4 +283,3 @@ jobs:
         with:
           name: novelapp-ios-ipa
           path: build/ios/export/*.ipa
-
