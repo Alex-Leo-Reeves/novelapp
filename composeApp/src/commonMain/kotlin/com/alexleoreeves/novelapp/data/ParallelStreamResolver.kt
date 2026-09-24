@@ -82,9 +82,9 @@ class ParallelStreamResolver(
         // 1. AnimeXin Scraper
         if (!chapterUrl.isNullOrBlank() && (chapterUrl.contains("animexin") || chapterUrl.startsWith("http"))) {
             candidates.add {
-                val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val start = io.ktor.util.date.getTimeMillis()
                 val resolved = animeXinScraper.resolveEpisodePlayerUrl(chapterUrl) ?: chapterUrl
-                val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+                val latency = io.ktor.util.date.getTimeMillis() - start
                 val isDirect = resolved.isDirectMediaUrl()
                 ResolvedStreamResult(
                     url = resolved,
@@ -99,9 +99,9 @@ class ParallelStreamResolver(
         // 2. Anivexa Providers (Anime Server 5 AniNeko & Anime Server 3 AniKoto)
         if (!chapterUrl.isNullOrBlank() && AnivexaApi.isAnivexaEpisodeUrl(chapterUrl)) {
             candidates.add {
-                val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val start = io.ktor.util.date.getTimeMillis()
                 val stream = runCatching { anivexaApi.resolveStream(chapterUrl) }.getOrNull()
-                val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+                val latency = io.ktor.util.date.getTimeMillis() - start
                 if (stream != null && stream.url.isNotBlank()) {
                     ResolvedStreamResult(
                         url = stream.url,
@@ -117,7 +117,7 @@ class ParallelStreamResolver(
 
         // 3. TMDB Embeds (Movie Server 1 & Movie Server 2)
         candidates.add {
-            val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val start = io.ktor.util.date.getTimeMillis()
             val url = StreamServer.VIDLINK.buildEmbedUrl(tmdbId, "tv", sNum, epNum)
             
             val isAlive = runCatching {
@@ -125,7 +125,7 @@ class ParallelStreamResolver(
             }.getOrDefault(false)
             if (!isAlive) return@add null
 
-            val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+            val latency = io.ktor.util.date.getTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
                 isDirect = false,
@@ -135,7 +135,7 @@ class ParallelStreamResolver(
             )
         }
         candidates.add {
-            val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val start = io.ktor.util.date.getTimeMillis()
             val url = StreamServer.VIDSRC_TO.buildEmbedUrl(tmdbId, "tv", sNum, epNum)
             
             val isAlive = runCatching {
@@ -143,7 +143,7 @@ class ParallelStreamResolver(
             }.getOrDefault(false)
             if (!isAlive) return@add null
 
-            val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+            val latency = io.ktor.util.date.getTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
                 isDirect = false,
@@ -176,9 +176,9 @@ class ParallelStreamResolver(
         // 1. Direct Anivexa endpoint if chapter already carries an anivexa:// URL
         if (!chapterUrl.isNullOrBlank() && AnivexaApi.isAnivexaEpisodeUrl(chapterUrl)) {
             candidates.add {
-                val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val start = io.ktor.util.date.getTimeMillis()
                 val stream = runCatching { anivexaApi.resolveStream(chapterUrl) }.getOrNull()
-                val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+                val latency = io.ktor.util.date.getTimeMillis() - start
                 if (stream != null && stream.url.isNotBlank()) {
                     ResolvedStreamResult(
                         url = stream.url,
@@ -195,7 +195,7 @@ class ParallelStreamResolver(
         // 2. Client Scrapers (AnimePahe / AnimeHeaven / AniDao / AniNeko)
         if (!chapterUrl.isNullOrBlank() && chapterUrl.startsWith("http")) {
             candidates.add {
-                val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val start = io.ktor.util.date.getTimeMillis()
                 val streamUrl = when {
                     chapterUrl.contains("animepahe") -> animePaheScraper.extractStreamUrl(chapterUrl)
                     chapterUrl.contains("animeheaven") -> animeHeavenScraper.resolvePlayerUrl(chapterUrl)
@@ -203,7 +203,7 @@ class ParallelStreamResolver(
                     chapterUrl.contains("anineko") -> aninekoScraper.extractStreamUrl(chapterUrl)
                     else -> null
                 }
-                val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+                val latency = io.ktor.util.date.getTimeMillis() - start
                 if (!streamUrl.isNullOrBlank()) {
                     val isDirect = streamUrl.isDirectMediaUrl()
                     ResolvedStreamResult(
@@ -219,7 +219,7 @@ class ParallelStreamResolver(
 
         // 3. TMDB Embed Fallbacks (VidLink, VidSrc.to, AutoEmbed, 2Embed)
         candidates.add {
-            val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val start = io.ktor.util.date.getTimeMillis()
             val url = StreamServer.VIDLINK.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
             
             val isAlive = runCatching {
@@ -227,7 +227,7 @@ class ParallelStreamResolver(
             }.getOrDefault(false)
             if (!isAlive) return@add null
 
-            val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+            val latency = io.ktor.util.date.getTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
                 isDirect = false,
@@ -237,7 +237,7 @@ class ParallelStreamResolver(
             )
         }
         candidates.add {
-            val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val start = io.ktor.util.date.getTimeMillis()
             val url = StreamServer.VIDSRC_TO.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
 
             val isAlive = runCatching {
@@ -245,7 +245,7 @@ class ParallelStreamResolver(
             }.getOrDefault(false)
             if (!isAlive) return@add null
 
-            val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+            val latency = io.ktor.util.date.getTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
                 isDirect = false,
@@ -255,7 +255,7 @@ class ParallelStreamResolver(
             )
         }
         candidates.add {
-            val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val start = io.ktor.util.date.getTimeMillis()
             val url = StreamServer.VIDSRC_SBS.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
 
             val isAlive = runCatching {
@@ -263,7 +263,7 @@ class ParallelStreamResolver(
             }.getOrDefault(false)
             if (!isAlive) return@add null
 
-            val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+            val latency = io.ktor.util.date.getTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
                 isDirect = false,
@@ -273,7 +273,7 @@ class ParallelStreamResolver(
             )
         }
         candidates.add {
-            val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val start = io.ktor.util.date.getTimeMillis()
             val url = StreamServer.AUTOEMBED.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
 
             val isAlive = runCatching {
@@ -281,7 +281,7 @@ class ParallelStreamResolver(
             }.getOrDefault(false)
             if (!isAlive) return@add null
 
-            val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+            val latency = io.ktor.util.date.getTimeMillis() - start
             ResolvedStreamResult(
                 url = url,
                 isDirect = false,
@@ -322,7 +322,7 @@ class ParallelStreamResolver(
             StreamServer.NONTONGO to 650
         ).forEach { (server, baseScore) ->
             candidates.add {
-                val start = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val start = io.ktor.util.date.getTimeMillis()
                 val embedUrl = server.buildEmbedUrl(tmdbId, type, s, e)
                 
                 // Ping the server to ensure it is alive before claiming it works
@@ -334,7 +334,7 @@ class ParallelStreamResolver(
 
                 if (!isAlive) return@add null
 
-                val latency = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - start
+                val latency = io.ktor.util.date.getTimeMillis() - start
                 ResolvedStreamResult(
                     url = embedUrl,
                     isDirect = false,
