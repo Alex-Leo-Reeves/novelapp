@@ -306,7 +306,7 @@ jobs:
             exit 1
           fi
 
-                     EXPECTED_VERSION="$(
+          EXPECTED_VERSION="$(
             python3 - <<'PY'
           import re
           from pathlib import Path
@@ -314,7 +314,7 @@ jobs:
           text = Path("iosApp/project.yml").read_text(encoding="utf-8")
 
           match = re.search(
-              r'^[ \t]*MARKETING_VERSION:[ \t]*[\'"]?([^\'"#\s]+)',
+              r'^[ \t]*MARKETING_VERSION:[ \t]*[\'"]?([^\'"#\s]+)[\'"]?[ \t]*(?:#.*)?$',
               text,
               re.MULTILINE,
           )
@@ -334,7 +334,7 @@ jobs:
           text = Path("iosApp/project.yml").read_text(encoding="utf-8")
 
           match = re.search(
-              r'^[ \t]*CURRENT_PROJECT_VERSION:[ \t]*[\'"]?([^\'"#\s]+)',
+              r'^[ \t]*CURRENT_PROJECT_VERSION:[ \t]*[\'"]?([^\'"#\s]+)[\'"]?[ \t]*(?:#.*)?$',
               text,
               re.MULTILINE,
           )
