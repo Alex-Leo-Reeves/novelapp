@@ -305,12 +305,12 @@ jobs:
             find build/ios -maxdepth 6 -name "Info.plist" -print 2>/dev/null || true
             exit 1
           fi
-          EXPECTED_VERSION="$(
-            python3 -c 'import re, pathlib; text=pathlib.Path("iosApp/project.yml").read_text(); match=re.search(r"^[[:space:]]*MARKETING_VERSION:[[:space:]]*[\"'\'']?([^\"'\'\"#[:space:]]+)", text, re.MULTILINE); print(match.group(1) if match else "")'
+                    EXPECTED_VERSION="$(
+            python3 -c '...'
           )"
 
           EXPECTED_BUILD="$(
-            python3 -c 'import re, pathlib; text=pathlib.Path("iosApp/project.yml").read_text(); match=re.search(r"^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*[\"'\'']?([^\"'\'\"#[:space:]]+)", text, re.MULTILINE); print(match.group(1) if match else "")'
+            python3 -c '...'
           )"
 
           if [ -z "$EXPECTED_VERSION" ]; then
