@@ -325,11 +325,4 @@ jobs:
 
           echo "Verifying bundled plist: $APP_PLIST (expected $EXPECTED_VERSION / $EXPECTED_BUILD)"
           python3 scripts/verify-ios-info-plist.py "$APP_PLIST" "$EXPECTED_VERSION" "$EXPECTED_BUILD"
-
-          if [ -z "$EXPECTED_VERSION" ] || [ -z "$EXPECTED_BUILD" ]; then
-            echo "::error::Could not read MARKETING_VERSION / CURRENT_PROJECT_VERSION from iosApp/project.yml"
-            exit 1
-          fi
           
-          echo "Verifying bundled plist: $APP_PLIST (expected $EXPECTED_VERSION / $EXPECTED_BUILD)"
-          python3 scripts/verify-ios-info-plist.py "$APP_PLIST" "$EXPECTED_VERSION" "$EXPECTED_BUILD"
