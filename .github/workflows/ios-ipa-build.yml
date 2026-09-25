@@ -305,44 +305,26 @@ jobs:
             find build/ios -maxdepth 6 -name "Info.plist" -print 2>/dev/null || true
             exit 1
           fi
-
-                    EXPECTED_VERSION="$(
-            python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          text = Path("iosApp/project.yml").read_text(encoding="utf-8")
-          match = re.search(
-              r'^[ \t]*MARKETING_VERSION:[ \t]*[\'"]?([^\'"#\s]+)',
-              text,
-              re.MULTILINE,
-          )
-
-          if not match:
-              raise SystemExit("Missing MARKETING_VERSION in iosApp/project.yml")
-
-          print(match.group(1))
-          PY
+          EXPECTED_VERSION="$(
+            python3 -c 'import re, pathlib; text=pathlib.Path("iosApp/project.yml").read_text(); match=re.search(r"^[[:space:]]*MARKETING_VERSION:[[:space:]]*[\"'\'']?([^\"'\'\"#[:space:]]+)", text, re.MULTILINE); print(match.group(1) if match else "")'
           )"
 
           EXPECTED_BUILD="$(
-            python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          text = Path("iosApp/project.yml").read_text(encoding="utf-8")
-          match = re.search(
-              r'^[ \t]*CURRENT_PROJECT_VERSION:[ \t]*[\'"]?([^\'"#\s]+)',
-              text,
-              re.MULTILINE,
-          )
-
-          if not match:
-              raise SystemExit("Missing CURRENT_PROJECT_VERSION in iosApp/project.yml")
-
-          print(match.group(1))
-          PY
+            python3 -c 'import re, pathlib; text=pathlib.Path("iosApp/project.yml").read_text(); match=re.search(r"^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*[\"'\'']?([^\"'\'\"#[:space:]]+)", text, re.MULTILINE); print(match.group(1) if match else "")'
           )"
+
+          if [ -z "$EXPECTED_VERSION" ]; then
+            echo "::error::Missing MARKETING_VERSION in iosApp/project.yml"
+            exit 1
+          fi
+
+          if [ -z "$EXPECTED_BUILD" ]; then
+            echo "::error::Missing CURRENT_PROJECT_VERSION in iosApp/project.yml"
+            exit 1
+          fi
+
+          echo "Verifying bundled plist: $APP_PLIST (expected $EXPECTED_VERSION / $EXPECTED_BUILD)"
+          python3 scripts/verify-ios-info-plist.py "$APP_PLIST" "$EXPECTED_VERSION" "$EXPECTED_BUILD"
 
           if [ -z "$EXPECTED_VERSION" ] || [ -z "$EXPECTED_BUILD" ]; then
             echo "::error::Could not read MARKETING_VERSION / CURRENT_PROJECT_VERSION from iosApp/project.yml"
