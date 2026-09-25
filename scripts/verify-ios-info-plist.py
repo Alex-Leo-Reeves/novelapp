@@ -43,6 +43,9 @@ REQUIRED_KEYS: tuple[str, ...] = (
     "CFBundlePackageType",
     "CFBundleShortVersionString",
     "CFBundleVersion",
+    # Compose Multiplatform 1.7+ aborts at startup (PlistSanityCheck) unless this
+    # key is present and true -- the "shows launch screen then force-quits" bug.
+    "CADisableMinimumFrameDurationOnPhone",
     "LSRequiresIPhoneOS",
     "NSAppTransportSecurity",
     "UIApplicationSceneManifest",
@@ -114,6 +117,12 @@ def collect_failures(info: dict[str, Any], expected_version: str, expected_build
     actual_build = str(info.get("CFBundleVersion", ""))
     if actual_build != expected_build:
         failures.append(f"CFBundleVersion is {actual_build!r}, expected {expected_build!r}")
+
+    if info.get("CADisableMinimumFrameDurationOnPhone") is not True:
+        failures.append(
+            "CADisableMinimumFrameDurationOnPhone is not set to true -- Compose "
+            "Multiplatform's PlistSanityCheck aborts the app at startup without it"
+        )
 
     ats = info.get("NSAppTransportSecurity")
     if not isinstance(ats, dict) or ats.get("NSAllowsArbitraryLoads") is not True:
