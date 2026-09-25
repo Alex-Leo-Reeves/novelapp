@@ -109,3 +109,7 @@ writes into `iosApp/Config.xcconfig`.
   for the script call plus an explicit failure branch. A stray trailing blank line at EOF was
   dropped by the editor as a side effect.
 - `ioslogs.zip` is left untracked — it is a transient CI log dump, not a build input.
+- Pushed as `d135fa0` on `main` (`1f53612..d135fa0`), so `on.push.paths` matched
+  `.github/workflows/ios-ipa-build.yml` and the workflow re-ran on this commit.
+- The commit is authored `Sixth <sixth@local>` because no git identity is configured in this
+  checkout. `git commit --amend --reset-author` re-attributes it if a different author is wanted.
