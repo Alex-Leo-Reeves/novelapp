@@ -31,7 +31,11 @@ struct ComposeView: UIViewControllerRepresentable {
         // full-screen on/off through IosSystemUiBridge; ImmersiveBridge applies it.
         context.coordinator.immersive.host = controller
         IosSystemUiBridge.shared.setListener { [immersive = context.coordinator.immersive] on in
-            immersive.apply(on)
+            // Kotlin/Native boxes a Kotlin `Boolean` lambda parameter as
+            // `KotlinBoolean` (an NSNumber subclass) when exporting to Swift,
+            // so `on` is NOT a Swift `Bool`. Use `boolValue` — the compiler's
+            // suggested `as! Bool` fix-it would trap at runtime.
+            immersive.apply(on.boolValue)
         }
 
         // iOS-standard "swipe from the left edge to go back" gesture. Forwards
@@ -85,7 +89,7 @@ final class EdgeBackTarget: NSObject {
                 didTrigger = true
                 _ = IosBackBridge.shared.triggerBack()
             }
-        case .ended, .cancelled, .failed:
+        case .ended, .cancelled, .failed, .possible:
             didTrigger = false
         @unknown default:
             break
