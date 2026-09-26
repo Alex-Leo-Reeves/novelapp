@@ -29,11 +29,14 @@
         "Windows (EXE): v1.46 \u2014 Parallel stream resolution and multi-tier server failover",
         "Windows (EXE): Episodic download management and updated scrapers"
     ],
-    "iosVersionCode": 46,
-    "iosVersionName": "1.46",
+    "iosVersionCode": 47,
+    "iosVersionName": "1.47",
     "iosReleaseNotes": [
-        "iOS (IPA): v1.46 \u2014 Parallel stream resolution and multi-tier server failover",
-        "iOS (IPA): Episodic auto-advance and post-playback transitions"
+        "iOS (IPA): v1.47 \u2014 New watchable home feed: learned 'Recommended For You', 'Latest', and 15 genre rows (Action, Horror, Supernatural, Comedy, Thriller\u2026)",
+        "iOS (IPA): Home now lists only watchable video \u2014 novels, manga and comics plus the old media dividers are gone",
+        "iOS (IPA): Direct streams now play through AVPlayer with a 90-second forward buffer instead of a WebView, greatly reducing rebuffering",
+        "iOS (IPA): Fixed 'Continue from where I stopped' hanging on load instead of playing",
+        "iOS (IPA): More reliable downloads \u2014 files now stream straight to disk, verify HTTP status, fall back to the backend proxy, and bundle fMP4 init segments for offline playback"
     ],
     "releaseNotes": [
         "Android: version 1.47 \u2014 New watchable home feed: learned 'Recommended For You', 'Latest', and 15 genre rows (Action, Horror, Supernatural, Comedy, Thriller\u2026)",
