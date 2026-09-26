@@ -24,9 +24,10 @@ import kotlinx.serialization.json.jsonObject
 import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
-import platform.Foundation.NSFileHandle
-import platform.Foundation.fileHandleForWritingAtPath
 import platform.Foundation.NSMutableData
+import platform.posix.fclose
+import platform.posix.fopen
+import platform.posix.fwrite
 import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSString
@@ -255,12 +256,11 @@ private suspend fun iosStreamToFile(
             error("HTTP ${response.status.value} while downloading media")
         }
         val total = response.headers["Content-Length"]?.toLongOrNull() ?: 0L
-        NSFileManager.defaultManager.createFileAtPath(
-            path = filePath,
-            contents = null,
-            attributes = null
-        )
-        val handle = NSFileHandle.fileHandleForWritingAtPath(filePath)
+        // POSIX file I/O: "wb" creates/truncates the file. NSFileHandle's
+        // Kotlin/Native mapping is awkward here — writeData() demands an
+        // `error` out-param and closeFile() does not resolve — whereas
+        // fopen/fwrite/fclose are stable, standard cinterop.
+        val outFile = fopen(filePath, "wb")
             ?: error("Could not open download file: $filePath")
         try {
             val channel = response.bodyAsChannel()
@@ -269,14 +269,16 @@ private suspend fun iosStreamToFile(
             while (true) {
                 val read = channel.readAvailable(buffer)
                 if (read <= 0) break
-                handle.writeData(buffer.copyOfRange(0, read).toNSData())
+                buffer.usePinned { pinned ->
+                    fwrite(pinned.addressOf(0), 1uL, read.toULong(), outFile)
+                }
                 received += read
                 if (total > 0) {
                     onProgress?.invoke((received.toFloat() / total.toFloat()).coerceIn(0f, 1f))
                 }
             }
         } finally {
-            handle.closeFile()
+            fclose(outFile)
         }
     }
 }
