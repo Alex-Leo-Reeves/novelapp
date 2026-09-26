@@ -123,7 +123,7 @@ actual fun MaServerPlayerScreen(
                                 errorMessage = message
                             }
                         )
-                        uiDelegate = MaEmbedUiDelegate()
+                        UIDelegate = MaEmbedUiDelegate()
                         val url = NSURL.URLWithString(embedUrl)
                             ?: NSURL.URLWithString("https://vidsrc.to")!!
                         loadRequest(NSURLRequest.requestWithURL(url)!!)
@@ -267,11 +267,11 @@ private class MaEmbedUiDelegate : NSObject(), WKUIDelegateProtocol {
     override fun webView(
         webView: WKWebView,
         createWebViewWithConfiguration: WKWebViewConfiguration,
-        navigationAction: WKNavigationAction,
+        forNavigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ): WKWebView? {
-        if (navigationAction.targetFrame == null) {
-            webView.loadRequest(navigationAction.request)
+        if (forNavigationAction.targetFrame == null) {
+            webView.loadRequest(forNavigationAction.request)
         }
         return null
     }

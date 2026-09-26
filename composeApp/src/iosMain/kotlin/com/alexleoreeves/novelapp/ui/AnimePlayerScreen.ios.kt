@@ -183,7 +183,7 @@ actual fun AnimePlayerScreen(
                                     errorMessage = message
                                 }
                             )
-                            uiDelegate = AnimePlayerUiDelegate()
+                            UIDelegate = AnimePlayerUiDelegate()
                             wkRef = this
                             val url = NSURL.URLWithString(streamUrl)
                                 ?: NSURL.URLWithString("https://vidsrc.to")!!
@@ -196,7 +196,11 @@ actual fun AnimePlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = isLoading || errorMessage != null,
+            // The direct AVPlayer path renders its own video surface, so the
+            // spinner must NOT sit over it while loading — otherwise playback
+            // stays hidden behind the overlay for up to the 20 s deadline.
+            // Embed (WebView) and local paths keep the loading overlay.
+            visible = (isLoading && !isDirectOnlineMedia) || errorMessage != null,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -347,11 +351,11 @@ private class AnimePlayerUiDelegate : NSObject(), WKUIDelegateProtocol {
     override fun webView(
         webView: WKWebView,
         createWebViewWithConfiguration: WKWebViewConfiguration,
-        navigationAction: WKNavigationAction,
+        forNavigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ): WKWebView? {
-        if (navigationAction.targetFrame == null) {
-            webView.loadRequest(navigationAction.request)
+        if (forNavigationAction.targetFrame == null) {
+            webView.loadRequest(forNavigationAction.request)
         }
         return null
     }

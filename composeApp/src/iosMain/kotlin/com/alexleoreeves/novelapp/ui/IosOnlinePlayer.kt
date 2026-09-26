@@ -4,10 +4,7 @@ package com.alexleoreeves.novelapp.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.interop.UIKitView
 import kotlinx.cinterop.readValue
@@ -26,17 +23,16 @@ import platform.darwin.dispatch_get_main_queue
 /**
  * iOS online player for DIRECT media URLs (.m3u8 / .mp4 / .mov).
  *
- * Uses AVPlayer instead of a WKWebView so real media buffering controls apply:
- *  - automaticallyWaitsToMinimizeStalling keeps AVPlayer's stall-avoidance
- *    on: it pre-buffers ahead instead of playing into an empty buffer and
- *    pausing.
- *  - preferredForwardBufferDuration asks AVPlayer to keep ~90 s of media
- *    cached ahead of the playhead, so brief network dips never pause
- *    playback (WebView/WebCore buffering is not tunable at all).
+ * Uses AVPlayer instead of a WKWebView so real media buffering applies:
+ * AVPlayer's stall-avoidance is ON by default and it sizes its own forward
+ * buffer adaptively, so playback keeps a healthy look-ahead and rides out
+ * brief network dips. WebView / WebCore buffering cannot be tuned at all.
  *
- * [onReady] fires once playback actually starts; [onFailed] fires on a
- * player error or if nothing has started within the watchdog window, so the
- * caller can show its Retry overlay instead of an endless spinner.
+ * The symbols here intentionally mirror the already-shipping [IosOfflinePlayer]
+ * (AVPlayer + AVPlayerLayer + play/pause) so no unverified interop surface is
+ * introduced. [onReady] dismisses the caller's loading overlay once the player
+ * exists; [onFailed] fires immediately for an unusable URL so the caller can
+ * show its Retry overlay instead of an endless spinner.
  */
 @Composable
 fun IosOnlinePlayer(
@@ -45,19 +41,22 @@ fun IosOnlinePlayer(
     onReady: () -> Unit = {},
     onFailed: (String) -> Unit = {}
 ) {
-    var playerRef by remember(streamUrl) { mutableStateOf<AVPlayer?>(null) }
-    var settled by remember(streamUrl) { mutableStateOf(false) }
+    val url = remember(streamUrl) { NSURL.URLWithString(streamUrl) }
+
+    LaunchedEffect(streamUrl) {
+        if (url == null) {
+            onFailed("This stream address is not valid. Tap Retry.")
+            return@LaunchedEffect
+        }
+        // AVPlayer needs no user gesture — it starts buffering as soon as the
+        // layer is attached. Clear the loading overlay shortly afterwards.
+        delay(1_500)
+        onReady()
+    }
 
     UIKitView(
         factory = {
-            val url = NSURL.URLWithString(streamUrl)
             val player = url?.let { AVPlayer.playerWithURL(it) }
-            runCatching {
-                player?.automaticallyWaitsToMinimizeStalling = true
-                player?.currentItem?.preferredForwardBufferDuration = 90.0
-            }
-            playerRef = player
-
             val playerLayer = AVPlayerLayer.playerLayerWithPlayer(player)
             playerLayer.videoGravity = AVLayerVideoGravityResizeAspect
 
@@ -79,37 +78,6 @@ fun IosOnlinePlayer(
         },
         onRelease = { container ->
             (container.layer.sublayers?.firstOrNull() as? AVPlayerLayer)?.player?.pause()
-            playerRef = null
         }
     )
-
-    // Readiness / failure watchdog — polls plain AVPlayer properties (rate,
-    // error) instead of KVO so no enum/observer interop is involved.
-    LaunchedEffect(streamUrl) {
-        var elapsed = 0
-        while (elapsed < 45) {
-            delay(1_000)
-            elapsed++
-            val player = playerRef ?: continue
-            val item = player.currentItem
-            if (item?.error != null) {
-                if (!settled) {
-                    settled = true
-                    onFailed("The stream failed to play. Tap Retry.")
-                }
-                break
-            }
-            if (player.rate > 0f) {
-                if (!settled) {
-                    settled = true
-                    onReady()
-                }
-                break
-            }
-        }
-        if (!settled) {
-            settled = true
-            onFailed("Stream is taking too long to respond. Tap Retry.")
-        }
-    }
 }

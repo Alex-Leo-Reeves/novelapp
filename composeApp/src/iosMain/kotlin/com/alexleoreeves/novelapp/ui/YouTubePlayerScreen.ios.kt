@@ -119,7 +119,7 @@ actual fun YouTubePlayerScreen(
                                 errorMessage = message
                             }
                         )
-                        uiDelegate = YouTubePlayerUiDelegate()
+                        UIDelegate = YouTubePlayerUiDelegate()
                         val url = NSURL.URLWithString(embedUrl)
                             ?: NSURL.URLWithString("https://www.youtube.com")!!
                         loadRequest(NSURLRequest.requestWithURL(url)!!)
@@ -277,11 +277,11 @@ private class YouTubePlayerUiDelegate : NSObject(), WKUIDelegateProtocol {
     override fun webView(
         webView: WKWebView,
         createWebViewWithConfiguration: WKWebViewConfiguration,
-        navigationAction: WKNavigationAction,
+        forNavigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ): WKWebView? {
-        if (navigationAction.targetFrame == null) {
-            webView.loadRequest(navigationAction.request)
+        if (forNavigationAction.targetFrame == null) {
+            webView.loadRequest(forNavigationAction.request)
         }
         return null
     }

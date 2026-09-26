@@ -25,6 +25,7 @@ import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSFileHandle
+import platform.Foundation.fileHandleForWritingAtPath
 import platform.Foundation.NSMutableData
 import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
