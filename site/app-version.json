@@ -1,26 +1,27 @@
 {
     "_instructions": "PERMANENT release-channel URLs \u2014 do NOT change apkUrl / tvApkUrl / desktopUrl / ipaUrl for a routine release. To ship a new build you REPLACE the binary behind each URL and update ONLY the version fields + release notes plus the matching sha256/bytes. Per-platform overrides (tvVersion*, desktopVersion*, iosVersion*) let TV, Windows EXE, and iOS ship on their OWN tracks; when null they fall back to the top-level Android values. \u26a0\ufe0f Each per-platform versionCode MUST equal the versionCode that platform actually BUILDS with (tvApp/build.gradle.kts for TV, PlatformAppVersion.desktop.kt + composeApp packageVersion for EXE, iosApp/project.yml for iOS) \u2014 a mismatch makes that platform show a false 'update available'. AFTER BUILDING, fill in the sha256 + bytes for every platform (empty string / 0 = the app skips integrity verification for that platform until you provide them). Compute with: sha256sum <file>  and  stat --format=%s <file>",
-    "versionCode": 46,
-    "versionName": "1.46",
+    "versionCode": 47,
+    "versionName": "1.47",
     "apkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.39/novelapp-android.apk",
-    "apkSha256": "2e97d3b81fab7d4e91ec319ee7621fb911b229ef647e8cbddf5cf686aabeae59",
-    "apkBytes": 151298207,
+    "apkSha256": "643c9b55043ee3de788ac36767124f04d8a7676420eb83a54992f9e465c7ca8f",
+    "apkBytes": 151295547,
     "tvApkUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.40/novelapp-androidtv.apk",
-    "tvApkSha256": "c26e968cc6a2ed83a67eef00a27d2e697c49f7ff941b5cb04014ced53e168e33",
-    "tvApkBytes": 157045729,
+    "tvApkSha256": "94749bead5a164355186863895d6e0b37bb9e2fcb5bbe6c06bbe6328c9a70d19",
+    "tvApkBytes": 157068737,
     "desktopUrl": "https://github.com/Alex-Leo-Reeves/novelapp/releases/download/v1.41/novelapp-android.exe",
     "desktopSha256": "",
     "desktopBytes": 0,
     "ipaUrl": "https://novelapp1.onrender.com/downloads/novelapp-ios.ipa",
     "ipaSha256": "",
     "ipaBytes": 0,
-    "tvVersionCode": 46,
-    "tvVersionName": "1.46",
+    "tvVersionCode": 47,
+    "tvVersionName": "1.47",
     "tvReleaseNotes": [
-        "Android TV (TV): v1.46 \u2014 Automated Parallel Server Resolution engine with concurrent health check sweeps and multi-server fallback",
-        "Android TV (TV): Seamless post-playback episodic auto-advance & D-pad accessible movie completion recommendations rail",
-        "Android TV (TV): Granular episode download selection modal with Season tabs and batch queueing",
-        "Android TV (TV): Reconfigured Donghua streaming servers & updated anime embed playback engine"
+        "Android TV (TV): v1.47 \u2014 New watchable home feed: learned 'Recommended For You', 'Latest', and 15 genre rows (Action, Horror, Supernatural, Comedy, Thriller\u2026)",
+        "Android TV (TV): Home now lists only watchable video \u2014 novels, manga and comics plus the old media dividers are gone",
+        "Android TV (TV): Recommendations now learn from your watch history and match similar titles",
+        "Android TV (TV): Smoother playback \u2014 larger forward network cache (15s) greatly reduces rebuffering and pause/play stutter",
+        "Android TV (TV): Fixed 'Continue from where I stopped' hanging on load instead of playing"
     ],
     "desktopVersionCode": 46,
     "desktopVersionName": "1.46",
@@ -35,10 +36,11 @@
         "iOS (IPA): Episodic auto-advance and post-playback transitions"
     ],
     "releaseNotes": [
-        "Android: version 1.46 \u2014 Automated Parallel Server Resolution engine with concurrent health check sweeps and multi-server fallback",
-        "Android: Episodic download picker UI with multi-select and season filtering",
-        "Android: Seamless post-playback auto-advance and movie completion transitions",
-        "Android: Updated Donghua and Anime embed scrapers"
+        "Android: version 1.47 \u2014 New watchable home feed: learned 'Recommended For You', 'Latest', and 15 genre rows (Action, Horror, Supernatural, Comedy, Thriller\u2026)",
+        "Android: Recommendations now learn from what you watch and surface similar titles first",
+        "Android: Smoother playback \u2014 larger forward buffer plus a read-through disk cache stops the pause/play stutter",
+        "Android: Fixed 'Continue from where I stopped' hanging on load instead of playing",
+        "Android: More reliable downloads \u2014 fMP4 init segments are bundled so offline playback never needs the network"
     ],
     "forceUpdate": false
 }

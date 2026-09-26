@@ -2,10 +2,12 @@
 
 package com.alexleoreeves.novelapp.data
 
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.DefaultRequest
 import io.ktor.client.request.get
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsChannel
@@ -22,6 +24,7 @@ import kotlinx.serialization.json.jsonObject
 import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSFileHandle
 import platform.Foundation.NSMutableData
 import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
@@ -125,7 +128,16 @@ actual suspend fun saveDownloadedVideo(
 ): DownloadedVideoFile = withContext(Dispatchers.Default) {
     runCatching {
         if (!sourceUrl.startsWith("http", ignoreCase = true)) {
-            return@runCatching DownloadedVideoFile(error = "Local video file was not found.")
+            // Already-local source: reuse the file as-is — parity with the
+            // Android actual (return the existing file instead of failing).
+            val existing = sourceUrl.removePrefix("file://")
+            return@runCatching if (existing.isNotBlank() &&
+                NSFileManager.defaultManager.fileExistsAtPath(existing)
+            ) {
+                DownloadedVideoFile(existing, iosFileSize(existing))
+            } else {
+                DownloadedVideoFile(error = "Local video file was not found.")
+            }
         }
 
         val dir = videoDownloadsDir(parentId, episodeNumber)
@@ -146,7 +158,7 @@ actual suspend fun saveDownloadedVideo(
         }
         try {
             if (sourceUrl.isIosHlsLikeUrl()) {
-                saveIosHlsDownload(client, sourceUrl, dir)
+                saveIosHlsDownload(client, sourceUrl, dir, onProgress)
             } else {
                 val extension = sourceUrl.substringBefore("?")
                     .substringBefore("#")
@@ -154,7 +166,8 @@ actual suspend fun saveDownloadedVideo(
                     .takeIf { it.length in 2..5 }
                     ?: "mp4"
                 val filePath = "$dir/episode.$extension"
-                downloadIosToFile(client, sourceUrl, filePath)
+                downloadIosToFile(client, sourceUrl, filePath, onProgress)
+                onProgress?.invoke(1f)
                 DownloadedVideoFile(filePath, iosFileSize(filePath))
             }
         } finally {
@@ -207,17 +220,84 @@ private fun parseIosDownloadHeaders(headersJson: String?): Map<String, String> {
     }.getOrDefault(emptyMap())
 }
 
-private suspend fun downloadIosToFile(client: HttpClient, url: String, filePath: String) {
-    iosDownloadBytesToFile(client, url, filePath)
+private suspend fun downloadIosToFile(
+    client: HttpClient,
+    url: String,
+    filePath: String,
+    onProgress: ((Float) -> Unit)? = null
+) {
+    runCatching {
+        iosStreamToFile(client, url, filePath, onProgress)
+    }.getOrElse {
+        // Backend proxy fallback (parity with Android's downloadToFile) so a
+        // CDN that rejects direct requests still downloads.
+        iosStreamToFile(client, iosProxyUrl(url), filePath, onProgress)
+    }
 }
 
-private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, dir: String): DownloadedVideoFile {
+private suspend fun iosStreamToFile(
+    client: HttpClient,
+    url: String,
+    filePath: String,
+    onProgress: ((Float) -> Unit)? = null
+) {
+    // Stream straight to disk in chunks. The old bodyAsBytes() path held the
+    // ENTIRE file (movies can be GBs) in RAM, which jetsam-kills the iOS app
+    // mid-download. Status is checked first so a 403 error page can never be
+    // saved as a "video".
+    client.prepareGet(url) {
+        header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+        header("Accept", "*/*")
+        header("Accept-Encoding", "identity")
+    }.execute { response ->
+        if (response.status.value !in 200..299) {
+            error("HTTP ${response.status.value} while downloading media")
+        }
+        val total = response.headers["Content-Length"]?.toLongOrNull() ?: 0L
+        NSFileManager.defaultManager.createFileAtPath(
+            path = filePath,
+            contents = null,
+            attributes = null
+        )
+        val handle = NSFileHandle.fileHandleForWritingAtPath(filePath)
+            ?: error("Could not open download file: $filePath")
+        try {
+            val channel = response.bodyAsChannel()
+            val buffer = ByteArray(256 * 1024)
+            var received = 0L
+            while (true) {
+                val read = channel.readAvailable(buffer)
+                if (read <= 0) break
+                handle.writeData(buffer.copyOfRange(0, read).toNSData())
+                received += read
+                if (total > 0) {
+                    onProgress?.invoke((received.toFloat() / total.toFloat()).coerceIn(0f, 1f))
+                }
+            }
+        } finally {
+            handle.closeFile()
+        }
+    }
+}
+
+private suspend fun saveIosHlsDownload(
+    client: HttpClient,
+    sourceUrl: String,
+    dir: String,
+    onProgress: ((Float) -> Unit)? = null
+): DownloadedVideoFile {
     val masterText = iosFetchText(client, sourceUrl)
     val (playlistUrl, playlistText) = iosSelectMediaPlaylist(client, sourceUrl, masterText)
     val playlistPath = "$dir/playlist.m3u8"
     var totalBytes = 0L
     var segmentIndex = 0
     var keyIndex = 0
+    var mapIndex = 0
+    // Segment-based progress so the UI shows a real % on iOS, like Android.
+    val totalSegments = playlistText.lines()
+        .count { it.isNotBlank() && !it.startsWith("#") }
+        .coerceAtLeast(1)
+    var processedSegments = 0
     val rewrittenLines = mutableListOf<String>()
     for (line in playlistText.lines()) {
         val trimmed = line.trim()
@@ -234,6 +314,20 @@ private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, di
                     rewrittenLines.add(line.replace("""URI="$keyUri"""", """URI="${keyPath.substringAfterLast("/")}""""))
                 }
             }
+            // fMP4 HLS: bundle the init segment locally too, otherwise offline
+            // playback still needs the network for EXT-X-MAP (parity Android).
+            trimmed.startsWith("#EXT-X-MAP", ignoreCase = true) && "URI=\"" in trimmed -> {
+                val mapUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
+                if (mapUri.isNullOrBlank()) {
+                    rewrittenLines.add(line)
+                } else {
+                    val mapUrl = iosResolveUrl(playlistUrl, mapUri)
+                    val mapPath = "$dir/init_${mapIndex++}.mp4"
+                    iosDownloadBytesToFile(client, mapUrl, mapPath)
+                    totalBytes += iosFileSize(mapPath)
+                    rewrittenLines.add(line.replace("""URI="$mapUri"""", """URI="${mapPath.substringAfterLast("/")}""""))
+                }
+            }
             trimmed.isBlank() || trimmed.startsWith("#") -> {
                 rewrittenLines.add(line)
             }
@@ -248,6 +342,8 @@ private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, di
                 segmentIndex += 1
                 iosDownloadBytesToFile(client, segmentUrl, segmentPath)
                 totalBytes += iosFileSize(segmentPath)
+                processedSegments += 1
+                onProgress?.invoke(processedSegments.toFloat() / totalSegments.toFloat())
                 rewrittenLines.add(segmentPath.substringAfterLast("/"))
             }
         }
@@ -258,12 +354,44 @@ private suspend fun saveIosHlsDownload(client: HttpClient, sourceUrl: String, di
 }
 
 private suspend fun iosDownloadBytesToFile(client: HttpClient, url: String, filePath: String) {
-    val bytes = client.get(url) {
+    val bytes = runCatching { iosFetchBytes(client, url) }
+        .getOrElse { iosFetchBytes(client, iosProxyUrl(url)) }
+    bytes.toNSData().writeToFile(filePath, atomically = false)
+}
+
+private suspend fun iosFetchBytes(client: HttpClient, url: String): ByteArray {
+    val response = client.get(url) {
         header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
         header("Accept", "*/*")
         header("Accept-Encoding", "identity")
-    }.bodyAsBytes()
-    bytes.toNSData().writeToFile(filePath, atomically = false)
+    }
+    // expectSuccess=false — check manually so a 403 error page can never be
+    // saved as a media part.
+    if (response.status.value !in 200..299) {
+        error("HTTP ${response.status.value} while fetching media part")
+    }
+    return response.bodyAsBytes()
+}
+
+/** Backend proxy URL — mirrors Android's downloadText/downloadToFile 403 fallback. */
+private fun iosProxyUrl(url: String): String =
+    "${AppReleaseConfig.API_BASE_URL}/anivexa/proxy?url=${url.encodeIosQueryParam()}"
+
+/** Percent-encode a value for a query parameter (JVM URLEncoder is unavailable on Native). */
+private fun String.encodeIosQueryParam(): String {
+    val hex = "0123456789ABCDEF"
+    val sb = StringBuilder()
+    for (ch in this) {
+        if (ch.isLetterOrDigit() || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            sb.append(ch)
+        } else {
+            for (b in ch.toString().encodeToByteArray()) {
+                val v = b.toInt() and 0xFF
+                sb.append('%').append(hex[v shr 4]).append(hex[v and 0xF])
+            }
+        }
+    }
+    return sb.toString()
 }
 
 private suspend fun iosSelectMediaPlaylist(client: HttpClient, sourceUrl: String, playlistText: String): Pair<String, String> {
@@ -292,10 +420,27 @@ private fun iosResolveUrl(baseUrl: String, value: String): String {
 }
 
 private suspend fun iosFetchText(client: HttpClient, url: String): String =
-    client.get(url) {
-        header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
-        header("Accept", "*/*")
-    }.bodyAsText()
+    runCatching {
+        val response = client.get(url) {
+            header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+            header("Accept", "*/*")
+        }
+        if (response.status.value !in 200..299) {
+            error("HTTP ${response.status.value} while fetching playlist")
+        }
+        response.bodyAsText()
+    }.getOrElse {
+        // Backend proxy fallback (parity with Android's downloadText) so a
+        // CDN that 403s plain requests still downloads.
+        val response = client.get(iosProxyUrl(url)) {
+            header("User-Agent", IOS_DOWNLOAD_USER_AGENT)
+            header("Accept", "*/*")
+        }
+        if (response.status.value !in 200..299) {
+            error("HTTP ${response.status.value} while fetching playlist via proxy")
+        }
+        response.bodyAsText()
+    }
 
 private fun iosWriteUtf8(filePath: String, text: String) {
     NSString.create(string = text).writeToFile(

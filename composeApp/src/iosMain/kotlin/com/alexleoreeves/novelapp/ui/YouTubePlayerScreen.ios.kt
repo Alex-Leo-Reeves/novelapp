@@ -49,9 +49,12 @@ import platform.CoreGraphics.CGRectZero
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
+import platform.WebKit.WKNavigationAction
 import platform.WebKit.WKNavigationDelegateProtocol
+import platform.WebKit.WKUIDelegateProtocol
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
+import platform.WebKit.WKWindowFeatures
 import platform.darwin.NSObject
 
 private const val YOUTUBE_USER_AGENT =
@@ -116,6 +119,7 @@ actual fun YouTubePlayerScreen(
                                 errorMessage = message
                             }
                         )
+                        uiDelegate = YouTubePlayerUiDelegate()
                         val url = NSURL.URLWithString(embedUrl)
                             ?: NSURL.URLWithString("https://www.youtube.com")!!
                         loadRequest(NSURLRequest.requestWithURL(url)!!)
@@ -259,5 +263,26 @@ private class YouTubeNavigationDelegate(
         } else {
             decisionHandler(platform.WebKit.WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
         }
+    }
+}
+
+/**
+ * iOS drops window.open() / target=_blank requests unless a UI delegate
+ * re-routes them, while Android's WebView loads them in the same window by
+ * default. This delegate mirrors the Android behavior so taps inside the
+ * YouTube embed keep working on iOS exactly like they do on Android.
+ */
+private class YouTubePlayerUiDelegate : NSObject(), WKUIDelegateProtocol {
+    @ObjCSignatureOverride
+    override fun webView(
+        webView: WKWebView,
+        createWebViewWithConfiguration: WKWebViewConfiguration,
+        navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ): WKWebView? {
+        if (navigationAction.targetFrame == null) {
+            webView.loadRequest(navigationAction.request)
+        }
+        return null
     }
 }

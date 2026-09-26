@@ -110,7 +110,9 @@ fun YouScreen(
         }
     }
 
-    LaunchedEffect(Unit) { checkForUpdates() }
+    // iOS ships outside the App Store — the in-app updater (and its automatic
+    // check) only exists for the Android/TV/desktop self-install channels.
+    LaunchedEffect(Unit) { if (updateTarget != AppUpdateTarget.IOS) checkForUpdates() }
 
     LaunchedEffect(account.authToken) {
         runCatching { authApi.billingStatus(account.authToken) }
@@ -309,14 +311,16 @@ fun YouScreen(
                 GlassSectionLabel("Voice Settings")
                 VoiceSettingsCard(ttsController)
 
-                // App update
-                GlassSectionLabel("App update")
-                UpdateCard(
-                    state = updateState,
-                    updateTarget = updateTarget,
-                    onCheckAgain = { scope.launch { checkForUpdates() } },
-                    onDownload = { url -> linkOpener.open(url.ifBlank { AppReleaseConfig.DOWNLOAD_URL }) }
-                )
+                // App update — hidden on iOS: the IPA has no self-update channel.
+                if (updateTarget != AppUpdateTarget.IOS) {
+                    GlassSectionLabel("App update")
+                    UpdateCard(
+                        state = updateState,
+                        updateTarget = updateTarget,
+                        onCheckAgain = { scope.launch { checkForUpdates() } },
+                        onDownload = { url -> linkOpener.open(url.ifBlank { AppReleaseConfig.DOWNLOAD_URL }) }
+                    )
+                }
 
                 // Sign out
                 OutlinedButton(

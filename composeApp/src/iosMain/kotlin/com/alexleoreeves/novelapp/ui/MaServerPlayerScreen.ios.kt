@@ -49,9 +49,12 @@ import platform.CoreGraphics.CGRectZero
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
+import platform.WebKit.WKNavigationAction
 import platform.WebKit.WKNavigationDelegateProtocol
+import platform.WebKit.WKUIDelegateProtocol
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
+import platform.WebKit.WKWindowFeatures
 import platform.darwin.NSObject
 
 private const val MA_EMBED_USER_AGENT =
@@ -120,6 +123,7 @@ actual fun MaServerPlayerScreen(
                                 errorMessage = message
                             }
                         )
+                        uiDelegate = MaEmbedUiDelegate()
                         val url = NSURL.URLWithString(embedUrl)
                             ?: NSURL.URLWithString("https://vidsrc.to")!!
                         loadRequest(NSURLRequest.requestWithURL(url)!!)
@@ -249,6 +253,27 @@ private class MaEmbedNavigationDelegate(
     @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didFailProvisionalNavigation: WKNavigation?, withError: platform.Foundation.NSError) {
         onFailed(withError.localizedDescription)
+    }
+}
+
+/**
+ * iOS drops window.open() / target=_blank requests — the common "tap Play" flow
+ * on embed servers — unless a UI delegate re-routes them, while Android's
+ * WebView loads them in the same window by default. This delegate mirrors the
+ * Android behavior so playback starts on iOS exactly like it does on Android.
+ */
+private class MaEmbedUiDelegate : NSObject(), WKUIDelegateProtocol {
+    @ObjCSignatureOverride
+    override fun webView(
+        webView: WKWebView,
+        createWebViewWithConfiguration: WKWebViewConfiguration,
+        navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ): WKWebView? {
+        if (navigationAction.targetFrame == null) {
+            webView.loadRequest(navigationAction.request)
+        }
+        return null
     }
 }
 

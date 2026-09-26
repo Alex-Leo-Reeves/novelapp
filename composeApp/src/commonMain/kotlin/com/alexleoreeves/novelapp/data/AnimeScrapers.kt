@@ -76,6 +76,41 @@ class AniListSource(private val client: HttpClient) {
             }
         """.trimIndent()
 
+        // Genre-filtered query — powers the home feed's genre rows (Action,
+        // Horror, Supernatural …) with AniList anime of that genre.
+        private val GENRE_QUERY = """
+            query (${'$'}genre: String, ${'$'}page: Int, ${'$'}perPage: Int) {
+              Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                media(genre: ${'$'}genre, type: ANIME, sort: POPULARITY_DESC) {
+                  id
+                  title { romaji english }
+                  coverImage { large }
+                  description(asHtml: false)
+                  episodes
+                  genres
+                  status
+                }
+              }
+            }
+        """.trimIndent()
+
+        // Newest anime first — powers the "Latest" home row.
+        private val LATEST_QUERY = """
+            query (${'$'}page: Int, ${'$'}perPage: Int) {
+              Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                media(type: ANIME, sort: START_DATE_DESC) {
+                  id
+                  title { romaji english }
+                  coverImage { large }
+                  description(asHtml: false)
+                  episodes
+                  genres
+                  status
+                }
+              }
+            }
+        """.trimIndent()
+
         private val RELATION_QUERY = """
             query (${'$'}id: Int) {
               Media(id: ${'$'}id, type: ANIME) {
@@ -180,6 +215,45 @@ class AniListSource(private val client: HttpClient) {
             }.body()
             parseAnimeList(response)
         }.getOrElse { emptyList() }
+    }
+
+    suspend fun fetchLatestAnime(page: Int = 1, perPage: Int = 20): List<AnimeResult> {
+        return runCatching {
+            val body = buildJsonObject {
+                put("query", LATEST_QUERY)
+                putJsonObject("variables") {
+                    put("page", page)
+                    put("perPage", perPage)
+                }
+            }
+            val response: String = client.post(ENDPOINT) {
+                header("Content-Type", "application/json")
+                setBody(body.toString())
+            }.body()
+            parseAnimeList(response)
+        }.getOrElse { emptyList() }
+    }
+
+    /** Anime of a given genre — used by the home feed's genre rows. */
+    suspend fun searchByGenre(genre: String, page: Int = 1, perPage: Int = 20): List<AnimeResult> {
+        return runCatching {
+            val body = buildJsonObject {
+                put("query", GENRE_QUERY)
+                putJsonObject("variables") {
+                    put("genre", genre)
+                    put("page", page)
+                    put("perPage", perPage)
+                }
+            }
+            val response: String = client.post(ENDPOINT) {
+                header("Content-Type", "application/json")
+                setBody(body.toString())
+            }.body()
+            parseAnimeList(response)
+        }.getOrElse { e ->
+            println("[AniList] Error fetching genre '$genre': ${e.message}")
+            emptyList()
+        }
     }
 
     suspend fun fetchSeasonChain(startId: String, maxDepth: Int = 12): List<AnimeResult> {

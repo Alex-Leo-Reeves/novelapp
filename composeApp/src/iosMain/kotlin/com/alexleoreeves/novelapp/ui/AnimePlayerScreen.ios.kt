@@ -49,14 +49,36 @@ import platform.CoreGraphics.CGRectZero
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
+import platform.WebKit.WKNavigationAction
 import platform.WebKit.WKNavigationDelegateProtocol
+import platform.WebKit.WKUIDelegateProtocol
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
+import platform.WebKit.WKWindowFeatures
 import platform.darwin.NSObject
 
 private const val PLAYER_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+/**
+ * Best-effort "kick" that starts playback on pages that loaded fine (UI and
+ * subtitles visible) but left their <video> paused — the classic embed hang.
+ * Unmutes and calls play() on every reachable video (top document plus
+ * same-origin iframes); cross-origin frames are out of reach from JS.
+ */
+private const val IOS_PLAY_KICK_JS =
+    "(function(){var s='none';" +
+        "function f(r){try{var a=r.querySelectorAll('video');" +
+        "for(var i=0;i<a.length;i++){var v=a[i];try{if(v.paused){" +
+        "v.muted=false;v.volume=1;var p=v.play();" +
+        "if(p&&p.catch){p.catch(function(){try{v.muted=true;v.play();}catch(e){}});}" +
+        "s='ok';}else{s='ok';}}catch(e){}}}catch(e){}}" +
+        "f(document);" +
+        "try{var g=document.querySelectorAll('iframe');" +
+        "for(var i=0;i<g.length;i++){try{if(g[i].contentDocument){f(g[i].contentDocument);}}catch(e){}}" +
+        "}catch(e){}" +
+        "return s;})()"
 
 @Composable
 actual fun AnimePlayerScreen(
@@ -73,18 +95,37 @@ actual fun AnimePlayerScreen(
     onBack: () -> Unit
 ) {
     val isLocalPath = remember(streamUrl) { streamUrl.isIosLocalMediaPath() }
+    // Direct media URLs play through AVPlayer (real forward buffering);
+    // embed pages keep the WKWebView path.
+    val isDirectOnlineMedia = remember(streamUrl) { streamUrl.isIosDirectOnlineMediaUrl() }
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
     var isLoading by remember(streamUrl, retryKey) { mutableStateOf(!isLocalPath) }
     var errorMessage by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     val providerName = streamUrl.animeProviderName()
+    // Kept so the play-kick loop below can reach the live page after load.
+    var wkRef by remember(streamUrl, retryKey) { mutableStateOf<WKWebView?>(null) }
 
-    LaunchedEffect(streamUrl, retryKey, isLoading) {
-        if (isLoading) {
-            delay(18_000)
-            if (isLoading) {
+    // Hard loading deadline — checked on a fixed cadence so redirect chains
+    // can never restart the timer. The old isLoading-keyed effect restarted
+    // its 18s delay on every navigation flicker, so a looping embed page
+    // could keep the spinner up forever.
+    LaunchedEffect(streamUrl, retryKey) {
+        while (true) {
+            delay(20_000)
+            if (isLoading && errorMessage == null) {
                 errorMessage = "$providerName is taking too long to respond. Try another provider or episode."
                 isLoading = false
             }
+        }
+    }
+
+    // Play kick: embed pages load fine and render their subtitles, but the
+    // inner <video> often stays paused without a user gesture — "loads
+    // forever, never plays". Re-issue unmute+play() for ~20s after load.
+    LaunchedEffect(streamUrl, retryKey) {
+        repeat(10) {
+            delay(2_000)
+            wkRef?.evaluateJavaScript(IOS_PLAY_KICK_JS, null)
         }
     }
 
@@ -105,6 +146,18 @@ actual fun AnimePlayerScreen(
                 modifier = Modifier.fillMaxSize(),
                 onPlaybackEnded = onPreviewFinished
             )
+        } else if (isDirectOnlineMedia) {
+            key(retryKey) {
+                IosOnlinePlayer(
+                    streamUrl = streamUrl,
+                    modifier = Modifier.fillMaxSize(),
+                    onReady = { isLoading = false },
+                    onFailed = { message ->
+                        isLoading = false
+                        errorMessage = message
+                    }
+                )
+            }
         } else {
             key(retryKey) {
                 UIKitView(
@@ -130,6 +183,8 @@ actual fun AnimePlayerScreen(
                                     errorMessage = message
                                 }
                             )
+                            uiDelegate = AnimePlayerUiDelegate()
+                            wkRef = this
                             val url = NSURL.URLWithString(streamUrl)
                                 ?: NSURL.URLWithString("https://vidsrc.to")!!
                             loadRequest(NSURLRequest.requestWithURL(url)!!)
@@ -281,9 +336,37 @@ private class AnimePlayerNavigationDelegate(
     }
 }
 
+/**
+ * iOS drops window.open() / target=_blank requests — the common "tap Play" flow
+ * on embed providers — unless a UI delegate re-routes them, while Android's
+ * WebView loads them in the same window by default. This delegate mirrors the
+ * Android behavior so playback starts on iOS exactly like it does on Android.
+ */
+private class AnimePlayerUiDelegate : NSObject(), WKUIDelegateProtocol {
+    @ObjCSignatureOverride
+    override fun webView(
+        webView: WKWebView,
+        createWebViewWithConfiguration: WKWebViewConfiguration,
+        navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ): WKWebView? {
+        if (navigationAction.targetFrame == null) {
+            webView.loadRequest(navigationAction.request)
+        }
+        return null
+    }
+}
+
 private fun String.isIosLocalMediaPath(): Boolean =
     startsWith("file://", ignoreCase = true) ||
         (startsWith("/") && !contains("://"))
+
+/** Direct media URLs (.m3u8/.mp4/.mov over http) → AVPlayer; .mpd and embed pages stay on the WebView. */
+private fun String.isIosDirectOnlineMediaUrl(): Boolean {
+    if (!startsWith("http", ignoreCase = true)) return false
+    val clean = substringBefore("?").substringBefore("#").lowercase()
+    return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mov")
+}
 
 private fun String.animeProviderName(): String {
     val host = NSURL.URLWithString(this)?.host?.removePrefix("www.") ?: return "Embedded provider"

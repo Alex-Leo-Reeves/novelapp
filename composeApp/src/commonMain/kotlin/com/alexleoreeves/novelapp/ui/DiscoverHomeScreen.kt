@@ -39,213 +39,93 @@ fun DiscoverHomeScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
 
-    // Section data — loaded lazily per category
-    var recommendedItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var isLoadingRecommended by remember { mutableStateOf(false) }
-    var animeItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var movieItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var nollywoodItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var kdramaItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var cartoonItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var classicItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var donghuaItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    
-    // Mixed media additions
-    var popularNovelItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var popularMangaItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
-    var popularComicItems by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    // ── Genre-based watchable feed state ────────────────────────────────────
+    // Row plan: Recommended (learned from watch history) → Latest → 15 genre
+    // rows. Only TMDB/AniList video content is fetched — novels, manga, comics
+    // and the old medium divider rows are gone from the home feed.
+    var rowData by remember { mutableStateOf<Map<String, List<UnifiedSearchResult>>>(emptyMap()) }
+    var rowLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var rowPages by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var rowHasMore by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var feedSeedTitles by remember { mutableStateOf<List<String>>(emptyList()) }
+    var feedSeedIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // TMDB search merged results
     var searchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var nollywoodSearchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
 
-    var isLoadingAnime by remember { mutableStateOf(false) }
-    var isLoadingMovies by remember { mutableStateOf(false) }
-    var isLoadingNollywood by remember { mutableStateOf(false) }
-    var isLoadingKDrama by remember { mutableStateOf(false) }
-    var isLoadingCartoon by remember { mutableStateOf(false) }
-    var isLoadingClassic by remember { mutableStateOf(false) }
-    var isLoadingDonghua by remember { mutableStateOf(false) }
-    var isLoadingNovels by remember { mutableStateOf(false) }
-    var isLoadingManga by remember { mutableStateOf(false) }
-    var isLoadingComics by remember { mutableStateOf(false) }
-
-    // ── Infinite scrolling state (per-section rows) ───────────────────────
-    var animePage by remember { mutableStateOf(2) }
-    var moviePage by remember { mutableStateOf(2) }
-    var nollywoodPage by remember { mutableStateOf(2) }
-    var kdramaPage by remember { mutableStateOf(2) }
-    var cartoonPage by remember { mutableStateOf(2) }
-    var classicPage by remember { mutableStateOf(2) }
-    var donghuaPage by remember { mutableStateOf(2) }
-    var novelPage by remember { mutableStateOf(2) }
-    var mangaPage by remember { mutableStateOf(2) }
-    var comicPage by remember { mutableStateOf(2) }
-
-    var isLoadingMoreAnime by remember { mutableStateOf(false) }
-    var isLoadingMoreMovies by remember { mutableStateOf(false) }
-    var isLoadingMoreNollywood by remember { mutableStateOf(false) }
-    var isLoadingMoreKDrama by remember { mutableStateOf(false) }
-    var isLoadingMoreCartoon by remember { mutableStateOf(false) }
-    var isLoadingMoreClassic by remember { mutableStateOf(false) }
-    var isLoadingMoreDonghua by remember { mutableStateOf(false) }
-    var isLoadingMoreNovels by remember { mutableStateOf(false) }
-    var isLoadingMoreManga by remember { mutableStateOf(false) }
-    var isLoadingMoreComics by remember { mutableStateOf(false) }
-
-    var hasMoreAnime by remember { mutableStateOf(true) }
-    var hasMoreMovies by remember { mutableStateOf(true) }
-    var hasMoreNollywood by remember { mutableStateOf(true) }
-    var hasMoreKDrama by remember { mutableStateOf(true) }
-    var hasMoreCartoon by remember { mutableStateOf(true) }
-    var hasMoreClassic by remember { mutableStateOf(true) }
-    var hasMoreDonghua by remember { mutableStateOf(true) }
-    var hasMoreNovels by remember { mutableStateOf(true) }
-    var hasMoreManga by remember { mutableStateOf(true) }
-    var hasMoreComics by remember { mutableStateOf(true) }
-
     val scope = rememberCoroutineScope()
 
-    // ── Load-more helpers (append next page on row end) ──────────────────
-    fun loadMoreSection(
-        category: VideoCategory,
-        page: Int,
-        current: List<UnifiedSearchResult>,
-        setter: (List<UnifiedSearchResult>) -> Unit,
-        setPage: (Int) -> Unit,
-        isLoading: Boolean,
-        setLoading: (Boolean) -> Unit,
-        hasMore: Boolean,
-        setHasMore: (Boolean) -> Unit
-    ) {
-        if (isLoading || !hasMore) return
-        setLoading(true)
+    // ── Genre home feed — shared with the TV app (see data/HomeFeed.kt) ──
+    val homeFeed = remember {
+        val client = io.ktor.client.HttpClient()
+        HomeFeedRepository(
+            tmdb = TmdbSource(
+                client = client,
+                readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
+                apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
+            ),
+            anilist = AniListSource(client)
+        )
+    }
+    val rowPlan = remember {
+        listOf("recommended" to "Recommended For You", "latest" to "Latest") +
+            HomeGenres.all.map { "genre_${it.key}" to it.label }
+    }
+
+    fun loadRow(rowKey: String, page: Int = 1) {
+        if (rowKey in rowLoading) return
+        rowLoading = rowLoading + rowKey
         scope.launch {
             try {
-                val repo = com.alexleoreeves.novelapp.data.NovelSearchRepository(
-                    rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
-                    rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
-                )
-                val more = repo.fetchVideo(category, page)
-                if (more.isNotEmpty()) {
-                    setter((current + more).distinctBy { it.id })
-                    setPage(page + 1)
-                } else {
-                    setHasMore(false)
+                val fetched = when {
+                    rowKey == "recommended" -> homeFeed.recommendedRow(feedSeedTitles, feedSeedIds)
+                    rowKey == "latest" -> homeFeed.latestRow(page)
+                    else -> HomeGenres.all.firstOrNull { "genre_${it.key}" == rowKey }
+                        ?.let { homeFeed.genreRow(it, page) } ?: emptyList()
                 }
-            } catch (_: Exception) {
-            } finally {
-                setLoading(false)
-            }
-        }
-    }
-
-    fun loadMoreMixed(
-        fetch: suspend (Int) -> List<UnifiedSearchResult>,
-        page: Int,
-        current: List<UnifiedSearchResult>,
-        setter: (List<UnifiedSearchResult>) -> Unit,
-        setPage: (Int) -> Unit,
-        isLoading: Boolean,
-        setLoading: (Boolean) -> Unit,
-        hasMore: Boolean,
-        setHasMore: (Boolean) -> Unit
-    ) {
-        if (isLoading || !hasMore) return
-        setLoading(true)
-        scope.launch {
-            try {
-                val more = fetch(page)
-                if (more.isNotEmpty()) {
-                    setter((current + more).distinctBy { it.id })
-                    setPage(page + 1)
-                } else {
-                    setHasMore(false)
-                }
-            } catch (_: Exception) {
-            } finally {
-                setLoading(false)
-            }
-        }
-    }
-
-    // ── Load all sections on mount ────────────────────────────────────────
-    fun loadSection(category: VideoCategory, setter: (List<UnifiedSearchResult>) -> Unit, loadingSetter: (Boolean) -> Unit) {
-        scope.launch {
-            loadingSetter(true)
-            try {
-                val repo = com.alexleoreeves.novelapp.data.NovelSearchRepository(
-                    rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
-                    rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
-                )
-                setter(repo.fetchVideo(category))
-            } catch (_: Exception) {}
-            loadingSetter(false)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        if (recommendedItems.isEmpty()) {
-            scope.launch {
-                isLoadingRecommended = true
-                try {
-                    val tmdb = com.alexleoreeves.novelapp.data.TmdbSource(
-                        client = io.ktor.client.HttpClient(),
-                        readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
-                        apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
-                    )
-                    val aniList = com.alexleoreeves.novelapp.data.AniListSource(io.ktor.client.HttpClient())
-                    val engine = com.alexleoreeves.novelapp.data.RecommendationEngine(tmdb, aniList, downloadRepo)
-                    val recs = engine.getRecommendations()
-                    recommendedItems = if (recs.isNotEmpty()) recs else {
-                        val movies = tmdb.fetchVideo(VideoCategory.MOVIES, 1).take(15)
-                        val anime = aniList.fetchTrending(1).map { it.toUnifiedSearchResult() }.take(15)
-                        (movies + anime).shuffled()
+                if (page <= 1) {
+                    rowData = rowData + (rowKey to fetched)
+                    rowPages = rowPages + (rowKey to 2)
+                    if (rowKey != "recommended" && fetched.isNotEmpty()) {
+                        rowHasMore = rowHasMore + rowKey
                     }
-                } catch (_: Exception) {
-                    try {
-                        val tmdb = com.alexleoreeves.novelapp.data.TmdbSource(
-                            client = io.ktor.client.HttpClient(),
-                            readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
-                            apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
-                        )
-                        val aniList = com.alexleoreeves.novelapp.data.AniListSource(io.ktor.client.HttpClient())
-                        val movies = tmdb.fetchVideo(VideoCategory.MOVIES, 1).take(15)
-                        val anime = aniList.fetchTrending(1).map { it.toUnifiedSearchResult() }.take(15)
-                        recommendedItems = (movies + anime).shuffled()
-                    } catch (_: Exception) {}
+                } else if (fetched.isNotEmpty()) {
+                    rowData = rowData + (rowKey to (rowData[rowKey].orEmpty() + fetched).distinctBy { it.id })
+                    rowPages = rowPages + (rowKey to (page + 1))
+                } else {
+                    rowHasMore = rowHasMore - rowKey
                 }
-                isLoadingRecommended = false
+            } catch (_: Exception) {
+                rowHasMore = rowHasMore - rowKey
+            } finally {
+                rowLoading = rowLoading - rowKey
             }
         }
-        if (animeItems.isEmpty()) loadSection(VideoCategory.ANIME, { animeItems = it }, { isLoadingAnime = it })
-        if (movieItems.isEmpty()) loadSection(VideoCategory.MOVIES, { movieItems = it }, { isLoadingMovies = it })
-        if (nollywoodItems.isEmpty()) loadSection(VideoCategory.NIGERIAN, { nollywoodItems = it }, { isLoadingNollywood = it })
-        if (kdramaItems.isEmpty()) loadSection(VideoCategory.K_DRAMA, { kdramaItems = it }, { isLoadingKDrama = it })
-        if (cartoonItems.isEmpty()) loadSection(VideoCategory.CARTOON, { cartoonItems = it }, { isLoadingCartoon = it })
-        if (classicItems.isEmpty()) loadSection(VideoCategory.CLASSIC, { classicItems = it }, { isLoadingClassic = it })
-        if (donghuaItems.isEmpty()) loadSection(VideoCategory.DONGHUA, { donghuaItems = it }, { isLoadingDonghua = it })
-        
-        // Load mixed media
-        scope.launch {
-            val repo = com.alexleoreeves.novelapp.data.NovelSearchRepository(
-                rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
-                rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
-            )
-            if (popularNovelItems.isEmpty()) {
-                isLoadingNovels = true
-                try { popularNovelItems = repo.fetchPopularNovels() } catch(_: Exception) {}
-                isLoadingNovels = false
-            }
-            if (popularMangaItems.isEmpty()) {
-                isLoadingManga = true
-                try { popularMangaItems = repo.fetchPopularManga() } catch(_: Exception) {}
-                isLoadingManga = false
-            }
-            if (popularComicItems.isEmpty()) {
-                isLoadingComics = true
-                try { popularComicItems = repo.fetchPopularComics() } catch(_: Exception) {}
-                isLoadingComics = false
+    }
+
+    // ── Load the watchable feed ──────────────────────────────────────────
+    LaunchedEffect(Unit) {
+        // Seeds first: what the user actually watched (history + downloads).
+        val historyTitles = runCatching { downloadRepo.getWatchHistory() }
+            .getOrElse { emptyList() }
+            .sortedByDescending { it.updatedAt }
+            .map { it.title }
+        val downloads = runCatching { downloadRepo.getAllItems() }.getOrElse { emptyList() }
+        feedSeedTitles = (historyTitles + downloads.map { it.title })
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(6)
+        feedSeedIds = downloads.map { it.id }.filter { it.startsWith("tmdb") }.take(3)
+
+        // Recommended + Latest first, then genre rows in batches of 3 so the
+        // device is never hit with ~50 requests at once.
+        loadRow("recommended")
+        loadRow("latest")
+        HomeGenres.all.chunked(3).forEach { chunk ->
+            chunk.forEach { g -> loadRow("genre_${g.key}") }
+            while (chunk.any { "genre_${it.key}" in rowLoading }) {
+                delay(150)
             }
         }
     }
@@ -399,297 +279,35 @@ fun DiscoverHomeScreen(
                     }
                 }
             } else {
-                // Browse feed — Recommended section is the very FIRST section
-                if (recommendedItems.isNotEmpty() || isLoadingRecommended) {
-                    item { GlassSectionLabel("Recommended For You", modifier = Modifier.padding(horizontal = 16.dp)) }
-                    if (isLoadingRecommended) {
-                        item { SectionShimmerHorizontal() }
-                    } else {
-                        item {
-                            DiscoverPosterRow(
-                                items = recommendedItems,
-                                isLoadingMore = false,
-                                onItemClick = onNovelSelected,
-                                onLoadMore = {}
-                            )
+                // Browse feed: Recommended → Latest → 15 genre rows. Watchable
+                // video only — novels/manga and the old medium divider rows
+                // (Movies/Anime/Classic/…) no longer exist on home.
+                rowPlan.forEach { (rowKey, label) ->
+                    val loading = rowKey in rowLoading
+                    val items = rowData[rowKey].orEmpty()
+                    if (loading || items.isNotEmpty()) {
+                        item(key = "${rowKey}_label") {
+                            GlassSectionLabel(label, modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
+                        }
+                        if (items.isEmpty()) {
+                            item(key = "${rowKey}_shimmer") { SectionShimmerHorizontal() }
+                        } else {
+                            item(key = "${rowKey}_row") {
+                                DiscoverPosterRow(
+                                    items = items,
+                                    isLoadingMore = loading,
+                                    onItemClick = onNovelSelected,
+                                    onLoadMore = {
+                                        if (rowKey in rowHasMore && rowKey !in rowLoading) {
+                                            loadRow(rowKey, rowPages[rowKey] ?: 2)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
 
-                item { GlassSectionLabel("Anime", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingAnime) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = animeItems,
-                            isLoadingMore = isLoadingMoreAnime,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.ANIME,
-                                    page = animePage,
-                                    current = animeItems,
-                                    setter = { animeItems = it },
-                                    setPage = { animePage = it },
-                                    isLoading = isLoadingMoreAnime,
-                                    setLoading = { isLoadingMoreAnime = it },
-                                    hasMore = hasMoreAnime,
-                                    setHasMore = { hasMoreAnime = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Trending Novels", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingNovels) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = popularNovelItems,
-                            isLoadingMore = isLoadingMoreNovels,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreMixed(
-                                    fetch = { page ->
-                                        com.alexleoreeves.novelapp.data.NovelSearchRepository(
-                                            rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
-                                            rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
-                                        ).fetchPopularNovels(page)
-                                    },
-                                    page = novelPage,
-                                    current = popularNovelItems,
-                                    setter = { popularNovelItems = it },
-                                    setPage = { novelPage = it },
-                                    isLoading = isLoadingMoreNovels,
-                                    setLoading = { isLoadingMoreNovels = it },
-                                    hasMore = hasMoreNovels,
-                                    setHasMore = { hasMoreNovels = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Movies", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingMovies) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = movieItems,
-                            isLoadingMore = isLoadingMoreMovies,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.MOVIES,
-                                    page = moviePage,
-                                    current = movieItems,
-                                    setter = { movieItems = it },
-                                    setPage = { moviePage = it },
-                                    isLoading = isLoadingMoreMovies,
-                                    setLoading = { isLoadingMoreMovies = it },
-                                    hasMore = hasMoreMovies,
-                                    setHasMore = { hasMoreMovies = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Nollywood", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingNollywood) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = nollywoodItems,
-                            isLoadingMore = isLoadingMoreNollywood,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.NIGERIAN,
-                                    page = nollywoodPage,
-                                    current = nollywoodItems,
-                                    setter = { nollywoodItems = it },
-                                    setPage = { nollywoodPage = it },
-                                    isLoading = isLoadingMoreNollywood,
-                                    setLoading = { isLoadingMoreNollywood = it },
-                                    hasMore = hasMoreNollywood,
-                                    setHasMore = { hasMoreNollywood = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Popular Manga", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingManga) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = popularMangaItems,
-                            isLoadingMore = isLoadingMoreManga,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreMixed(
-                                    fetch = { page ->
-                                        com.alexleoreeves.novelapp.data.NovelSearchRepository(
-                                            rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
-                                            rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
-                                        ).fetchPopularManga(page)
-                                    },
-                                    page = mangaPage,
-                                    current = popularMangaItems,
-                                    setter = { popularMangaItems = it },
-                                    setPage = { mangaPage = it },
-                                    isLoading = isLoadingMoreManga,
-                                    setLoading = { isLoadingMoreManga = it },
-                                    hasMore = hasMoreManga,
-                                    setHasMore = { hasMoreManga = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("K-Drama", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingKDrama) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = kdramaItems,
-                            isLoadingMore = isLoadingMoreKDrama,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.K_DRAMA,
-                                    page = kdramaPage,
-                                    current = kdramaItems,
-                                    setter = { kdramaItems = it },
-                                    setPage = { kdramaPage = it },
-                                    isLoading = isLoadingMoreKDrama,
-                                    setLoading = { isLoadingMoreKDrama = it },
-                                    hasMore = hasMoreKDrama,
-                                    setHasMore = { hasMoreKDrama = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Cartoon", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingCartoon) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = cartoonItems,
-                            isLoadingMore = isLoadingMoreCartoon,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.CARTOON,
-                                    page = cartoonPage,
-                                    current = cartoonItems,
-                                    setter = { cartoonItems = it },
-                                    setPage = { cartoonPage = it },
-                                    isLoading = isLoadingMoreCartoon,
-                                    setLoading = { isLoadingMoreCartoon = it },
-                                    hasMore = hasMoreCartoon,
-                                    setHasMore = { hasMoreCartoon = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Popular Comics", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingComics) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = popularComicItems,
-                            isLoadingMore = isLoadingMoreComics,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreMixed(
-                                    fetch = { page ->
-                                        com.alexleoreeves.novelapp.data.NovelSearchRepository(
-                                            rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
-                                            rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
-                                        ).fetchPopularComics(page)
-                                    },
-                                    page = comicPage,
-                                    current = popularComicItems,
-                                    setter = { popularComicItems = it },
-                                    setPage = { comicPage = it },
-                                    isLoading = isLoadingMoreComics,
-                                    setLoading = { isLoadingMoreComics = it },
-                                    hasMore = hasMoreComics,
-                                    setHasMore = { hasMoreComics = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Classic", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingClassic) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = classicItems,
-                            isLoadingMore = isLoadingMoreClassic,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.CLASSIC,
-                                    page = classicPage,
-                                    current = classicItems,
-                                    setter = { classicItems = it },
-                                    setPage = { classicPage = it },
-                                    isLoading = isLoadingMoreClassic,
-                                    setLoading = { isLoadingMoreClassic = it },
-                                    hasMore = hasMoreClassic,
-                                    setHasMore = { hasMoreClassic = it }
-                                )
-                            }
-                        )
-                    }
-                }
-
-                item { GlassSectionLabel("Donghua", modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) }
-                if (isLoadingDonghua) {
-                    item { SectionShimmerHorizontal() }
-                } else {
-                    item {
-                        DiscoverPosterRow(
-                            items = donghuaItems,
-                            isLoadingMore = isLoadingMoreDonghua,
-                            onItemClick = onNovelSelected,
-                            onLoadMore = {
-                                loadMoreSection(
-                                    category = VideoCategory.DONGHUA,
-                                    page = donghuaPage,
-                                    current = donghuaItems,
-                                    setter = { donghuaItems = it },
-                                    setPage = { donghuaPage = it },
-                                    isLoading = isLoadingMoreDonghua,
-                                    setLoading = { isLoadingMoreDonghua = it },
-                                    hasMore = hasMoreDonghua,
-                                    setHasMore = { hasMoreDonghua = it }
-                                )
-                            }
-                        )
-                    }
-                }
             }
         }
     }

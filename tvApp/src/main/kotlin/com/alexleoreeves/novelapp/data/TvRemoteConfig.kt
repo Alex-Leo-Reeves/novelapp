@@ -14,7 +14,7 @@ data class TvConfigRow(val key: String = "", val label: String = "", val type: S
 @Serializable
 data class TvBranding(
     val title: String = "NovaRead TV",
-    val tagline: String = "Anime · Novels · Manga · Movies"
+    val tagline: String = "Movies · Anime · K-Drama · Series"
 )
 
 @Serializable

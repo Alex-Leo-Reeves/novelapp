@@ -3,6 +3,8 @@ package com.alexleoreeves.novelapp.data
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.*
 
 private val tmdbJson = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -569,6 +571,78 @@ class TmdbSource(
         }
     }.getOrElse { emptyList() }
 
+    // ── Genre-based home feed API ───────────────────────────────────────────
+
+    /**
+     * Discover by genre — powers the home feed's genre rows
+     * (e.g. "Horror" = horror movies + horror shows, popularity-sorted).
+     */
+    suspend fun discoverByGenre(
+        mediaType: String,
+        genreIds: List<Int>,
+        page: Int = 1,
+        category: VideoCategory = VideoCategory.MOVIES
+    ): List<UnifiedSearchResult> =
+        discover(mediaType, page, category) {
+            parameter("with_genres", genreIds.joinToString(","))
+        }
+
+    /**
+     * "Latest" — movies in theatres now + shows currently on air, interleaved.
+     * Uses now-playing/on-the-air endpoints so nothing future-dated (not yet
+     * watchable) ever lands in the row.
+     */
+    suspend fun fetchLatestMixed(page: Int = 1): List<UnifiedSearchResult> = coroutineScope {
+        val movieJob = async { runCatching {
+            val response = client.get("$baseUrl/movie/now_playing") {
+                tmdbAuth()
+                parameter("page", page)
+                parameter("include_adult", "false")
+            }.bodyAsText()
+            parseResults(response).mapNotNull { it.jsonObject.toUnified("movie", VideoCategory.MOVIES) }
+        }.getOrElse { emptyList() } }
+        val tvJob = async { runCatching {
+            val response = client.get("$baseUrl/tv/on_the_air") {
+                tmdbAuth()
+                parameter("page", page)
+            }.bodyAsText()
+            parseResults(response).mapNotNull { it.jsonObject.toUnified("tv", VideoCategory.MOVIES) }
+        }.getOrElse { emptyList() } }
+        interleaveTwo(movieJob.await(), tvJob.await())
+    }
+
+    /**
+     * Single-call multi search used to match a watched title (seed) to its
+     * TMDB entry so recommendations can be fetched for it. Unlike [searchMulti]
+     * this is one request — it runs per seed on every home-screen load.
+     */
+    suspend fun searchSeedMatch(query: String): List<UnifiedSearchResult> = runCatching {
+        val response = client.get("$baseUrl/search/multi") {
+            tmdbAuth()
+            parameter("query", query)
+            parameter("include_adult", "false")
+            parameter("page", 1)
+        }.bodyAsText()
+        parseResults(response).mapNotNull { element ->
+            val obj = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+            val mediaType = obj["media_type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            if (mediaType != "movie" && mediaType != "tv") return@mapNotNull null
+            obj.toUnified(mediaType, if (mediaType == "movie") VideoCategory.MOVIES else VideoCategory.CARTOON)
+        }.take(5)
+    }.getOrElse {
+        println("[TMDB] Seed match failed: ${it.message}")
+        emptyList()
+    }
+
+    private fun interleaveTwo(a: List<UnifiedSearchResult>, b: List<UnifiedSearchResult>): List<UnifiedSearchResult> {
+        val out = ArrayList<UnifiedSearchResult>(a.size + b.size)
+        for (i in 0 until maxOf(a.size, b.size)) {
+            if (i < a.size) out.add(a[i])
+            if (i < b.size) out.add(b[i])
+        }
+        return out
+    }
+
     private fun HttpRequestBuilder.tmdbAuth() {
         usableToken?.let {
             header("Authorization", "Bearer $it")
@@ -650,17 +724,24 @@ class TmdbSource(
 
     private fun genreName(id: Int): String? = when (id) {
         12 -> "Adventure"
+        14 -> "Fantasy"
         16 -> "Animation"
         18 -> "Drama"
+        27 -> "Horror"
         28 -> "Action"
         35 -> "Comedy"
+        36 -> "History"
+        53 -> "Thriller"
         80 -> "Crime"
-        99 -> "Documentary"
         878 -> "Sci-Fi"
+        99 -> "Documentary"
+        9648 -> "Mystery"
         10749 -> "Romance"
         10751 -> "Family"
+        10752 -> "War"
         10759 -> "Action"
         10765 -> "Sci-Fi"
+        10768 -> "War"
         else -> null
     }
 }

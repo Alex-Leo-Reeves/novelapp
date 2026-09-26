@@ -119,9 +119,11 @@ fun TvPlayerScreen(
         remember(resolvedUrl) {
             runCatching {
                 val args = arrayListOf(
-                    // Network caching: 5 s look-ahead prevents the stutter-on-start
-                    // and mid-stream rebuffering seen with the default 1 s cache.
-                    "--network-caching=5000",
+                    // Network caching: 15 s look-ahead keeps a useful stretch of
+                    // a typical HLS ladder buffered ahead, so brief network dips
+                    // never pause playback (the old 5 s cache rebuffered
+                    // constantly on slower connections).
+                    "--network-caching=15000",
                     "--file-caching=5000",
                     "--live-caching=5000",
                     // HLS/DASH helpers
@@ -270,6 +272,18 @@ fun TvPlayerScreen(
     }
 
     val focusRequester = remember { FocusRequester() }
+
+    // Startup watchdog: an expired/invalid direct URL used to leave a silent
+    // black screen forever (LibVLC often reports no error event at all) —
+    // "keeps loading but never plays". Surface a real error after 20s so the
+    // user can go back and re-resolve a fresh stream.
+    LaunchedEffect(vlcMediaPlayer, streamUrl) {
+        delay(20_000L)
+        val mp = vlcMediaPlayer ?: return@LaunchedEffect
+        if (errorMsg == null && !mp.isPlaying && currentPosition <= 0L) {
+            errorMsg = "Stream took too long to start. It may have expired — go back and play it again."
+        }
+    }
 
     // Auto-hide controls: 5 seconds after the LAST interaction. Keying on
     // [controlsTick] too means every wake/OK/seek press restarts the window.

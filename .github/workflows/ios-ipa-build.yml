@@ -87,6 +87,38 @@ jobs:
             echo "GROQ_API_KEY=$GROQ_CLOUD_API_KEY" >> "$GITHUB_ENV"
           fi
 
+      - name: Verify version parity and content API keys
+        run: |
+          set -euo pipefail
+
+          # 1) The iOS version must equal the Android release version. Version
+          #    drift is exactly how the IPA ends up shipping a stale app.
+          IOS_VERSION="$(python3 scripts/read-ios-version.py iosApp/project.yml | sed -n '1p')"
+          IOS_BUILD="$(python3 scripts/read-ios-version.py iosApp/project.yml | sed -n '2p')"
+          ANDROID_VERSION="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' composeApp/build.gradle.kts | head -1)"
+          ANDROID_BUILD="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' composeApp/build.gradle.kts | head -1)"
+          echo "Android: ${ANDROID_VERSION} (${ANDROID_BUILD}) — iOS: ${IOS_VERSION} (${IOS_BUILD})"
+          if [ "$IOS_VERSION" != "$ANDROID_VERSION" ] || [ "$IOS_BUILD" != "$ANDROID_BUILD" ]; then
+            echo "::error::iOS version ${IOS_VERSION}/${IOS_BUILD} does not match Android ${ANDROID_VERSION}/${ANDROID_BUILD}."
+            echo "::error::Update iosApp/project.yml MARKETING_VERSION and CURRENT_PROJECT_VERSION to match composeApp/build.gradle.kts."
+            exit 1
+          fi
+
+          # 2) Content-critical API keys must be real (non-empty, not a mock_
+          #    placeholder) so the IPA ships with the same capabilities as Android.
+          missing=0
+          for name in RAPID_API_KEY RAPID_API_HOST TMDB_API_KEY TMDB_READ_ACCESS_TOKEN; do
+            value="${!name:-}"
+            if [ -z "$value" ] || [[ "$value" == mock_* ]]; then
+              echo "::error::$name is empty or still a mock_ placeholder — add it as a repository secret (Settings → Secrets → Actions)."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "OK: iOS/Android version parity and real content API keys verified."
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -326,3 +358,60 @@ jobs:
 
           echo "Verifying bundled plist: $APP_PLIST (expected $EXPECTED_VERSION / $EXPECTED_BUILD)"
           python3 scripts/verify-ios-info-plist.py "$APP_PLIST" "$EXPECTED_VERSION" "$EXPECTED_BUILD"
+
+      - name: Verify bundled binary is the full shared Compose app
+        run: |
+          set -euo pipefail
+
+          APP=""
+          for candidate in \
+            "build/ios/DerivedData/Build/Products/Release-iphoneos/NovaRead.app" \
+            "build/ios/NovaRead.xcarchive/Products/Applications/NovaRead.app"
+          do
+            if [ -d "$candidate" ]; then APP="$candidate"; break; fi
+          done
+          if [ -z "$APP" ]; then
+            echo "::error::No built .app bundle found to smoke-check."
+            find build/ios -maxdepth 6 -type d -name "*.app" -print 2>/dev/null || true
+            exit 1
+          fi
+
+          BIN="$APP/NovaRead"
+          if [ ! -x "$BIN" ]; then
+            echo "::error::App executable missing at $BIN"
+            exit 1
+          fi
+
+          # The shared Compose app links a ~60 MB binary (a 19 MB IPA is normal —
+          # it is just the compressed archive). A tiny binary means the wrong,
+          # reduced app was built — the old failure mode.
+          BIN_BYTES=$(stat -f%z "$BIN")
+          echo "Bundled binary size: $BIN_BYTES bytes"
+          if [ "$BIN_BYTES" -lt 25000000 ]; then
+            echo "::error::Binary is only $BIN_BYTES bytes — this is not the full Compose app (expected > 25000000)."
+            exit 1
+          fi
+
+          # Marker strings from the CURRENT shared UI and the iOS host must exist
+          # in the shipped binary. Kotlin/Native stores literals as UTF-16LE as
+          # well as ASCII, so scan both encodings.
+          STRINGS_TMP="$(mktemp)"
+          strings "$BIN" > "$STRINGS_TMP" 2>/dev/null || true
+          strings -e l "$BIN" >> "$STRINGS_TMP" 2>/dev/null || true
+
+          for marker in \
+            "MainViewController" \
+            "Search movies, anime, shows..." \
+            "KIDS MODE ACTIVE" \
+            "Loading secure player..." \
+            "Voice Settings"
+          do
+            if ! grep -qF "$marker" "$STRINGS_TMP"; then
+              echo "::error::Marker string not found in bundled binary: $marker"
+              echo "::error::The IPA does not contain the current shared app — do not ship it."
+              rm -f "$STRINGS_TMP"
+              exit 1
+            fi
+          done
+          rm -f "$STRINGS_TMP"
+          echo "OK: bundled binary is the full shared Compose app (host + current UI markers present)."

@@ -258,6 +258,7 @@ private fun saveHlsDownload(sourceUrl: String, dir: File, headersJson: String?, 
     var totalBytes = 0L
     var segmentIndex = 0
     var keyIndex = 0
+    var mapIndex = 0
     
     val lines = playlistText.lines()
     val totalSegments = lines.count { it.isNotBlank() && !it.startsWith("#") }.coerceAtLeast(1)
@@ -273,6 +274,17 @@ private fun saveHlsDownload(sourceUrl: String, dir: File, headersJson: String?, 
                     val keyFile = File(dir, "key_${keyIndex++}.bin")
                     totalBytes += downloadToFile(keyUrl, keyFile, headersJson)
                     line.replace("""URI="$keyUri"""", """URI="${keyFile.name}"""")
+                }
+            }
+            // fMP4 HLS: bundle the init segment locally so offline playback
+            // doesn't need the network for EXT-X-MAP (parity with iOS).
+            trimmed.startsWith("#EXT-X-MAP", ignoreCase = true) && "URI=\"" in trimmed -> {
+                val mapUri = Regex("""URI="([^"]+)"""").find(trimmed)?.groupValues?.getOrNull(1)
+                if (mapUri.isNullOrBlank()) line else {
+                    val mapUrl = resolveUrl(playlistUrl, mapUri)
+                    val mapFile = File(dir, "init_${mapIndex++}.mp4")
+                    totalBytes += downloadToFile(mapUrl, mapFile, headersJson)
+                    line.replace("""URI="$mapUri"""", """URI="${mapFile.name}"""")
                 }
             }
             trimmed.isBlank() || trimmed.startsWith("#") -> line

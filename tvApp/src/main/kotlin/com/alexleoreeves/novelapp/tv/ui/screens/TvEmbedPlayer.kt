@@ -109,6 +109,26 @@ fun TvEmbedPlayer(
         }
     }
 
+    // ── LOADING watchdog ──────────────────────────────────────────────────
+    // onPageFinished may never fire for a hung/blocked embed request, which
+    // used to spin "Loading player..." forever (STABILIZING had a watchdog
+    // but LOADING had none). Reload once at 25s; if STILL loading at 45s,
+    // leave LOADING so the error overlay renders instead of an infinite
+    // spinner over a page whose video never plays.
+    LaunchedEffect(embedUrl) {
+        delay(25_000L)
+        if (playerPhase == PlayerPhase.LOADING) {
+            phaseMessage = "Still loading — retrying..."
+            webViewRef?.reload()
+        }
+        delay(20_000L)
+        if (playerPhase == PlayerPhase.LOADING) {
+            playerPhase = PlayerPhase.READY
+            hasError = true
+            phaseMessage = ""
+        }
+    }
+
     // Clean audio gesture & autoplay loop: repeatedly dispatches center touches
     // to start playback in cross-origin iframes (AutoEmbed, 2Embed, VidLink, VidSrc)
     // and sets volume to maximum.

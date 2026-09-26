@@ -169,7 +169,13 @@ fun TvEmbedPlayerScreen(
             webViewRef?.evaluateJavascript(EMBED_PAUSE_JS, null)
             maxAllowed
         } else {
-            positionMs.coerceIn(0L, maxAllowed)
+            // Never seek past the stream's real duration — a stale saved
+            // position beyond the end parks <video> where no data exists and
+            // it never starts playing ( endless load with subtitles on top ).
+            val upper = if (duration > 0L) {
+                minOf(maxAllowed, duration - 1_000L).coerceAtLeast(0L)
+            } else maxAllowed
+            positionMs.coerceIn(0L, upper)
         }
 
         // Targets the REAL (longest) video via __novelAppFindBestVideo, not the
@@ -251,7 +257,7 @@ fun TvEmbedPlayerScreen(
                     // (waiting for center play button click) or claims "playing" but is frozen,
                     // inject a synthetic center tap to dismiss the overlay and start playback.
                     if ((stalled && !paused) || (paused && positionMs == 0L)) stallStreak++ else stallStreak = 0
-                    if (stallStreak >= 4 && stallRecoveries < 3) {
+                    if (stallStreak >= 4 && stallRecoveries < 6) {
                         stallStreak = 0
                         stallRecoveries++
                         dispatchCenterTouch(webView)

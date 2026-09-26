@@ -56,11 +56,6 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<key>UIDeviceFamily</key>
-	<array>
-		<integer>1</integer>
-		<integer>2</integer>
-	</array>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIRequiredDeviceCapabilities</key>

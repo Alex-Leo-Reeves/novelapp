@@ -192,7 +192,9 @@ fun App(
     }
 
     LaunchedEffect(showSplash, isAuthChecked) {
-        if (!showSplash && isAuthChecked) {
+        // The IPA has no in-app update channel (iOS cannot self-install an IPA),
+        // so the startup update check only runs for Android/TV/Desktop targets.
+        if (!showSplash && isAuthChecked && updateTarget != AppUpdateTarget.IOS) {
             startupUpdateManifest = fetchAppUpdateManifest(updateClient, updateTarget)
                 ?.takeIf { it.isAvailableFor(updateTarget) }
         }

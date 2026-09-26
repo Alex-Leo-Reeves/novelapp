@@ -1,6 +1,7 @@
 package com.alexleoreeves.novelapp.ui
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
@@ -49,6 +50,31 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+
+// ── Shared read-through disk cache ────────────────────────────────────────
+// One process-wide SimpleCache. ExoPlayer reads stream data through it, so
+// anything already watched is served from disk on seek/rebuffer/rewind
+// instead of re-hitting the network — the persistent half of intelligent
+// forward caching. SimpleCache is a strict singleton per directory (a
+// second instance throws), hence the lock + held reference.
+private val videoDiskCacheLock = Any()
+private var videoDiskCache: SimpleCache? = null
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun sharedVideoDiskCache(context: Context): SimpleCache? {
+    synchronized(videoDiskCacheLock) {
+        videoDiskCache?.let { return it }
+        val cacheRoot = File(context.cacheDir, "exo_media_cache")
+        videoDiskCache = runCatching {
+            SimpleCache(
+                cacheRoot,
+                LeastRecentlyUsedCacheEvictor(192L * 1024L * 1024L),
+                StandaloneDatabaseProvider(context)
+            )
+        }.getOrNull()
+        return videoDiskCache
+    }
+}
 
 /**
  * Android actual: Full-screen immersive ExoPlayer.
@@ -231,9 +257,24 @@ actual fun AnimePlayerScreen(
                 .setDefaultRequestProperties(requestHeaders)
                 .setConnectTimeoutMs(30_000)
                 .setReadTimeoutMs(30_000)
-            val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            // Read-through disk cache: segments already played are replayed
+            // from disk on seek/rebuffer/rewind instead of re-fetching —
+            // the persistent half of intelligent forward caching. Falls
+            // back to plain HTTP if the cache cannot be opened.
+            val upstreamFactory = sharedVideoDiskCache(context)?.let { cache ->
+                CacheDataSource.Factory()
+                    .setCache(cache)
+                    .setUpstreamDataSourceFactory(httpDataSourceFactory)
+                    .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            } ?: httpDataSourceFactory
+            val dataSourceFactory = DefaultDataSource.Factory(context, upstreamFactory)
+            // Forward-caching buffer: fill ~45 s before the player is happy,
+            // keep up to 75 s of look-ahead, and after any rebuffer wait for
+            // 6 s of buffer before resuming. The old 1.5 s resume threshold
+            // restarted playback with almost no buffer, so a slow network
+            // stalled again within seconds — the pause/play cycle.
             val loadControl = DefaultLoadControl.Builder()
-                .setBufferDurationsMs(32_000, 64_000, 1_000, 1_500)
+                .setBufferDurationsMs(45_000, 75_000, 2_000, 6_000)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
@@ -293,6 +334,9 @@ actual fun AnimePlayerScreen(
     var playerRestartTrigger by remember(resolvedUrl, retryKey) { mutableStateOf(0) }
     var isPlayerBuffering by remember(resolvedUrl, retryKey) { mutableStateOf(true) }
     var playerReady by remember(resolvedUrl, retryKey) { mutableStateOf(false) }
+    // One-shot guard: validate the saved resume position against the stream's
+    // real duration the first time we reach READY.
+    var resumeSeekValidated by remember(resolvedUrl, retryKey) { mutableStateOf(false) }
 
     LaunchedEffect(audioCodecRetries) {
         if (audioCodecRetries in 1..maxAudioCodecRetries && exoPlayer != null) {
@@ -327,6 +371,17 @@ actual fun AnimePlayerScreen(
                         playerReady = true
                         isPlayerBuffering = false
                         playerError = null
+                        // Stale-resume guard: saved progress can point past this
+                        // stream's duration (different server/cut than when the
+                        // position was recorded). ExoPlayer clamps such a seek to
+                        // the end and then buffers forever — restart at 0 instead.
+                        if (!resumeSeekValidated && initialPositionMs > 0L) {
+                            resumeSeekValidated = true
+                            val dur = exoPlayer?.duration ?: 0L
+                            if (dur > 0L && initialPositionMs >= dur) {
+                                exoPlayer?.seekTo(0L)
+                            }
+                        }
                     }
                 }
                 override fun onPlayerError(error: PlaybackException) {
@@ -355,16 +410,21 @@ actual fun AnimePlayerScreen(
         }
     }
 
-    // Buffering timeout
+    // Buffering timeout — fires on ANY sustained buffering stretch, even
+    // after the player reached READY once. The old check bailed out when
+    // `playerReady` was set, which permanently disabled the watchdog after
+    // the first READY: a resume seek that landed where the stream had no
+    // data then spun "Buffering ahead..." forever (with the subtitles for
+    // that position still rendered on top and no video ever playing).
     val loadingTimeoutMs = 30_000L
     var bufferingTooLong by remember(resolvedUrl, retryKey) { mutableStateOf(false) }
     LaunchedEffect(isPlayerBuffering, retryKey) {
-        if (!isPlayerBuffering || playerReady) { bufferingTooLong = false; return@LaunchedEffect }
+        if (!isPlayerBuffering) { bufferingTooLong = false; return@LaunchedEffect }
         var elapsed = 0L
         while (elapsed < loadingTimeoutMs) {
             delay(2_500)
             elapsed += 2_500
-            if (!isPlayerBuffering || playerReady) { bufferingTooLong = false; return@LaunchedEffect }
+            if (!isPlayerBuffering) { bufferingTooLong = false; return@LaunchedEffect }
         }
         bufferingTooLong = true
         if (playerError == null) playerError = "Video is taking too long to load. Please click on retry."

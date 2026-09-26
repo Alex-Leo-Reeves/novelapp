@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
@@ -26,6 +27,7 @@ import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.tv.mediacache.TvIndexedBundle
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
 import com.alexleoreeves.novelapp.tv.ui.theme.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -437,51 +439,75 @@ private fun TvHomeFeed(
     var rowExhausted by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    val novelRepo = remember { TvNovelSearchRepository() }
     val rowScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val progressStore = remember { TvWatchProgressStore(context) }
+    val homeFeed = remember {
+        val client = com.alexleoreeves.novelapp.data.platformHttpClient()
+        HomeFeedRepository(
+            TmdbSource(
+                client = client,
+                readAccessToken = com.alexleoreeves.novelapp.BuildKonfig.TMDB_READ_ACCESS_TOKEN,
+                apiKey = com.alexleoreeves.novelapp.BuildKonfig.TMDB_API_KEY
+            ),
+            AniListSource(client)
+        )
+    }
+    // Fixed row plan: Recommended → Latest → 15 genre rows. The old remote-config
+    // category rows (novels/manga and the Anime/Movies/Classic dividers) are
+    // intentionally gone — home only ever shows watchable video content.
+    val rowPlan = remember {
+        listOf("recommended" to "✨ Recommended For You", "latest" to "🆕 Latest") +
+            HomeGenres.all.map { "genre_${it.key}" to it.label }
+    }
 
-    LaunchedEffect(config.version) {
+    suspend fun fetchRow(rowKey: String, page: Int): List<UnifiedSearchResult> = runCatching {
+        val seeds = progressStore.getRecentSeeds(6)
+        when {
+            rowKey == "recommended" -> homeFeed.recommendedRow(
+                seedTitles = seeds.map { it.title },
+                seedTmdbIds = seeds.map { it.mediaId }.filter { it.startsWith("tmdb") }
+            )
+            rowKey == "latest" -> homeFeed.latestRow(page)
+            else -> HomeGenres.all.firstOrNull { "genre_${it.key}" == rowKey }
+                ?.let { homeFeed.genreRow(it, page) } ?: emptyList()
+        }
+    }.getOrElse { emptyList() }
+
+    LaunchedEffect(Unit) {
         isLoading = true
-        val rows = config.homeRows.ifEmpty { TvRemoteConfigDefaults.default.homeRows }
-        val fetched = rows.map { row ->
-            async {
-                row.key to runCatching {
-                    if (row.type == "recommended") {
-                        val movies = fetchContentHome("movie", 1).take(15)
-                        val anime = fetchContentHome("anime", 1).take(15)
-                        (movies + anime).shuffled().take(20)
-                    } else if (row.type == "novel") {
-                        novelRepo.fetchPopularNovels(1)
-                    } else {
-                        fetchContentHome(row.type, 1)
-                    }
-                }.getOrDefault(emptyList())
-            }
+        // Recommended + Latest first, then genre rows in batches of 3 so a
+        // TV box is never hit with ~50 requests at once.
+        val first = listOf("recommended", "latest").map { key ->
+            async { key to fetchRow(key, 1) }
         }.awaitAll()
-        rowData = fetched.toMap()
-        // Every row starts at page 2; rows whose page-1 fetch failed will retry
-        // when the user swipes to their end.
-        rowNextPage = rows.associate { it.key to 2 }
-        rowExhausted = emptySet()
+        rowData = rowData + first.toMap()
+        if (first.firstOrNull { it.first == "latest" }?.second?.isNotEmpty() == true) {
+            rowNextPage = rowNextPage + ("latest" to 2)
+        }
         isLoading = false
+        HomeGenres.all.chunked(3).forEach { chunk ->
+            val batch = chunk.map { g ->
+                async {
+                    val key = "genre_${g.key}"
+                    key to fetchRow(key, 1)
+                }
+            }.awaitAll()
+            rowData = rowData + batch.toMap()
+            batch.forEach { (key, list) ->
+                if (list.isNotEmpty()) rowNextPage = rowNextPage + (key to 2)
+            }
+        }
     }
 
     fun loadMoreRow(rowKey: String, rowType: String) {
-        if (rowKey in rowExhausted) return
+        if (rowKey == "recommended" || rowKey in rowExhausted) return
         val page = rowNextPage[rowKey] ?: return
         if (rowKey in rowLoadingMore) return
         rowLoadingMore = rowLoadingMore + rowKey
         rowScope.launch {
             try {
-                val more = if (rowType == "recommended") {
-                    val movies = fetchContentHome("movie", page).take(10)
-                    val anime = fetchContentHome("anime", page).take(10)
-                    (movies + anime).shuffled()
-                } else if (rowType == "novel") {
-                    novelRepo.fetchPopularNovels(page)
-                } else {
-                    fetchContentHome(rowType, page)
-                }
+                val more = fetchRow(rowKey, page)
                 if (more.isNotEmpty()) {
                     val current = rowData[rowKey].orEmpty()
                     rowData = rowData + (rowKey to (current + more).distinctBy { it.id })
@@ -511,7 +537,7 @@ private fun TvHomeFeed(
             color = Color.White
         )
         Text(
-            config.branding.tagline.ifBlank { "Discover anime, novels, manga, movies & more" },
+            config.branding.tagline.ifBlank { "Recommended for you · Latest releases · Genre picks" },
             style = MaterialTheme.typography.titleMedium,
             color = Color.White.copy(0.6f)
         )
@@ -521,24 +547,25 @@ private fun TvHomeFeed(
                 CircularProgressIndicator(color = Purple500)
             }
         } else {
-            val rows = config.homeRows.ifEmpty { TvRemoteConfigDefaults.default.homeRows }
-            rows.forEach { row ->
-                key(row.key) {
-                    val list = rowData[row.key].orEmpty()
+            // Recommended → Latest → 15 genre rows. Every row is watchable
+            // video only — novels/manga and the medium dividers are gone.
+            rowPlan.forEach { (rowKey, label) ->
+                key(rowKey) {
+                    val list = rowData[rowKey].orEmpty()
                     if (list.isNotEmpty()) {
                         ContentRow(
-                            label = row.label.ifBlank { row.key },
-                            rowKey = row.key,
-                            rowType = row.type,
+                            label = label,
+                            rowKey = rowKey,
+                            rowType = rowKey,
                             items = list,
-                            isLoadingMore = row.key in rowLoadingMore,
+                            isLoadingMore = rowKey in rowLoadingMore,
                             onLoadMore = ::loadMoreRow,
                             onMediaSelected = onMediaSelected
                         )
                     }
                 }
             }
-            if (rows.all { rowData[it.key].orEmpty().isEmpty() }) {
+            if (rowPlan.all { rowData[it.first].orEmpty().isEmpty() }) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Default.CloudOff, null, tint = Color.White.copy(0.2f), modifier = Modifier.size(48.dp))
