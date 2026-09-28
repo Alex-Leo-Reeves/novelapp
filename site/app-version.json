@@ -17,11 +17,11 @@
     "tvVersionCode": 48,
     "tvVersionName": "1.48",
     "tvReleaseNotes": [
-        "Android TV (TV): v1.47 \u2014 New watchable home feed: learned 'Recommended For You', 'Latest', and 15 genre rows (Action, Horror, Supernatural, Comedy, Thriller\u2026)",
-        "Android TV (TV): Home now lists only watchable video \u2014 novels, manga and comics plus the old media dividers are gone",
-        "Android TV (TV): Recommendations now learn from your watch history and match similar titles",
-        "Android TV (TV): Smoother playback \u2014 larger forward network cache (15s) greatly reduces rebuffering and pause/play stutter",
-        "Android TV (TV): Fixed 'Continue from where I stopped' hanging on load instead of playing"
+        "Android TV (TV): v1.48 \u2014 New app icon: neon play button wrapped in film strips",
+        "Android TV (TV): Multi-currency paywall \u2014 plans are priced in your currency (NGN, USD, GBP or EUR) and Flutterwave charges that exact amount; the currency is auto-detected and can be switched with the currency chips",
+        "Android TV (TV): New App Settings on the You screen \u2014 switch the app language (16 languages or follow the device) and toggle server selectors; both are remembered",
+        "Android TV (TV): Simpler AI plan \u2014 a single 'AI Creator' tier (20 creations/mo, up to 5 fused sources) quoted in your local currency instead of hardcoded naira prices",
+        "Android TV (TV): TV web players now load premium prices from the server so the quoted amount always matches the charge"
     ],
     "desktopVersionCode": 46,
     "desktopVersionName": "1.46",
@@ -39,11 +39,11 @@
         "iOS (IPA): More reliable downloads \u2014 files now stream straight to disk, verify HTTP status, fall back to the backend proxy, and bundle fMP4 init segments for offline playback"
     ],
     "releaseNotes": [
-        "Android: version 1.47 \u2014 New watchable home feed: learned 'Recommended For You', 'Latest', and 15 genre rows (Action, Horror, Supernatural, Comedy, Thriller\u2026)",
-        "Android: Recommendations now learn from what you watch and surface similar titles first",
-        "Android: Smoother playback \u2014 larger forward buffer plus a read-through disk cache stops the pause/play stutter",
-        "Android: Fixed 'Continue from where I stopped' hanging on load instead of playing",
-        "Android: More reliable downloads \u2014 fMP4 init segments are bundled so offline playback never needs the network"
+        "Android: version 1.48 \u2014 New app icon: neon play button wrapped in film strips",
+        "Android: Multi-currency paywall \u2014 choose NGN, USD, GBP or EUR, see real local prices, and pay via Flutterwave in that same currency (auto-detected from your region, switchable any time)",
+        "Android: New language setting in the You tab \u2014 pick from 16 languages or follow the device language; the choice is remembered across restarts",
+        "Android: New 'Show server selectors' toggle in the You tab \u2014 opt-in manual streaming-server picker on detail screens (off by default; the app still auto-picks the best server)",
+        "Android: Simpler AI plan \u2014 a single 'AI Creator' tier (20 creations/mo, up to 5 fused sources) priced in your currency instead of hardcoded naira prices"
     ],
     "forceUpdate": false
 }
