@@ -1849,10 +1849,33 @@
   }
 
   // ── Premium checkout (Flutterwave QR, phone-first like the TV app) ─────
-  var PREMIUM_PLAN_OPTIONS = [
+  // Naira fallback used until /billing/status answers. The server response
+  // replaces these so international viewers are quoted the amount they will
+  // actually be charged, instead of seeing naira while being billed in USD.
+  var PREMIUM_PLAN_FALLBACK = [
     { id: 'premium_3_devices', title: 'Premium — 3 devices', amount: '₦1,000 / month', blurb: 'Every episode & movie unlocked, on up to 3 signed-in devices.' },
     { id: 'premium_unlimited', title: 'Premium — Unlimited devices', amount: '₦4,000 / month', blurb: 'Everything unlocked, on as many devices as you like.' }
   ];
+  var PREMIUM_PLAN_OPTIONS = PREMIUM_PLAN_FALLBACK.slice();
+  var PREMIUM_CURRENCY = null;
+
+  async function refreshPremiumPlanOptions() {
+    try {
+      var status = await NovaApi.fetchBillingStatus();
+      if (!status) return;
+      PREMIUM_CURRENCY = status.selectedCurrency || null;
+      var plans = Array.isArray(status.plans) ? status.plans : [];
+      if (!plans.length) return;
+      PREMIUM_PLAN_OPTIONS = plans.map(function (plan) {
+        return {
+          id: plan.id,
+          title: plan.label || plan.id,
+          amount: (plan.priceLabel || ('₦' + plan.amount)) + ' / month',
+          blurb: plan.description || ''
+        };
+      });
+    } catch (e) {}
+  }
 
   function renderPlanOptions(selectedId, copyEl) {
     var qrBox = document.getElementById('tv-payment-qr');
@@ -1896,6 +1919,8 @@
 
     // Step 1 — no plan chosen yet: show the plan options and wait.
     if (!planId) {
+      // Price from the server first so the quoted amount matches the charge.
+      await refreshPremiumPlanOptions();
       renderPlanOptions(null, copyEl);
       if (extraCopy) copyEl.textContent = extraCopy;
       return;
@@ -1906,7 +1931,7 @@
     copyEl.textContent = extraCopy || ('Creating a secure Flutterwave payment link for ' + planMeta.title + '…');
     qrBox.innerHTML = '';
 
-    var checkout = await NovaApi.createBillingCheckout(planMeta.id).catch(function () { return null; });
+    var checkout = await NovaApi.createBillingCheckout(planMeta.id, PREMIUM_CURRENCY).catch(function () { return null; });
     if (checkout && checkout.link && window.NovaQR) {
       qrBox.innerHTML = '';
       var heading = document.createElement('div');

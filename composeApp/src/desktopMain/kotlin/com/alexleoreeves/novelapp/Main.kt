@@ -36,11 +36,13 @@ fun main() = application {
 
         val sessionStore = remember { DesktopUserSessionStore() }
         val linkOpener = remember { DesktopExternalLinkOpener() }
+        val settingsStore = remember { DesktopAppSettingsStore() }
 
         App(
             userSessionStore = sessionStore,
             linkOpener = linkOpener,
-            updateTarget = AppUpdateTarget.DESKTOP
+            updateTarget = AppUpdateTarget.DESKTOP,
+            settingsStore = settingsStore
         )
     }
 }

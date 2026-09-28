@@ -9,6 +9,7 @@ fun MainViewController() = ComposeUIViewController {
     App(
         userSessionStore = IosUserSessionStore(),
         linkOpener = IosExternalLinkOpener(),
-        updateTarget = AppUpdateTarget.IOS
+        updateTarget = AppUpdateTarget.IOS,
+        settingsStore = IosAppSettingsStore()
     )
 }

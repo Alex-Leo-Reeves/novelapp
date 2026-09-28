@@ -52,7 +52,13 @@ fun TvHomeScreen(
     onPlayLiveChannel: (String, String) -> Unit = { _, _ -> },
     onSignOut: () -> Unit = {},
     onBackHome: () -> Unit = {},
-    onGoPremium: () -> Unit = {}
+    onGoPremium: () -> Unit = {},
+    // ── App Settings (forwarded to TvYouScreen) ──────────────────────────
+    showServerSelectors: Boolean = false,
+    onShowServerSelectorsChange: (Boolean) -> Unit = {},
+    activeLanguage: AppLanguage = AppLanguage.SYSTEM,
+    deviceLanguageName: String = "English",
+    onLanguageChange: (AppLanguage) -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedSearchCategory by remember { mutableStateOf("all") }
@@ -313,7 +319,12 @@ fun TvHomeScreen(
                 selectedProfile = selectedProfile,
                 onSwitchProfile = onSwitchProfile,
                 onSignOut = onSignOut,
-                onBack = onBackHome
+                onBack = onBackHome,
+                showServerSelectors = showServerSelectors,
+                onShowServerSelectorsChange = onShowServerSelectorsChange,
+                activeLanguage = activeLanguage,
+                deviceLanguageName = deviceLanguageName,
+                onLanguageChange = onLanguageChange
             )
 
             else -> {

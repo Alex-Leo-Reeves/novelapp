@@ -176,8 +176,9 @@ const AI_SOURCE_MAX_PLAN_MAP = {
     free: 3,
     premium_3_devices: 3,
     premium_unlimited: 3,
-    ai_novel_4: 4,
-    ai_novel_5: 5,
+    // Single AI payment tier. `ai_creator_unlimited` is a retired entitlement:
+    // still honoured for anyone who already holds it, but no longer sellable
+    // (see `sellable` in BILLING_PLANS).
     ai_creator_20: 5,
     ai_creator_unlimited: 5
 };
@@ -187,53 +188,244 @@ function aiNovelSourceLimit(user) {
     return AI_SOURCE_MAX_PLAN_MAP[plan] || AI_SOURCE_MAX_FREE;
 }
 
+// ── Multi-currency billing ───────────────────────────────────────────────────
+// Flutterwave requires a `country` that matches the charge `currency`. A
+// Nigerian merchant account charges NGN natively and USD/GBP/EUR as
+// "international" charges; per Flutterwave's multicurrency docs every one of
+// those currencies maps to country "NG" (only GHS/KES/ZAR/TZS use their own).
+// International card acceptance is a SEPARATE account-level switch that must be
+// enabled from the Flutterwave dashboard (Settings -> Business Preferences ->
+// Payment Methods -> request access); it cannot be turned on from code.
+const BILLING_CURRENCY_META = {
+    NGN: { country: "NG", symbol: "\u20A6", decimals: 0 },
+    USD: { country: "NG", symbol: "$", decimals: 2 },
+    GBP: { country: "NG", symbol: "\u00A3", decimals: 2 },
+    EUR: { country: "NG", symbol: "\u20AC", decimals: 2 }
+};
+const BILLING_DEFAULT_CURRENCY = "NGN";
+const BILLING_CURRENCY_ORDER = ["NGN", "USD", "GBP", "EUR"];
+
+// Region -> currency, used to guess a currency from Accept-Language so a
+// US/UK/EU visitor sees a sane price without touching the picker.
+const BILLING_REGION_CURRENCY = {
+    NG: "NGN", US: "USD", CA: "USD", GB: "GBP", IE: "EUR", DE: "EUR", FR: "EUR",
+    ES: "EUR", IT: "EUR", NL: "EUR", PT: "EUR", AT: "EUR", BE: "EUR", FI: "EUR",
+    GR: "EUR", SK: "EUR", SI: "EUR", LT: "EUR", LV: "EUR", EE: "EUR", LU: "EUR",
+    MT: "EUR", CY: "EUR"
+};
+
+// Which currencies the storefront advertises. Override without a deploy via
+//   BILLING_CURRENCIES="NGN,USD"
+// Unknown codes are ignored; an empty/invalid value falls back to the full list.
+function billingCurrencies() {
+    const raw = String(process.env.BILLING_CURRENCIES || "").trim();
+    if (!raw) return BILLING_CURRENCY_ORDER.slice();
+    const wanted = raw.split(",")
+        .map((code) => code.trim().toUpperCase())
+        .filter((code) => BILLING_CURRENCY_META[code]);
+    return wanted.length ? Array.from(new Set(wanted)) : BILLING_CURRENCY_ORDER.slice();
+}
+
+function normalizeCurrency(value) {
+    const clean = String(value || "").trim().toUpperCase();
+    return BILLING_CURRENCY_META[clean] ? clean : "";
+}
+
+function currencyMeta(code) {
+    return BILLING_CURRENCY_META[normalizeCurrency(code)] || BILLING_CURRENCY_META[BILLING_DEFAULT_CURRENCY];
+}
+
+// NGN has no minor unit, USD/GBP/EUR have two. Round to the currency's
+// precision so 1.99 never becomes 1.9900000000000002 on the wire.
+function roundMoney(amount, currency) {
+    const factor = Math.pow(10, currencyMeta(currency).decimals);
+    return Math.round(Number(amount || 0) * factor) / factor;
+}
+
+// Human-readable price: 1000/NGN -> "₦1,000", 1.99/USD -> "$1.99".
+// Formatted server-side so every client renders an identical string without
+// having to agree on float rounding or symbol placement.
+function formatMoney(amount, currency) {
+    const code = normalizeCurrency(currency) || BILLING_DEFAULT_CURRENCY;
+    const fixed = roundMoney(amount, code).toFixed(currencyMeta(code).decimals);
+    const [whole, fraction] = fixed.split(".");
+    const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return `${currencyMeta(code).symbol}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
+
+// Plan catalogue. `prices` is the single source of truth: NGN is the home
+// market price and the international prices are deliberately higher (they are
+// NOT FX conversions of the NGN price — Nigerian pricing is PPP-discounted).
+// TODO(ops): confirm the USD/GBP/EUR amounts before promoting them widely.
 const BILLING_PLANS = {
     free: {
         id: "free",
         label: "Free",
-        amount: 0,
-        currency: "NGN",
         maxDevices: 2,
         premium: false,
+        prices: { NGN: 0, USD: 0, GBP: 0, EUR: 0 },
         description: "Free preview access and up to 2 signed-in devices."
     },
     premium_3_devices: {
         id: "premium_3_devices",
         label: "Premium 3 devices",
-        amount: 1000,
-        currency: "NGN",
         maxDevices: 3,
         premium: true,
+        prices: { NGN: 1000, USD: 1.99, GBP: 1.49, EUR: 1.79 },
         description: "Full movies, cartoons, K-drama, and up to 3 signed-in devices."
     },
     premium_unlimited: {
         id: "premium_unlimited",
         label: "Premium unlimited",
-        amount: 4000,
-        currency: "NGN",
         maxDevices: null,
         premium: true,
+        prices: { NGN: 4000, USD: 7.99, GBP: 5.99, EUR: 6.99 },
         description: "Full access and unlimited signed-in devices."
     },
     ai_creator_20: {
         id: "ai_creator_20",
         label: "AI Creator 20",
-        amount: 2000,
-        currency: "NGN",
         maxDevices: 2,
         premium: true,
+        prices: { NGN: 2000, USD: 3.99, GBP: 2.99, EUR: 3.49 },
         description: "20 AI creations per month and full premium access."
     },
+    // Retired entitlement: kept in the catalogue so existing holders keep their
+    // premium status, device allowance and unlimited quota, but `sellable: false`
+    // blocks new purchases. There is only ONE AI payment tier: ai_creator_20.
     ai_creator_unlimited: {
         id: "ai_creator_unlimited",
         label: "AI Creator Unlimited",
-        amount: 4000,
-        currency: "NGN",
         maxDevices: null,
         premium: true,
+        sellable: false,
+        prices: { NGN: 4000, USD: 7.99, GBP: 5.99, EUR: 6.99 },
         description: "Unlimited AI creations and unlimited signed-in devices."
     }
 };
+// Resolve the currency to price a request in, in priority order:
+//   1. explicit ?currency= / body.currency (validated against the offer list)
+//   2. Accept-Language region (en-US -> USD, en-GB -> GBP, de-DE -> EUR, ...)
+//   3. BILLING_DEFAULT_CURRENCY (NGN)
+// Only currencies the storefront actually offers are ever returned, so an
+// operator can pin the storefront to NGN with BILLING_CURRENCIES="NGN".
+function detectRequestCurrency(request, explicit) {
+    const offered = billingCurrencies();
+    const requested = normalizeCurrency(explicit);
+    if (requested && offered.includes(requested)) return requested;
+    const header = String((request && request.headers && request.headers["accept-language"]) || "");
+    for (const part of header.split(",")) {
+        const region = part.split(";")[0].trim().split("-")[1];
+        if (!region) continue;
+        const guess = BILLING_REGION_CURRENCY[region.toUpperCase()];
+        if (guess && offered.includes(guess)) return guess;
+    }
+    return offered.includes(BILLING_DEFAULT_CURRENCY) ? BILLING_DEFAULT_CURRENCY : offered[0];
+}
+
+// Optional price overrides without a redeploy:
+//   BILLING_PRICE_OVERRIDES='{"premium_3_devices":{"USD":1.59}}'
+function billingPriceOverrides() {
+    const raw = String(process.env.BILLING_PRICE_OVERRIDES || "").trim();
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (error) {
+        console.warn("[billing] Ignoring invalid BILLING_PRICE_OVERRIDES:", error.message);
+        return {};
+    }
+}
+
+(function applyBillingPriceOverrides() {
+    const overrides = billingPriceOverrides();
+    for (const [planId, byCurrency] of Object.entries(overrides)) {
+        const plan = BILLING_PLANS[planId];
+        if (!plan || !byCurrency || typeof byCurrency !== "object") continue;
+        for (const [code, amount] of Object.entries(byCurrency)) {
+            const currency = normalizeCurrency(code);
+            if (!currency || !Number.isFinite(Number(amount))) continue;
+            plan.prices[currency] = roundMoney(amount, currency);
+        }
+    }
+})();
+
+// Price of `plan` in `currency`, or null when that currency isn't priced.
+function planPriceFor(plan, currency) {
+    const code = normalizeCurrency(currency);
+    if (!plan || !plan.prices || !code) return null;
+    const amount = plan.prices[code];
+    if (amount == null || !Number.isFinite(Number(amount))) return null;
+    return { currency: code, amount: roundMoney(amount, code), country: currencyMeta(code).country };
+}
+
+// Same as planPriceFor but never null, falling back to the home currency.
+// Used on display paths where a null would blank the UI.
+function resolvePlanPrice(plan, currency) {
+    return planPriceFor(plan, currency) || planPriceFor(plan, BILLING_DEFAULT_CURRENCY) || {
+        currency: BILLING_DEFAULT_CURRENCY,
+        amount: 0,
+        country: currencyMeta(BILLING_DEFAULT_CURRENCY).country
+    };
+}
+
+// NGN price used as the tier yardstick. Ranking plans across currencies would
+// need an FX table and would break whenever rates moved, so plan upgrades are
+// always compared on the home-market price.
+function planTierAmount(plan) {
+    return Number((plan && plan.prices && plan.prices[BILLING_DEFAULT_CURRENCY]) || 0);
+}
+
+// Shape a plan for API responses.
+//
+// IMPORTANT: `amount` stays an integer count of NGN and `currency` stays "NGN"
+// for backwards compatibility. Existing v4x clients deserialize `amount` into a
+// non-nullable Int with no default, so returning 1.99 there would crash them.
+// Currency-aware clients read `selectedCurrency` / `priceLabel` / `prices`.
+function planForClient(plan, currency) {
+    const selected = normalizeCurrency(currency) || BILLING_DEFAULT_CURRENCY;
+    const price = resolvePlanPrice(plan, selected);
+    const prices = {};
+    for (const code of billingCurrencies()) {
+        const entry = planPriceFor(plan, code);
+        if (!entry) continue;
+        prices[code] = {
+            currency: code,
+            amountMajor: entry.amount,
+            label: formatMoney(entry.amount, code),
+            country: entry.country
+        };
+    }
+    return {
+        id: plan.id,
+        label: plan.label,
+        // ── legacy fields: always NGN, always an integer ──
+        amount: planTierAmount(plan),
+        currency: BILLING_DEFAULT_CURRENCY,
+        // ── currency-aware fields ──
+        selectedCurrency: price.currency,
+        amountMajor: price.amount,
+        priceLabel: formatMoney(price.amount, price.currency),
+        prices,
+        maxDevices: plan.maxDevices,
+        premium: plan.premium,
+        description: plan.description
+    };
+}
+
+// Advertised currency list for the client-side picker.
+function billingCurrencyOptions() {
+    return billingCurrencies().map((code) => ({
+        code,
+        symbol: currencyMeta(code).symbol,
+        country: currencyMeta(code).country,
+        decimals: currencyMeta(code).decimals
+    }));
+}
+
+
+
 
 const SPORTS_API_KEY = String(process.env.SPORTS_API_KEY || "").trim();
 const SPORTS_API_HOST = "v3.football.api-sports.io";
@@ -682,11 +874,11 @@ function billingPlanFor(planId) {
     return BILLING_PLANS[clean] || BILLING_PLANS.free;
 }
 
-function availableBillingPlans() {
+function availableBillingPlans(currency) {
     return [
         BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID],
         BILLING_PLANS.premium_unlimited
-    ];
+    ].map((plan) => planForClient(plan, currency));
 }
 
 function isPremiumUser(user) {
@@ -3368,16 +3560,24 @@ async function requireApiUser(request, response) {
   return user;
 }
 
-function subscriptionPayload(user) {
+function subscriptionPayload(user, currency) {
   const plan = billingPlanFor(user?.plan);
+  const selectedCurrency = detectRequestCurrency(null, currency);
+  const featured = planForClient(BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID], selectedCurrency);
   return {
     user: publicUser(user),
     premium: isPremiumUser(user),
     currentPlan: plan.id,
-    monthlyFee: BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID].amount,
-    currency: "NGN",
+    // ── legacy fields (always NGN integers) for older clients ──
+    monthlyFee: planTierAmount(BILLING_PLANS[DEFAULT_PREMIUM_PLAN_ID]),
+    currency: BILLING_DEFAULT_CURRENCY,
+    // ── currency-aware fields ──
+    selectedCurrency,
+    monthlyFeeMajor: featured.amountMajor,
+    monthlyFeeLabel: featured.priceLabel,
+    supportedCurrencies: billingCurrencyOptions(),
     maxDevices: userMaxDevices(user),
-    plans: availableBillingPlans(),
+    plans: availableBillingPlans(selectedCurrency),
     freePreview: {
       episodicFraction: EPISODIC_FREE_FRACTION,
       movieMs: MOVIE_FREE_PREVIEW_MS
@@ -3388,7 +3588,13 @@ function subscriptionPayload(user) {
 async function handleBillingStatus(request, response) {
   const user = await requireApiUser(request, response);
   if (!user) return;
-  return sendJson(response, 200, subscriptionPayload(user));
+  const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+  const requested = url.searchParams.get("currency");
+  const header = String(request.headers["accept-language"] || "");
+  const currency = requested
+    ? detectRequestCurrency(request, requested)
+    : detectRequestCurrency({ headers: { "accept-language": header } });
+  return sendJson(response, 200, subscriptionPayload(user, currency));
 }
 
 async function flutterwaveRequest(pathname, { method = "GET", body } = {}) {
@@ -3517,18 +3723,30 @@ async function handleBillingCheckout(request, response) {
   if (!user) return;
   const body = request.method === "POST" ? await readBody(request).catch(() => ({})) : {};
   const requestedPlan = billingPlanFor(body.planId || body.plan || DEFAULT_PREMIUM_PLAN_ID);
-  if (!requestedPlan.premium) return sendError(response, 400, "Choose a paid plan.");
-  const currentPlan = billingPlanFor(user.plan);
-  if (isPremiumUser(user) && currentPlan.amount >= requestedPlan.amount) {
-    return sendJson(response, 200, { ...subscriptionPayload(user), alreadyPremium: true });
+  // `sellable: false` marks a retired plan: existing holders keep it, but it can
+  // no longer be bought. Without this, a direct API call could still buy the
+  // retired second AI tier and bypass the single-AI-tier rule.
+  if (!requestedPlan.premium || requestedPlan.sellable === false) {
+    return sendError(response, 400, "Choose a paid plan.");
   }
+  // Tier comparison uses the NGN price so it never depends on live FX rates.
+  const currentPlan = billingPlanFor(user.plan);
+  if (isPremiumUser(user) && planTierAmount(currentPlan) >= planTierAmount(requestedPlan)) {
+    return sendJson(response, 200, { ...subscriptionPayload(user, body.currency), alreadyPremium: true });
+  }
+  // Explicit currency wins; otherwise fall back to Accept-Language / NGN.
+  const price = resolvePlanPrice(requestedPlan, detectRequestCurrency(request, body.currency));
   const txRef = `novelapp-sub-${requestedPlan.id}-${user.id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
   const payload = await flutterwaveRequest("payments", {
     method: "POST",
     body: {
       tx_ref: txRef,
-      amount: requestedPlan.amount,
-      currency: requestedPlan.currency,
+      amount: price.amount,
+      currency: price.currency,
+      // Flutterwave requires `country` to match `currency` on multicurrency
+      // charges. Omitting it silently defaults to NGN/NG, which rejects any
+      // non-NGN currency.
+      country: price.country,
       redirect_url: `${PUBLIC_APP_URL}/billing-return.html`,
       customer: {
         email: user.email,
@@ -3540,7 +3758,8 @@ async function handleBillingCheckout(request, response) {
       },
       meta: {
         user_id: user.id,
-        plan: requestedPlan.id
+        plan: requestedPlan.id,
+        currency: price.currency
       }
     }
   });
@@ -3549,10 +3768,27 @@ async function handleBillingCheckout(request, response) {
   return sendJson(response, 200, {
     link,
     txRef,
-    amount: requestedPlan.amount,
-    currency: requestedPlan.currency,
-    plan: requestedPlan
+    // ── legacy fields (always NGN integers) ──
+    amount: planTierAmount(requestedPlan),
+    currency: BILLING_DEFAULT_CURRENCY,
+    // ── currency-aware fields ──
+    selectedCurrency: price.currency,
+    amountMajor: price.amount,
+    priceLabel: formatMoney(price.amount, price.currency),
+    country: price.country,
+    plan: planForClient(requestedPlan, price.currency)
   });
+}
+
+// Accept a paid amount if it meets or exceeds the expected price for the
+// SETTLED currency. A half-minor-unit slack absorbs float representation error
+// (1.99 * 100 === 198.99999...); overpayment is allowed, underpayment is not.
+// There is deliberately no FX tolerance: Flutterwave charges exactly the amount
+// we requested, so a mismatch means tampering or a stale price, not a moving
+// exchange rate.
+function paidAmountCovers(paid, expected, currency) {
+  const tolerance = 1 / Math.pow(10, currencyMeta(currency).decimals);
+  return Number(paid || 0) + tolerance / 2 >= Number(expected || 0);
 }
 
 async function verifyFlutterwavePayment({ transactionId, txRef }) {
@@ -3561,20 +3797,40 @@ async function verifyFlutterwavePayment({ transactionId, txRef }) {
     : await flutterwaveRequest(`transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`);
   const data = payload?.data || {};
   const amount = Number(data.amount || 0);
-  const currency = String(data.currency || "").toUpperCase();
+  const currency = normalizeCurrency(data.currency);
+  const settlementCurrency = String(data.currency || "").toUpperCase();
   const status = String(data.status || "").toLowerCase();
   const resolvedTxRef = data.tx_ref || txRef;
   const planId = data.meta?.plan || extractCheckoutPlanId(resolvedTxRef);
   const plan = billingPlanFor(planId);
-  if (!plan.premium || status !== "successful" || currency !== plan.currency || amount < plan.amount) {
+  // Price the plan in whatever currency the customer actually settled in. Using
+  // the plan's single NGN price here is what used to reject every international
+  // (USD/GBP/EUR) payment even though the card had already been charged.
+  const expectedPrice = currency ? planPriceFor(plan, currency) : null;
+  const amountOk = expectedPrice ? paidAmountCovers(amount, expectedPrice.amount, currency) : false;
+  if (!plan.premium || status !== "successful" || !currency || !amountOk) {
+    console.warn(
+      "[billing] Rejecting Flutterwave payment",
+      JSON.stringify({ txRef: resolvedTxRef, planId, status: data.status, settlementCurrency, amount, expected: expectedPrice })
+    );
     await recordBillingEvent({
       userId: extractCheckoutUserId(resolvedTxRef),
       txRef: resolvedTxRef,
       transactionId: data.id || transactionId,
       status: data.status || status,
       amount,
-      currency,
-      raw: payload
+      currency: settlementCurrency || BILLING_DEFAULT_CURRENCY,
+      // `raw` is jsonb so the full settlement detail is preserved for manual
+      // reconciliation without a schema change.
+      raw: {
+        payload,
+        reason: !plan.premium ? "unknown_plan"
+          : status !== "successful" ? "not_successful"
+            : !currency ? "unsupported_currency"
+              : "amount_below_price",
+        expectedAmount: expectedPrice ? expectedPrice.amount : null,
+        expectedCurrency: expectedPrice ? expectedPrice.currency : null
+      }
     });
     throw new Error("Payment was not successful for the selected subscription.");
   }
@@ -3586,7 +3842,18 @@ async function verifyFlutterwavePayment({ transactionId, txRef }) {
     status: data.status || status,
     amount,
     currency,
-    raw: payload
+    // Keep the settlement breakdown for accounting (fee/FX visibility).
+    raw: {
+      payload,
+      settlement: {
+        currency,
+        chargedAmount: amount,
+        settledAmount: data.amount_settled != null ? Number(data.amount_settled) : null,
+        appliedFee: data.applied_fee != null ? Number(data.applied_fee) : null,
+        paymentType: data.payment_type || null,
+        processorResponse: data.processor_response || null
+      }
+    }
   }, plan.id);
 }
 
@@ -3596,7 +3863,7 @@ async function handleBillingVerify(request, response) {
   const txRef = body.txRef || body.tx_ref;
   if (!transactionId && !txRef) return sendError(response, 400, "Payment reference is required.");
   const user = await verifyFlutterwavePayment({ transactionId, txRef });
-  return sendJson(response, 200, subscriptionPayload(user));
+  return sendJson(response, 200, subscriptionPayload(user, body.currency));
 }
 
 async function handleFlutterwaveWebhook(request, response) {

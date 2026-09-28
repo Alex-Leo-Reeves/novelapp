@@ -49,6 +49,8 @@ fun TvDetailScreen(
     onOpenRecommendations: (recItem: UnifiedSearchResult, fromItem: UnifiedSearchResult?) -> Unit,
     onReadNovel: (text: String, title: String) -> Unit,
     onReadManga: (pages: List<String>, title: String) -> Unit,
+    // App-wide setting ("You" tab → "Show server selectors"). Off by default.
+    showServerSelectors: Boolean = false,
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -697,7 +699,7 @@ fun TvDetailScreen(
                 // Manual server selector chips — curated per content type:
                 // donghua → DONGHUA_SELECTOR, anime → ANIME_SELECTOR,
                 // movies/TV → MOVIE_SELECTOR.
-                val showServerSelector = false
+                val showServerSelector = showServerSelectors
 
                 if (isVideoTitle && !item.id.startsWith("youtube_nollywood_")) {
                     // Donghua shows TWO rows: the DonghuaServer row (AnimeXin

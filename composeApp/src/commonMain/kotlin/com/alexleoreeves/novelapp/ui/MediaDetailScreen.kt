@@ -47,6 +47,10 @@ fun MediaDetailScreen(
         if (l == null) onPlayMaEmbed(u, t)
         else println("MediaDetailScreen: onPlayMaEmbedWithLimit invoked without a limit-aware callback (url=$u, title=$t, limit=$l); refusing to play to avoid a preview bypass")
     },
+    // App-wide setting (You tab → "Show server selectors"). Off by default: the
+    // app auto-picks the best provider, and these chips are an opt-in power-user
+    // control that surfaces every provider for the content type.
+    showServerSelectors: Boolean = false,
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -1081,7 +1085,7 @@ fun MediaDetailScreen(
             // Manual server selector chips (restored). Each content type shows
             // its curated set: movies → MOVIE_SELECTOR, anime → ANIME_SELECTOR,
             // donghua → DONGHUA_SELECTOR.
-            val showServerSelector = false
+            val showServerSelector = showServerSelectors
 
             // ── Audio preference selector (anime — always visible) ──────
             if (isAnimeItem) {

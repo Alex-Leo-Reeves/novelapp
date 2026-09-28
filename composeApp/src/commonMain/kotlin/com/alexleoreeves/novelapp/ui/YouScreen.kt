@@ -80,12 +80,22 @@ fun YouScreen(
     onReadNovelChapter: (localPath: String, title: String, sourceName: String) -> Unit,
     onResumeRead: (ReadHistoryItem) -> Unit,
     onResumeWatch: (WatchHistoryItem) -> Unit,
-    onSubscribePlan: (String) -> Unit,
+    /**
+     * Start a checkout. [currency] is null when the user hasn't picked one, in
+     * which case the server infers it from Accept-Language.
+     */
+    onSubscribePlan: (planId: String, currency: String?) -> Unit,
     onSignOut: () -> Unit,
     ttsController: SherpaNarrationController,
     favorites: List<FavoriteNovel> = emptyList(),
     onToggleFavorite: ((FavoriteNovel) -> Unit)? = null,
-    onSwitchProfile: () -> Unit = {}
+    onSwitchProfile: () -> Unit = {},
+    // ── App Settings (persisted through AppSettingsStore) ────────────────
+    showServerSelectors: Boolean = false,
+    onShowServerSelectorsChange: (Boolean) -> Unit = {},
+    activeLanguage: AppLanguage = AppLanguage.SYSTEM,
+    deviceLanguageName: String = "English",
+    onLanguageChange: (AppLanguage) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val client = remember {
@@ -99,6 +109,9 @@ fun YouScreen(
     val authApi = remember { AuthApi() }
     var billingStatus by remember(account.authToken) { mutableStateOf<BillingStatus?>(null) }
     var billingMessage by remember(account.authToken) { mutableStateOf("") }
+    // null = let the server infer the currency from Accept-Language, so
+    // Nigerian users keep seeing naira without touching anything.
+    var selectedCurrency by remember(account.authToken) { mutableStateOf<String?>(null) }
 
     suspend fun checkForUpdates() {
         updateState = UpdateState.Checking
@@ -114,8 +127,8 @@ fun YouScreen(
     // check) only exists for the Android/TV/desktop self-install channels.
     LaunchedEffect(Unit) { if (updateTarget != AppUpdateTarget.IOS) checkForUpdates() }
 
-    LaunchedEffect(account.authToken) {
-        runCatching { authApi.billingStatus(account.authToken) }
+    LaunchedEffect(account.authToken, selectedCurrency) {
+        runCatching { authApi.billingStatus(account.authToken, selectedCurrency) }
             .onSuccess { billingStatus = it; billingMessage = "" }
             .onFailure { billingMessage = it.message ?: "Subscription details unavailable." }
     }
@@ -247,7 +260,9 @@ fun YouScreen(
                     account = account,
                     billingStatus = billingStatus,
                     message = billingMessage,
-                    onSubscribePlan = onSubscribePlan
+                    onSubscribePlan = onSubscribePlan,
+                    selectedCurrency = selectedCurrency,
+                    onCurrencyChange = { selectedCurrency = it }
                 )
 
                 // History
@@ -301,6 +316,17 @@ fun YouScreen(
                     }
                 }
 
+                // App Settings — persisted preferences (language follows the
+                // device unless the user overrides it).
+                GlassSectionLabel("App Settings")
+                AppSettingsCard(
+                    showServerSelectors = showServerSelectors,
+                    onShowServerSelectorsChange = onShowServerSelectorsChange,
+                    activeLanguage = activeLanguage,
+                    deviceLanguageName = deviceLanguageName,
+                    onLanguageChange = onLanguageChange
+                )
+
                 // Contact
                 GlassSectionLabel("Contact Mike")
                 ContactCard("Email", DeveloperContact.EMAIL, true) { linkOpener.open("mailto:${DeveloperContact.EMAIL}") }
@@ -351,17 +377,21 @@ private fun SubscriptionCard(
     account: SavedUserAccount,
     billingStatus: BillingStatus?,
     message: String,
-    onSubscribePlan: (String) -> Unit
+    onSubscribePlan: (planId: String, currency: String?) -> Unit,
+    selectedCurrency: String?,
+    onCurrencyChange: (String?) -> Unit
 ) {
     val plan = billingStatus?.currentPlan ?: account.plan
     val isPremium = billingStatus?.premium ?: account.isPremium
     val maxDevices = billingStatus?.maxDevices ?: account.maxDevices
     val plans = billingStatus?.plans.orEmpty().ifEmpty {
         listOf(
-            BillingPlan(id = "premium_3_devices", label = "Premium 3 devices", amount = 1000, maxDevices = 3, description = "Full movies, cartoons, K-drama, and up to 3 signed-in devices."),
-            BillingPlan(id = "premium_unlimited", label = "Premium unlimited", amount = 4000, maxDevices = null, description = "Full access and unlimited signed-in devices.")
+            BillingPlan(id = "premium_3_devices", label = "Premium 3 devices", amount = 1000, maxDevices = 3, priceLabel = "\u20A61,000", description = "Full movies, cartoons, K-drama, and up to 3 signed-in devices."),
+            BillingPlan(id = "premium_unlimited", label = "Premium unlimited", amount = 4000, maxDevices = null, priceLabel = "\u20A64,000", description = "Full access and unlimited signed-in devices.")
         )
     }
+    val currencies = billingStatus?.supportedCurrencies.orEmpty()
+    val activeCurrency = selectedCurrency ?: billingStatus?.selectedCurrency ?: "NGN"
 
     GlassCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -400,13 +430,54 @@ private fun SubscriptionCard(
                 fontSize = 13.sp
             )
 
+            // Currency switcher — only when the storefront offers a choice.
+            if (currencies.size > 1) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Paying from",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 11.sp
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        currencies.forEach { option ->
+                            val isActiveCurrency = option.code == activeCurrency
+                            if (isActiveCurrency) {
+                                Button(
+                                    onClick = { onCurrencyChange(option.code) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
+                                    shape = RoundedCornerShape(999.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+                                ) {
+                                    Text("${option.symbol} ${option.code}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { onCurrencyChange(option.code) },
+                                    shape = RoundedCornerShape(999.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+                                ) {
+                                    Text("${option.symbol} ${option.code}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                    if (activeCurrency != (billingStatus?.selectedCurrency ?: "NGN")) {
+                        Text(
+                            "Charged in $activeCurrency. Your bank may add a conversion fee.",
+                            color = Color.White.copy(alpha = 0.35f),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
             if (message.isNotBlank()) {
                 Text(message, color = NeonBlue, fontSize = 11.sp)
             }
 
             plans.forEach { paidPlan ->
                 val active = isPremium && plan == paidPlan.id
-                val label = "${paidPlan.label} · ₦${paidPlan.amount}/month"
+                val label = "${paidPlan.label} · ${paidPlan.displayPrice()}/month"
                 if (active) {
                     OutlinedButton(
                         onClick = {}, enabled = false,
@@ -414,7 +485,7 @@ private fun SubscriptionCard(
                     ) { Text("$label active") }
                 } else {
                     Button(
-                        onClick = { onSubscribePlan(paidPlan.id) },
+                        onClick = { onSubscribePlan(paidPlan.id, selectedCurrency) },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
                         modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
                     ) { Text(label, color = Color.White, fontWeight = FontWeight.Bold) }
@@ -797,3 +868,157 @@ private fun VolumeSliderRow(
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  App Settings — server-selector visibility + language (both persisted)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun AppSettingsCard(
+    showServerSelectors: Boolean,
+    onShowServerSelectorsChange: (Boolean) -> Unit,
+    activeLanguage: AppLanguage,
+    deviceLanguageName: String,
+    onLanguageChange: (AppLanguage) -> Unit
+) {
+    var showLanguagePicker by remember { mutableStateOf(false) }
+
+    if (showLanguagePicker) {
+        LanguagePickerDialog(
+            activeLanguage = activeLanguage,
+            deviceLanguageName = deviceLanguageName,
+            onDismiss = { showLanguagePicker = false },
+            onSelect = { picked ->
+                onLanguageChange(picked)
+                showLanguagePicker = false
+            }
+        )
+    }
+
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // ── Server selectors ────────────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Dns, null, tint = NeonBlue, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Show server selectors",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Pick the streaming provider yourself on movie, anime and donghua pages. Off = the app chooses the best server automatically.",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Switch(
+                    checked = showServerSelectors,
+                    onCheckedChange = onShowServerSelectorsChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = NeonBlue
+                    )
+                )
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+            // ── Language ────────────────────────────────────────────────────
+            val languageLabel = if (activeLanguage == AppLanguage.SYSTEM) {
+                "Device language · $deviceLanguageName"
+            } else {
+                activeLanguage.nativeName
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showLanguagePicker = true }
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Language, null, tint = NeonBlue, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Language",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(languageLabel, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
+                }
+                Icon(Icons.Default.ChevronRight, null, tint = Color.White.copy(alpha = 0.3f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguagePickerDialog(
+    activeLanguage: AppLanguage,
+    deviceLanguageName: String,
+    onDismiss: () -> Unit,
+    onSelect: (AppLanguage) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("App language", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                AppLanguage.entries.forEach { language ->
+                    val isActive = language == activeLanguage
+                    val label = if (language == AppLanguage.SYSTEM) {
+                        "Device language · $deviceLanguageName"
+                    } else {
+                        "${language.nativeName} · ${language.englishName}"
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(language) }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            label,
+                            color = if (isActive) NeonBlue else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isActive) {
+                            Icon(
+                                Icons.Default.Check,
+                                null,
+                                tint = NeonBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = NeonBlue)
+            }
+        }
+    )
+}
+

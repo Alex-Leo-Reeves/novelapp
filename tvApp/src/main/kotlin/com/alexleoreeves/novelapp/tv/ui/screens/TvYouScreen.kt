@@ -20,6 +20,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import com.alexleoreeves.novelapp.data.AppLanguage
+import com.alexleoreeves.novelapp.data.BillingCurrency
+import com.alexleoreeves.novelapp.data.BillingPlan
+import com.alexleoreeves.novelapp.data.TvBillingSnapshot
+import com.alexleoreeves.novelapp.data.billingSnapshot
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.payment.QrPaymentScreen
 import com.alexleoreeves.novelapp.tv.ui.theme.*
@@ -32,7 +37,13 @@ fun TvYouScreen(
     onSignOut: () -> Unit,
     onBack: () -> Unit = {},
     selectedProfile: com.alexleoreeves.novelapp.tv.ui.TvProfile? = null,
-    onSwitchProfile: () -> Unit = {}
+    onSwitchProfile: () -> Unit = {},
+    // ── App Settings (persisted through TvAppSettingsStore) ──────────────
+    showServerSelectors: Boolean = false,
+    onShowServerSelectorsChange: (Boolean) -> Unit = {},
+    activeLanguage: AppLanguage = AppLanguage.SYSTEM,
+    deviceLanguageName: String = "English",
+    onLanguageChange: (AppLanguage) -> Unit = {}
 ) {
     if (account == null) {
         Box(
@@ -49,15 +60,25 @@ fun TvYouScreen(
     }
 
     var showSubscribe by remember { mutableStateOf(false) }
-    var selectedPlan by remember { mutableStateOf<Pair<String, Pair<String, Int>>?>(null) }
+    var selectedPlan by remember { mutableStateOf<BillingPlan?>(null) }
     var billingMessage by remember { mutableStateOf("") }
+    // Server-priced plans. A null currency lets the server infer it from the
+    // request, so Nigerian viewers keep seeing naira by default.
+    var billingState by remember { mutableStateOf<TvBillingSnapshot?>(null) }
+    var selectedCurrency by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(account.authToken, selectedCurrency) {
+        billingState = billingSnapshot(account.authToken, selectedCurrency)
+    }
 
     if (showSubscribe && selectedPlan != null) {
+        val plan = selectedPlan!!
         QrPaymentScreen(
             account = account,
-            planId = selectedPlan!!.first,
-            planLabel = selectedPlan!!.second.first,
-            planAmount = selectedPlan!!.second.second,
+            planId = plan.id,
+            planLabel = plan.label,
+            planPriceLabel = plan.displayPrice(),
+            currency = plan.selectedCurrency,
             onComplete = { showSubscribe = false },
             onBack = { showSubscribe = false }
         )
@@ -151,19 +172,39 @@ fun TvYouScreen(
             // Subscription cards
             SectionTitle("Subscription")
 
-            val plans = listOf(
-                Triple("premium_3_devices", Pair("Premium 3 Devices", 1000), "Full movies, cartoons, K-drama, up to 3 devices"),
-                Triple("premium_unlimited", Pair("Premium Unlimited", 4000), "Full access with unlimited signed-in devices")
-            )
+            val snapshot = billingState
+            val plans = snapshot?.plans.orEmpty().ifEmpty { tvOfflineFallbackPlans() }
+            val currencies = snapshot?.supportedCurrencies.orEmpty()
 
-            plans.forEach { (planId, info, desc) ->
-                val isActive = account.isPremium && account.plan == planId
+            // Currency switcher — only shown when the storefront offers a choice.
+            if (currencies.size > 1) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "Paying from:",
+                        color = Color.White.copy(0.5f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    currencies.forEach { option ->
+                        TvCurrencyChip(
+                            option = option,
+                            selected = (selectedCurrency ?: snapshot?.selectedCurrency) == option.code,
+                            onClick = { selectedCurrency = option.code }
+                        )
+                    }
+                }
+            }
+
+            plans.forEach { paidPlan ->
+                val isActive = account.isPremium && account.plan == paidPlan.id
                 var planFocused by remember { mutableStateOf(false) }
 
                 Surface(
                     onClick = {
                         if (!isActive) {
-                            selectedPlan = planId to info
+                            selectedPlan = paidPlan
                             showSubscribe = true
                         }
                     },
@@ -186,17 +227,17 @@ fun TvYouScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(info.first, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                Text(paidPlan.label, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                 if (isActive) {
                                 Surface(color = NeonBlue, shape = RoundedCornerShape(4.dp)) {
                                     Text("ACTIVE", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                                     }
                                 }
                             }
-                            Text(desc, color = Color.White.copy(0.5f), style = MaterialTheme.typography.bodySmall)
+                            Text(paidPlan.description, color = Color.White.copy(0.5f), style = MaterialTheme.typography.bodySmall)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("₦${info.second}", color = if (isActive) NeonBlue else Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineMedium)
+                            Text(paidPlan.displayPrice(), color = if (isActive) NeonBlue else Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineMedium)
                             Text("/month", color = Color.White.copy(0.4f), style = MaterialTheme.typography.labelSmall)
                         }
                         if (!isActive && planFocused) {
@@ -225,6 +266,89 @@ fun TvYouScreen(
                 StatCard("Premium", if (account.isPremium) "Active" else "Free", Color(0xFF00BFFF))
                 StatCard("Devices", "${account.maxDevices ?: 2}", Color(0xFF06D6A0))
                 StatCard("Plan", account.plan.replace("premium_", "").replace("_", " ").ifBlank { "free" }, Color(0xFF00BFFF))
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ── App Settings ──────────────────────────────────────────────
+            SectionTitle("App Settings")
+            Spacer(Modifier.height(12.dp))
+
+            // Server selector visibility — press OK to flip.
+            var serverToggleFocused by remember { mutableStateOf(false) }
+            Surface(
+                onClick = { onShowServerSelectorsChange(!showServerSelectors) },
+                shape = RoundedCornerShape(10.dp),
+                color = if (serverToggleFocused) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E),
+                border = if (serverToggleFocused) BorderStroke(2.dp, Color(0xFF00BFFF))
+                    else BorderStroke(1.dp, Color.White.copy(0.05f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { serverToggleFocused = it.isFocused }
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Dns, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show server selectors", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Pick the streaming provider yourself on movie, anime and donghua pages.",
+                            color = Color.White.copy(0.5f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Text(
+                        if (showServerSelectors) "ON" else "OFF",
+                        color = if (showServerSelectors) Color(0xFF06D6A0) else Color.White.copy(0.5f),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Language — press OK to cycle through the supported languages
+            // (remote-friendly: no text entry, no nested dialog).
+            var languageFocused by remember { mutableStateOf(false) }
+            Surface(
+                onClick = {
+                    onLanguageChange(
+                        AppLanguage.entries[(AppLanguage.entries.indexOf(activeLanguage) + 1) % AppLanguage.entries.size]
+                    )
+                },
+                shape = RoundedCornerShape(10.dp),
+                color = if (languageFocused) Color(0xFF00BFFF).copy(0.2f) else Color(0xFF14141E),
+                border = if (languageFocused) BorderStroke(2.dp, Color(0xFF00BFFF))
+                    else BorderStroke(1.dp, Color.White.copy(0.05f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { languageFocused = it.isFocused }
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Language, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Language", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (activeLanguage == AppLanguage.SYSTEM) "Device language · $deviceLanguageName"
+                            else "${activeLanguage.nativeName} · ${activeLanguage.englishName}",
+                            color = Color.White.copy(0.5f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Text(
+                        "CHANGE",
+                        color = Color(0xFF00BFFF),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -300,5 +424,57 @@ private fun StatCard(label: String, value: String, accent: Color) {
             Text(value, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
             Text(label, color = Color.White.copy(0.5f), style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+/**
+ * Naira-priced plans used only when /billing/status can't be reached (offline
+ * or cold start). The server response always wins once it arrives.
+ */
+private fun tvOfflineFallbackPlans(): List<BillingPlan> = listOf(
+    BillingPlan(
+        id = "premium_3_devices",
+        label = "Premium 3 Devices",
+        amount = 1000,
+        maxDevices = 3,
+        priceLabel = "\u20A61,000",
+        description = "Full movies, cartoons, K-drama, up to 3 devices"
+    ),
+    BillingPlan(
+        id = "premium_unlimited",
+        label = "Premium Unlimited",
+        amount = 4000,
+        maxDevices = null,
+        priceLabel = "\u20A64,000",
+        description = "Full access with unlimited signed-in devices"
+    )
+)
+
+/** Focusable currency pill for the TV paywall. */
+@Composable
+private fun TvCurrencyChip(
+    option: BillingCurrency,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) NeonBlue.copy(0.25f) else Color(0xFF14141E),
+        border = when {
+            focused -> BorderStroke(2.dp, NeonBlue)
+            selected -> BorderStroke(2.dp, NeonBlue.copy(0.6f))
+            else -> BorderStroke(1.dp, Color.White.copy(0.08f))
+        },
+        modifier = Modifier.onFocusChanged { focused = it.isFocused }
+    ) {
+        Text(
+            option.code,
+            color = if (selected) Color.White else Color.White.copy(0.7f),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
     }
 }

@@ -572,13 +572,56 @@ suspend fun billingStatus(token: String): JsonObject? {
     finally { client.close() }
 }
 
-suspend fun createCheckout(token: String, planId: String): BillingCheckout {
+/**
+ * Plans and currencies for the TV paywall, already priced by the server for
+ * [selectedCurrency]. The TV shows `plan.displayPrice()` directly so it never
+ * has to format money itself.
+ */
+data class TvBillingSnapshot(
+    val plans: List<BillingPlan>,
+    val selectedCurrency: String,
+    val supportedCurrencies: List<BillingCurrency>,
+    val premium: Boolean,
+    val currentPlan: String,
+    val maxDevices: Int?
+)
+
+/**
+ * Load subscription state priced in [currency]. When null the server infers the
+ * currency from how the TV is configured, falling back to NGN.
+ */
+suspend fun billingSnapshot(token: String, currency: String? = null): TvBillingSnapshot? {
+    val client = platformHttpClient()
+    return try {
+        val resp = client.get("${ApiConfig.API_BASE_URL}/billing/status") {
+            bearerAuth(token)
+            currency?.takeIf { it.isNotBlank() }?.let { parameter("currency", it) }
+        }
+        val body = resp.bodyAsText()
+        val root = apiJson.parseToJsonElement(body).jsonObject
+        TvBillingSnapshot(
+            plans = root["plans"]?.let { apiJson.decodeFromJsonElement<List<BillingPlan>>(it) }.orEmpty(),
+            selectedCurrency = root["selectedCurrency"]?.jsonPrimitive?.contentOrNull ?: "NGN",
+            supportedCurrencies = root["supportedCurrencies"]
+                ?.let { apiJson.decodeFromJsonElement<List<BillingCurrency>>(it) }.orEmpty(),
+            premium = root["premium"]?.jsonPrimitive?.booleanOrNull ?: false,
+            currentPlan = root["currentPlan"]?.jsonPrimitive?.contentOrNull ?: "free",
+            maxDevices = root["maxDevices"]?.jsonPrimitive?.intOrNull
+        )
+    } catch (_: Exception) { null }
+    finally { client.close() }
+}
+
+suspend fun createCheckout(token: String, planId: String, currency: String? = null): BillingCheckout {
     val client = platformHttpClient()
     return try {
         val resp = client.post("${ApiConfig.API_BASE_URL}/billing/checkout") {
             contentType(KtorContentType.Application.Json)
             bearerAuth(token)
-            setBody(buildJsonObject { put("planId", planId) })
+            setBody(buildJsonObject {
+                put("planId", planId)
+                put("currency", currency ?: "")
+            })
         }
         val body = resp.bodyAsText()
         val json = apiJson.parseToJsonElement(body).jsonObject
@@ -588,7 +631,11 @@ suspend fun createCheckout(token: String, planId: String): BillingCheckout {
             amount = json["amount"]?.jsonPrimitive?.intOrNull ?: 1000,
             currency = json["currency"]?.jsonPrimitive?.contentOrNull ?: "NGN",
             alreadyPremium = json["alreadyPremium"]?.jsonPrimitive?.booleanOrNull ?: false,
-            premium = json["premium"]?.jsonPrimitive?.booleanOrNull ?: false
+            premium = json["premium"]?.jsonPrimitive?.booleanOrNull ?: false,
+            selectedCurrency = json["selectedCurrency"]?.jsonPrimitive?.contentOrNull ?: "NGN",
+            amountMajor = json["amountMajor"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+            priceLabel = json["priceLabel"]?.jsonPrimitive?.contentOrNull ?: "",
+            country = json["country"]?.jsonPrimitive?.contentOrNull ?: "NG"
         )
     } finally { client.close() }
 }

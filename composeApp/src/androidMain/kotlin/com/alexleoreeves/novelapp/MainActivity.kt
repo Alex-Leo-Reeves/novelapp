@@ -8,6 +8,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.alexleoreeves.novelapp.nodebridge.ResidentialScraperStatus
 import com.alexleoreeves.novelapp.nodebridge.WebViewBridgeRuntime
+import com.alexleoreeves.novelapp.platform.AndroidAppSettingsStore
 import com.alexleoreeves.novelapp.platform.AndroidExternalLinkOpener
 import com.alexleoreeves.novelapp.platform.AndroidUserSessionStore
 import com.alexleoreeves.novelapp.sensor.AppContextHolder
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
             App(
                 userSessionStore = AndroidUserSessionStore(appContext),
                 linkOpener = AndroidExternalLinkOpener(appContext),
+                settingsStore = AndroidAppSettingsStore(appContext),
                 nodeBridgeMessage = nodeBridgeMessage
             )
         }

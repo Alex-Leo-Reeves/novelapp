@@ -30,7 +30,10 @@ fun QrPaymentScreen(
     account: SavedUserAccount,
     planId: String,
     planLabel: String,
-    planAmount: Int,
+    /** Server-rendered price for the fallback copy, e.g. "₦1,000" or "$1.99". */
+    planPriceLabel: String,
+    /** Charge currency (NGN/USD/GBP/EUR); null lets the server decide. */
+    currency: String? = null,
     onComplete: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -39,10 +42,10 @@ fun QrPaymentScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var pollCount by remember { mutableStateOf(0) }
 
-    LaunchedEffect(planId) {
+    LaunchedEffect(planId, currency) {
         isLoading = true
         try {
-            checkout = createCheckout(account.authToken, planId)
+            checkout = createCheckout(account.authToken, planId, currency)
         } catch (e: Exception) {
             errorMessage = e.message ?: "Failed to create checkout"
         }
@@ -123,7 +126,9 @@ fun QrPaymentScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "\u20A6$planAmount/month",
+                        // The checkout response is authoritative once it lands;
+                        // the passed-in label covers the loading state.
+                        "${checkout?.displayAmount()?.takeIf { it.isNotBlank() } ?: planPriceLabel}/month",
                         style = MaterialTheme.typography.headlineMedium,
                         color = Color.White,
                         fontWeight = FontWeight.Black

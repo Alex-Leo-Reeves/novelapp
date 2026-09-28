@@ -34,6 +34,7 @@ import com.alexleoreeves.novelapp.nodebridge.ResidentialScraperStatus
 import com.alexleoreeves.novelapp.nodebridge.ResidentialScraperState
 
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
+import com.alexleoreeves.novelapp.tv.platform.TvAppSettingsStore
 import com.alexleoreeves.novelapp.tv.platform.TvWatchProgressStore
 import com.alexleoreeves.novelapp.tv.platform.UserSessionStore
 import com.alexleoreeves.novelapp.tv.update.TvUpdateInstaller
@@ -152,6 +153,12 @@ fun TvApp(
     // Persistent watch-progress store — survives app kills, TV power loss and
     // re-launches. Keyed by "${mediaId}::${episodeTitle}".
     val watchProgressStore = remember(context) { TvWatchProgressStore(context) }
+
+    // Persisted app settings (language + server-selector visibility), seeded
+    // from the platform store once and written back on change.
+    val settingsStore = remember(context) { TvAppSettingsStore(context) }
+    var showServerSelectors by remember { mutableStateOf(settingsStore.showServerSelectors()) }
+    var activeLanguage by remember { mutableStateOf(settingsStore.activeLanguage()) }
 
     // ── Network connectivity state ────────────────────────────────────────
     // True when at least one network is available. Drives offline-first boot
@@ -742,7 +749,18 @@ fun TvApp(
                                         nav = nav.copy(account = null, selectedSection = TvSection.HOME, screen = TvScreen.AUTH)
                                     },
                                     onBackHome = { nav = nav.copy(selectedSection = TvSection.HOME) },
-                                    onGoPremium = { nav = nav.copy(selectedSection = TvSection.YOU) }
+                                    onGoPremium = { nav = nav.copy(selectedSection = TvSection.YOU) },
+                                    showServerSelectors = showServerSelectors,
+                                    onShowServerSelectorsChange = { enabled ->
+                                        showServerSelectors = enabled
+                                        settingsStore.setShowServerSelectors(enabled)
+                                    },
+                                    activeLanguage = activeLanguage,
+                                    deviceLanguageName = AppLanguage.fromTag(settingsStore.deviceLanguageCode())?.englishName ?: "English",
+                                    onLanguageChange = { language ->
+                                        activeLanguage = language
+                                        settingsStore.setLanguageOverride(language.takeIf { it != AppLanguage.SYSTEM }?.code)
+                                    }
                                 )
                             }
 
@@ -774,6 +792,7 @@ fun TvApp(
                                             nav = nav.copy(screen = TvScreen.MANGA_VIEWER, mangaPages = pages, mangaTitle = title)
                                         },
                                         watchProgressStore = watchProgressStore,
+                                        showServerSelectors = showServerSelectors,
                                         onBack = { goBack() }
                                     )
                                 }

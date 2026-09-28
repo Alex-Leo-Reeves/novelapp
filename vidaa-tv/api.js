@@ -232,8 +232,8 @@
     return res.ok && res.data ? res.data : null;
   }
 
-  async function createBillingCheckout(planId) {
-    var res = await request('/billing/checkout', { method: 'POST', body: { planId: planId || 'premium_3_devices' } });
+  async function createBillingCheckout(planId, currency) {
+    var res = await request('/billing/checkout', { method: 'POST', body: { planId: planId || 'premium_3_devices', currency: currency || '' } });
     if (res.ok && res.data && res.data.data) return res.data.data;
     return res.ok && res.data ? res.data : null;
   }

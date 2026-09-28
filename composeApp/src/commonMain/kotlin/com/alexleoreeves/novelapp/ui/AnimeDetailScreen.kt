@@ -46,6 +46,7 @@ fun AnimeDetailScreen(
     isPremium: Boolean = false,
     onPlayEpisode: (streamUrl: String, episodeTitle: String, headersJson: String?, subtitlesJson: String?) -> Unit,
     onPlayMaEmbed: (embedUrl: String, episodeTitle: String) -> Unit = { _, _ -> },
+    showServerSelectors: Boolean = false,
     onBack: () -> Unit,
     requireAuth: (() -> Unit) -> Unit
 ) {
@@ -442,7 +443,7 @@ fun AnimeDetailScreen(
                         }
                     }
                 }
-                val showServerSelector = false
+                val showServerSelector = showServerSelectors
                 if (showServerSelector) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

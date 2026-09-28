@@ -34,20 +34,24 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
+// The one and only AI payment tier. `ai_creator_unlimited` is a retired
+// entitlement that is no longer sold but still grants 5 sources.
+private const val AI_CREATOR_PLAN_ID = "ai_creator_20"
+private const val AI_CREATOR_SOURCES = 5
+
 private fun maxSourcesForPlan(plan: String): Int = when (plan.trim().lowercase()) {
-    "ai_novel_4" -> 4
-    "ai_novel_5", "ai_creator_20", "ai_creator_unlimited" -> 5
+    AI_CREATOR_PLAN_ID, "ai_creator_unlimited" -> AI_CREATOR_SOURCES
     else -> 3
 }
 
+// Empty for anyone already on the AI tier, which hides the upgrade buttons.
+// The exact amount is quoted by the checkout dialog in the customer's own
+// currency, so no hardcoded naira price is shown here.
 private fun availableSourceUpgrades(currentPlan: String): List<Pair<String, String>> {
     val plan = currentPlan.trim().lowercase()
-    return when {
-        plan in listOf("ai_novel_4", "ai_novel_5", "ai_creator_20", "ai_creator_unlimited") -> emptyList()
-        else -> listOf(
-            "ai_novel_4" to "Upgrade to 4 sources — ₦1,000",
-            "ai_novel_5" to "Upgrade to 5 sources — ₦3,000"
-        )
+    return when (plan) {
+        AI_CREATOR_PLAN_ID, "ai_creator_unlimited" -> emptyList()
+        else -> listOf(AI_CREATOR_PLAN_ID to "AI Creator — 20 creations/mo and up to $AI_CREATOR_SOURCES fused sources")
     }
 }
 
@@ -490,13 +494,10 @@ private fun AiNovelCreatorTab(
         AlertDialog(onDismissRequest = { showPaymentDropdown = false }, title = { Text("Upgrade Source Limit", color = currentTheme.textColor(), fontWeight = FontWeight.Bold) },
             text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Your current plan ($sourceLimit sources) limits how many novels/shows you can fuse. Upgrade for more:", color = currentTheme.subTextColor(), style = MaterialTheme.typography.bodyMedium)
-                    Card(onClick = { onSubscribePlan?.invoke("ai_novel_4"); showPaymentDropdown = false }, colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Column(modifier = Modifier.weight(1f)) { Text("AI Fusion 4", color = currentTheme.textColor(), fontWeight = FontWeight.Bold); Text("Fuse up to 4 sources", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }; Text("₦1,000", color = currentTheme.accentColor(), fontWeight = FontWeight.Bold) }
+                    Card(onClick = { onSubscribePlan?.invoke(AI_CREATOR_PLAN_ID); showPaymentDropdown = false }, colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Column(modifier = Modifier.weight(1f)) { Text("AI Creator", color = currentTheme.textColor(), fontWeight = FontWeight.Bold); Text("20 AI creations per month", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }; Text("Up to $AI_CREATOR_SOURCES sources", color = currentTheme.accentColor(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall) }
                     }
-                    Card(onClick = { onSubscribePlan?.invoke("ai_novel_5"); showPaymentDropdown = false }, colors = CardDefaults.cardColors(containerColor = currentTheme.cardColor()), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Column(modifier = Modifier.weight(1f)) { Text("AI Fusion 5", color = currentTheme.textColor(), fontWeight = FontWeight.Bold); Text("Fuse up to 5 sources", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall) }; Text("₦3,000", color = currentTheme.accentColor(), fontWeight = FontWeight.Bold) }
-                    }
-                    Text("Payments via Flutterwave. One-time per month.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
+                    Text("Payments via Flutterwave, billed monthly in your local currency.", color = currentTheme.subTextColor(), style = MaterialTheme.typography.labelSmall)
                 }
             }, confirmButton = { TextButton(onClick = { showPaymentDropdown = false }) { Text("Close", color = currentTheme.accentColor()) } }, containerColor = currentTheme.surfaceColor())
     }

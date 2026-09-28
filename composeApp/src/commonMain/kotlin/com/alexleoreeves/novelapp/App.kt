@@ -37,12 +37,19 @@ fun App(
     userSessionStore: UserSessionStore = EmptyUserSessionStore,
     linkOpener: ExternalLinkOpener = NoOpExternalLinkOpener,
     updateTarget: AppUpdateTarget = AppUpdateTarget.ANDROID,
+    // Persisted UI settings (language + server-selector visibility). Each
+    // platform entry point passes its own implementation.
+    settingsStore: AppSettingsStore = DefaultAppSettingsStore,
     // Non-null when the Android nodebridge (embedded anime engine) reports a
     // user-facing start failure. Shown as a dismissible info dialog. Desktop
     // and iOS call sites omit it → default null → nothing shown.
     nodeBridgeMessage: String? = null
 ) {
     val appTheme = remember { mutableStateOf(AppTheme.DARK) }
+    // Persisted UI settings, seeded from the platform store once and written
+    // back on change so the choice survives restarts.
+    var showServerSelectors by remember { mutableStateOf(settingsStore.showServerSelectors()) }
+    var activeLanguage by remember { mutableStateOf(settingsStore.activeLanguage()) }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
     val tabHistory = remember { mutableStateListOf<BottomTab>() }
     var showSplash by remember { mutableStateOf(true) }
@@ -70,6 +77,9 @@ fun App(
     var hasHydratedCloudState by remember { mutableStateOf(false) }
     var searchHistoryPulse by remember { mutableStateOf(0) }
     var subscriptionMessage by remember { mutableStateOf<String?>(null) }
+    // Currency of the most recent checkout attempt, so retrying from the alert
+    // dialog doesn't silently fall back to NGN for an international customer.
+    var lastCheckoutCurrency by remember { mutableStateOf<String?>(null) }
     val authApi = remember { AuthApi() }
 
     val favorites = remember { mutableStateListOf<FavoriteNovel>() }
@@ -151,19 +161,21 @@ fun App(
         if (account != null && hasHydratedCloudState) cloudSyncPulse += 1
     }
 
-    fun beginPremiumCheckout(planId: String = "premium_3_devices") {
+    fun beginPremiumCheckout(planId: String = "premium_3_devices", currency: String? = null) {
         val a = account ?: run { showAuthSheet = true; return }
         scope.launch {
             subscriptionMessage = "Starting subscription checkout..."
-            runCatching { authApi.createBillingCheckout(a.authToken, planId) }
+            // Remembered so retrying from the dialog reuses the same currency.
+            lastCheckoutCurrency = currency
+            runCatching { authApi.createBillingCheckout(a.authToken, planId, currency) }
                 .onSuccess { ch ->
                     if (ch.alreadyPremium || ch.premium) {
-                        runCatching { authApi.billingStatus(a.authToken) }
+                        runCatching { authApi.billingStatus(a.authToken, currency) }
                             .onSuccess { s -> account = s.account; userSessionStore.saveAccount(s.account) }
                         subscriptionMessage = "This plan is already active."
                     } else if (ch.link.isNotBlank()) {
                         linkOpener.open(ch.link)
-                        subscriptionMessage = "Complete the Flutterwave checkout, then reopen the app to refresh your plan."
+                        subscriptionMessage = "Complete the ${ch.displayAmount()} Flutterwave checkout, then reopen the app to refresh your plan."
                     } else subscriptionMessage = "Checkout link was not returned."
                 }
                 .onFailure { subscriptionMessage = it.message ?: "Could not start subscription." }
@@ -521,6 +533,7 @@ fun App(
                             maServerEmbedTitle.value = t
                             maServerPreviewLimitMs.value = animeLimit
                         },
+                        showServerSelectors = showServerSelectors,
                         onBack = { selectedAnime.value = null },
                         requireAuth = requireAuth
                     )
@@ -557,6 +570,7 @@ fun App(
                     },
                     onPlayMaEmbed = { u, t -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = null },
                     onPlayMaEmbedWithLimit = { u, t, l -> maServerEmbedUrl.value = u; maServerEmbedTitle.value = t; maServerPreviewLimitMs.value = l },
+                    showServerSelectors = showServerSelectors,
                     onBack = { selectedMedia.value = null }
                 )
 
@@ -658,6 +672,17 @@ fun App(
                                     else YouScreen(
                                         account = account!!, currentTheme = appTheme.value, downloadRepo = downloadRepo, linkOpener = linkOpener,
                                         updateTarget = updateTarget, ttsController = ttsController,
+                                        showServerSelectors = showServerSelectors,
+                                        onShowServerSelectorsChange = { enabled ->
+                                            showServerSelectors = enabled
+                                            settingsStore.setShowServerSelectors(enabled)
+                                        },
+                                        activeLanguage = activeLanguage,
+                                        deviceLanguageName = AppLanguage.fromTag(settingsStore.deviceLanguageCode())?.englishName ?: "English",
+                                        onLanguageChange = { language ->
+                                            activeLanguage = language
+                                            settingsStore.setLanguageOverride(language.takeIf { it != AppLanguage.SYSTEM }?.code)
+                                        },
                                         favorites = favorites.toList(),
                                         onPlayEpisode = { p, t -> selectedAnime.value = null; animeStreamUrl.value = p; animeEpisodeTitle.value = t; animeEpisodeNumber.value = t.substringAfter("EP ", "0").takeWhile { it.isDigit() }.toIntOrNull() ?: 0; animePreviewLimitMs.value = null },
                                         onReadMangaChapter = { p, t -> selectedNovel.value = UnifiedSearchResult(id = p, title = t, coverUrl = "", detailPageUrl = p, sourceName = "local", isManga = true); selectedChapterUrl.value = p; selectedChapterTitle.value = t; selectedNovelTitle.value = t; selectedSourceName.value = "local" },
@@ -670,7 +695,7 @@ fun App(
                                             queueCloudSync()
                                         },
                                         onSwitchProfile = { selectedProfile = null },
-                                        onSubscribePlan = { planId -> beginPremiumCheckout(planId) },
+                                        onSubscribePlan = { planId, currency -> beginPremiumCheckout(planId, currency) },
                                         onSignOut = {
                                             scope.launch {
                                                 account?.authToken?.let { t -> runCatching { authApi.logout(t) } }
@@ -743,7 +768,7 @@ fun App(
             onForgotPassword = { showAuthSheet = false; showForgotPassword = true }
         )
 
-        subscriptionMessage?.let { m -> AlertDialog(onDismissRequest = { subscriptionMessage = null }, title = { Text("Premium") }, text = { Text(m) }, confirmButton = { Button(onClick = { beginPremiumCheckout("premium_3_devices") }) { Text("Subscribe") } }, dismissButton = { TextButton(onClick = { subscriptionMessage = null }) { Text("Close") } }) }
+        subscriptionMessage?.let { m -> AlertDialog(onDismissRequest = { subscriptionMessage = null }, title = { Text("Premium") }, text = { Text(m) }, confirmButton = { Button(onClick = { beginPremiumCheckout("premium_3_devices", lastCheckoutCurrency) }) { Text("Subscribe") } }, dismissButton = { TextButton(onClick = { subscriptionMessage = null }) { Text("Close") } }) }
 
         var scraperDialogDismissed by remember { mutableStateOf(false) }
         val effectiveScraperMessage = nodeBridgeMessage?.takeIf { it.isNotBlank() }?.takeIf { !scraperDialogDismissed }

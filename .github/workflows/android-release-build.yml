@@ -135,12 +135,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="android-v1.11"
+          # v1.39 is the PERMANENT Android release channel. The committed
+          # site/app-version.json points apkUrl at this tag's asset, so builds
+          # must be uploaded here — uploading to a version-pinned tag (the old
+          # "android-v1.11") left the manifest URL serving a stale APK.
+          TAG="v1.39"
           ASSET="novelapp-android.apk"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
-              --title "Android v1.11" \
-              --notes "Android v1.11 with Supabase account sync, Kokoro model download/cache, improved manga caching, and updated media providers."
+              --title "NovelApp v1.39" \
+              --notes "Permanent NovelApp Android release channel."
           fi
           gh release upload "$TAG" "${{ steps.apk.outputs.path }}#$ASSET" --clobber
 
@@ -151,13 +155,14 @@ jobs:
           APK_SHA256: ${{ steps.apk.outputs.sha256 }}
         run: |
           set -euo pipefail
-          mkdir -p site/downloads
-          cp "${{ steps.apk.outputs.path }}" site/downloads/novelapp-android.apk
+          # The APK is NOT committed to git — it ships as a GitHub release asset
+          # (uploaded above) and as a workflow artifact. Committing a ~150 MB
+          # binary per release bloated the repo, and site/downloads/*.apk is
+          # gitignored anyway. Only the manifest metadata is committed here.
           node <<'NODE'
           const fs = require('fs');
           const path = 'site/app-version.json';
           const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
-          manifest.apkUrl = 'https://novelapp1.onrender.com/downloads/novelapp-android.apk';
           manifest.apkBytes = Number(process.env.APK_BYTES);
           manifest.apkSha256 = process.env.APK_SHA256;
           fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -169,7 +174,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/app-version.json site/downloads/novelapp-android.apk
+          git add site/app-version.json
           if git diff --cached --quiet; then
             echo "No Android manifest metadata changes to publish."
           else

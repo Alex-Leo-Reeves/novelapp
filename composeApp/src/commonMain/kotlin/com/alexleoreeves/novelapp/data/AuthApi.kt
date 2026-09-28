@@ -234,10 +234,16 @@ class AuthApi(
         return authJson.decodeFromString<UserStateResponse>(rawBody).state
     }
 
-    suspend fun billingStatus(token: String): BillingStatus {
+    /**
+     * Load subscription state. [currency] (e.g. "USD") asks the server to price
+     * the plans in a specific currency; when null the server infers it from the
+     * Accept-Language header, falling back to NGN.
+     */
+    suspend fun billingStatus(token: String, currency: String? = null): BillingStatus {
         val response = client.get("$baseUrl/billing/status") {
             accept(ContentType.parse("application/json"))
             bearerAuth(token)
+            currency?.takeIf { it.isNotBlank() }?.let { parameter("currency", it) }
         }
         val rawBody = response.bodyAsText()
         if (response.status != HttpStatusCode.OK) {
@@ -252,16 +258,27 @@ class AuthApi(
             currency = payload.currency,
             maxDevices = payload.maxDevices,
             plans = payload.plans,
-            freePreview = payload.freePreview
+            freePreview = payload.freePreview,
+            selectedCurrency = payload.selectedCurrency,
+            monthlyFeeLabel = payload.monthlyFeeLabel,
+            supportedCurrencies = payload.supportedCurrencies
         )
     }
 
-    suspend fun createBillingCheckout(token: String, planId: String = "premium_3_devices"): BillingCheckout {
+    /**
+     * Start a Flutterwave checkout. [currency] pins the charge currency (NGN,
+     * USD, GBP, EUR); when null the server picks it from Accept-Language.
+     */
+    suspend fun createBillingCheckout(
+        token: String,
+        planId: String = "premium_3_devices",
+        currency: String? = null
+    ): BillingCheckout {
         val response = client.post("$baseUrl/billing/checkout") {
             accept(ContentType.parse("application/json"))
             contentType(ContentType.parse("application/json"))
             bearerAuth(token)
-            setBody(BillingCheckoutRequest(planId = planId))
+            setBody(BillingCheckoutRequest(planId = planId, currency = currency ?: ""))
         }
         val rawBody = response.bodyAsText()
         if (response.status != HttpStatusCode.OK) {
@@ -316,12 +333,25 @@ data class BillingStatus(
     val account: SavedUserAccount,
     val premium: Boolean,
     val currentPlan: String,
+    /** Legacy NGN integer monthly fee; see [BillingPlan.amount]. */
     val monthlyFee: Int,
     val currency: String,
     val maxDevices: Int?,
     val plans: List<BillingPlan>,
-    val freePreview: BillingPreview
-)
+    val freePreview: BillingPreview,
+    /** Currency the server priced this response in. */
+    val selectedCurrency: String = "NGN",
+    /** Server-rendered monthly fee, e.g. "₦1,000" or "$1.99". */
+    val monthlyFeeLabel: String = "",
+    /** Currencies the storefront can charge in. */
+    val supportedCurrencies: List<BillingCurrency> = emptyList()
+) {
+    /** Monthly fee for the featured plan, in the selected currency. */
+    fun displayMonthlyFee(): String = monthlyFeeLabel.ifBlank { "\u20A6$monthlyFee" }
+
+    /** True when the paywall should offer a currency switcher. */
+    fun hasMultipleCurrencies(): Boolean = supportedCurrencies.size > 1
+}
 
 class AuthApiException(
     message: String,
@@ -451,19 +481,67 @@ private data class UserStateResponse(
 
 @Serializable
 private data class BillingCheckoutRequest(
-    val planId: String
+    val planId: String,
+    /** Empty string means "let the server infer it". */
+    val currency: String = ""
+)
+
+/**
+ * A plan price in one specific currency.
+ *
+ * [amountMajor] is the price in major units (1000 for ₦1,000, 1.99 for $1.99)
+ * and [label] is the server-rendered display string, so the UI never has to
+ * guess at rounding or symbol placement.
+ */
+@Serializable
+data class BillingPrice(
+    val currency: String = "NGN",
+    val amountMajor: Double = 0.0,
+    val label: String = "",
+    val country: String = "NG"
+)
+
+/** A currency the storefront can charge in. */
+@Serializable
+data class BillingCurrency(
+    val code: String = "NGN",
+    val symbol: String = "\u20A6",
+    val country: String = "NG",
+    val decimals: Int = 0
 )
 
 @Serializable
 data class BillingPlan(
     val id: String,
     val label: String,
+    /**
+     * Legacy NGN price as a whole-naira integer. Retained because older builds
+     * decode this into a non-nullable Int; use [displayPrice] for UI instead of
+     * formatting this yourself.
+     */
     val amount: Int,
     val currency: String = "NGN",
     val maxDevices: Int? = null,
     val premium: Boolean = true,
-    val description: String = ""
-)
+    val description: String = "",
+    /** Currency this plan was priced in for this response. */
+    val selectedCurrency: String = "NGN",
+    /** Price in [selectedCurrency], in major units. */
+    val amountMajor: Double = 0.0,
+    /** Server-rendered price, e.g. "₦1,000" or "$1.99". */
+    val priceLabel: String = "",
+    /** Every supported currency, keyed by currency code. */
+    val prices: Map<String, BillingPrice> = emptyMap()
+) {
+    /**
+     * Best available price string. Falls back to the legacy naira amount when
+     * talking to a server that predates multi-currency billing.
+     */
+    fun displayPrice(): String = priceLabel.ifBlank { "\u20A6$amount" }
+
+    /** Price in a specific currency, or null when the server doesn't offer it. */
+    fun priceIn(code: String): BillingPrice? = prices[code]
+}
 
 @Serializable
 data class BillingPreview(
@@ -480,16 +558,30 @@ private data class BillingStatusResponse(
     val currency: String = "NGN",
     val maxDevices: Int? = 2,
     val plans: List<BillingPlan> = emptyList(),
-    val freePreview: BillingPreview = BillingPreview()
+    val freePreview: BillingPreview = BillingPreview(),
+    val selectedCurrency: String = "NGN",
+    val monthlyFeeLabel: String = "",
+    val supportedCurrencies: List<BillingCurrency> = emptyList()
 )
 
 @Serializable
 data class BillingCheckout(
     val link: String = "",
     val txRef: String = "",
+    /** Legacy NGN integer; see [BillingPlan.amount]. */
     val amount: Int = 1000,
     val currency: String = "NGN",
     val plan: BillingPlan? = null,
     val alreadyPremium: Boolean = false,
-    val premium: Boolean = false
-)
+    val premium: Boolean = false,
+    /** Currency the checkout was actually created in. */
+    val selectedCurrency: String = "NGN",
+    /** Amount charged in [selectedCurrency], in major units. */
+    val amountMajor: Double = 0.0,
+    /** Server-rendered amount, e.g. "₦1,000" or "$1.99". */
+    val priceLabel: String = "",
+    val country: String = "NG"
+) {
+    /** Amount string for confirmation copy. */
+    fun displayAmount(): String = priceLabel.ifBlank { "\u20A6$amount" }
+}
