@@ -390,9 +390,13 @@ actual fun AnimePlayerScreen(
                     if (isAudioCodecTimeout && audioCodecRetries < maxAudioCodecRetries) {
                         playerError = "Audio codec glitch — retrying... (${audioCodecRetries + 1}/$maxAudioCodecRetries)"
                         audioCodecRetries++
-                    } else if (playbackAttempt == 0 && !streamHeadersJson.isNullOrBlank()) {
+                    } else if (playbackAttempt == 0 &&
+                        (!streamHeadersJson.isNullOrBlank() || resolvedSourceUrl.isDonghuaworldCdnUrl())
+                    ) {
                         // Direct fetch rejected (CDN hotlink/egress block) — retry
                         // once through our backend HLS proxy before failing.
+                        // The dedicated donghua source needs no headers, so the
+                        // CDN host itself is the trigger for its proxy fallback.
                         playbackAttempt = 1
                     } else {
                         playerError = error.localizedMessage ?: "Stream failed to load."
@@ -1012,12 +1016,30 @@ private fun PlayerLoadingOverlay(
  * which fetches the upstream with the provider-required Referer and rewrites
  * playlist URLs to stay inside the proxy — same technique AniVault uses.
  */
+/**
+ * True for the dedicated donghua source's public CDN hosts (Rumble).
+ * These serve the master playlist with zero request headers, so when they are
+ * unreachable they must be routed through `/api/donghua/proxy` — the Anivexa
+ * proxy route needs a provider Referer that these URLs simply do not have.
+ */
+private fun String.isDonghuaworldCdnUrl(): Boolean {
+    val lower = lowercase()
+    return lower.contains("rumble.com/hls-vod") ||
+        lower.contains("hugh.cdn.rumble.cloud") ||
+        lower.contains("rumble.cloud/video/")
+}
+
 private fun String.toProxiedStreamUrl(headersJson: String?): String? {
     if (isBlank()) return null
+    val base = AppReleaseConfig.API_BASE_URL.trimEnd('/')
+    // Dedicated donghua source: PUBLIC Rumble HLS, no Referer/Origin required,
+    // so it uses the donghua proxy route rather than the Anivexa one.
+    if (isDonghuaworldCdnUrl()) {
+        return "$base/donghua/proxy?url=" + android.net.Uri.encode(this)
+    }
     val referer = if (headersJson.isNullOrBlank()) "" else runCatching {
         org.json.JSONObject(headersJson).optString("Referer")
     }.getOrNull().orEmpty()
-    val base = AppReleaseConfig.API_BASE_URL.trimEnd('/')
     return "$base/anivexa/proxy?url=" + android.net.Uri.encode(this) + "&ref=" + android.net.Uri.encode(referer)
 }
 

@@ -91,6 +91,7 @@ fun TvHomeScreen(
                     TvSection.CREATION -> emptyList()
                     TvSection.DONGHUA -> fetchContentHome("donghua")
                     TvSection.K_DRAMA -> fetchContentHome("kdrama")
+                    TvSection.ASIAN -> fetchAsianHome()
                     TvSection.CARTOON -> fetchContentHome("cartoon")
                     TvSection.CLASSIC -> fetchContentHome("classic")
                     TvSection.MOVIES -> fetchContentHome("movie")
@@ -121,6 +122,7 @@ fun TvHomeScreen(
                             TvSection.COMICS -> "comic"
                             TvSection.DONGHUA -> "donghua"
                             TvSection.K_DRAMA -> "kdrama"
+                            TvSection.ASIAN -> "indian"
                             TvSection.CARTOON -> "cartoon"
                             TvSection.CLASSIC -> "classic"
                             TvSection.MOVIES -> "movie"
@@ -236,6 +238,7 @@ fun TvHomeScreen(
                 TvSection.NOVELS -> "novel"
                 TvSection.DONGHUA -> "donghua"
                 TvSection.K_DRAMA -> "kdrama"
+                TvSection.ASIAN -> "indian"
                 TvSection.CARTOON -> "cartoon"
                 TvSection.CLASSIC -> "classic"
                 TvSection.MOVIES -> "movie"

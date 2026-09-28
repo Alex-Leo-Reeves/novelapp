@@ -91,7 +91,9 @@ class LocalDownloadRepository {
         loadIndex().episodes.filter {
             it.parentId == parentId && isDownloadedLocalFileAvailable(it.localFilePath)
         }
-            .sortedByDescending { it.episodeNumber }
+            // Ascending so Episode 1 sits at the top — the natural watch order
+            // in the Downloads list (title-level lists are alphabetical).
+            .sortedBy { it.episodeNumber }
 
     fun getChaptersFor(parentId: String): List<DownloadedChapter> =
         loadIndex().chapters.filter {

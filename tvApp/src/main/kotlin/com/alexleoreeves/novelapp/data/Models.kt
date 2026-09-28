@@ -25,6 +25,7 @@ enum class TvSection(val label: String) {
     ANIME("Anime"),
     DONGHUA("Donghua"),
     K_DRAMA("K-Drama"),
+    ASIAN("Asian"),
     CARTOON("Cartoon"),
     CLASSIC("Classic"),
     MOVIES("Movies"),

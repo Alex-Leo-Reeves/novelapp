@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.alexleoreeves.novelapp.data.*
 import com.alexleoreeves.novelapp.ui.theme.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -53,6 +56,9 @@ fun DiscoverHomeScreen(
     // TMDB search merged results
     var searchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
     var nollywoodSearchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
+    // Asian-tab regions (Chinese Movies / Indian / Filipino) — searched in
+    // English via TMDB, played by each region's own dedicated server.
+    var asianSearchResults by remember { mutableStateOf<List<UnifiedSearchResult>>(emptyList()) }
 
     val scope = rememberCoroutineScope()
 
@@ -69,8 +75,17 @@ fun DiscoverHomeScreen(
         )
     }
     val rowPlan = remember {
-        listOf("recommended" to "Recommended For You", "latest" to "Latest") +
-            HomeGenres.all.map { "genre_${it.key}" to it.label }
+        // "not too much": only two of the three Asian regions are bled into the
+        // home feed (Chinese Movies + Indian); Filipino stays in the Asian tab.
+        listOf(
+            "recommended" to "Recommended For You",
+            "latest" to "Latest"
+        ) +
+            HomeGenres.all.map { "genre_${it.key}" to it.label } +
+            listOf(
+                "asian_chinese" to "Chinese Movies",
+                "asian_indian" to "Indian Cinema"
+            )
     }
 
     fun loadRow(rowKey: String, page: Int = 1) {
@@ -81,6 +96,9 @@ fun DiscoverHomeScreen(
                 val fetched = when {
                     rowKey == "recommended" -> homeFeed.recommendedRow(feedSeedTitles, feedSeedIds)
                     rowKey == "latest" -> homeFeed.latestRow(page)
+                    // Asian bleed rows: each plays on its own dedicated region server.
+                    rowKey == "asian_chinese" -> homeFeed.asianRow(VideoCategory.CHINESE_MOVIES, page)
+                    rowKey == "asian_indian" -> homeFeed.asianRow(VideoCategory.INDIAN, page)
                     else -> HomeGenres.all.firstOrNull { "genre_${it.key}" == rowKey }
                         ?.let { homeFeed.genreRow(it, page) } ?: emptyList()
                 }
@@ -136,6 +154,7 @@ fun DiscoverHomeScreen(
             isSearching = false
             searchResults = emptyList()
             nollywoodSearchResults = emptyList()
+            asianSearchResults = emptyList()
             return@LaunchedEffect
         }
         isSearching = true
@@ -145,9 +164,24 @@ fun DiscoverHomeScreen(
             rapidApiKey = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_KEY,
             rapidApiHost = com.alexleoreeves.novelapp.BuildKonfig.RAPID_API_HOST
         )
-        // Fan out: search TMDB movies + Nollywood YouTube in parallel
+        // Fan out: search TMDB movies + Nollywood YouTube + the three Asian
+        // regions in parallel. The regions are searched in English (TMDB), so an
+        // English query surfaces Chinese/Indian/Filipino titles that are then
+        // played by that region's own dedicated server.
         try { searchResults = repo.searchVideo(VideoCategory.MOVIES, q) } catch (_: Exception) { searchResults = emptyList() }
         try { nollywoodSearchResults = repo.searchVideo(VideoCategory.NIGERIAN, q) } catch (_: Exception) { nollywoodSearchResults = emptyList() }
+        try {
+            val asian = kotlinx.coroutines.coroutineScope {
+                listOf(VideoCategory.CHINESE_MOVIES, VideoCategory.INDIAN, VideoCategory.FILIPINO).map { category ->
+                    async { runCatching { repo.searchVideo(category, q) }.getOrElse { emptyList() } }
+                }.awaitAll()
+            }
+            asianSearchResults = asian.flatten()
+                .distinctBy { it.id }
+                .filterNot { it.isAdultAsianTitle() }
+        } catch (_: Exception) {
+            asianSearchResults = emptyList()
+        }
         isSearching = false
     }
 
@@ -264,7 +298,23 @@ fun DiscoverHomeScreen(
                         }
                     }
                 }
-                if (searchResults.isEmpty() && nollywoodSearchResults.isEmpty()) {
+                // Search results — Asian regions (Chinese Movies / Indian / Filipino).
+                // These play through their region's own dedicated server, so the
+                // section is labelled with the region rather than "Movies".
+                if (asianSearchResults.isNotEmpty()) {
+                    item {
+                        GlassSectionLabel(
+                            "Asian — ${asianSearchResults.size} results",
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(top = if (searchResults.isEmpty() && nollywoodSearchResults.isEmpty()) 0.dp else 8.dp)
+                        )
+                    }
+                    items(asianSearchResults) { item ->
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            VideoCardItem(item = item, onClick = { onNovelSelected(item) })
+                        }
+                    }
+                }
+                if (searchResults.isEmpty() && nollywoodSearchResults.isEmpty() && asianSearchResults.isEmpty()) {
                     item {
                         Box(
                             modifier = Modifier.fillMaxWidth().padding(top = 80.dp),
@@ -557,4 +607,22 @@ private fun SectionShimmerHorizontal() {
             )
         }
     }
+
+}
+
+/**
+ * Keeps the Bold/Vivamax-style adult catalogue out of search results. The app
+ * ships a Kids mode, so this must never depend on the user's age setting.
+ *
+ * Declared at file scope rather than as a local fun inside the composable:
+ * local functions cannot carry `private`, and a local one cannot be referenced
+ * from the search pipeline above its declaration site.
+ */
+private fun UnifiedSearchResult.isAdultAsianTitle(): Boolean {
+    val text = (title + " " + genre + " " + synopsis).lowercase()
+    val banned = listOf(
+        "sexy", "porn", "xxx", "erotic", "hentai", "nsfw", "vivamax",
+        "pinay sexy", "blowjob", "milf"
+    )
+    return banned.any { text.contains(it) }
 }

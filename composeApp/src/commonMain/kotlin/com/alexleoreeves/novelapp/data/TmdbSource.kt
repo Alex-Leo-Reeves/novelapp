@@ -71,6 +71,9 @@ class TmdbSource(
             VideoCategory.CLASSIC -> fetchClassicTv(page)
             VideoCategory.MOVIES -> fetchMovies(page)
             VideoCategory.NIGERIAN -> fetchNigerian(page)
+            VideoCategory.CHINESE_MOVIES -> fetchChineseMovies(page)
+            VideoCategory.INDIAN -> fetchIndian(page)
+            VideoCategory.FILIPINO -> fetchFilipino(page)
         }
 
     /** Donghua / Chinese content: fetch all Chinese-language content including:
@@ -195,6 +198,9 @@ class TmdbSource(
                     }
                 }
             VideoCategory.MOVIES -> searchMulti(query, page, category)
+            VideoCategory.CHINESE_MOVIES -> searchMulti(query, page, category)
+            VideoCategory.INDIAN -> searchMulti(query, page, category)
+            VideoCategory.FILIPINO -> searchMulti(query, page, category)
             VideoCategory.NIGERIAN -> searchMulti(query, page, category)
                 .filter { item ->
                     item.genre.contains("Nigeria", ignoreCase = true) ||
@@ -227,6 +233,67 @@ class TmdbSource(
                 parseResults(fallback).mapNotNull { it.jsonObject.toUnified("tv", VideoCategory.K_DRAMA) }
             }.getOrElse { emptyList() }
     }.getOrElse { emptyList() }
+    /**
+     * ── Asian tab catalogs ───────────────────────────────────────────────
+     *
+     * Three regions, three separate TMDB discover queries. Each row is paired
+     * with its own dedicated server at playback time (see `data/AsianApi.kt`),
+     * so the catalog and the stream never depend on each other's coverage.
+     */
+    private suspend fun fetchChineseMovies(page: Int): List<UnifiedSearchResult> = runCatching {
+        // Chinese-language films (mainland) + HK/TW co-productions + series.
+        val movies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_original_language", "zh")
+        }
+        val hkTw = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_origin_country", "HK|TW")
+        }
+        val series = discover("tv", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_original_language", "zh")
+        }
+        interleaveUnique(listOf(movies, hkTw, series))
+    }.getOrElse { emptyList() }
+
+    /** Indian cinema: origin-country driven so every regional industry is included. */
+    private suspend fun fetchIndian(page: Int): List<UnifiedSearchResult> = runCatching {
+        val movies = discover("movie", page, VideoCategory.INDIAN) {
+            parameter("with_origin_country", "IN")
+        }
+        val series = discover("tv", page, VideoCategory.INDIAN) {
+            parameter("with_origin_country", "IN")
+        }
+        interleaveUnique(listOf(movies, series))
+    }.getOrElse { emptyList() }
+
+    /** Filipino cinema (Star Cinema / Viva / Regal releases and TV). */
+    private suspend fun fetchFilipino(page: Int): List<UnifiedSearchResult> = runCatching {
+        val movies = discover("movie", page, VideoCategory.FILIPINO) {
+            parameter("with_origin_country", "PH")
+        }
+        val byLanguage = discover("movie", page, VideoCategory.FILIPINO) {
+            parameter("with_original_language", "tl")
+        }
+        val series = discover("tv", page, VideoCategory.FILIPINO) {
+            parameter("with_origin_country", "PH")
+        }
+        interleaveUnique(listOf(movies, byLanguage, series))
+    }.getOrElse { emptyList() }
+
+    /** Round-robin merge that keeps a row varied instead of front-loaded. */
+    private fun interleaveUnique(groups: List<List<UnifiedSearchResult>>): List<UnifiedSearchResult> {
+        val out = mutableListOf<UnifiedSearchResult>()
+        val seen = mutableSetOf<String>()
+        val maxSize = groups.maxOfOrNull { it.size } ?: 0
+        for (index in 0 until maxSize) {
+            for (group in groups) {
+                val item = group.getOrNull(index) ?: continue
+                if (seen.add(item.id)) out.add(item)
+            }
+        }
+        return out
+    }
+
+
 
     /** Cartoons: fetch popular/weekly trending movie + TV and filter for animation (exclude Japanese/anime) */
     private suspend fun fetchCartoons(page: Int): List<UnifiedSearchResult> = runCatching {

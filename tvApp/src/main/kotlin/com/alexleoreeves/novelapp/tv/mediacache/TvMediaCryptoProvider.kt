@@ -17,6 +17,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * AES-256-CBC + HMAC-SHA256 (encrypt-then-MAC) implementation for Smart TV.
@@ -86,6 +87,19 @@ class TvMediaCryptoProvider : MediaCryptoPort {
 
     override fun sha256Hex(data: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(data).toHex()
+
+    /**
+     * Provider HLS segment decryption (AES-128-CBC / PKCS#7) — used by the
+     * engine before a segment is packed into our encrypted bundle. Returns
+     * null instead of throwing so the runner can surface a clean failure.
+     */
+    override fun aes128CbcDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray? = try {
+        Cipher.getInstance("AES/CBC/PKCS5Padding").apply {
+            init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+        }.doFinal(data)
+    } catch (e: Exception) {
+        null
+    }
 
     // ── internals ──────────────────────────────────────────────────────────
 

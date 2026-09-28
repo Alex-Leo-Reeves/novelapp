@@ -11,6 +11,8 @@ const supabaseAuthHandlers = require("./supabase-auth-handlers");
 const tvPairHandlers = require("./tv-pair-handlers");
 const anivexaHandlers = require("./anivexa-handlers");
 const anivaultHandlers = require("./anivault-handlers");
+const donghuaHandlers = require("./donghua-handlers");
+const asianHandlers = require("./asian-handlers");
 const { createMangaUnified } = require("./manga-unified");
 // Merges MangaDex + WeebCentral + Webtoon so no single provider dominates
 // the manga grid on Android/TV. contentItem/fetchWithAbort are hoisted.
@@ -121,9 +123,14 @@ const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync("/var/data") ? "/var/data" : path.join(process.cwd(), "server-data"));
 const DATA_FILE = path.join(DATA_DIR, "auth.json");
 const SITE_DIR = path.join(process.cwd(), "site");
-const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || "");
+// CinePro and OMSS are the same OMSS-shaped aggregator. Ship a working public
+// instance as the DEFAULT so stream resolution for downloads works out of the
+// box — an empty base URL made every TMDB download fail with "stream cannot be
+// resolved" (movies now resolve through /api/content/cinepro/sources).
+const DEFAULT_CINEPRO_BASE_URL = "https://cinepro-core-esmh.onrender.com";
+const OMSS_BASE_URL = cleanBaseUrl(process.env.OMSS_BASE_URL || process.env.OMSS_API_BASE_URL || DEFAULT_CINEPRO_BASE_URL);
 const VIDLINK_RESOLVER_BASE_URL = cleanBaseUrl(process.env.VIDLINK_RESOLVER_BASE_URL || process.env.VIDLINK_API_BASE_URL || "");
-let CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.env.CINEHUB_BASE_URL || process.env.CINEPRO_API_BASE_URL || "");
+let CINEPRO_BASE_URL = cleanBaseUrl(process.env.CINEPRO_BASE_URL || process.env.CINEHUB_BASE_URL || process.env.CINEPRO_API_BASE_URL || DEFAULT_CINEPRO_BASE_URL);
 // Auto-correct old/deprecated cinepro domain to the actual Render instance
 if (CINEPRO_BASE_URL && CINEPRO_BASE_URL.includes("cinepro-core.onrender.com") && !CINEPRO_BASE_URL.includes("cinepro-core-esmh")) {
     const corrected = CINEPRO_BASE_URL.replace("cinepro-core.onrender.com", "cinepro-core-esmh.onrender.com");
@@ -1383,6 +1390,9 @@ function normalizeContentType(type) {
     if (["classic", "classictv", "classic-tv"].includes(raw)) return "classic";
     if (["nigerian", "nollywood", "naija"].includes(raw)) return "nigerian";
     if (["donghua", "chineseanime", "chineseanimation", "dongman", "donghua-anime", "chinesedrama"].includes(raw)) return "donghua";
+    if (["chinesemovies", "chinesemovie", "chinese", "china", "cn"].includes(raw)) return "chinesemovies";
+    if (["indian", "india", "bollywood", "hindi", "in"].includes(raw)) return "indian";
+    if (["filipino", "philippines", "pinoy", "tagalog", "ph"].includes(raw)) return "filipino";
     if (["comic", "comics"].includes(raw)) return "comic";
     if (["anime", "manga"].includes(raw)) return raw;
     // TV / episodic video kinds — the Vidaa TV sends mediaKind ("tv", "video",
@@ -1591,7 +1601,10 @@ async function tmdbItems(type, query, page = 1) {
     const key = process.env.TMDB_API_KEY || "15d2ea6d0dc1d247f33e5405d4b507cc";
     if (!token && !key) return [];
     const normalizedType = normalizeContentType(type);
-    const mediaType = normalizedType === "movies" ? "movie" : "tv";
+    // The Asian-tab regions are movie catalogs (discover/movie), so they must
+    // not be labelled "tv" or the detail page treats films as series.
+    const mediaType = (normalizedType === "movies" || normalizedType === "chinesemovies" ||
+        normalizedType === "indian" || normalizedType === "filipino") ? "movie" : "tv";
     const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
     const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
 
@@ -1616,6 +1629,16 @@ async function tmdbItems(type, query, page = 1) {
         // Donghua: Chinese animation + Chinese-language movies/TV
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&with_genres=16&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
         // Fall back to mixed discover if query (handle in general logic below)
+    } else if (normalizedType === "chinesemovies") {
+        // Asian tab — Chinese Movies: zh-language films + HK/TW co-productions.
+        endpoint = `https://api.themoviedb.org/3/discover/movie?with_original_language=zh&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "indian") {
+        // Asian tab — Indian: origin-country driven so every regional film
+        // industry (Hindi/Tamil/Telugu/Malayalam/…) is included.
+        endpoint = `https://api.themoviedb.org/3/discover/movie?with_origin_country=IN&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "filipino") {
+        // Asian tab — Filipino: PH origin (Star Cinema / Viva / Regal releases).
+        endpoint = `https://api.themoviedb.org/3/discover/movie?with_origin_country=PH&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
     } else if (normalizedType === "anime") {
         // Anime home starts with series; contentSearch also includes anime movies.
         endpoint = `https://api.themoviedb.org/3/discover/tv?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
@@ -1686,7 +1709,7 @@ async function tmdbItems(type, query, page = 1) {
         return contentItem({
             id: `tmdb_${itemType}_${item.id}`,
             title: item.title || item.name || "Untitled",
-            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : normalizedType === "anime" ? (itemType === "movie" ? "Anime Movie" : "Anime Series") : "Movie",
+            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : normalizedType === "chinesemovies" ? "Chinese Movies" : normalizedType === "indian" ? "Indian" : normalizedType === "filipino" ? "Filipino" : normalizedType === "anime" ? (itemType === "movie" ? "Anime Movie" : "Anime Series") : "Movie",
             coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
             detailUrl: `tmdb://${itemType}/${item.id}`,
             sourceName: "TMDB",
@@ -1837,8 +1860,11 @@ async function contentHome(type, page = 1) {
         const live = await mangaUnified.mangaItems(mangadexItems, "", page).catch(() => []);
         return live.length ? live : fixtureItems(normalizedType);
     }
-    // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, and Movies all go through TMDB (same pipeline)
-    if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
+    // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, Movies and the
+    // three Asian-tab regions (Chinese Movies / Indian / Filipino) all go
+    // through TMDB (same pipeline).
+    if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian",
+         "chinesemovies", "indian", "filipino"].includes(normalizedType)) {
         const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
         return tmdb.length ? tmdb : fixtureItems(normalizedType);
     }
@@ -1886,8 +1912,13 @@ async function contentSearch(type, query, page = 1) {
     }
 
     const normalizedType = normalizeContentType(type);
-    // Donghua, Anime, K-Drama, Cartoon, Classic, Movies, Nigerian: all go through TMDB multi-pipeline
-    if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian"].includes(normalizedType)) {
+    // Donghua, Anime, K-Drama, Cartoon, Classic, Movies, Nigerian and the three
+    // Asian-tab regions (Chinese Movies / Indian / Filipino): all go through the
+    // TMDB multi-pipeline. The regions MUST be listed here or a region search
+    // falls through to the global "everything" sweep, which is what made an
+    // English query inside a region return unrelated (often Chinese) titles.
+    if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian",
+         "chinesemovies", "indian", "filipino"].includes(normalizedType)) {
         // Search multiple TMDB pages for better coverage
         const pagePromises = [];
         const maxPages = normalizedType === "movies" ? 3 : 2;
@@ -4889,6 +4920,24 @@ async function handleApi(request, response, pathname) {
     // anime that the 13 Anivexa providers can't resolve still play (e.g. DBS).
     if (pathname.startsWith("/api/anivault/")) {
       return await anivaultHandlers.handleAnivault(request, response, pathname, requestUrl);
+    }
+    // ── Dedicated Donghua server (donghuaworld.com) ─────────────────────
+    // Returns a plain PUBLIC HLS URL (Rumble CDN) that plays with zero
+    // request headers, so ExoPlayer / LibVLC / AVPlayer / hls.js all work
+    // without a WebView, an embed page or a redirect to the host site.
+    // Dailymotion is kept as a second server and served through the
+    // /api/donghua/proxy route, which supplies the CDN's required header
+    // fingerprint server-side.
+    if (pathname.startsWith("/api/donghua/")) {
+      return await donghuaHandlers.handleDonghua(request, response, pathname, requestUrl);
+    }
+    // ── Asian dedicated servers (Chinese movies/series, Indian, Filipino) ───
+    // Each region has its own working source: ikanbot.com serves Chinese AND
+    // Indian as a DIRECT public HLS (AES-128, zero headers, verified playable in
+    // ExoPlayer / LibVLC / AVPlayer / hls.js), and Filipino mainstream falls
+    // back to the official YouTube channels the app already plays.
+    if (pathname.startsWith("/api/asian/")) {
+      return await asianHandlers.handleAsian(request, response, pathname, requestUrl);
     }
     if (request.method === "POST" && pathname === "/api/auth/register") {
       return await handleRegister(request, response);

@@ -55,6 +55,7 @@ object TvRemoteConfigDefaults {
             TvConfigSection("anime", "Anime"),
             TvConfigSection("donghua", "Donghua"),
             TvConfigSection("kdrama", "K-Drama"),
+            TvConfigSection("asian", "Asian"),
             TvConfigSection("cartoon", "Cartoon"),
             TvConfigSection("classic", "Classic"),
             TvConfigSection("movies", "Movies"),
@@ -98,6 +99,7 @@ fun TvConfigSection.toSection(): TvSection = when (key.lowercase()) {
     "anime" -> TvSection.ANIME
     "donghua" -> TvSection.DONGHUA
     "kdrama", "k-drama" -> TvSection.K_DRAMA
+    "asian", "chinese", "chinesemovies", "indian", "filipino", "pinoy" -> TvSection.ASIAN
     "cartoon" -> TvSection.CARTOON
     "classic" -> TvSection.CLASSIC
     "movies" -> TvSection.MOVIES

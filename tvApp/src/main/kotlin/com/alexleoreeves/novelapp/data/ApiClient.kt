@@ -201,6 +201,30 @@ suspend fun pollTvPairStatus(pairId: String): TvPairPollState {
 }
 
 // ── Content ─────────────────────────────────────────────────────────────────
+/**
+ * ASIAN tab (TV): Chinese Movies + Indian + Filipino merged into one row.
+ *
+ * The regions keep their own dedicated servers at playback time (the backend
+ * resolves each title through the source that actually has it), so merging the
+ * catalogs here costs nothing in reliability.
+ */
+suspend fun fetchAsianHome(page: Int = 1): List<UnifiedSearchResult> {
+    val types = listOf("chinesemovies", "indian", "filipino")
+    return types.map { type -> fetchContentHome(type, page) }
+        .let { groups ->
+            val out = mutableListOf<UnifiedSearchResult>()
+            val seen = mutableSetOf<String>()
+            val maxSize = groups.maxOfOrNull { it.size } ?: 0
+            for (index in 0 until maxSize) {
+                for (group in groups) {
+                    val item = group.getOrNull(index) ?: continue
+                    if (seen.add(item.id)) out.add(item)
+                }
+            }
+            out
+        }
+}
+
 suspend fun fetchContentHome(type: String, page: Int = 1): List<UnifiedSearchResult> {
     val client = platformHttpClient()
     return try {
@@ -799,7 +823,11 @@ private fun JsonObject.toUnifiedResult(): UnifiedSearchResult {
         isManga = effectiveKind == "manga",
         isComic = effectiveKind == "comic",
         isAnime = isAnimeItem,
-        isVideo = effectiveKind in listOf("movie", "tv", "kdrama", "cartoon", "donghua", "classic", "nigerian", "anime"),
+        isVideo = effectiveKind in listOf(
+            "movie", "tv", "kdrama", "cartoon", "donghua", "classic", "nigerian", "anime",
+            // Asian-tab regions — each plays on its own dedicated server.
+            "chinesemovies", "indian", "filipino"
+        ),
         mediaKind = effectiveKind
     )
 }

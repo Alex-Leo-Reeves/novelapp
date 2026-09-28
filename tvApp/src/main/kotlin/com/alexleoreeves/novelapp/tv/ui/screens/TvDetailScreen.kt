@@ -98,7 +98,7 @@ fun TvDetailScreen(
     }
 
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.MOVIE_SERVER_1) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DEFAULT) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
     // Dub/Sub preference for Anivexa providers (like AniVault's toggle).
     var preferredAudio by remember { mutableStateOf("sub") }
@@ -215,7 +215,8 @@ fun TvDetailScreen(
                 httpClient = mediaRepo.client,
                 sourceUrl = rawSourceUrl,
                 tmdbContext = tmdbContext,
-                onStatus = { msg: String -> statusText = msg }
+                onStatus = { msg: String -> statusText = msg },
+                context = context
             )
             
             val bestQuality = qualities.firstOrNull()
@@ -293,7 +294,8 @@ fun TvDetailScreen(
                 httpClient = mediaRepo.client,
                 sourceUrl = rawSourceUrl,
                 tmdbContext = tmdbContext,
-                onStatus = { msg: String -> statusText = msg }
+                onStatus = { msg: String -> statusText = msg },
+                context = context
             )
             
             val bestQuality = qualities.firstOrNull()

@@ -49,6 +49,14 @@ interface MediaCryptoPort {
 
     /** SHA-256 of a chunk's plaintext, hex-encoded. */
     fun sha256Hex(data: ByteArray): String
+
+    /**
+     * Decrypt a provider HLS segment (`#EXT-X-KEY:METHOD=AES-128`, AES-128-CBC
+     * with PKCS#7 padding) so the cleartext media can be packed into our own
+     * bundle. Returns null when the payload is not valid PKCS#7 or the cipher
+     * rejects it (wrong key / truncated segment).
+     */
+    fun aes128CbcDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray?
 }
 
 class MediaCryptoException(message: String, cause: Throwable? = null) : Exception(message, cause)

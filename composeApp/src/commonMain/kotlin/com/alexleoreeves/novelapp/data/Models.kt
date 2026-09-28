@@ -54,7 +54,30 @@ enum class VideoCategory(val label: String) {
     CARTOON("Cartoon"),
     CLASSIC("Classic"),
     MOVIES("Movies"),
-    NIGERIAN("Nigerian")
+    NIGERIAN("Nigerian"),
+
+    // ── Asian tab regions ────────────────────────────────────────────────
+    // Each region has its own dedicated server behind `/api/asian/` (see
+    // `data/AsianApi.kt`): Chinese movies/series and Indian resolve to a DIRECT
+    // public HLS playlist, Filipino falls back to the official Star Cinema /
+    // Viva / Regal uploads on YouTube. Kept as three categories (not one) so the
+    // catalog query and the playback server can be chosen per region.
+    CHINESE_MOVIES("Chinese Movies"),
+    INDIAN("Indian"),
+    FILIPINO("Filipino");
+
+    /** True for the three Asian-tab regions. */
+    val isAsian: Boolean
+        get() = this == CHINESE_MOVIES || this == INDIAN || this == FILIPINO
+
+    /** The `/api/asian/` region key, or "" when this is not an Asian category. */
+    val asianRegionKey: String
+        get() = when (this) {
+            CHINESE_MOVIES -> "chinese"
+            INDIAN -> "indian"
+            FILIPINO -> "filipino"
+            else -> ""
+        }
 }
 
 // ───────────────────────────────────────────────

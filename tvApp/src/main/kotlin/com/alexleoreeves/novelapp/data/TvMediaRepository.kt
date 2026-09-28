@@ -48,6 +48,8 @@ class TvMediaRepository {
     private val aniDaoScraper = AniDaoScraper(httpClient)
     private val consumetAnimeScraper = ConsumetAnimeScraper(httpClient)
     private val anivexaApi = AnivexaApi(httpClient)
+    private val donghuaApi = DonghuaApi(httpClient)
+    private val asianApi = AsianApi(httpClient)
     private val youtubeNollywoodScraper = YouTubeNollywoodScraper(httpClient)
     private val parallelResolver = ParallelStreamResolver(
         httpClient = httpClient,
@@ -58,7 +60,8 @@ class TvMediaRepository {
         animeHeavenScraper = animeHeavenScraper,
         aniDaoScraper = aniDaoScraper,
         donghuaStreamScraper = donghuaStreamScraper,
-        tmdbScraper = tmdbScraper
+        tmdbScraper = tmdbScraper,
+        donghuaApi = donghuaApi
     )
 
     /**
@@ -122,8 +125,21 @@ class TvMediaRepository {
 
             val episodes = when {
                 isDonghua -> {
-                    val effectiveDonghua = donghuaServer ?: DonghuaServer.MOVIE_SERVER_1
+                    val effectiveDonghua = donghuaServer ?: DonghuaServer.DEFAULT
                     when (effectiveDonghua) {
+                        DonghuaServer.DONGHUAWORLD -> {
+                            // Dedicated donghua source (donghuaworld.com): numbered
+                            // episode grid from its own player pages. Falls back to
+                            // AnimeXin so the tab still lists episodes if the site
+                            // is unreachable.
+                            val eps = donghuaApi.fetchEpisodesForTitle(item.title)
+                            if (eps.isNotEmpty()) {
+                                eps.map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
+                            } else {
+                                animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                                    .map { Chapter(title = it.title, url = it.url, chapterNumber = it.episodeNumber) }
+                            }
+                        }
                         DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2, DonghuaServer.VIDSRC_SBS -> {
                             // TMDB-embed servers
                             val tmdbEps = fetchTmdbChaptersForAnime(item)
@@ -433,6 +449,35 @@ class TvMediaRepository {
         return "$base/api/anivexa/proxy?url=$encodedUrl&ref=$encodedRef"
     }
 
+    /**
+     * English subtitle (VTT) URL for a donghuaworld episode page, or null when
+     * the source has none. Used by the TV binge resolver to attach a subtitle
+     * slave in LibVLC — native players on TV have no subtitle picker for
+     * external tracks, so the English track is attached up-front.
+     */
+    suspend fun resolveDonghuaSubtitleUrl(
+        episodeUrl: String,
+        title: String = "",
+        episodeNumber: Int = 0
+    ): String? {
+        val direct = if (DonghuaApi.isDonghuaworldUrl(episodeUrl)) {
+            runCatching { donghuaApi.resolveEpisodeStream(episodeUrl) }.getOrNull()
+        } else {
+            null
+        }
+        // TMDB-sourced donghua carries no donghuaworld chapter URL, so the
+        // episode is looked up by title + number exactly like the stream path.
+        val resolved = direct ?: if (title.isNotBlank()) {
+            runCatching { donghuaApi.resolveByTitle(title, episodeNumber.coerceAtLeast(1)) }.getOrNull()
+        } else {
+            null
+        }
+        return resolved
+            ?.subtitles
+            ?.firstOrNull { it.lang.equals("en", ignoreCase = true) }
+            ?.url
+    }
+
     suspend fun resolveStreamUrl(
         item: UnifiedSearchResult,
         chapter: Chapter?,
@@ -507,9 +552,56 @@ class TvMediaRepository {
             return youtubeNollywoodScraper.extractStreamUrl(videoId)
         }
 
+        // ── Asian tab regions: dedicated server per region ───────────────────
+        // Chinese Movies and Indian return a DIRECT public HLS playlist, which
+        // LibVLC plays with no headers at all. Filipino may answer with an
+        // official YouTube upload instead, which the embed player handles.
+        val asianCategory = VideoCategory.entries.firstOrNull { category ->
+            category.isAsian && item.mediaKind.equals(category.name, ignoreCase = true)
+        }
+        if (asianCategory != null) {
+            val region = AsianApi.REGIONS.firstOrNull { it.key == asianCategory.asianRegionKey }
+            if (region != null) {
+                // Same marker the other TMDB paths use, so the backend can look
+                // the title up under its regional release name.
+                val marker = parseTmdbPlaybackMarker(chapter?.url, item.detailPageUrl, chapter?.chapterNumber)
+                val tmdbId = marker?.tmdbId.orEmpty().ifBlank {
+                    item.id.removePrefix("tmdb_movie_").removePrefix("tmdb_tv_").trim()
+                }
+                val resolved = retryNullable {
+                    asianApi.resolve(item.title, region, tmdbId, "movie")
+                }
+                val direct = resolved?.playbackUrl
+                if (!direct.isNullOrBlank()) return direct
+                val youtubeId = resolved?.youtubeVideoId
+                if (!youtubeId.isNullOrBlank()) {
+                    return "https://www.youtube.com/embed/$youtubeId?autoplay=1&playsinline=1"
+                }
+                return null
+            }
+        }
+
         if (isDonghua && chapter != null) {
-            val effectiveDonghua = donghuaServer ?: DonghuaServer.MOVIE_SERVER_1
+            val effectiveDonghua = donghuaServer ?: DonghuaServer.DEFAULT
             return when (effectiveDonghua) {
+                DonghuaServer.DONGHUAWORLD -> {
+                    // Dedicated donghua source: the chapter URL is a donghuaworld
+                    // episode page. The backend resolves it to a PLAIN PUBLIC Rumble
+                    // HLS master that LibVLC plays with no headers at all — the exact
+                    // reason this source was chosen for TV.
+                    val resolved = retryNullable { donghuaApi.resolveEpisodeStream(chapter.url) }
+                    val direct = resolved?.playbackUrl
+                    if (!direct.isNullOrBlank()) {
+                        direct
+                    } else {
+                        // Beaten path fallback: look the episode up by title + number.
+                        val byTitle = retryNullable {
+                            donghuaApi.resolveByTitle(item.title, chapter.chapterNumber.coerceAtLeast(1))
+                        }?.playbackUrl
+                        if (!byTitle.isNullOrBlank()) byTitle
+                        else animeXinScraper.resolveEpisodePlayerUrl(chapter.url) ?: chapter.url
+                    }
+                }
                 DonghuaServer.MOVIE_SERVER_1 -> {
                     parseTmdbPlaybackMarker(chapter.url, item.detailPageUrl, chapter.chapterNumber)?.let { marker ->
                         StreamServer.VIDLINK.buildEmbedUrl(marker.tmdbId, marker.mediaType, marker.season, marker.episode)

@@ -167,7 +167,13 @@ data class ChunkRecord(
     val encryptedLength: Long,   // on-disk length ([tag][iv][ciphertext])
     val sha256Hex: String = "",  // plaintext digest (integrity sweep)
     val verified: Boolean = false,
-    val chunkUrl: String? = null
+    val chunkUrl: String? = null,
+    // ── HLS provider encryption (bundle engine) ────────────────────────────
+    // When set, the fetched chunk is an AES-128-CBC HLS segment that must be
+    // decrypted with this key/IV BEFORE it is packed into our own encrypted
+    // bundle — otherwise finished downloads are unplayable garbage.
+    val hlsKeyUrl: String? = null,
+    val hlsIvHex: String? = null
 )
 
 /**

@@ -41,6 +41,7 @@ import androidx.compose.ui.interop.UIKitView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alexleoreeves.novelapp.data.AppTheme
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import kotlinx.cinterop.readValue
@@ -99,6 +100,13 @@ actual fun AnimePlayerScreen(
     // embed pages keep the WKWebView path.
     val isDirectOnlineMedia = remember(streamUrl) { streamUrl.isIosDirectOnlineMediaUrl() }
     var retryKey by remember(streamUrl) { mutableStateOf(0) }
+    // Retry escalation for the dedicated donghua source: AVPlayer cannot report
+    // a CDN-level failure, so tapping Retry on a Rumble URL re-issues it through
+    // our own same-origin HLS proxy, which no network blocks.
+    var useProxy by remember(streamUrl) { mutableStateOf(false) }
+    val effectiveUrl = remember(streamUrl, useProxy) {
+        if (useProxy) streamUrl.toIosDonghuaProxyUrl() ?: streamUrl else streamUrl
+    }
     var isLoading by remember(streamUrl, retryKey) { mutableStateOf(!isLocalPath) }
     var errorMessage by remember(streamUrl, retryKey) { mutableStateOf<String?>(null) }
     val providerName = streamUrl.animeProviderName()
@@ -147,9 +155,9 @@ actual fun AnimePlayerScreen(
                 onPlaybackEnded = onPreviewFinished
             )
         } else if (isDirectOnlineMedia) {
-            key(retryKey) {
+            key(retryKey, effectiveUrl) {
                 IosOnlinePlayer(
-                    streamUrl = streamUrl,
+                    streamUrl = effectiveUrl,
                     modifier = Modifier.fillMaxSize(),
                     onReady = { isLoading = false },
                     onFailed = { message ->
@@ -159,7 +167,7 @@ actual fun AnimePlayerScreen(
                 )
             }
         } else {
-            key(retryKey) {
+            key(retryKey, effectiveUrl) {
                 UIKitView(
                     factory = {
                         val config = WKWebViewConfiguration().apply {
@@ -185,7 +193,7 @@ actual fun AnimePlayerScreen(
                             )
                             UIDelegate = AnimePlayerUiDelegate()
                             wkRef = this
-                            val url = NSURL.URLWithString(streamUrl)
+                            val url = NSURL.URLWithString(effectiveUrl)
                                 ?: NSURL.URLWithString("https://vidsrc.to")!!
                             loadRequest(NSURLRequest.requestWithURL(url)!!)
                         }
@@ -212,6 +220,9 @@ actual fun AnimePlayerScreen(
                 onRetry = {
                     errorMessage = null
                     isLoading = true
+                    // Dedicated donghua source: a second attempt goes through our
+                    // own HLS proxy, so a CDN block can never strand the user.
+                    if (!useProxy && streamUrl.toIosDonghuaProxyUrl() != null) useProxy = true
                     retryKey++
                 },
                 onBack = onBack
@@ -370,6 +381,40 @@ private fun String.isIosDirectOnlineMediaUrl(): Boolean {
     if (!startsWith("http", ignoreCase = true)) return false
     val clean = substringBefore("?").substringBefore("#").lowercase()
     return clean.endsWith(".m3u8") || clean.endsWith(".mp4") || clean.endsWith(".mov")
+}
+
+/**
+ * Same-origin HLS proxy URL for the dedicated donghua source's public Rumble
+ * CDN. AVPlayer cannot send a provider Referer and some networks block the CDN
+ * outright, so a Retry escalation routes through our own backend, which
+ * supplies the CDN's required headers and always returns a playable playlist.
+ * Returns null for anything that is not a donghua CDN URL.
+ */
+private fun String.toIosDonghuaProxyUrl(): String? {
+    val lower = lowercase()
+    val isCdn = lower.contains("rumble.com/hls-vod") ||
+        lower.contains("hugh.cdn.rumble.cloud") ||
+        lower.contains("rumble.cloud/video/")
+    if (!isCdn) return null
+    val base = AppReleaseConfig.API_BASE_URL.trimEnd('/')
+    return "$base/donghua/proxy?url=" + this.percentEncodeQueryParam()
+}
+
+/** Minimal RFC 3986 percent-encoder (URLQueryAllowed leaves '&' and '?' intact). */
+private fun String.percentEncodeQueryParam(): String {
+    val hex = "0123456789ABCDEF"
+    val sb = StringBuilder()
+    for (ch in this) {
+        if (ch.isLetterOrDigit() || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            sb.append(ch)
+        } else {
+            for (b in ch.toString().encodeToByteArray()) {
+                val v = b.toInt() and 0xFF
+                sb.append('%').append(hex[v shr 4]).append(hex[v and 0xF])
+            }
+        }
+    }
+    return sb.toString()
 }
 
 private fun String.animeProviderName(): String {

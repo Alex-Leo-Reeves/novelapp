@@ -59,6 +59,8 @@ fun MediaDetailScreen(
     val donghuaStreamScraper = remember { DonghuaSiteScraper.donghuaStream(httpClient) }
     val luciferDonghuaScraper = remember { DonghuaSiteScraper.luciferDonghua(httpClient) }
     val animeXinScraper = remember { AnimeXinScraper(httpClient) }
+    val donghuaApi = remember { DonghuaApi(httpClient) }
+    val asianApi = remember { AsianApi(httpClient) }
     val anivexaApi = remember { AnivexaApi(httpClient) }
     val aninekoScraper = remember { AninekoScraper(httpClient) }
     val animePaheScraper = remember { AnimePaheScraper(httpClient) }
@@ -168,6 +170,18 @@ fun MediaDetailScreen(
         item.genre.contains("Japanese Animation", ignoreCase = true)
         )
     val isTmdbDetail = item.detailPageUrl.startsWith("tmdb://")
+
+    // ── Asian tab regions ────────────────────────────────────────────────
+    // One dedicated server per region (see data/AsianApi.kt + server/asian-handlers.js).
+    // Chinese Movies and Indian resolve to a DIRECT public HLS playlist;
+    // Filipino falls back to the official Star Cinema / Viva / Regal uploads.
+    val asianCategory = VideoCategory.entries.firstOrNull { category ->
+        category.isAsian && item.mediaKind.equals(category.name, ignoreCase = true)
+    }
+    val isAsianItem = asianCategory != null
+    val asianRegion = asianCategory?.let { category ->
+        AsianApi.REGIONS.firstOrNull { it.key == category.asianRegionKey }
+    }
     val isDramaCoolDetail = item.detailPageUrl.contains("dramacool", ignoreCase = true)
     val isKimCartoonDetail = item.detailPageUrl.contains("kimcartoon", ignoreCase = true)
     val isWcoStreamDetail = item.sourceName == "WCOStream" || item.detailPageUrl.contains("wcostream", ignoreCase = true)
@@ -175,7 +189,7 @@ fun MediaDetailScreen(
     // ── Server selector ──────────────────────────────────────────────
     // All 2 servers displayed inline. Default to Server 1 (VidLink).
     var selectedServer by remember { mutableStateOf(StreamServer.VIDLINK) }
-    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.MOVIE_SERVER_1) }
+    var selectedDonghuaServer by remember { mutableStateOf(DonghuaServer.DEFAULT) }
     var selectedAnimeServer by remember { mutableStateOf(AnimeServer.ANINEKO) }
     // Dub/Sub preference for Anivexa providers (like AniVault's toggle).
     var preferredAudio by remember { mutableStateOf("sub") }
@@ -254,6 +268,12 @@ fun MediaDetailScreen(
 
     suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? {
         return when (selectedDonghuaServer) {
+            DonghuaServer.DONGHUAWORLD -> {
+                // The episode URL is the donghuaworld episode page; the backend
+                // turns it into a public Rumble HLS master (zero headers).
+                val resolved = donghuaApi.resolveEpisodeStream(ep.url)
+                resolved?.playbackUrl?.takeIf { it.isNotBlank() }
+            }
             DonghuaServer.MOVIE_SERVER_1 -> {
                 val tmdb = tmdbId.ifBlank { providerTmdbId }
                 if (tmdb.isNotBlank()) StreamServer.VIDLINK.buildEmbedUrl(tmdb, "tv", "1", ep.episodeNumber.toString())
@@ -343,6 +363,9 @@ fun MediaDetailScreen(
         "CLASSIC" -> ContentType.CLASSIC
         "DONGHUA" -> ContentType.MOVIE
         "NIGERIAN" -> ContentType.NIGERIAN
+        // Asian tab regions (all movie/series video) must land in the Movies
+        // section — falling through to ANIME hid them from the Downloads root.
+        "CHINESE_MOVIES", "INDIAN", "FILIPINO" -> ContentType.MOVIE
         else -> ContentType.ANIME
     }
 
@@ -378,7 +401,33 @@ fun MediaDetailScreen(
                             )
                         )
 
+                        // Asian tab regions: the dedicated server answers with a
+                        // DIRECT HLS playlist (AES-128, zero headers), so downloads
+                        // skip embed scraping and CinePro entirely. Mirrors the
+                        // playEpisode branch above.
+                        var blockedDownloadReason: String? = null
                         val sourceUrl = when {
+                            isAsianItem && asianRegion != null -> {
+                                statusText = "Resolving ${asianRegion.label} stream..."
+                                val playback = runCatching {
+                                    asianApi.resolve(
+                                        title = item.title,
+                                        region = asianRegion,
+                                        tmdbId = tmdbId.ifBlank { providerTmdbId },
+                                        mediaType = "movie"
+                                    )
+                                }.getOrNull()
+                                if (playback == null || playback.isYouTube) {
+                                    blockedDownloadReason = if (playback != null) {
+                                        "YouTube uploads are playback-only and cannot be downloaded."
+                                    } else {
+                                        "This title is not on the ${asianRegion.label} server."
+                                    }
+                                    null
+                                } else {
+                                    playback.playbackUrl
+                                }
+                            }
                             isDonghuaItem -> resolveDonghuaEpisodeUrl(ep)
                             isAnimeItem -> {
                                 if (selectedAnimeServer.isAnivexa) {
@@ -428,6 +477,9 @@ fun MediaDetailScreen(
 
                         // Build TMDB context for CinePro download resolution
                         val downloadTmdbContext: Triple<String, String, String>? = when {
+                            // The Asian tab resolves through its own dedicated
+                            // direct server — never route it through CinePro.
+                            isAsianItem && asianRegion != null -> null
                             isDonghuaItem -> {
                                 val urlParts = ep.url.split(":")
                                 val tvId = urlParts.getOrNull(1).orEmpty()
@@ -505,7 +557,7 @@ fun MediaDetailScreen(
                                 pendingDownloadAction = { processDownload(CineProSource(it)) }
                             }
                         } else {
-                            statusText = "Stream unavailable for download."
+                            statusText = blockedDownloadReason ?: "Stream unavailable for download."
                             if (downloadRepo.getEpisodesFor(item.id).isEmpty()) {
                                 downloadRepo.deleteItem(item.id)
                             }
@@ -531,6 +583,13 @@ fun MediaDetailScreen(
         val initialEpisodes = when {
             isDonghuaItem -> {
                 when (selectedDonghuaServer) {
+                    DonghuaServer.DONGHUAWORLD -> {
+                        // Dedicated donghua source: its own episode grid (numbered,
+                        // ascending, with Sub/Dub labels) scraped by the backend.
+                        val eps = donghuaApi.fetchEpisodesForTitle(item.title)
+                        if (eps.isNotEmpty()) eps
+                        else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
+                    }
                     DonghuaServer.MOVIE_SERVER_1, DonghuaServer.MOVIE_SERVER_2, DonghuaServer.VIDSRC_SBS -> {
                         // TMDB-embed servers: load episode list from TMDB
                         if (tmdbId.isNotBlank()) {
@@ -684,6 +743,50 @@ fun MediaDetailScreen(
             statusText = "Resolving stream via $serverLabel..."
 
             val shouldResolveInParallel = isDonghuaItem || isAnimeItem || isTmdbDetail
+
+            // ── Asian tab regions: each has its own dedicated server ─────
+            // Chinese Movies and Indian come back as a DIRECT public HLS URL
+            // (AES-128, zero headers), so they go straight to ExoPlayer/AVPlayer
+            // with no WebView. Filipino may fall back to an official YouTube
+            // upload, which plays in the app's embed player.
+            if (isAsianItem && asianRegion != null) {
+                statusText = "Resolving ${asianRegion.label} stream..."
+                val asianPlayback = runCatching {
+                    asianApi.resolve(
+                        title = item.title,
+                        region = asianRegion,
+                        tmdbId = tmdbId.ifBlank { providerTmdbId },
+                        mediaType = "movie"
+                    )
+                }.getOrNull()
+                if (asianPlayback == null) {
+                    statusText = "This title is not on the ${asianRegion.label} server. Try another."
+                    return@launch
+                }
+                if (asianPlayback.isYouTube) {
+                    // Official channel upload — the app's WebView player shows
+                    // YouTube's own embed, so playback never leaves the app.
+                    statusText = ""
+                    tryPlayEmbed(
+                        "https://www.youtube.com/embed/${asianPlayback.youtubeVideoId}?autoplay=1&playsinline=1",
+                        "${item.title} - ${ep.title}",
+                        if (isPremium) null else freeMoviePreviewMs,
+                        ep.episodeNumber
+                    )
+                    return@launch
+                }
+                statusText = ""
+                tryPlayStream(
+                    asianPlayback.playbackUrl,
+                    "${item.title} - ${ep.title}",
+                    if (isPremium) null else freeMoviePreviewMs,
+                    null,
+                    null,
+                    ep.episodeNumber
+                )
+                return@launch
+            }
+
             if (shouldResolveInParallel) {
                 statusText = "Resolving best stream in parallel..."
                 val urlParts = ep.url.split(":")
@@ -699,7 +802,8 @@ fun MediaDetailScreen(
                     animeHeavenScraper = animeHeavenScraper,
                     aniDaoScraper = aniDaoScraper,
                     donghuaStreamScraper = donghuaStreamScraper,
-                    tmdbScraper = tmdbScraper
+                    tmdbScraper = tmdbScraper,
+                    donghuaApi = donghuaApi
                 )
                 val parallelStream = resolver.resolveBestStream(
                     item = item,
@@ -719,7 +823,10 @@ fun MediaDetailScreen(
                         parallelStream.url,
                         "${item.title} - ${ep.title}",
                         if (isPremium) null else freeEpisodePreviewMs,
-                        null,
+                        // Sources that ship their own subtitle tracks (the dedicated
+                        // donghua server returns 18 languages) hand them straight to
+                        // the player instead of the external-subtitle lookup.
+                        parallelStream.subtitlesJson,
                         parallelStream.headersJson,
                         ep.episodeNumber
                     )
@@ -1242,9 +1349,39 @@ fun MediaDetailScreen(
                                         try {
                                             downloadRepo.addItem(DownloadedItem(item.id, item.title, item.coverUrl, contentTypeForItem(), item.sourceName))
                                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
-                                            val sourceUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                                            // CinePro context for movie download
-                                            val movieTmdbContext = if (resolvedTmdbId.isNotBlank()) Triple(resolvedTmdbId, "movie", "1:1") else null
+                                            // ── Asian tab: dedicated direct server first ──
+                                            // Chinese/Indian/Filipino resolve to a DIRECT HLS
+                                            // playlist — no embed URL and no CinePro context.
+                                            val asianMoviePlayback = if (isAsianItem && asianRegion != null) {
+                                                statusText = "Resolving ${asianRegion.label} stream..."
+                                                runCatching {
+                                                    asianApi.resolve(
+                                                        title = item.title,
+                                                        region = asianRegion,
+                                                        tmdbId = resolvedTmdbId,
+                                                        mediaType = "movie"
+                                                    )
+                                                }.getOrNull()
+                                            } else null
+                                            if (isAsianItem && asianRegion != null && asianMoviePlayback == null) {
+                                                statusText = "This title is not on the ${asianRegion.label} server."
+                                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id)
+                                                downloadingMovie = false
+                                                refreshTrigger++
+                                                return@launch
+                                            }
+                                            if (asianMoviePlayback?.isYouTube == true) {
+                                                statusText = "YouTube uploads are playback-only and cannot be downloaded."
+                                                if (downloadRepo.getEpisodesFor(item.id).isEmpty()) downloadRepo.deleteItem(item.id)
+                                                downloadingMovie = false
+                                                refreshTrigger++
+                                                return@launch
+                                            }
+                                            val sourceUrl = asianMoviePlayback?.playbackUrl
+                                                ?: selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
+                                            // CinePro context for movie download (Asian items stay
+                                            // on their dedicated direct server instead)
+                                            val movieTmdbContext = if (asianMoviePlayback == null && resolvedTmdbId.isNotBlank()) Triple(resolvedTmdbId, "movie", "1:1") else null
                                             val downloadQualities = resolveDownloadableQualitiesCommon(httpClient, sourceUrl, tmdbContext = movieTmdbContext, onStatus = { msg -> statusText = msg })
                                             if (downloadQualities.isNotEmpty()) {
                                                 val processDownload = { quality: CineProSource ->

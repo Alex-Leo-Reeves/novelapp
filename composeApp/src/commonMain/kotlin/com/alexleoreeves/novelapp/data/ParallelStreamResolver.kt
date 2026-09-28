@@ -16,6 +16,12 @@ data class ResolvedStreamResult(
     val isDirect: Boolean = false,
     val serverName: String = "",
     val headersJson: String? = null,
+    /**
+     * Optional subtitle tracks in the players' native JSON shape
+     * (`[{"file","label","srclang"}]`). Populated by sources that ship their own
+     * tracks — the dedicated donghua server returns 18 languages this way.
+     */
+    val subtitlesJson: String? = null,
     val score: Int = 0,
     val latencyMs: Long = 0L
 )
@@ -38,7 +44,9 @@ class ParallelStreamResolver(
     private val animeHeavenScraper: AnimeHeavenScraper,
     private val aniDaoScraper: AniDaoScraper,
     private val donghuaStreamScraper: DonghuaSiteScraper,
-    private val tmdbScraper: TMDBMovieScraper
+    private val tmdbScraper: TMDBMovieScraper,
+    /** Dedicated donghua source (donghuaworld.com) — the donghua tab's primary. */
+    private val donghuaApi: DonghuaApi
 ) {
 
     /**
@@ -78,6 +86,40 @@ class ParallelStreamResolver(
         val sNum = marker.season.ifBlank { "1" }
 
         val candidates = mutableListOf<suspend () -> ResolvedStreamResult?>()
+
+        // 0. DEDICATED DONGHUA SERVER (donghuaworld.com) — highest priority.
+        // Two entry points:
+        //   * the chapter already carries a donghuaworld episode page → resolve it
+        //   * no such URL (TMDB-sourced donghua) → look the episode up by title
+        // Either way the backend returns a PLAIN PUBLIC Rumble HLS URL plus VTT
+        // subtitle tracks, so the result plays directly in ExoPlayer/VLC with no
+        // headers and no embed page. Ranked above every other donghua route.
+        candidates.add {
+            val start = io.ktor.util.date.getTimeMillis()
+            val episodeUrl = chapterUrl
+                ?.takeIf { DonghuaApi.isDonghuaworldUrl(it) }
+                ?: item.detailPageUrl.takeIf { DonghuaApi.isDonghuaworldUrl(it) }
+            val resolved = runCatching {
+                if (episodeUrl != null) {
+                    donghuaApi.resolveEpisodeStream(episodeUrl)
+                } else {
+                    donghuaApi.resolveByTitle(item.title, (chapterNumber ?: 1).coerceAtLeast(1))
+                }
+            }.getOrNull()
+            val latency = io.ktor.util.date.getTimeMillis() - start
+            val stream = resolved?.primary
+            if (stream == null || stream.url.isBlank()) return@add null
+            ResolvedStreamResult(
+                url = stream.url,
+                isDirect = true,
+                serverName = "Donghuaworld",
+                // Subtitle tracks ride along as the players' native subtitle JSON;
+                // no CDN headers are needed because the Rumble HLS is public.
+                subtitlesJson = resolved.subtitlesJson(),
+                score = 1200,
+                latencyMs = latency
+            )
+        }
 
         // 1. AnimeXin Scraper
         if (!chapterUrl.isNullOrBlank() && (chapterUrl.contains("animexin") || chapterUrl.startsWith("http"))) {

@@ -1187,6 +1187,56 @@
     return null;
   }
 
+  /**
+   * Dedicated donghua server (donghuaworld.com).
+   *
+   * Returns a PLAIN PUBLIC HLS master (Rumble CDN, no headers, ACAO:*) plus the
+   * source's own VTT subtitle tracks. Resolving by title + episode number lets
+   * the web player play donghua even when the title came from TMDB and has no
+   * donghuaworld episode URL attached.
+   */
+  async function fetchDonghuaPlay(title, episodeNumber, episodeUrl) {
+    if (!title && !episodeUrl) return null;
+    var res;
+    if (episodeUrl && String(episodeUrl).indexOf('donghuaworld.com') !== -1) {
+      res = await request('/donghua/watch?url=' + encodeURIComponent(episodeUrl));
+    } else {
+      res = await request('/donghua/play?title=' + encodeURIComponent(title || '') +
+        '&ep=' + encodeURIComponent(String(episodeNumber || 1)));
+    }
+    if (!res.ok || !res.data || !res.data.data) return null;
+    var data = res.data.data;
+    var streams = data.streams || [];
+    if (!streams.length) return null;
+    var primary = streams[0];
+    if (!primary || !primary.url) return null;
+    return {
+      url: primary.url,
+      // Same-origin fallback through our own HLS proxy. hls.js plays it exactly
+      // like the direct URL, so a blocked CDN can never black-screen the player.
+      proxyUrl: primary.proxyUrl || '',
+      quality: primary.quality || 'auto',
+      subtitles: data.subtitles || [],
+      streams: streams,
+      provider: 'Donghua (Donghuaworld)'
+    };
+  }
+
+  /** Subtitle tracks shaped for the player's track list. */
+  function donghuaSubtitleUrls(data) {
+    if (!data || !data.subtitles || !data.subtitles.length) return [];
+    return data.subtitles.map(function (track) {
+      return {
+        // Same-origin CORS-safe copy first (browsers reject a cross-origin
+        // <track> without ACAO); the raw CDN URL stays as the fallback.
+        url: track.proxyUrl || track.url,
+        rawUrl: track.url,
+        label: track.label || track.lang || 'Subtitle',
+        lang: track.lang || ''
+      };
+    });
+  }
+
   // ── Novel text ──────────────────────────────────────────────────────────
   async function fetchChapterText(chapterUrl, title, sourceName) {
     // ReadNovelFull chapters are scraped client-side (Android recipe)
@@ -1810,6 +1860,8 @@
     fetchAnimeEpisodes: fetchAnimeEpisodes,
     fetchAnimeEpisodesParallel: fetchAnimeEpisodesParallel,
     fetchAnimeStream: fetchAnimeStream,
+    fetchDonghuaPlay: fetchDonghuaPlay,
+    donghuaSubtitleUrls: donghuaSubtitleUrls,
     fetchWatchRoutes: fetchWatchRoutes,
     fetchNollywoodLiveChannels: fetchNollywoodLiveChannels,
     fetchCuratedLiveChannels: fetchCuratedLiveChannels,

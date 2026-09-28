@@ -81,6 +81,21 @@ class HomeFeedRepository(
     private val tmdb: TmdbSource,
     private val anilist: AniListSource
 ) {
+    /**
+     * A dedicated Asian-tab region row for the home feed.
+     *
+     * The Asian tab owns Chinese Movies / Indian / Filipino; the home tab only
+     * *bleeds* a couple of those rows in so the content is discoverable without
+     * crowding out the main feed. Playback still goes through the region's own
+     * dedicated server, exactly as it does inside the Asian tab.
+     */
+    suspend fun asianRow(category: VideoCategory, page: Int = 1): List<UnifiedSearchResult> =
+        withTimeoutOrNull(FETCH_TIMEOUT_MS) {
+            runCatching { tmdb.fetchVideo(category, page) }.getOrElse { emptyList() }
+                .filter { it.isWatchableHome() }
+                .distinctBy { it.id }
+        } ?: emptyList()
+
     /** 🆕 Latest: movies in theatres + shows on air + newest anime, interleaved. */
     suspend fun latestRow(page: Int = 1): List<UnifiedSearchResult> = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
         coroutineScope {

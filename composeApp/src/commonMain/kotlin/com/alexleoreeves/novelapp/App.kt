@@ -642,6 +642,11 @@ fun App(
                                 )
                                 BottomTab.SPORTS -> SportsHomeScreen(appTheme.value,
                                     { selectedFootballMatch.value = it }, { selectedWweEvent.value = it })
+                                BottomTab.ASIAN -> AsianHomeScreen(
+                                    currentTheme = appTheme.value,
+                                    isKidsMode = selectedProfile?.isKids == true,
+                                    onTitleSelected = { selectedAnime.value = it.toAnimeResult() }
+                                )
                                 BottomTab.READ -> UniversalReadScreen(
                                     currentTheme = appTheme.value, ttsController = ttsController,
                                     requireAuth = requireAuth, account = account, downloadRepo = downloadRepo,
@@ -789,6 +794,7 @@ fun App(
 enum class BottomTab(val label: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.PlayCircle),
     LIVE_TV("Live TV", Icons.Default.LiveTv),
+    ASIAN("Asian", Icons.Default.Public),
     NMC("NMC", Icons.Default.Book),
     SPORTS("Sports", Icons.Default.EmojiEvents),
     READ("Read", Icons.Filled.MenuBook),

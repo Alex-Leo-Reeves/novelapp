@@ -397,6 +397,13 @@ fun GlassBottomBar(
                 onClick = { onTabSelected(BottomTab.LIVE_TV) }
             )
             GlassBottomNavItem(
+                tab = BottomTab.ASIAN,
+                label = "Asian",
+                icon = Icons.Rounded.Public,
+                isSelected = currentTab == BottomTab.ASIAN,
+                onClick = { onTabSelected(BottomTab.ASIAN) }
+            )
+            GlassBottomNavItem(
                 tab = BottomTab.SPORTS,
                 label = "Sports",
                 icon = Icons.Rounded.EmojiEvents,

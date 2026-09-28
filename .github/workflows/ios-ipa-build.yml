@@ -393,25 +393,10 @@ jobs:
           fi
 
           # Marker strings from the CURRENT shared UI and the iOS host must exist
-          # in the shipped binary. Kotlin/Native stores literals as UTF-16LE as
-          # well as ASCII, so scan both encodings.
-          STRINGS_TMP="$(mktemp)"
-          strings "$BIN" > "$STRINGS_TMP" 2>/dev/null || true
-          strings -e l "$BIN" >> "$STRINGS_TMP" 2>/dev/null || true
-
-          for marker in \
-            "MainViewController" \
-            "Search movies, anime, shows..." \
-            "KIDS MODE ACTIVE" \
-            "Loading secure player..." \
-            "Voice Settings"
-          do
-            if ! grep -qF "$marker" "$STRINGS_TMP"; then
-              echo "::error::Marker string not found in bundled binary: $marker"
-              echo "::error::The IPA does not contain the current shared app — do not ship it."
-              rm -f "$STRINGS_TMP"
-              exit 1
-            fi
-          done
-          rm -f "$STRINGS_TMP"
-          echo "OK: bundled binary is the full shared Compose app (host + current UI markers present)."
+          # in the shipped binary. Kotlin/Native stores shared-UI literals as
+          # UTF-16LE ONLY (no UTF-8 copy), so they depended entirely on
+          # `strings -e l` -- which extracted nothing on the macOS runner and had
+          # its error hidden by `2>/dev/null || true`. That reported a valid 68 MB
+          # binary as "not the current shared app". Searching raw bytes has no
+          # encoding flag and no per-platform `strings` to disagree with.
+          python3 scripts/verify-ios-markers.py "$BIN"

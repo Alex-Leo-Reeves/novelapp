@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import com.alexleoreeves.novelapp.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.platform.AppReleaseConfig
 import com.alexleoreeves.novelapp.tv.data.TvBingeSession
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.ui.components.TvMovieEndRail
@@ -40,6 +41,22 @@ import org.videolan.libvlc.util.VLCVideoLayout
 /** Hard cap copied from the backend so free users can NEVER finish a full title on TV. */
 const val TV_MOVIE_FREE_PREVIEW_MS = 20 * 60 * 1000L
 const val TV_EPISODIC_FREE_FRACTION = 0.2
+
+/**
+ * Same-origin HLS proxy URL for the dedicated donghua source's public Rumble CDN.
+ * LibVLC cannot send a provider Referer and some TV networks block that CDN, so a
+ * playback error is retried once through our own backend proxy. Returns null for
+ * anything that is not a donghua CDN URL, so other sources are left untouched.
+ */
+private fun String.toDonghuaProxyRetryUrl(): String? {
+    val lower = lowercase()
+    val isCdn = lower.contains("rumble.com/hls-vod") ||
+        lower.contains("hugh.cdn.rumble.cloud") ||
+        lower.contains("rumble.cloud/video/")
+    if (!isCdn) return null
+    val base = AppReleaseConfig.SERVER_BASE_URL.trimEnd('/')
+    return "$base/api/donghua/proxy?url=" + java.net.URLEncoder.encode(this, "UTF-8")
+}
 
 /**
  * TV Player powered by LibVLC SDK for direct .m3u8/.mp4/.mpd streams.
@@ -71,6 +88,8 @@ fun TvPlayerScreen(
     onEnded: () -> Unit = {},
     onOpenRecommendations: (UnifiedSearchResult) -> Unit = {},
     subtitlePath: String? = null,
+    /** Remote subtitle (VTT) URL shipped by the source — LibVLC fetches it directly. */
+    subtitleUrl: String? = null,
     isLiveTv: Boolean = false
 ) {
     val context = LocalContext.current
@@ -85,6 +104,10 @@ fun TvPlayerScreen(
     var previewExpired by remember { mutableStateOf(false) }
     var vlcMediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var libVlc by remember { mutableStateOf<LibVLC?>(null) }
+    // Escalation target for the dedicated donghua source: if LibVLC cannot reach
+    // the public Rumble CDN (some TV networks block it), the same stream is
+    // re-opened through our own HLS proxy instead of showing a playback error.
+    var proxyRetryUrl by remember(streamUrl) { mutableStateOf<String?>(null) }
     // Resume-once from the saved position (power loss / app kill).
     // Keyed on streamUrl so navigating to a new episode resets the flag.
     var hasAppliedResume by remember(streamUrl) { mutableStateOf(false) }
@@ -107,7 +130,7 @@ fun TvPlayerScreen(
     }
 
     val isPremium = account?.isPremium == true
-    val resolvedUrl = streamUrl.trim()
+    val resolvedUrl = (proxyRetryUrl ?: streamUrl).trim()
 
     // LibVLC SDK Initialization.
     // The player must exist BEFORE the AndroidView factory runs (composition
@@ -164,6 +187,14 @@ fun TvPlayerScreen(
                         )
                     }
                 }
+                // Remote subtitles shipped by the source itself (the dedicated
+                // donghua server returns public VTT tracks). LibVLC fetches the
+                // URL directly, so network subtitles play without a download.
+                if (!subtitleUrl.isNullOrBlank()) {
+                    media.addSlave(
+                        IMedia.Slave(IMedia.Slave.Type.Subtitle, 0, subtitleUrl)
+                    )
+                }
                 mp.media = media
                 media.release()
 
@@ -198,7 +229,16 @@ fun TvPlayerScreen(
                             isPlaying = false
                         }
                         MediaPlayer.Event.EncounteredError -> {
-                            errorMsg = "LibVLC playback error encountered"
+                            // Dedicated donghua source: the public Rumble CDN can be
+                            // blocked on some TV networks. Escalate ONCE to our own
+                            // HLS proxy (same stream, never blocked) before giving up.
+                            val retry = if (proxyRetryUrl == null) resolvedUrl.toDonghuaProxyRetryUrl() else null
+                            if (retry != null) {
+                                proxyRetryUrl = retry
+                                errorMsg = null
+                            } else {
+                                errorMsg = "LibVLC playback error encountered"
+                            }
                         }
                     }
                 }

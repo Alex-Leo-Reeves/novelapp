@@ -509,6 +509,32 @@
       if (ep.streamUrl && !directUrl) candidates.push({ provider: 'Direct Stream', url: ep.streamUrl, route: 'direct' });
 
       var isAnimeLike = currentMedia && (currentMedia.mediaKind === 'anime' || currentMedia.mediaKind === 'donghua');
+      var isDonghuaLike = currentMedia && (currentMedia.mediaKind === 'donghua' ||
+        String(currentMedia.genre || '').toLowerCase().indexOf('donghua') !== -1);
+
+      // DEDICATED DONGHUA SERVER FIRST (donghuaworld.com).
+      // Its own player ships a PLAIN PUBLIC Rumble HLS master that needs no
+      // request headers and sends ACAO:*, so hls.js plays it directly — unlike
+      // the Consumet providers below, which have no donghua catalogue. Falls
+      // through untouched when the source has nothing for this title.
+      if (isDonghuaLike && currentMedia.title) {
+        showServerStatus('Resolving donghua server…');
+        try {
+          var donghuaData = await NovaApi.fetchDonghuaPlay(
+            currentMedia.title,
+            parseFloat(ep.chapterNumber || (currentEpisodeIndex + 1)) || 1,
+            ep.url || ''
+          ).catch(function () { return null; });
+          if (donghuaData && donghuaData.url) {
+            // Direct first, our own HLS proxy second: two independent ways to
+            // reach the same stream, so a blocked CDN can never black-screen it.
+            if (donghuaData.proxyUrl) {
+              candidates.push({ provider: 'Donghua Server (proxy)', url: donghuaData.proxyUrl, route: 'direct', subtitles: donghuaData.subtitles });
+            }
+            candidates.push({ provider: 'Donghua Server', url: donghuaData.url, route: 'direct', subtitles: donghuaData.subtitles });
+          }
+        } catch (donghuaErr) { /* donghua path is best-effort; other routes remain */ }
+      }
 
       // ANIME-SPECIFIC SERVERS FIRST (different from the movie/TV servers):
       // resolve this episode through the Consumet anime providers.
@@ -856,7 +882,7 @@
     // Load the actual stream now (after the user gesture)
     if (activeCandidate) {
       if (isDirectUrl(activeCandidate.url)) {
-        loadNative(activeCandidate.url);
+        loadNative(activeCandidate.url, activeCandidate.subtitles);
       } else {
         loadEmbed(activeCandidate.url);
       }
@@ -982,8 +1008,105 @@
     embedWatchdog = null;
   }
 
+  // ── Source-shipped subtitles (VTT) ──────────────────────────────────────
+  // The dedicated donghua server ships public VTT tracks (18 languages incl.
+  // English). A browser silently drops a cross-origin <track> unless the
+  // response carries `Access-Control-Allow-Origin`, so the backend returns a
+  // same-origin `proxyUrl` per track — that is preferred when present; native
+  // players get the raw URL. Either way the video itself is never affected:
+  // a failing subtitle can't black-screen playback.
+  function clearSubtitleTracks() {
+    var video = elements.video;
+    if (!video) return;
+    var existing = video.querySelectorAll('track[data-source-sub]');
+    for (var i = 0; i < existing.length; i++) {
+      try { existing[i].parentNode.removeChild(existing[i]); } catch (e) {}
+    }
+    var list = video.textTracks;
+    if (list) {
+      for (var j = 0; j < list.length; j++) {
+        try { list[j].mode = 'disabled'; } catch (e) {}
+      }
+    }
+  }
+
+  /** Enable the English track when one exists, otherwise the first track. */
+  function showDefaultSubtitle() {
+    var video = elements.video;
+    var list = video && video.textTracks;
+    if (!list || !list.length) return;
+    var picked = -1;
+    for (var i = 0; i < list.length; i++) {
+      var lang = String(list[i].language || '');
+      var label = String(list[i].label || '');
+      if (/^en\b/i.test(lang) || /english/i.test(label)) { picked = i; break; }
+    }
+    if (picked === -1) picked = 0;
+    for (var j = 0; j < list.length; j++) {
+      try { list[j].mode = (j === picked) ? 'showing' : 'disabled'; } catch (e) {}
+    }
+  }
+
+  /**
+   * In-manifest subtitle renditions. Dailymotion masters carry an
+   * `#EXT-X-MEDIA:TYPE=SUBTITLES` group (en/fr/es/pt/it/ar) which hls.js renders
+   * over the video once a track is selected, so English is picked when present.
+   * Only applies when the source did not ship standalone VTT tracks of its own.
+   */
+  function selectManifestSubtitle() {
+    if (!hlsInstance || !hlsInstance.subtitleTracks) return;
+    var tracks = hlsInstance.subtitleTracks;
+    if (!tracks || !tracks.length) return;
+    var hasSourceTracks = !!(elements.video && elements.video.querySelector('track[data-source-sub]'));
+    if (hasSourceTracks) return;
+    var index = -1;
+    for (var i = 0; i < tracks.length; i++) {
+      var track = tracks[i] || {};
+      var lang = String(track.lang || track.language || '');
+      var name = String(track.name || '');
+      if (/^en\b/i.test(lang) || /english/i.test(name)) { index = i; break; }
+    }
+    if (index === -1) index = 0;
+    try { hlsInstance.subtitleTrack = index; } catch (e) {}
+  }
+
+  function attachSubtitleTracks(tracks) {
+    clearSubtitleTracks();
+    var video = elements.video;
+    if (!video || !tracks || !tracks.length) return;
+    // Only the preferred (English) track is marked `default`: the browser
+    // eagerly fetches a default track and leaves the others alone until they
+    // are selected, so a 18-language list never fires 18 requests at once.
+    var preferred = 0;
+    for (var p = 0; p < tracks.length; p++) {
+      var probe = tracks[p] || {};
+      if (/^en\b/i.test(String(probe.lang || '')) || /english/i.test(String(probe.label || ''))) {
+        preferred = p;
+        break;
+      }
+    }
+    var added = 0;
+    for (var i = 0; i < tracks.length; i++) {
+      var track = tracks[i] || {};
+      var src = track.proxyUrl || track.url;
+      if (!src) continue;
+      var el = document.createElement('track');
+      el.kind = 'subtitles';
+      el.label = track.label || track.lang || 'Subtitle';
+      el.srclang = track.lang || 'und';
+      el.src = src;
+      el.setAttribute('data-source-sub', '1');
+      if (i === preferred) el.setAttribute('default', 'default');
+      try { video.appendChild(el); } catch (e) { continue; }
+      added++;
+    }
+    if (!added) return;
+    // textTracks appears only after the elements are in the DOM.
+    setTimeout(showDefaultSubtitle, 400);
+  }
+
   // ── Loading the winning stream with Max-Volume Autoplay ─────────────────
-  function loadNative(url) {
+  function loadNative(url, subtitleTracks) {
     clearEmbedWatchdog();
     if (elements.embedIframe) {
       elements.embedIframe.style.display = 'none';
@@ -1016,6 +1139,8 @@
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
+        // Render in-manifest subtitle renditions (Dailymotion ships en/fr/es/…)
+        subtitleDisplay: true,
         manifestLoadingTimeOut: 15000,
         manifestLoadingMaxRetry: 2,
         levelLoadingTimeOut: 15000,
@@ -1025,6 +1150,14 @@
       hlsInstance.attachMedia(elements.video);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
         startNativePlayback();
+        showDefaultSubtitle();
+        selectManifestSubtitle();
+      });
+      // hls.js exposes the subtitle renditions a tick after MANIFEST_PARSED, so
+      // keep applying the automatic pick until one is actually selected (the
+      // guard stops it from overriding a track that is already active).
+      hlsInstance.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, function () {
+        if (hlsInstance.subtitleTrack === -1) selectManifestSubtitle();
       });
       hlsInstance.on(Hls.Events.ERROR, function (evt, data) {
         if (data && data.fatal) {
@@ -1041,6 +1174,10 @@
       elements.video.load();
       startNativePlayback();
     }
+    // Source-shipped VTT tracks (dedicated donghua server). Attached after the
+    // source so the media element is already loading; browsers fetch <track>
+    // independently, so this never delays or blocks playback.
+    attachSubtitleTracks(subtitleTracks);
   }
 
   function startNativePlayback() {

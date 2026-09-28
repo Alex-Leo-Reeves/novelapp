@@ -150,9 +150,12 @@ enum class StreamServer(
 /**
  * Donghua-only servers.
  *
+ * DONGHUAWORLD is the dedicated donghua source (donghuaworld.com). Its own
+ * player exposes a plain public Rumble HLS master that plays with zero request
+ * headers, so it is the first chip and the default — see `data/DonghuaApi.kt`.
  * Movie Server 1/2 use TMDB-embed playback (VidLink / VidSrc.to).
  * Anime Server 5/3 use the Anivexa API (AniNeko / AniKoto providers).
- * AnimeXin is a dedicated Donghua scraper site.
+ * AnimeXin is a legacy dedicated Donghua scraper site.
  */
 enum class DonghuaServer(
     val displayName: String,
@@ -162,22 +165,27 @@ enum class DonghuaServer(
     val scraperKey: String? = null,
     val anivexaProviderKey: String? = null
 ) {
-    MOVIE_SERVER_1("Nebula", "VidLink", 1),
-    MOVIE_SERVER_2("Quasar", "VidSrc.to", 2),
-    ANIME_SERVER_5("Kitsune", "AniNeko", 3, anivexaProviderKey = "anineko"),
-    ANIME_SERVER_3("Shogun", "AniKoto", 4, anivexaProviderKey = "anikoto"),
-    ANIMEXIN("Loong", "AnimeXin", 5, isScraper = true, scraperKey = "animexin"),
-    VIDSRC_SBS("Astra", "VidSrc.sbs", 6);
+    DONGHUAWORLD("Loong", "Donghuaworld", 1, isScraper = true, scraperKey = "donghuaworld"),
+    MOVIE_SERVER_1("Nebula", "VidLink", 2),
+    MOVIE_SERVER_2("Quasar", "VidSrc.to", 3),
+    ANIME_SERVER_5("Kitsune", "AniNeko", 4, anivexaProviderKey = "anineko"),
+    ANIME_SERVER_3("Shogun", "AniKoto", 5, anivexaProviderKey = "anikoto"),
+    ANIMEXIN("Loong (AnimeXin)", "AnimeXin", 6, isScraper = true, scraperKey = "animexin"),
+    VIDSRC_SBS("Astra", "VidSrc.sbs", 7);
 
     val isAnivexa: Boolean get() = anivexaProviderKey != null
+    val isDonghuaworld: Boolean get() = this == DONGHUAWORLD
 
     companion object {
         val ALL_IN_ORDER = values().sortedBy { it.serverOrder }
 
-        /** Curated donghua selector chips shown in the UI. */
+        /** Curated donghua selector chips shown in the UI (default first). */
         val DONGHUA_SELECTOR = listOf(
-            MOVIE_SERVER_1, MOVIE_SERVER_2, ANIME_SERVER_5, ANIME_SERVER_3, ANIMEXIN, VIDSRC_SBS
+            DONGHUAWORLD, MOVIE_SERVER_1, MOVIE_SERVER_2, ANIME_SERVER_5, ANIME_SERVER_3, ANIMEXIN, VIDSRC_SBS
         )
+
+        /** The dedicated source the donghua tab opens on. */
+        val DEFAULT = DONGHUAWORLD
     }
 }
 

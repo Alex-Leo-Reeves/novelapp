@@ -37,7 +37,13 @@ data class TvBingeEpisode(
     val chapter: Chapter,
     val url: String = "",
     val kind: BingeContentKind = BingeContentKind.TV,
-    val isDirect: Boolean = false
+    val isDirect: Boolean = false,
+    /**
+     * Optional remote subtitle (VTT) URL shipped by the source itself — the
+     * dedicated donghua server returns 18 languages incl. English. LibVLC is
+     * handed it as a subtitle slave so TV playback gets subtitles too.
+     */
+    val subtitleUrl: String? = null
 )
 
 /**
@@ -179,14 +185,43 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
     val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
     val trimmed = resolved.trim()
     val kind = deriveBingeKind(item, chapter, isDonghua)
-    val isDirect = isLocalOfflineMediaUrl(trimmed)
+    // The dedicated donghua source is the one online server whose streams are a
+    // PLAIN PUBLIC HLS (Rumble CDN, zero headers, ACAO:*), so LibVLC can play it
+    // directly — no WebView, no embed page, no redirect to a third-party site.
+    val isDonghuaVlcStream = isDonghua && (isDonghuaworldVlcStreamUrl(trimmed))
+    val isDirect = isLocalOfflineMediaUrl(trimmed) || isDonghuaVlcStream
+
+    // Subtitles for the dedicated source. The backend caches the watch payload,
+    // so this is a cheap follow-up to the resolve above. TMDB-sourced donghua has
+    // no donghuaworld chapter URL, so the title + episode number are passed too.
+    val subtitleUrl = if (isDonghuaVlcStream && chapter != null) {
+        resolveDonghuaSubtitleUrl(
+            episodeUrl = chapter.url,
+            title = item.title,
+            episodeNumber = chapter.chapterNumber
+        )
+    } else {
+        null
+    }
 
     return TvBingeEpisode(
         chapter = chapter ?: Chapter(item.title, item.detailPageUrl, 0),
         url = trimmed,
         kind = kind,
-        isDirect = isDirect
+        isDirect = isDirect,
+        subtitleUrl = subtitleUrl
     )
+}
+
+/**
+ * True for URLs the dedicated donghua source produces (public Rumble HLS or our
+ * own same-origin proxy). These are safe to hand to LibVLC directly.
+ */
+fun isDonghuaworldVlcStreamUrl(url: String): Boolean {
+    val lower = url.lowercase()
+    return lower.contains("rumble.com/hls-vod") ||
+        lower.contains("hugh.cdn.rumble.cloud") ||
+        lower.contains("/api/donghua/proxy")
 }
 
 /**

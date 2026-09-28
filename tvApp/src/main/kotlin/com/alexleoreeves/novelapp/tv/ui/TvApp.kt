@@ -810,6 +810,9 @@ fun TvApp(
                                     onNext = { advanceBinge(1) },
                                     onPrev = { advanceBinge(-1) },
                                     subtitlePath = nav.localSubtitlePath.ifBlank { null },
+                                    // Source-provided subtitle (dedicated donghua server)
+                                    // so TV playback gets English subs in LibVLC.
+                                    subtitleUrl = current?.subtitleUrl,
                                     isLiveTv = nav.playerFromSection == TvSection.LIVE_TV,
                                     onEnded = {
                                         if (session?.hasNext == true) {
@@ -1343,6 +1346,7 @@ private fun iconForSection(section: TvSection): ImageVector? = when (section) {
     TvSection.ANIME -> Icons.Default.PlayCircle
     TvSection.DONGHUA -> Icons.Default.VideoLibrary
     TvSection.K_DRAMA -> Icons.Default.LiveTv
+    TvSection.ASIAN -> Icons.Default.Public
     TvSection.CARTOON -> Icons.Default.Animation
     TvSection.CLASSIC -> Icons.Default.Theaters
     TvSection.MOVIES -> Icons.Default.Movie

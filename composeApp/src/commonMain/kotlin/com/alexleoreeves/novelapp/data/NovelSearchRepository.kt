@@ -113,7 +113,8 @@ class NovelSearchRepository(
         animeHeavenScraper = animeHeavenScraper,
         aniDaoScraper = aniDaoScraper,
         donghuaStreamScraper = DonghuaSiteScraper.donghuaStream(httpClient),
-        tmdbScraper = TMDBMovieScraper(httpClient)
+        tmdbScraper = TMDBMovieScraper(httpClient),
+        donghuaApi = DonghuaApi(httpClient)
     )
 
     suspend fun resolveBestStream(
@@ -541,6 +542,20 @@ class NovelSearchRepository(
                             VideoCategory.NIGERIAN -> media.genres.contains("Nigeria", ignoreCase = true) ||
                                 media.genres.contains("Nigerian", ignoreCase = true) ||
                                 media.genres.contains("Nollywood", ignoreCase = true)
+                            // Asian-tab regions: keep anything the region's own
+                            // discover query would surface, so an English query
+                            // still matches the right part of the world.
+                            VideoCategory.CHINESE_MOVIES -> media.genres.contains("Chinese", ignoreCase = true) ||
+                                media.genres.contains("China", ignoreCase = true) ||
+                                media.genres.contains("Hong Kong", ignoreCase = true) ||
+                                media.genres.contains("Taiwan", ignoreCase = true)
+                            VideoCategory.INDIAN -> media.genres.contains("India", ignoreCase = true) ||
+                                media.genres.contains("Hindi", ignoreCase = true) ||
+                                media.genres.contains("Tamil", ignoreCase = true) ||
+                                media.genres.contains("Telugu", ignoreCase = true)
+                            VideoCategory.FILIPINO -> media.genres.contains("Philippines", ignoreCase = true) ||
+                                media.genres.contains("Filipino", ignoreCase = true) ||
+                                media.genres.contains("Tagalog", ignoreCase = true)
                         }
                     }
                         .ifEmpty { mediaResults }
@@ -1581,7 +1596,10 @@ private fun VideoCategory.backendContentType(): String = when (this) {
     VideoCategory.CLASSIC -> "classic"
     VideoCategory.MOVIES -> "movies"
     VideoCategory.NIGERIAN -> "nigerian"
-    VideoCategory.DONGHUA -> "donghua"
+    // Asian-tab regions — the server maps these to their own TMDB catalogs.
+    VideoCategory.CHINESE_MOVIES -> "chinesemovies"
+    VideoCategory.INDIAN -> "indian"
+    VideoCategory.FILIPINO -> "filipino"
 }
 
 private fun JsonObject.contentString(name: String): String =

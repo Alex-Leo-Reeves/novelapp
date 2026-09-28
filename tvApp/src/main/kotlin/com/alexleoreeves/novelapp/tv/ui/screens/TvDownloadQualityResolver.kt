@@ -12,6 +12,9 @@ import kotlinx.serialization.json.put
 
 // ── CinePro models (TV-local copy so tvApp doesn't depend on composeApp/ui) ──
 
+import android.content.Context
+import com.alexleoreeves.novelapp.data.extractTvStreamFromEmbed
+
 data class TvCineProSource(
     val url: String,
     val provider: String = "",
@@ -188,7 +191,8 @@ suspend fun tvResolveDownloadableQualities(
     httpClient: HttpClient,
     sourceUrl: String,
     tmdbContext: Triple<String, String, String>? = null,
-    onStatus: ((String) -> Unit)? = null
+    onStatus: ((String) -> Unit)? = null,
+    context: Context? = null
 ): List<TvCineProSource> {
     // Phase 1: Try CinePro Core for any TMDB-based content
     if (tmdbContext != null) {
@@ -212,6 +216,26 @@ suspend fun tvResolveDownloadableQualities(
         return listOf(TvCineProSource(url = trimmed, quality = "Direct"))
     }
 
-    // Phase 3: TV does not support hidden WebView scraping — return empty
+    // Phase 3: Hidden WebView scrape — vidlink/vidsrc/embed.su pages are
+    // JavaScript-rendered, so a plain fetch finds nothing. Android TV ships a
+    // WebView, and TvStreamResolver already ports the phone's embed scraper
+    // (extractTvStreamFromEmbed); without this phase every embed-based
+    // download died with "Stream unavailable for download."
+    if (context != null) {
+        onStatus?.invoke("Scraping embed page for a direct stream...")
+        val scraped = runCatching {
+            extractTvStreamFromEmbed(
+                context = context,
+                embedUrl = trimmed,
+                timeoutMs = 45_000L,
+                userAgentIndex = 0
+            )
+        }.getOrNull()
+        if (scraped != null && scraped.url.isNotBlank() && scraped.url.isTvDirectPlayableStreamUrl()) {
+            onStatus?.invoke("Found direct stream.")
+            return listOf(TvCineProSource(url = scraped.url, quality = "WebView"))
+        }
+        onStatus?.invoke("No direct stream found on this server.")
+    }
     return emptyList()
 }
