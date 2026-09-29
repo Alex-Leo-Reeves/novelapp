@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.alexleoreeves.novelapp.data.AppLanguage
+import com.alexleoreeves.novelapp.data.AppStrings
 import com.alexleoreeves.novelapp.data.BillingCurrency
 import com.alexleoreeves.novelapp.data.BillingPlan
 import com.alexleoreeves.novelapp.data.TvBillingSnapshot
@@ -271,7 +272,7 @@ fun TvYouScreen(
             Spacer(Modifier.height(24.dp))
 
             // ── App Settings ──────────────────────────────────────────────
-            SectionTitle("App Settings")
+            SectionTitle(AppStrings.get("app_settings"))
             Spacer(Modifier.height(12.dp))
 
             // Server selector visibility — press OK to flip.
@@ -293,7 +294,7 @@ fun TvYouScreen(
                     Icon(Icons.Default.Dns, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Show server selectors", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(AppStrings.get("server_selectors"), color = Color.White, fontWeight = FontWeight.Bold)
                         Text(
                             "Pick the streaming provider yourself on movie, anime and donghua pages.",
                             color = Color.White.copy(0.5f),
@@ -334,9 +335,9 @@ fun TvYouScreen(
                     Icon(Icons.Default.Language, null, tint = Color(0xFF00BFFF), modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Language", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(AppStrings.get("language"), color = Color.White, fontWeight = FontWeight.Bold)
                         Text(
-                            if (activeLanguage == AppLanguage.SYSTEM) "Device language · $deviceLanguageName"
+                            if (activeLanguage == AppLanguage.SYSTEM) "${AppStrings.get("device_language")} · $deviceLanguageName"
                             else "${activeLanguage.nativeName} · ${activeLanguage.englishName}",
                             color = Color.White.copy(0.5f),
                             style = MaterialTheme.typography.bodySmall

@@ -5546,9 +5546,14 @@ ensurePremiumSeedUser()
       // This pings CinePro Core every 5 minutes to keep it warm so users
       // don't hit cold-start delays when streaming.
       const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+      // Lightweight health route only. The framework serves /v1/health (NOT
+      // /health, which 404s). Pinging the heavy /v1/movies/550 resolve endpoint
+      // ran all 14 stream providers + TMDB on every single keep-alive — and two
+      // identical targets fired it twice per cycle, which made the Cloudflare
+      // edge in front of Render rate-limit us with HTTP 429. /v1/health answers
+      // 200 in <1s with a tiny body, which is all Render's spin-down timer needs.
       const KEEPALIVE_TARGETS = [
-        { url: CINEPRO_BASE_URL + "/v1/movies/550?platform=web", label: "CinePro Movies" },
-        { url: CINEPRO_BASE_URL + "/v1/movies/550?platform=web", label: "CinePro Movies" }
+        { url: CINEPRO_BASE_URL + "/v1/health", label: "CinePro Core" }
       ].filter(t => t.url.startsWith("http"));
 
       if (KEEPALIVE_TARGETS.length > 0) {

@@ -39,6 +39,14 @@ import com.alexleoreeves.novelapp.tv.mediacache.UsbVolume
 import com.alexleoreeves.novelapp.tv.ui.components.TvEpisodeDownloadModal
 import androidx.activity.compose.BackHandler
 
+/** First download-ready (range-capable or HLS) candidate picked by the auto-resolver. */
+private data class TvDownloadPick(
+    val source: TvCineProSource,
+    val serverId: String,
+    val serverName: String,
+    val headersJson: String
+)
+
 @Composable
 fun TvDetailScreen(
     item: UnifiedSearchResult,
@@ -176,28 +184,95 @@ fun TvDetailScreen(
         } catch (e: Exception) {}
     }
 
+    /**
+     * Download auto-resolver.
+     *
+     * Walks every candidate server (the currently selected one first) and
+     * pre-flights each resolved stream with the exact download headers, so a
+     * source that cannot be downloaded (no byte ranges / dead CDN) never
+     * reaches the engine — the engine would fail it after enqueue with
+     * NO_RANGE_SUPPORT ("This source doesn't allow downloads"). Returns the
+     * first HEALTHY candidate, or null when no server allows downloads.
+     */
+    suspend fun resolveDownloadPick(
+        cache: TvMediaCacheController,
+        ch: Chapter,
+        tmdbContext: Triple<String, String, String>?
+    ): TvDownloadPick? {
+        val probed = HashSet<String>()
+        val options = ArrayList<Triple<String, String, suspend () -> String?>>()
+        if (isDonghua) {
+            val ordered = listOf(selectedDonghuaServer) +
+                DonghuaServer.DONGHUA_SELECTOR.filter { it != selectedDonghuaServer }
+            ordered.take(5).forEach { server ->
+                options.add(Triple(server.name, server.displayName) {
+                    mediaRepo.resolveStreamUrl(item = item, chapter = ch, server = null, donghuaServer = server, animeServer = null)
+                })
+            }
+        } else if (item.isAnime && !animeFallbackActive) {
+            val ordered = listOf(selectedAnimeServer) +
+                AnimeServer.ANIME_SELECTOR.filter { it != selectedAnimeServer }
+            ordered.take(5).forEach { server ->
+                options.add(Triple(server.name, server.displayName) {
+                    mediaRepo.resolveStreamUrl(item = item, chapter = ch, server = null, donghuaServer = null, animeServer = server)
+                })
+            }
+        } else {
+            val ordered = listOf(selectedServer) +
+                StreamServer.MOVIE_SELECTOR.filter { it != selectedServer }
+            ordered.take(5).forEach { server ->
+                options.add(Triple(server.name, server.displayName) {
+                    mediaRepo.resolveStreamUrl(item = item, chapter = ch, server = server, donghuaServer = null, animeServer = null)
+                })
+            }
+        }
+
+        options.forEachIndexed { index, (serverId, serverName, resolve) ->
+            statusText = "Checking server ${index + 1}/${options.size} ($serverName) for downloads..."
+            val raw = runCatching { resolve() }.getOrNull()
+            if (raw.isNullOrBlank()) return@forEachIndexed
+            val qualities = runCatching {
+                tvResolveDownloadableQualities(
+                    httpClient = mediaRepo.client,
+                    sourceUrl = raw,
+                    // CinePro's TMDB sweep does not depend on the selected
+                    // server — run it once (first option) instead of per server.
+                    tmdbContext = if (index == 0) tmdbContext else null,
+                    onStatus = { msg: String -> statusText = msg },
+                    context = context
+                )
+            }.getOrDefault(emptyList())
+            for (quality in qualities.take(4)) {
+                if (!probed.add(quality.url)) continue
+                val headersJson = quality.headersJson ?: mediaRepo.resolveAnivexaDownloadHeaders(ch.url).orEmpty()
+                val result = cache.probeServers(
+                    listOf(MediaServerCandidate(serverId, serverName, quality.url, headersJson))
+                ).firstOrNull() ?: continue
+                if (result.isHealthy) {
+                    return TvDownloadPick(quality, serverId, serverName, headersJson)
+                }
+            }
+        }
+        return null
+    }
+
     fun startDownloadToInternal(cache: TvMediaCacheController, ch: Chapter) {
         val title = ch.title.ifBlank { item.title }
         val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
         val containerExtension = "mp4"
-        statusText = "Downloading \"$title\"..."
+        statusText = "Finding a download-ready stream for \"$title\"..."
         scope.launch {
-            val rawSourceUrl = mediaRepo.resolveStreamUrl(
-                item = item,
-                chapter = ch,
-                server = when {
-                    animeFallbackActive -> selectedServer
-                    isDonghua || item.isAnime -> null
-                    else -> selectedServer
-                },
-                donghuaServer = if (isDonghua) selectedDonghuaServer else null,
-                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer else null
-            )
-            if (rawSourceUrl.isNullOrBlank()) {
-                statusText = "Could not resolve a download link. Try another server."
+            val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
+            val tmdbContext = if (isTmdb) {
+                Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
+            } else null
+
+            val pick = resolveDownloadPick(cache, ch, tmdbContext)
+            if (pick == null) {
+                statusText = "No server allows downloads for this title. Try another server on the title's page."
                 return@launch
             }
-            
+
             val derivedMediaType = when {
                 isDonghua -> "DONGHUA"
                 item.isAnime -> "ANIME"
@@ -206,50 +281,25 @@ fun TvDetailScreen(
                 item.isComic -> "COMIC"
                 else -> "NOVEL"
             }
-            
-            val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
-            val tmdbContext = if (isTmdb) {
-                Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
-            } else null
 
-            statusText = "Resolving high quality stream..."
-            val qualities = tvResolveDownloadableQualities(
-                httpClient = mediaRepo.client,
-                sourceUrl = rawSourceUrl,
-                tmdbContext = tmdbContext,
-                onStatus = { msg: String -> statusText = msg },
-                context = context
-            )
-            
-            val bestQuality = qualities.firstOrNull()
-            if (bestQuality == null) {
-                statusText = "Stream unavailable for download. Try another server."
-                return@launch
-            }
-            
-            val downloadHeadersJson = bestQuality.headersJson ?: mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
-            
             // Free-tier: single-content (movies) get 20% file cap via maxFraction.
             // Episode cap is already enforced in enqueueDownload().
             val effectiveMaxFraction = if (account?.isPremium != true && isSingleContent) 0.2f else 0f
             cache.enqueueInternal(
                 taskId = taskId,
-                sourceUrl = bestQuality.url,
+                sourceUrl = pick.source.url,
                 title = title,
                 parentId = item.id,
                 episodeNumber = ch.chapterNumber,
                 containerExtension = containerExtension,
-                serverId = if (isDonghua) selectedDonghuaServer.name
-                    else if (item.isAnime) selectedAnimeServer.name
-                    else selectedServer.name,
-                serverName = if (isDonghua) selectedDonghuaServer.displayName
-                    else if (item.isAnime) selectedAnimeServer.displayName
-                    else selectedServer.displayName,
+                serverId = pick.serverId,
+                serverName = pick.serverName,
                 mediaType = derivedMediaType,
                 seasonNumber = ch.seasonNumber,
                 coverUrl = item.coverUrl,
                 maxFraction = effectiveMaxFraction,
-                headersJson = downloadHeadersJson.orEmpty()
+                headersJson = pick.headersJson,
+                parentTitle = item.title
             )
             statusText = "Download started — see Downloads (active queue)."
         }
@@ -259,70 +309,31 @@ fun TvDetailScreen(
         val title = ch.title.ifBlank { item.title }
         val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
         val containerExtension = "mp4"
-        statusText = "Downloading \"$title\" to $usbLabel..."
+        statusText = "Finding a download-ready stream for \"$title\" (to $usbLabel)..."
         scope.launch {
-            val rawSourceUrl = mediaRepo.resolveStreamUrl(
-                item = item,
-                chapter = ch,
-                server = when {
-                    animeFallbackActive -> selectedServer
-                    isDonghua || item.isAnime -> null
-                    else -> selectedServer
-                },
-                donghuaServer = if (isDonghua) selectedDonghuaServer else null,
-                animeServer = if (item.isAnime && !animeFallbackActive) selectedAnimeServer else null
-            )
-            if (rawSourceUrl.isNullOrBlank()) {
-                statusText = "Could not resolve a download link. Try another server."
-                return@launch
-            }
-            
-            val derivedMediaType = when {
-                isDonghua -> "DONGHUA"
-                item.isAnime -> "ANIME"
-                item.isVideo -> item.mediaKind.uppercase().ifBlank { "MOVIE" }
-                item.isManga -> "MANGA"
-                item.isComic -> "COMIC"
-                else -> "NOVEL"
-            }
-            
             val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
             val tmdbContext = if (isTmdb) {
                 Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
             } else null
 
-            statusText = "Resolving high quality stream..."
-            val qualities = tvResolveDownloadableQualities(
-                httpClient = mediaRepo.client,
-                sourceUrl = rawSourceUrl,
-                tmdbContext = tmdbContext,
-                onStatus = { msg: String -> statusText = msg },
-                context = context
-            )
-            
-            val bestQuality = qualities.firstOrNull()
-            if (bestQuality == null) {
-                statusText = "Stream unavailable for download. Try another server."
+            val pick = resolveDownloadPick(cache, ch, tmdbContext)
+            if (pick == null) {
+                statusText = "No server allows downloads for this title. Try another server on the title's page."
                 return@launch
             }
-            
-            val downloadHeadersJson = bestQuality.headersJson ?: mediaRepo.resolveAnivexaDownloadHeaders(ch.url)
 
             val ok = cache.enqueueUsb(
                 taskId = taskId,
-                sourceUrl = bestQuality.url,
+                sourceUrl = pick.source.url,
                 title = title,
                 parentId = item.id,
                 episodeNumber = ch.chapterNumber,
                 containerExtension = containerExtension,
                 usbVolumeId = usbVolumeId,
-                serverId = if (isDonghua) selectedDonghuaServer.name
-                    else if (item.isAnime) selectedAnimeServer.name
-                    else selectedServer.name,
-                serverName = if (isDonghua) selectedDonghuaServer.displayName
-                    else if (item.isAnime) selectedAnimeServer.displayName
-                    else selectedServer.displayName,
-                headersJson = downloadHeadersJson.orEmpty()
+                serverId = pick.serverId,
+                serverName = pick.serverName,
+                headersJson = pick.headersJson,
+                parentTitle = item.title
             )
             statusText = if (ok) "Download started — see Downloads (active queue)."
                 else "USB drive was removed. Download to internal storage instead."

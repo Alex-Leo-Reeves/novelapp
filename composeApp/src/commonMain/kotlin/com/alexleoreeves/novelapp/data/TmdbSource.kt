@@ -711,6 +711,9 @@ class TmdbSource(
     }
 
     private fun HttpRequestBuilder.tmdbAuth() {
+        // Language switch → localized catalog: ask TMDB for results in the
+        // active app language (AppLanguageState; null = English/default).
+        AppLanguageState.tmdbLanguage?.let { parameter("language", it) }
         usableToken?.let {
             header("Authorization", "Bearer $it")
             return

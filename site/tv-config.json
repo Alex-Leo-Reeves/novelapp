@@ -24,6 +24,7 @@
         { "key": "anime", "label": "Anime" },
         { "key": "donghua", "label": "Donghua" },
         { "key": "kdrama", "label": "K-Drama" },
+        { "key": "asian", "label": "Asian" },
         { "key": "cartoon", "label": "Cartoon" },
         { "key": "classic", "label": "Classic" },
         { "key": "movies", "label": "Movies" },

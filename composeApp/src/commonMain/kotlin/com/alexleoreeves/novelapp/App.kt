@@ -50,6 +50,11 @@ fun App(
     // back on change so the choice survives restarts.
     var showServerSelectors by remember { mutableStateOf(settingsStore.showServerSelectors()) }
     var activeLanguage by remember { mutableStateOf(settingsStore.activeLanguage()) }
+    // Publish the active language app-wide: TMDB re-queries the catalog in it
+    // (AppLanguageState) and AppStrings translates the navigation chrome.
+    LaunchedEffect(activeLanguage) {
+        AppLanguageState.update(activeLanguage, settingsStore.deviceLanguageCode())
+    }
     val currentTab = remember { mutableStateOf(BottomTab.DISCOVER) }
     val tabHistory = remember { mutableStateListOf<BottomTab>() }
     var showSplash by remember { mutableStateOf(true) }
@@ -681,6 +686,7 @@ fun App(
                                         deviceLanguageName = AppLanguage.fromTag(settingsStore.deviceLanguageCode())?.englishName ?: "English",
                                         onLanguageChange = { language ->
                                             activeLanguage = language
+                                            AppLanguageState.update(language, settingsStore.deviceLanguageCode())
                                             settingsStore.setLanguageOverride(language.takeIf { it != AppLanguage.SYSTEM }?.code)
                                         },
                                         favorites = favorites.toList(),

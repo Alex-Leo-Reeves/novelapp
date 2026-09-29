@@ -4,6 +4,13 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { knownThirdPartyProxies } from './thirdPartyProxies.js';
 import { streamPatterns } from './streamPatterns.js';
+import { installRelayFetch } from './relayFetch.js';
+
+// Cloudflare blocks Render's egress IP on every entertainment host our
+// providers scrape (vsembed.ru, vixsrc.to, … → 403 "Just a moment…"), which
+// made allProvidersFailed on the deployed instance. Wrap global fetch with
+// the direct-then-relay fallback BEFORE any provider issues a request.
+installRelayFetch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -86,6 +86,9 @@ fun TvDownloadsScreen(
     val completed = remember(completedCount) { mediaCache.listCompletedInternal() }
 
     var breadcrumb by remember { mutableStateOf<DownloadBreadcrumb>(DownloadBreadcrumb.Root) }
+    // Task groups expanded in the root Active/Failed sections. Keys are
+    // prefixed ("f:") so the same title can be open in both sections at once.
+    var expandedTaskGroups by remember { mutableStateOf(setOf<String>()) }
 
     // Build the unified list of items for the current breadcrumb level
     val items = remember(tasks, completed, usbIndex, breadcrumb) {
@@ -119,35 +122,75 @@ fun TvDownloadsScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Active downloads always visible at every level
+                // Active downloads, grouped under their title (series, novel,
+                // movie…) so Episodes 1 and 2 never appear as two flat rows at
+                // root — tap the title to expand its episodes.
                 val activeTasks = tasks.values.filter { !it.isTerminal }
                 if (activeTasks.isNotEmpty() && breadcrumb is DownloadBreadcrumb.Root) {
                     item { SectionHeader("Active downloads") }
-                    items(activeTasks, key = { it.request.taskId }) { task ->
-                        ActiveTaskRow(
-                            task = task,
-                            onPause = { mediaCache.pause(task.request.taskId) },
-                            onResume = { mediaCache.resume(task.request.taskId) },
-                            onCancel = {
-                                mediaCache.cancel(task.request.taskId)
-                            },
-                            onDelete = { mediaCache.remove(task.request.taskId) }
-                        )
+                    activeTasks.groupBy { it.request.parentId }.forEach { (parentId, group) ->
+                        val expanded = parentId in expandedTaskGroups
+                        item(key = "active_group_$parentId") {
+                            TaskGroupRow(
+                                title = groupTitle(group),
+                                coverUrl = group.first().request.coverUrl,
+                                subtitle = groupSubtitle(group),
+                                progress = if (group.any { it.progress.chunksTotal > 0 })
+                                    group.map { it.fraction }.average().toFloat() else null,
+                                expanded = expanded,
+                                onToggle = {
+                                    expandedTaskGroups = if (expanded) expandedTaskGroups - parentId
+                                        else expandedTaskGroups + parentId
+                                }
+                            )
+                        }
+                        if (expanded) {
+                            items(group, key = { it.request.taskId }) { task ->
+                                ActiveTaskRow(
+                                    task = task,
+                                    onPause = { mediaCache.pause(task.request.taskId) },
+                                    onResume = { mediaCache.resume(task.request.taskId) },
+                                    onCancel = {
+                                        mediaCache.cancel(task.request.taskId)
+                                    },
+                                    onDelete = { mediaCache.remove(task.request.taskId) }
+                                )
+                            }
+                        }
                     }
                 }
 
-                // Failed downloads at root
+                // Failed downloads at root — same title grouping.
                 val failedTasks = tasks.values.filter { it.phase == DownloadPhase.FAILED }
                 if (failedTasks.isNotEmpty() && breadcrumb is DownloadBreadcrumb.Root) {
                     item { SectionHeader("Failed") }
-                    items(failedTasks, key = { it.request.taskId }) { task ->
-                        ActiveTaskRow(
-                            task = task,
-                            onPause = {},
-                            onResume = { mediaCache.resume(task.request.taskId) },
-                            onCancel = { mediaCache.remove(task.request.taskId) },
-                            onDelete = { mediaCache.remove(task.request.taskId) }
-                        )
+                    failedTasks.groupBy { it.request.parentId }.forEach { (parentId, group) ->
+                        val groupKey = "f:$parentId"
+                        val expanded = groupKey in expandedTaskGroups
+                        item(key = "failed_group_$parentId") {
+                            TaskGroupRow(
+                                title = groupTitle(group),
+                                coverUrl = group.first().request.coverUrl,
+                                subtitle = groupSubtitle(group, failed = true),
+                                progress = null,
+                                expanded = expanded,
+                                onToggle = {
+                                    expandedTaskGroups = if (expanded) expandedTaskGroups - groupKey
+                                        else expandedTaskGroups + groupKey
+                                }
+                            )
+                        }
+                        if (expanded) {
+                            items(group, key = { it.request.taskId }) { task ->
+                                ActiveTaskRow(
+                                    task = task,
+                                    onPause = {},
+                                    onResume = { mediaCache.resume(task.request.taskId) },
+                                    onCancel = { mediaCache.remove(task.request.taskId) },
+                                    onDelete = { mediaCache.remove(task.request.taskId) }
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -310,7 +353,15 @@ private fun buildDownloadItems(
 
             titleGroups.forEach { (parentId, group) ->
                 val manifestList = typeManifests.filter { it.parentId == parentId }
-                val title = manifestList.firstOrNull()?.title ?: typeActive.firstOrNull { it.request.parentId == parentId }?.request?.title ?: parentId
+                val firstManifest = manifestList.firstOrNull()
+                val firstActive = typeActive.firstOrNull { it.request.parentId == parentId }
+                // Prefer the stored series/novel/movie name (parentTitle); old
+                // downloads predate the field and fall back to the entry title.
+                val title = firstManifest?.parentTitle?.takeIf { it.isNotBlank() }
+                    ?: firstManifest?.title
+                    ?: firstActive?.request?.parentTitle?.takeIf { it.isNotBlank() }
+                    ?: firstActive?.request?.title
+                    ?: parentId
                 val coverUrl = manifestList.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl ?: ""
                 val count = manifestList.size + typeActive.count { it.request.parentId == parentId }
                 items.add(DownloadItem.TitleCard(
@@ -618,6 +669,92 @@ private fun TitleCardRow(item: DownloadItem.TitleCard, onClick: () -> Unit) {
     }
 }
 
+/**
+ * One grouped downloads row: the title (series/novel/movie) with its episode
+ * count and, while downloading, the aggregate progress. Tapping it expands the
+ * individual episode rows underneath.
+ */
+@Composable
+private fun TaskGroupRow(
+    title: String,
+    coverUrl: String,
+    subtitle: String,
+    progress: Float?,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(12.dp),
+        color = if (focused) Purple500.copy(0.35f) else Color(0xFF0C0C14),
+        border = if (focused) BorderStroke(3.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(0.08f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (coverUrl.isNotBlank()) {
+                    coil3.compose.AsyncImage(
+                        model = coverUrl,
+                        contentDescription = title,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.size(48.dp, 68.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.size(48.dp, 68.dp)
+                            .background(Color.White.copy(0.05f), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Folder, null, tint = Color.White.copy(0.2f))
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (focused) Color.White.copy(0.85f) else Color.White.copy(0.45f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ChevronRight,
+                    null,
+                    tint = if (focused) Color.White else Color.White.copy(0.4f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
+                        .height(4.dp),
+                    color = Accent,
+                    trackColor = Color.White.copy(0.1f)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SeasonCardRow(item: DownloadItem.SeasonCard, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
@@ -732,6 +869,27 @@ private fun episodeLabel(task: DownloadTask): String {
 private fun episodeLabel(manifest: DownloadManifest): String {
     return if (manifest.episodeNumber > 0) "E${manifest.episodeNumber} — ${manifest.title.ifBlank { "" }}"
     else manifest.title
+}
+
+/** Display name for a group of download tasks — the series/novel/movie title. */
+private fun groupTitle(group: List<DownloadTask>): String {
+    val request = group.first().request
+    return request.parentTitle.ifBlank { request.title.ifBlank { request.parentId } }
+}
+
+/**
+ * Subtitle for a grouped downloads row, e.g. "2 downloads • E1, E2".
+ * Single, non-episodic items (a movie, one novel chapter) read "1 download".
+ */
+private fun groupSubtitle(group: List<DownloadTask>, failed: Boolean = false): String {
+    val noun = if (failed) "failed" else if (group.size == 1) "download" else "downloads"
+    if (group.size == 1) return "1 $noun"
+    val labels = group.map {
+        if (it.request.episodeNumber > 0) "E${it.request.episodeNumber}"
+        else it.request.title.ifBlank { it.request.serverName }
+    }
+    val shown = labels.take(4).joinToString(", ")
+    return "${group.size} $noun • $shown${if (labels.size > 4) "…" else ""}"
 }
 
 // ── Quota banner ────────────────────────────────────────────────────────────

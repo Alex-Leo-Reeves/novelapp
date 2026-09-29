@@ -19,9 +19,11 @@ const https = require("https");
 const http = require("http");
 
 const TARGETS = [
-    // Main CinePro Core (direct stream resolution)
-    { url: "https://cinepro-core-esmh.onrender.com/health", label: "CinePro Core" },
-    { url: "https://cinepro-core-esmh.onrender.com/v1/movies/550?platform=web", label: "CinePro Movies" },
+    // Main CinePro Core (direct stream resolution).
+    // NOTE: use /v1/health — CinePro's framework does NOT serve /health (404),
+    // and the heavy /v1/movies resolve endpoint must never be used as a
+    // keep-alive target: it runs every stream provider on each ping.
+    { url: "https://cinepro-core-esmh.onrender.com/v1/health", label: "CinePro Core" },
     // Main NovelApp server (provides VidLink/CinePro routes and headless browser)
     { url: "https://novelapp1.onrender.com/health", label: "NovelApp Server" },
     // Optional: VidLink resolver if deployed separately

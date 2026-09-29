@@ -82,9 +82,21 @@ class MediaServerProbe(
         }
         val started = monotonicMs()
         return try {
-            val probe = transport.probe(candidate.url)
+            // Many sources (Anivexa, provider CDNs) only answer when the exact
+            // download headers are sent — probe with them or a healthy server
+            // would be misreported as unreachable.
+            val probe = transport.probe(candidate.url, parseDownloadHeaders(candidate.headersJson))
             val latency = (monotonicMs() - started).coerceAtLeast(0L)
+            // HLS manifests don't rely on byte ranges: the engine converts an
+            // m3u8 into a per-segment plan (chunkUrl), so a range-less playlist
+            // is perfectly downloadable and must pass the gate.
+            val isHls = probe.contentType.contains("mpegurl", ignoreCase = true) ||
+                candidate.url.substringBefore("?").endsWith(".m3u8", ignoreCase = true)
             when {
+                isHls -> MediaServerProbeResult(
+                    candidate.serverId, candidate.serverName, candidate.url,
+                    MediaServerProbeStatus.HEALTHY, probe.totalBytes, latency, probe.contentType
+                )
                 !probe.supportsRanges -> MediaServerProbeResult(
                     candidate.serverId, candidate.serverName, candidate.url,
                     MediaServerProbeStatus.NO_RANGE, probe.totalBytes, latency, probe.contentType
@@ -115,5 +127,8 @@ class MediaServerProbe(
 data class MediaServerCandidate(
     val serverId: String,       // "stream_server_3", "anime_server_5", "donghua_server_2"
     val serverName: String,     // "Server 3 (AniKoto)"
-    val url: String             // resolved direct/embed stream URL to pre-flight
+    val url: String,            // resolved direct/embed stream URL to pre-flight
+    // Exact request headers the download will use (Referer / UA / …). Sources
+    // that gate on them must be probed WITH them or they'd look unreachable.
+    val headersJson: String = ""
 )

@@ -41,6 +41,7 @@
 
 const http = require("http");
 const https = require("https");
+const { relayedFetchText } = require("./relay-fetch");
 
 const SITE = "https://donghuaworld.com";
 const WP_SEARCH = SITE + "/wp-json/wp/v2/search";
@@ -126,9 +127,11 @@ async function fetchWithTimeout(url, headers, timeoutMs) {
 }
 
 async function fetchText(url, headers, timeoutMs) {
-    const res = await fetchWithTimeout(url, headers, timeoutMs);
-    const body = await res.text();
-    return { status: res.status, ok: res.ok, body: body };
+    // Render's egress IP is challenged (403 "Just a moment…") by donghuaworld's
+    // Cloudflare on EVERY path — verified 2026-09-28. relayedFetchText tries the
+    // direct request first and falls back to the public relay chain, so this
+    // works both from Render and from an unblocked network.
+    return relayedFetchText(url, headers, timeoutMs);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,8 +311,12 @@ function searchQueryVariants(title) {
 }
 
 async function wpSearch(query) {
+    // NOTE: no `subtype=anime` — donghuaworld's REST search only accepts
+    // post/page/category/post_tag/any, so subtype=anime made WP answer
+    // 400 rest_invalid_param for EVERY query and the REST path never worked.
+    // The /anime/ URL filter below already drops non-anime hits.
     const url = WP_SEARCH + "?search=" + encodeURIComponent(query) +
-        "&subtype=anime&per_page=20&_fields=id,title,url,subtype";
+        "&per_page=20&_fields=id,title,url,subtype";
     const res = await fetchText(url, { "User-Agent": BROWSER_UA, Accept: "application/json" });
     if (!res.ok) return [];
     let parsed;

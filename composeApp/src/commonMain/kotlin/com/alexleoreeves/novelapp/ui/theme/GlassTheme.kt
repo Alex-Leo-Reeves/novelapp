@@ -1,5 +1,6 @@
 package com.alexleoreeves.novelapp.ui.theme
 
+import com.alexleoreeves.novelapp.data.AppStrings
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -384,42 +385,42 @@ fun GlassBottomBar(
         ) {
             GlassBottomNavItem(
                 tab = BottomTab.DISCOVER,
-                label = "Discover",
+                label = AppStrings.get("discover"),
                 icon = Icons.Rounded.PlayCircle,
                 isSelected = currentTab == BottomTab.DISCOVER,
                 onClick = { onTabSelected(BottomTab.DISCOVER) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.LIVE_TV,
-                label = "Live TV",
+                label = AppStrings.get("live_tv"),
                 icon = Icons.Rounded.LiveTv,
                 isSelected = currentTab == BottomTab.LIVE_TV,
                 onClick = { onTabSelected(BottomTab.LIVE_TV) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.ASIAN,
-                label = "Asian",
+                label = AppStrings.get("asian"),
                 icon = Icons.Rounded.Public,
                 isSelected = currentTab == BottomTab.ASIAN,
                 onClick = { onTabSelected(BottomTab.ASIAN) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.SPORTS,
-                label = "Sports",
+                label = AppStrings.get("sports"),
                 icon = Icons.Rounded.EmojiEvents,
                 isSelected = currentTab == BottomTab.SPORTS,
                 onClick = { onTabSelected(BottomTab.SPORTS) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.READ,
-                label = "Read",
+                label = AppStrings.get("read"),
                 icon = Icons.Rounded.MenuBook,
                 isSelected = currentTab == BottomTab.READ,
                 onClick = { onTabSelected(BottomTab.READ) }
             )
             GlassBottomNavItem(
                 tab = BottomTab.YOU,
-                label = "You",
+                label = AppStrings.get("you"),
                 icon = Icons.Rounded.Person,
                 isSelected = currentTab == BottomTab.YOU,
                 onClick = { onTabSelected(BottomTab.YOU) }

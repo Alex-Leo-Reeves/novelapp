@@ -75,7 +75,10 @@ data class MediaDownloadRequest(
     val coverUrl: String = "",        // poster/cover image URL
     val maxBytes: Long = 0L,          // 0 = unlimited; >0 = absolute cap
     val maxFraction: Float = 0f,      // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
-    val headersJson: String = ""      // provider-required HTTP headers JSON (Referer/Origin/UA)
+    val headersJson: String = "",     // provider-required HTTP headers JSON (Referer/Origin/UA)
+    // Display name of the parent title (series/novel/movie), so the downloads
+    // UI can group episodes under ONE card instead of listing them flat.
+    val parentTitle: String = ""
 )
 
 /** Result of probing a source URL (HEAD + first range request). */
@@ -221,7 +224,8 @@ data class DownloadManifest(
     val coverUrl: String = "",         // poster/cover image URL for the downloads UI
     val maxBytes: Long = 0L,           // 0 = unlimited; >0 = absolute cap
     val maxFraction: Float = 0f,       // 0 = unlimited; >0 = fraction of probed size (e.g. 0.2f = 20%)
-    val headersJson: String = ""       // provider-required HTTP headers JSON, replayed on resume
+    val headersJson: String = "",      // provider-required HTTP headers JSON, replayed on resume
+    val parentTitle: String = ""       // series/novel/movie display name for grouped listings
 )
 
 

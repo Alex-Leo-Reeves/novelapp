@@ -908,7 +908,7 @@ private fun AppSettingsCard(
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Show server selectors",
+                        AppStrings.get("server_selectors"),
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
@@ -935,7 +935,7 @@ private fun AppSettingsCard(
 
             // ── Language ────────────────────────────────────────────────────
             val languageLabel = if (activeLanguage == AppLanguage.SYSTEM) {
-                "Device language · $deviceLanguageName"
+                "${AppStrings.get("device_language")} · $deviceLanguageName"
             } else {
                 activeLanguage.nativeName
             }
@@ -950,7 +950,7 @@ private fun AppSettingsCard(
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Language",
+                        AppStrings.get("language"),
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold

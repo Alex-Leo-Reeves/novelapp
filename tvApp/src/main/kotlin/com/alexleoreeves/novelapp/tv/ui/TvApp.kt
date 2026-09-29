@@ -159,6 +159,10 @@ fun TvApp(
     val settingsStore = remember(context) { TvAppSettingsStore(context) }
     var showServerSelectors by remember { mutableStateOf(settingsStore.showServerSelectors()) }
     var activeLanguage by remember { mutableStateOf(settingsStore.activeLanguage()) }
+    // Publish the active language app-wide (TMDB content + chrome translation).
+    LaunchedEffect(activeLanguage) {
+        AppLanguageState.update(activeLanguage, settingsStore.deviceLanguageCode())
+    }
 
     // ── Network connectivity state ────────────────────────────────────────
     // True when at least one network is available. Drives offline-first boot
@@ -759,6 +763,7 @@ fun TvApp(
                                     deviceLanguageName = AppLanguage.fromTag(settingsStore.deviceLanguageCode())?.englishName ?: "English",
                                     onLanguageChange = { language ->
                                         activeLanguage = language
+                                        AppLanguageState.update(language, settingsStore.deviceLanguageCode())
                                         settingsStore.setLanguageOverride(language.takeIf { it != AppLanguage.SYSTEM }?.code)
                                     }
                                 )
@@ -1237,7 +1242,7 @@ private fun TvSidebar(
     val sections = configuredSections.mapNotNull { section ->
         val tvSection = section.toSection()
         val icon = iconForSection(tvSection)
-        if (icon != null) tvSection to (icon to section.label) else null
+        if (icon != null) tvSection to (icon to AppStrings.sectionLabel(section.key, section.label)) else null
     }
 
     Column(

@@ -254,7 +254,8 @@ class MediaTaskRunner(
             seasonNumber = request.seasonNumber,
             coverUrl = request.coverUrl,
             maxBytes = request.maxBytes,
-            headersJson = request.headersJson
+            headersJson = request.headersJson,
+            parentTitle = request.parentTitle
         )
     }
 
