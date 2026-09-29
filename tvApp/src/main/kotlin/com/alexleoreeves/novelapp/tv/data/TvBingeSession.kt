@@ -7,6 +7,7 @@ import com.alexleoreeves.novelapp.data.DonghuaServer
 import com.alexleoreeves.novelapp.data.StreamServer
 import com.alexleoreeves.novelapp.data.TvMediaRepository
 import com.alexleoreeves.novelapp.data.UnifiedSearchResult
+import com.alexleoreeves.novelapp.data.extractTvStreamFromEmbed
 import com.alexleoreeves.novelapp.data.isTvPlayableStreamUrl
 
 /**
@@ -132,11 +133,8 @@ fun deriveBingeKind(
 
 /**
  * Classifies a resolved stream URL into the right TV player:
- *  - Local offline media (file://, content://, local cache daemon) → LibVLC TvPlayerScreen.
- *  - All online streams / embeds / server content → TvEmbedPlayerScreen (WebPlayer).
- *
- * WebPlayer provides full subtitle options, anti-bot support, and stable
- * playback without LibVLC native player hangs on Android TV.
+ *  - Local offline media and real direct online streams → LibVLC TvPlayerScreen.
+ *  - HTML/embed pages → TvEmbedPlayerScreen.
  */
 fun buildTvBingeEpisode(
     chapter: Chapter,
@@ -145,7 +143,9 @@ fun buildTvBingeEpisode(
     isDonghua: Boolean
 ): TvBingeEpisode {
     val trimmed = rawUrl.trim()
-    val isDirect = isLocalOfflineMediaUrl(trimmed)
+    val isDirect = isLocalOfflineMediaUrl(trimmed) ||
+        isDonghuaworldVlcStreamUrl(trimmed) ||
+        isTvPlayableStreamUrl(trimmed)
     return TvBingeEpisode(
         chapter = chapter,
         url = trimmed,
@@ -169,9 +169,8 @@ fun isLocalOfflineMediaUrl(url: String): Boolean {
 /**
  * Resolves one episode's playback route on the session's chosen server.
  *
- * Every online server stream routes to the WebView embed player (TvEmbedPlayerScreen)
- * for reliable playback with native subtitles and player controls. Only local
- * offline downloads use LibVLC.
+ * Direct online streams (HLS/MP4/proxied media) route to LibVLC; HTML/embed
+ * pages stay in the WebView player.
  */
 suspend fun TvMediaRepository.resolveBingeEpisode(
     context: Context,
@@ -184,12 +183,19 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
 ): TvBingeEpisode? {
     val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
     val trimmed = resolved.trim()
+    val playbackUrl = if (trimmed.contains("vidsrc.sbs/", ignoreCase = true)) {
+        runCatching { extractTvStreamFromEmbed(context, trimmed, timeoutMs = 30_000L)?.url }
+            .getOrNull()
+            ?.takeIf { isTvPlayableStreamUrl(it) }
+            ?: trimmed
+    } else {
+        trimmed
+    }
     val kind = deriveBingeKind(item, chapter, isDonghua)
-    // The dedicated donghua source is the one online server whose streams are a
-    // PLAIN PUBLIC HLS (Rumble CDN, zero headers, ACAO:*), so LibVLC can play it
-    // directly — no WebView, no embed page, no redirect to a third-party site.
-    val isDonghuaVlcStream = isDonghua && (isDonghuaworldVlcStreamUrl(trimmed))
-    val isDirect = isLocalOfflineMediaUrl(trimmed) || isDonghuaVlcStream
+    val isDonghuaVlcStream = isDonghua && isDonghuaworldVlcStreamUrl(playbackUrl)
+    val isDirect = isLocalOfflineMediaUrl(playbackUrl) ||
+        isDonghuaVlcStream ||
+        isTvPlayableStreamUrl(playbackUrl)
 
     // Subtitles for the dedicated source. The backend caches the watch payload,
     // so this is a cheap follow-up to the resolve above. TMDB-sourced donghua has
@@ -206,7 +212,7 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
 
     return TvBingeEpisode(
         chapter = chapter ?: Chapter(item.title, item.detailPageUrl, 0),
-        url = trimmed,
+        url = playbackUrl,
         kind = kind,
         isDirect = isDirect,
         subtitleUrl = subtitleUrl

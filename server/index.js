@@ -1666,6 +1666,28 @@ function compactTitleKey(value) {
     return normalizeTitleKey(value).replace(/\s+/g, "");
 }
 
+function tmdbRegionMatches(item, normalizedType) {
+    if (!item) return false;
+    const language = String(item.original_language || "").toLowerCase();
+    const countries = Array.isArray(item.origin_country) ? item.origin_country.map((code) => String(code || "").toUpperCase()) : [];
+    if (normalizedType === "chinesemovies") {
+        return language === "zh" || countries.includes("CN") || countries.includes("HK") || countries.includes("TW");
+    }
+    if (normalizedType === "indian") {
+        return ["hi", "ta", "te", "ml", "bn", "mr", "pa", "gu", "kn", "ur"].includes(language) || countries.includes("IN");
+    }
+    if (normalizedType === "filipino") {
+        return language === "tl" || language === "fil" || countries.includes("PH");
+    }
+    return true;
+}
+
+function tmdbRegionBoost(item, normalizedType) {
+    if (tmdbRegionMatches(item, normalizedType)) return 180;
+    if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino") return -220;
+    return 0;
+}
+
 function tmdbResultScore(item, query, normalizedType) {
     if (!query) return Number(item.popularity || 0);
 
@@ -1699,6 +1721,7 @@ function tmdbResultScore(item, query, normalizedType) {
         if (mediaType === "movie" && /\b(movie|film|ova|broly|the movie)\b/i.test(query)) score += 110;
         if (mediaType === "tv" && /\b(series|season|episode|z|super|gt)\b/i.test(query)) score += 60;
     }
+    score += tmdbRegionBoost(item, normalizedType);
 
     score += Math.min(Number(item.popularity || 0), 100);
     return score;
@@ -1806,7 +1829,8 @@ async function tmdbItems(type, query, page = 1) {
         // Multi-search returns both movies and TV in one call, which is essential for
         // finding results like "agency" (a movie) or "forever 2024" (a TV show/movie).
         // We then filter by media_type appropriately.
-        if (normalizedType === "movies" || normalizedType === "classic" || normalizedType === "cartoon" || normalizedType === "kdrama" || normalizedType === "anime") {
+        if (normalizedType === "movies" || normalizedType === "classic" || normalizedType === "cartoon" || normalizedType === "kdrama" || normalizedType === "anime" ||
+            normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino") {
             endpoint = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
         } else {
             endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
@@ -1849,6 +1873,25 @@ async function tmdbItems(type, query, page = 1) {
         __media_type: item.media_type || mediaType
     }));
 
+    if (!query && (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino")) {
+        let tvEndpoint = "";
+        if (normalizedType === "chinesemovies") {
+            tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        } else if (normalizedType === "indian") {
+            tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=IN&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        } else if (normalizedType === "filipino") {
+            tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=PH&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        }
+        if (tvEndpoint) {
+            const tvPayload = await fetchWithTimeout(tvEndpoint, { headers }).catch(() => null);
+            const tvResults = ((tvPayload && tvPayload.results) || []).map((item) => ({
+                ...item,
+                __media_type: "tv"
+            }));
+            results = results.concat(tvResults);
+        }
+    }
+
     if (!query && normalizedType === "anime") {
         const movieEndpoint = `https://api.themoviedb.org/3/discover/movie?with_genres=16&with_original_language=ja&with_keywords=210024&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
         const moviePayload = await fetchWithTimeout(movieEndpoint, { headers }).catch(() => null);
@@ -1887,6 +1930,11 @@ async function tmdbItems(type, query, page = 1) {
     // For classic multi-search, filter to TV only
     if (query && normalizedType === "classic" && endpoint.includes("/search/multi")) {
         results = results.filter(item => item.media_type === "tv");
+    }
+
+    if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino") {
+        const filteredRegional = results.filter((item) => tmdbRegionMatches(item, normalizedType));
+        if (filteredRegional.length) results = filteredRegional;
     }
 
     if (query) {

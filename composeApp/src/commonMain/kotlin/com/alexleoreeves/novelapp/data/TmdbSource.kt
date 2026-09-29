@@ -198,9 +198,9 @@ class TmdbSource(
                     }
                 }
             VideoCategory.MOVIES -> searchMulti(query, page, category)
-            VideoCategory.CHINESE_MOVIES -> searchMulti(query, page, category)
-            VideoCategory.INDIAN -> searchMulti(query, page, category)
-            VideoCategory.FILIPINO -> searchMulti(query, page, category)
+            VideoCategory.CHINESE_MOVIES,
+            VideoCategory.INDIAN,
+            VideoCategory.FILIPINO -> searchAsianRegion(query, page, category)
             VideoCategory.NIGERIAN -> searchMulti(query, page, category)
                 .filter { item ->
                     item.genre.contains("Nigeria", ignoreCase = true) ||
@@ -241,17 +241,25 @@ class TmdbSource(
      * so the catalog and the stream never depend on each other's coverage.
      */
     private suspend fun fetchChineseMovies(page: Int): List<UnifiedSearchResult> = runCatching {
-        // Chinese-language films (mainland) + HK/TW co-productions + series.
-        val movies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+        // Mainland / HK / TW films + series, biased toward the region the tab
+        // is for instead of the generic global movie feed.
+        val zhMovies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
             parameter("with_original_language", "zh")
         }
-        val hkTw = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
-            parameter("with_origin_country", "HK|TW")
+        val mainlandMovies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_origin_country", "CN")
+        }
+        val hkMovies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_origin_country", "HK")
+        }
+        val twMovies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_origin_country", "TW")
         }
         val series = discover("tv", page, VideoCategory.CHINESE_MOVIES) {
             parameter("with_original_language", "zh")
         }
-        interleaveUnique(listOf(movies, hkTw, series))
+        interleaveUnique(listOf(zhMovies, mainlandMovies, hkMovies, twMovies, series))
+            .filter { it.matchesRegionCategory(VideoCategory.CHINESE_MOVIES) }
     }.getOrElse { emptyList() }
 
     /** Indian cinema: origin-country driven so every regional industry is included. */
@@ -259,10 +267,20 @@ class TmdbSource(
         val movies = discover("movie", page, VideoCategory.INDIAN) {
             parameter("with_origin_country", "IN")
         }
+        val hindiMovies = discover("movie", page, VideoCategory.INDIAN) {
+            parameter("with_original_language", "hi")
+        }
+        val tamilMovies = discover("movie", page, VideoCategory.INDIAN) {
+            parameter("with_original_language", "ta")
+        }
+        val teluguMovies = discover("movie", page, VideoCategory.INDIAN) {
+            parameter("with_original_language", "te")
+        }
         val series = discover("tv", page, VideoCategory.INDIAN) {
             parameter("with_origin_country", "IN")
         }
-        interleaveUnique(listOf(movies, series))
+        interleaveUnique(listOf(movies, hindiMovies, tamilMovies, teluguMovies, series))
+            .filter { it.matchesRegionCategory(VideoCategory.INDIAN) }
     }.getOrElse { emptyList() }
 
     /** Filipino cinema (Star Cinema / Viva / Regal releases and TV). */
@@ -273,10 +291,14 @@ class TmdbSource(
         val byLanguage = discover("movie", page, VideoCategory.FILIPINO) {
             parameter("with_original_language", "tl")
         }
+        val byFilipinoLanguage = discover("movie", page, VideoCategory.FILIPINO) {
+            parameter("with_original_language", "fil")
+        }
         val series = discover("tv", page, VideoCategory.FILIPINO) {
             parameter("with_origin_country", "PH")
         }
-        interleaveUnique(listOf(movies, byLanguage, series))
+        interleaveUnique(listOf(movies, byLanguage, byFilipinoLanguage, series))
+            .filter { it.matchesRegionCategory(VideoCategory.FILIPINO) }
     }.getOrElse { emptyList() }
 
     /** Round-robin merge that keeps a row varied instead of front-loaded. */
@@ -291,6 +313,26 @@ class TmdbSource(
             }
         }
         return out
+    }
+
+    /**
+     * Regional search used by the Asian tab. Search both movie and TV so
+     * Filipino and Chinese series are not dropped behind movie-only endpoints.
+     */
+    private suspend fun searchAsianRegion(
+        query: String,
+        page: Int,
+        category: VideoCategory
+    ): List<UnifiedSearchResult> {
+        val combined = (
+            searchMulti(query, page, category) +
+                searchMovie(query, page, category) +
+                searchTv(query, page, category)
+            )
+            .distinctBy { it.id }
+
+        val filtered = combined.filter { it.matchesRegionCategory(category) }
+        return filtered.ifEmpty { combined }
     }
 
 
@@ -756,7 +798,7 @@ class TmdbSource(
             add(category.label)
             genreIds().mapNotNull { genreName(it) }.forEach(::add)
             if (language.isNotBlank()) add(language)
-            originCountries().firstOrNull()?.let(::add)
+            countryLabels().forEach(::add)
         }.distinct().joinToString(", ")
 
         return UnifiedSearchResult(
@@ -782,15 +824,65 @@ class TmdbSource(
     private fun JsonObject.originCountries(): List<String> =
         this["origin_country"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
 
+    private fun JsonObject.countryLabels(): List<String> =
+        originCountries().mapNotNull { originCountryLabel(it) }
+
     private fun JsonObject.languageLabel(): String =
         when (this["original_language"]?.jsonPrimitive?.contentOrNull) {
             "ja" -> "Japanese"
             "ko" -> "Korean"
+            "zh", "cn" -> "Chinese"
+            "hi" -> "Hindi"
+            "ta" -> "Tamil"
+            "te" -> "Telugu"
+            "ml" -> "Malayalam"
+            "bn" -> "Bengali"
+            "mr" -> "Marathi"
+            "pa" -> "Punjabi"
+            "gu" -> "Gujarati"
+            "kn" -> "Kannada"
+            "ur" -> "Urdu"
+            "tl", "fil" -> "Tagalog"
             "en" -> "English"
             "fr" -> "French"
             "es" -> "Spanish"
             else -> ""
         }
+
+    private fun originCountryLabel(code: String): String? =
+        when (code.uppercase()) {
+            "CN" -> "China"
+            "HK" -> "Hong Kong"
+            "TW" -> "Taiwan"
+            "IN" -> "India"
+            "PH" -> "Philippines"
+            "JP" -> "Japan"
+            "KR" -> "South Korea"
+            "US" -> "United States"
+            "GB" -> "United Kingdom"
+            else -> null
+        }
+
+    private fun UnifiedSearchResult.matchesRegionCategory(category: VideoCategory): Boolean {
+        val text = listOf(title, genre, synopsis).joinToString(" ").lowercase()
+        return when (category) {
+            VideoCategory.CHINESE_MOVIES ->
+                (text.contains("china") || text.contains("chinese") ||
+                    text.contains("hong kong") || text.contains("taiwan") ||
+                    text.contains("mandarin") || text.contains("cantonese")) &&
+                    !text.contains("japanese") && !text.contains("korean")
+            VideoCategory.INDIAN ->
+                text.contains("india") || text.contains("indian") ||
+                    text.contains("hindi") || text.contains("tamil") ||
+                    text.contains("telugu") || text.contains("malayalam") ||
+                    text.contains("marathi") || text.contains("punjabi") ||
+                    text.contains("bengali")
+            VideoCategory.FILIPINO ->
+                text.contains("philippines") || text.contains("filipino") ||
+                    text.contains("tagalog") || text.contains("pinoy")
+            else -> true
+        }
+    }
 
     private fun genreName(id: Int): String? = when (id) {
         12 -> "Adventure"

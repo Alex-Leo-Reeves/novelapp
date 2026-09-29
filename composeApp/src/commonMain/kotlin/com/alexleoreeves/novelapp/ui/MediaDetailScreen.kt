@@ -211,6 +211,29 @@ fun MediaDetailScreen(
 
     fun selectedDonghuaScraper(): DonghuaSiteScraper = donghuaStreamScraper
 
+    /**
+     * Dedicated regional sources publish both the upstream CDN URL and a
+     * same-origin proxy fallback. Prefer the proxy when present so playback and
+     * downloads keep working on networks that block the upstream host.
+     */
+    fun preferredRegionalUrl(directUrl: String, proxyUrl: String): String? =
+        proxyUrl.takeIf { it.isNotBlank() }
+            ?: directUrl.takeIf { it.isNotBlank() }
+
+    /** Dedicated regional backends need the real TMDB media type. */
+    fun asianResolvedMediaType(): String = when {
+        isTmdbDetail -> mediaType
+        providerTmdbId.isNotBlank() -> providerTmdbType
+        isMovieContent -> "movie"
+        else -> "tv"
+    }
+
+    fun isAstraSelected(): Boolean = when {
+        isDonghuaItem -> selectedDonghuaServer == DonghuaServer.VIDSRC_SBS
+        isAnimeItem -> selectedAnimeServer == AnimeServer.VIDSRC_SBS
+        else -> selectedServer == StreamServer.VIDSRC_SBS
+    }
+
     /** Resolve the AniList ID for anime-only servers (Anivexa providers). */
     suspend fun resolveAnimeAnilistId(): String? {
         if (providerAnilistId.isNotBlank()) return providerAnilistId
@@ -275,8 +298,15 @@ fun MediaDetailScreen(
             DonghuaServer.DONGHUAWORLD -> {
                 // The episode URL is the donghuaworld episode page; the backend
                 // turns it into a public Rumble HLS master (zero headers).
-                val resolved = donghuaApi.resolveEpisodeStream(ep.url)
-                resolved?.playbackUrl?.takeIf { it.isNotBlank() }
+                val resolved = if (DonghuaApi.isDonghuaworldUrl(ep.url)) {
+                    donghuaApi.resolveEpisodeStream(ep.url)
+                } else {
+                    null
+                } ?: donghuaApi.resolveByTitle(item.title, ep.episodeNumber.coerceAtLeast(1))
+                preferredRegionalUrl(
+                    directUrl = resolved?.playbackUrl.orEmpty(),
+                    proxyUrl = resolved?.playbackProxyUrl.orEmpty()
+                )
             }
             DonghuaServer.MOVIE_SERVER_1 -> {
                 val tmdb = tmdbId.ifBlank { providerTmdbId }
@@ -418,7 +448,7 @@ fun MediaDetailScreen(
                                         title = item.title,
                                         region = asianRegion,
                                         tmdbId = tmdbId.ifBlank { providerTmdbId },
-                                        mediaType = "movie"
+                                        mediaType = asianResolvedMediaType()
                                     )
                                 }.getOrNull()
                                 if (playback == null || playback.isYouTube) {
@@ -429,7 +459,10 @@ fun MediaDetailScreen(
                                     }
                                     null
                                 } else {
-                                    playback.playbackUrl
+                                    preferredRegionalUrl(
+                                        directUrl = playback.playbackUrl,
+                                        proxyUrl = playback.playbackProxyUrl
+                                    )
                                 }
                             }
                             isDonghuaItem -> resolveDonghuaEpisodeUrl(ep)
@@ -746,7 +779,7 @@ fun MediaDetailScreen(
             }
             statusText = "Resolving stream via $serverLabel..."
 
-            val shouldResolveInParallel = isDonghuaItem || isAnimeItem || isTmdbDetail
+            val shouldResolveInParallel = !showServerSelectors && (isDonghuaItem || isAnimeItem || isTmdbDetail)
 
             // ── Asian tab regions: each has its own dedicated server ─────
             // Chinese Movies and Indian come back as a DIRECT public HLS URL
@@ -760,7 +793,7 @@ fun MediaDetailScreen(
                         title = item.title,
                         region = asianRegion,
                         tmdbId = tmdbId.ifBlank { providerTmdbId },
-                        mediaType = "movie"
+                        mediaType = asianResolvedMediaType()
                     )
                 }.getOrNull()
                 if (asianPlayback == null) {
@@ -779,9 +812,17 @@ fun MediaDetailScreen(
                     )
                     return@launch
                 }
+                val playbackUrl = preferredRegionalUrl(
+                    directUrl = asianPlayback.playbackUrl,
+                    proxyUrl = asianPlayback.playbackProxyUrl
+                )
+                if (playbackUrl.isNullOrBlank()) {
+                    statusText = "No playable stream was returned by the ${asianRegion.label} server."
+                    return@launch
+                }
                 statusText = ""
                 tryPlayStream(
-                    asianPlayback.playbackUrl,
+                    playbackUrl,
                     "${item.title} - ${ep.title}",
                     if (isPremium) null else freeMoviePreviewMs,
                     null,
@@ -994,12 +1035,45 @@ fun MediaDetailScreen(
             // All embed paths pass a 20-minute hard cap for free users — the
             // WebView player can't read duration reliably, so a flat cap
             // guarantees free users can never finish a full episode/movie.
-            tryPlayEmbed(
-                embedUrl,
-                "${item.title} - ${ep.title}",
-                if (isPremium) null else freeMoviePreviewMs,
-                ep.episodeNumber
-            )
+            if (embedUrl.isDirectPlayableStreamUrl()) {
+                tryPlayStream(
+                    embedUrl,
+                    "${item.title} - ${ep.title}",
+                    if (isPremium) null else freeEpisodePreviewMs,
+                    null,
+                    null,
+                    ep.episodeNumber
+                )
+            } else if (isAstraSelected()) {
+                statusText = "Astra: extracting direct stream..."
+                val extracted = extractStreamFromEmbed(embedUrl, timeoutMs = 30_000L)
+                if (!extracted.isNullOrBlank() && extracted.isDirectPlayableStreamUrl()) {
+                    statusText = ""
+                    tryPlayStream(
+                        extracted,
+                        "${item.title} - ${ep.title}",
+                        if (isPremium) null else freeEpisodePreviewMs,
+                        null,
+                        null,
+                        ep.episodeNumber
+                    )
+                } else {
+                    statusText = "Astra direct stream unavailable. Loading embed..."
+                    tryPlayEmbed(
+                        embedUrl,
+                        "${item.title} - ${ep.title}",
+                        if (isPremium) null else freeMoviePreviewMs,
+                        ep.episodeNumber
+                    )
+                }
+            } else {
+                tryPlayEmbed(
+                    embedUrl,
+                    "${item.title} - ${ep.title}",
+                    if (isPremium) null else freeMoviePreviewMs,
+                    ep.episodeNumber
+                )
+            }
         }
     }
 
@@ -1277,6 +1351,49 @@ fun MediaDetailScreen(
                     onClick = {
                         scope.launch {
                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
+                            if (isAsianItem && asianRegion != null) {
+                                statusText = "Resolving ${asianRegion.label} stream..."
+                                val asianPlayback = runCatching {
+                                    asianApi.resolve(
+                                        title = item.title,
+                                        region = asianRegion,
+                                        tmdbId = resolvedTmdbId,
+                                        mediaType = asianResolvedMediaType()
+                                    )
+                                }.getOrNull()
+                                if (asianPlayback == null) {
+                                    statusText = "This title is not on the ${asianRegion.label} server."
+                                    return@launch
+                                }
+                                if (asianPlayback.isYouTube) {
+                                    statusText = ""
+                                    tryPlayEmbed(
+                                        "https://www.youtube.com/embed/${asianPlayback.youtubeVideoId}?autoplay=1&playsinline=1",
+                                        item.title,
+                                        if (isPremium) null else freeMoviePreviewMs,
+                                        0
+                                    )
+                                    return@launch
+                                }
+                                val playbackUrl = preferredRegionalUrl(
+                                    directUrl = asianPlayback.playbackUrl,
+                                    proxyUrl = asianPlayback.playbackProxyUrl
+                                )
+                                if (playbackUrl.isNullOrBlank()) {
+                                    statusText = "No playable stream was returned by the ${asianRegion.label} server."
+                                    return@launch
+                                }
+                                statusText = ""
+                                tryPlayStream(
+                                    playbackUrl,
+                                    item.title,
+                                    if (isPremium) null else freeMoviePreviewMs,
+                                    null,
+                                    null,
+                                    0
+                                )
+                                return@launch
+                            }
                             // ── CinePro: Fetch ALL direct stream sources from the server ─
                             if (selectedServer == StreamServer.CINEPRO) {
                                 val serverBase = AppReleaseConfig.SERVER_BASE_URL
@@ -1310,6 +1427,31 @@ fun MediaDetailScreen(
                                 val embedUrl = StreamServer.VIDLINK_EXO.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
                                 statusText = ""
                                 tryPlayStream(embedUrl, item.title, if (isPremium) null else freeMoviePreviewMs, null, null, 0)
+                                return@launch
+                            }
+                            if (selectedServer == StreamServer.VIDSRC_SBS) {
+                                val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
+                                statusText = "Astra: extracting direct stream..."
+                                val extracted = extractStreamFromEmbed(embedUrl, timeoutMs = 30_000L)
+                                if (!extracted.isNullOrBlank() && extracted.isDirectPlayableStreamUrl()) {
+                                    statusText = ""
+                                    tryPlayStream(
+                                        extracted,
+                                        item.title,
+                                        if (isPremium) null else freeMoviePreviewMs,
+                                        null,
+                                        null,
+                                        0
+                                    )
+                                    return@launch
+                                }
+                                statusText = "Astra direct stream unavailable. Loading embed..."
+                                tryPlayEmbed(
+                                    embedUrl,
+                                    item.title,
+                                    if (isPremium) null else freeMoviePreviewMs,
+                                    0
+                                )
                                 return@launch
                             }
                             val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
@@ -1363,7 +1505,7 @@ fun MediaDetailScreen(
                                                         title = item.title,
                                                         region = asianRegion,
                                                         tmdbId = resolvedTmdbId,
-                                                        mediaType = "movie"
+                                                        mediaType = asianResolvedMediaType()
                                                     )
                                                 }.getOrNull()
                                             } else null
@@ -1381,7 +1523,12 @@ fun MediaDetailScreen(
                                                 refreshTrigger++
                                                 return@launch
                                             }
-                                            val sourceUrl = asianMoviePlayback?.playbackUrl
+                                            val sourceUrl = asianMoviePlayback?.let {
+                                                preferredRegionalUrl(
+                                                    directUrl = it.playbackUrl,
+                                                    proxyUrl = it.playbackProxyUrl
+                                                )
+                                            }
                                                 ?: selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
                                             // CinePro context for movie download (Asian items stay
                                             // on their dedicated direct server instead)

@@ -568,10 +568,15 @@ class TvMediaRepository {
                 val tmdbId = marker?.tmdbId.orEmpty().ifBlank {
                     item.id.removePrefix("tmdb_movie_").removePrefix("tmdb_tv_").trim()
                 }
-                val resolved = retryNullable {
-                    asianApi.resolve(item.title, region, tmdbId, "movie")
+                val mediaType = marker?.mediaType ?: when {
+                    item.detailPageUrl.contains("tmdb://tv/") -> "tv"
+                    item.id.startsWith("tmdb_tv_") -> "tv"
+                    else -> "movie"
                 }
-                val direct = resolved?.playbackUrl
+                val resolved = retryNullable {
+                    asianApi.resolve(item.title, region, tmdbId, mediaType)
+                }
+                val direct = resolved?.playbackProxyUrl?.ifBlank { resolved.playbackUrl }
                 if (!direct.isNullOrBlank()) return direct
                 val youtubeId = resolved?.youtubeVideoId
                 if (!youtubeId.isNullOrBlank()) {
