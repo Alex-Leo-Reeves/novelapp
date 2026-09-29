@@ -38,6 +38,7 @@ import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
 import com.alexleoreeves.novelapp.tv.mediacache.UsbVolume
 import com.alexleoreeves.novelapp.tv.ui.components.TvEpisodeDownloadModal
 import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** First download-ready (range-capable or HLS) candidate picked by the auto-resolver. */
 private data class TvDownloadPick(
@@ -81,6 +82,15 @@ fun TvDetailScreen(
         else "novel"
         
     val isDonghua = kind == "donghua" || item.genre.contains("Donghua", true) || item.sourceName.contains("Donghua", true)
+
+    // ── Asian tab regions ────────────────────────────────────────────────
+    // Chinese Movies / Indian / Filipino play on their own dedicated server
+    // (see data/AsianApi.kt). The region branch inside resolveStreamUrl
+    // preempts the generic StreamServer row — without this label the UI kept
+    // announcing "via Nebula" while the region server was the real source.
+    val asianRegion = item.asianVideoCategory()?.let { category ->
+        AsianApi.REGIONS.firstOrNull { it.key == category.asianRegionKey }
+    }
 
     // Whether the header shows a single "Watch Now" (movie / full-movie) vs an
     // episode list. Hoisted here so BOTH the left panel (Download button) and
@@ -201,7 +211,16 @@ fun TvDetailScreen(
     ): TvDownloadPick? {
         val probed = HashSet<String>()
         val options = ArrayList<Triple<String, String, suspend () -> String?>>()
-        if (isDonghua) {
+        if (asianRegion != null) {
+            // ONE option: the region's own dedicated server. Walking the
+            // generic StreamServer row would resolve the same region stream
+            // five times (the region branch preempts every option) and report
+            // misleading "Checking server … (Nebula)" statuses.
+            val region = asianRegion
+            options.add(Triple("asian_${region.key}", "${region.label} server") {
+                mediaRepo.resolveStreamUrl(item = item, chapter = ch, server = selectedServer, donghuaServer = null, animeServer = null)
+            })
+        } else if (isDonghua) {
             val ordered = listOf(selectedDonghuaServer) +
                 DonghuaServer.DONGHUA_SELECTOR.filter { it != selectedDonghuaServer }
             ordered.take(5).forEach { server ->
@@ -229,19 +248,23 @@ fun TvDetailScreen(
 
         options.forEachIndexed { index, (serverId, serverName, resolve) ->
             statusText = "Checking server ${index + 1}/${options.size} ($serverName) for downloads..."
-            val raw = runCatching { resolve() }.getOrNull()
+            // Every resolve is BOUNDED: a hung upstream (the blocked donghuaworld
+            // resolve used to run for minutes) must never stall the queue here.
+            val raw = runCatching { withTimeoutOrNull(45_000L) { resolve() } }.getOrNull()
             if (raw.isNullOrBlank()) return@forEachIndexed
             val qualities = runCatching {
-                tvResolveDownloadableQualities(
-                    httpClient = mediaRepo.client,
-                    sourceUrl = raw,
-                    // CinePro's TMDB sweep does not depend on the selected
-                    // server — run it once (first option) instead of per server.
-                    tmdbContext = if (index == 0) tmdbContext else null,
-                    onStatus = { msg: String -> statusText = msg },
-                    context = context
-                )
-            }.getOrDefault(emptyList())
+                withTimeoutOrNull(60_000L) {
+                    tvResolveDownloadableQualities(
+                        httpClient = mediaRepo.client,
+                        sourceUrl = raw,
+                        // CinePro's TMDB sweep does not depend on the selected
+                        // server — run it once (first option) instead of per server.
+                        tmdbContext = if (index == 0) tmdbContext else null,
+                        onStatus = { msg: String -> statusText = msg },
+                        context = context
+                    )
+                }
+            }.getOrNull() ?: emptyList()
             for (quality in qualities.take(4)) {
                 if (!probed.add(quality.url)) continue
                 val headersJson = quality.headersJson ?: mediaRepo.resolveAnivexaDownloadHeaders(ch.url).orEmpty()
@@ -442,6 +465,7 @@ fun TvDetailScreen(
                     item = item,
                     episodes = episodes,
                     serverName = when {
+                        asianRegion != null -> "${asianRegion.label} server"
                         animeFallbackActive -> selectedServer.displayName
                         isAnimeItem -> selectedAnimeServer.displayName
                         isDonghua -> selectedDonghuaServer.displayName

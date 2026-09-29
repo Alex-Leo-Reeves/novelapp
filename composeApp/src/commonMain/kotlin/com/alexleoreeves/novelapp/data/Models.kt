@@ -80,6 +80,21 @@ enum class VideoCategory(val label: String) {
         }
 }
 
+/**
+ * The Asian-tab region this item belongs to, or null.
+ *
+ * Two sources produce different spellings for the same region: TMDB-sourced
+ * rows carry the enum name (`CHINESE_MOVIES`) while backend content rows
+ * carry the backend kind (`chinesemovies`). Matching on the underscore-stripped
+ * lowercase form of both makes them interchangeable — without this, Chinese
+ * titles never matched their region and fell through to the Nebula server.
+ */
+fun UnifiedSearchResult.asianVideoCategory(): VideoCategory? =
+    VideoCategory.entries.firstOrNull { category ->
+        category.isAsian &&
+            mediaKind.filter { it != '_' }.equals(category.name.filter { it != '_' }, ignoreCase = true)
+    }
+
 // ───────────────────────────────────────────────
 //  Chapter reference (title + URL)
 // ───────────────────────────────────────────────

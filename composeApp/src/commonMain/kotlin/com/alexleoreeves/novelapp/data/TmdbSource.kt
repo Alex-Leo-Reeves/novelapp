@@ -262,6 +262,41 @@ class TmdbSource(
             .filter { it.matchesRegionCategory(VideoCategory.CHINESE_MOVIES) }
     }.getOrElse { emptyList() }
 
+    /**
+     * ASIAN tab row — Wuxia & Martial Arts (Chinese action/fantasy films +
+     * series). Tagged [VideoCategory.CHINESE_MOVIES] so every item routes
+     * through the Chinese region's dedicated direct-HLS server.
+     */
+    suspend fun fetchWuxiaRow(page: Int = 1): List<UnifiedSearchResult> = runCatching {
+        val movies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_original_language", "zh")
+            // TMDB genre 28 = Action — the martial-arts backbone.
+            parameter("with_genres", "28")
+        }
+        val series = discover("tv", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_original_language", "zh")
+            parameter("with_genres", "28")
+        }
+        interleaveUnique(listOf(movies, series))
+    }.getOrElse { emptyList() }
+
+    /**
+     * ASIAN tab row — Xianxia & Cultivation (Chinese fantasy films + series).
+     * Same CHINESE_MOVIES tagging → the Chinese region's server.
+     */
+    suspend fun fetchXianxiaRow(page: Int = 1): List<UnifiedSearchResult> = runCatching {
+        val movies = discover("movie", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_original_language", "zh")
+            // TMDB genre 14 = Fantasy — xianxia/cultivation stories live here.
+            parameter("with_genres", "14")
+        }
+        val series = discover("tv", page, VideoCategory.CHINESE_MOVIES) {
+            parameter("with_original_language", "zh")
+            parameter("with_genres", "14")
+        }
+        interleaveUnique(listOf(movies, series))
+    }.getOrElse { emptyList() }
+
     /** Indian cinema: origin-country driven so every regional industry is included. */
     private suspend fun fetchIndian(page: Int): List<UnifiedSearchResult> = runCatching {
         val movies = discover("movie", page, VideoCategory.INDIAN) {

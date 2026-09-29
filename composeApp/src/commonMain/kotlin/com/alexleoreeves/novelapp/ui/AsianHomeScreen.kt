@@ -60,27 +60,33 @@ fun AsianHomeScreen(
         )
     }
 
-    val rows = remember {
+    // (row label, region category for the server badge, fetch lambda). The
+    // two genre rows (Wuxia/Martial Arts + Xianxia/Cultivation) carry
+    // CHINESE_MOVIES because TmdbSource tags their items with that mediaKind,
+    // which routes them through the Chinese region's dedicated server.
+    val rows: List<Triple<String, VideoCategory, suspend () -> List<UnifiedSearchResult>>> = remember {
         listOf(
-            VideoCategory.CHINESE_MOVIES to "Chinese Movies",
-            VideoCategory.INDIAN to "Indian",
-            VideoCategory.FILIPINO to "Filipino"
+            Triple("Chinese Movies", VideoCategory.CHINESE_MOVIES) { tmdb.fetchVideo(VideoCategory.CHINESE_MOVIES, 1) },
+            Triple("Indian", VideoCategory.INDIAN) { tmdb.fetchVideo(VideoCategory.INDIAN, 1) },
+            Triple("Filipino", VideoCategory.FILIPINO) { tmdb.fetchVideo(VideoCategory.FILIPINO, 1) },
+            Triple("Wuxia & Martial Arts", VideoCategory.CHINESE_MOVIES) { tmdb.fetchWuxiaRow(1) },
+            Triple("Xianxia & Cultivation", VideoCategory.CHINESE_MOVIES) { tmdb.fetchXianxiaRow(1) }
         )
     }
 
-    var rowData by remember { mutableStateOf<Map<VideoCategory, List<UnifiedSearchResult>>>(emptyMap()) }
+    var rowData by remember { mutableStateOf<Map<String, List<UnifiedSearchResult>>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         loading = true
-        // All three rows load in parallel so the tab is never half-empty.
+        // All rows load in parallel so the tab is never half-empty.
         val loaded = coroutineScope {
-            rows.map { (category, _) ->
+            rows.map { row ->
                 async {
-                    val items = runCatching { tmdb.fetchVideo(category, 1) }
+                    val items = runCatching { row.third() }
                         .getOrElse { emptyList() }
                         .filter { !isKidsMode || !it.genre.contains("horror", ignoreCase = true) }
-                    category to items
+                    row.first to items
                 }
             }.awaitAll()
         }
@@ -103,7 +109,7 @@ fun AsianHomeScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Chinese movies, Indian and Filipino — each on its own server",
+                    "Chinese movies, wuxia & xianxia, Indian and Filipino — each on its own server",
                     color = currentTheme.subTextColor(),
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -116,10 +122,9 @@ fun AsianHomeScreen(
             }
         }
 
-        items(rows) { pair ->
-            val category = pair.first
-            val label = pair.second
-            val regionItems = rowData[category].orEmpty()
+        items(rows) { row ->
+            val label = row.first
+            val regionItems = rowData[label].orEmpty()
             Column(modifier = Modifier.padding(bottom = 18.dp)) {
                 Row(
                     modifier = Modifier
@@ -135,7 +140,7 @@ fun AsianHomeScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        serverLabelFor(category),
+                        serverLabelFor(row.second),
                         color = currentTheme.accentColor(),
                         style = MaterialTheme.typography.labelSmall
                     )

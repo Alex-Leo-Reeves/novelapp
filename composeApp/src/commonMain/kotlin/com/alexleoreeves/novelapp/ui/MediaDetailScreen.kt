@@ -64,6 +64,10 @@ fun MediaDetailScreen(
     val luciferDonghuaScraper = remember { DonghuaSiteScraper.luciferDonghua(httpClient) }
     val animeXinScraper = remember { AnimeXinScraper(httpClient) }
     val donghuaApi = remember { DonghuaApi(httpClient) }
+    // Device-side donghuaworld scrape — the backend's Render egress is
+    // 403-blocked by the site and its public relays are dead (60 s+ failures),
+    // so Loong resolves from the device's residential IP instead.
+    val donghuaWorldScraper = remember { DonghuaWorldScraper(httpClient) }
     val asianApi = remember { AsianApi(httpClient) }
     val anivexaApi = remember { AnivexaApi(httpClient) }
     val aninekoScraper = remember { AninekoScraper(httpClient) }
@@ -179,9 +183,9 @@ fun MediaDetailScreen(
     // One dedicated server per region (see data/AsianApi.kt + server/asian-handlers.js).
     // Chinese Movies and Indian resolve to a DIRECT public HLS playlist;
     // Filipino falls back to the official Star Cinema / Viva / Regal uploads.
-    val asianCategory = VideoCategory.entries.firstOrNull { category ->
-        category.isAsian && item.mediaKind.equals(category.name, ignoreCase = true)
-    }
+    // `asianVideoCategory()` matches BOTH spellings of the region kind
+    // (enum name vs backend `chinesemovies`) — see Models.kt.
+    val asianCategory = item.asianVideoCategory()
     val isAsianItem = asianCategory != null
     val asianRegion = asianCategory?.let { category ->
         AsianApi.REGIONS.firstOrNull { it.key == category.asianRegionKey }
@@ -296,13 +300,25 @@ fun MediaDetailScreen(
     suspend fun resolveDonghuaEpisodeUrl(ep: MediaEpisode): String? {
         return when (selectedDonghuaServer) {
             DonghuaServer.DONGHUAWORLD -> {
-                // The episode URL is the donghuaworld episode page; the backend
-                // turns it into a public Rumble HLS master (zero headers).
-                val resolved = if (DonghuaApi.isDonghuaworldUrl(ep.url)) {
-                    donghuaApi.resolveEpisodeStream(ep.url)
-                } else {
-                    null
-                } ?: donghuaApi.resolveByTitle(item.title, ep.episodeNumber.coerceAtLeast(1))
+                // Device-side scrape FIRST: donghuaworld 403s Render's egress
+                // and every public relay is dead, so the backend resolve took
+                // 60+ s then failed ("Resolving stream..." forever). The
+                // device's residential IP answers in seconds; the backend
+                // stays as a BOUNDED fallback for when its relays recover.
+                val local = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
+                    donghuaWorldScraper.resolveEpisodeStream(ep.url)
+                }
+                val localPlayable = local?.takeIf { it.playbackUrl.isNotBlank() }
+                    ?: kotlinx.coroutines.withTimeoutOrNull(25_000L) {
+                        donghuaWorldScraper.resolveByTitle(item.title, ep.episodeNumber.coerceAtLeast(1))
+                    }
+                // Backend only as a last resort, ONE bounded attempt: its
+                // donghuaworld route is 403-blocked from Render today, so the
+                // old retry×3 + by-title chain (the 60 s+ hang) is gone.
+                val resolved = localPlayable
+                    ?: kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                        donghuaApi.resolveEpisodeStream(ep.url)
+                    }
                 preferredRegionalUrl(
                     directUrl = resolved?.playbackUrl.orEmpty(),
                     proxyUrl = resolved?.playbackProxyUrl.orEmpty()
@@ -622,8 +638,22 @@ fun MediaDetailScreen(
                 when (selectedDonghuaServer) {
                     DonghuaServer.DONGHUAWORLD -> {
                         // Dedicated donghua source: its own episode grid (numbered,
-                        // ascending, with Sub/Dub labels) scraped by the backend.
-                        val eps = donghuaApi.fetchEpisodesForTitle(item.title)
+                        // ascending, with Sub/Dub labels). Device-side FIRST — the
+                        // backend's Render egress is 403-blocked by the site and
+                        // its relays are dead, so /series took 60 s+ and failed.
+                        // Backend stays a BOUNDED fallback; AnimeXin the last
+                        // resort so the tab still lists episodes.
+                        val deviceEps = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                            donghuaWorldScraper.fetchEpisodesForTitle(item.title)
+                        }.orEmpty()
+                        val backendEps = if (deviceEps.isEmpty()) {
+                            kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                                donghuaApi.fetchEpisodesForTitle(item.title)
+                            }.orEmpty()
+                        } else {
+                            emptyList()
+                        }
+                        val eps = deviceEps.ifEmpty { backendEps }
                         if (eps.isNotEmpty()) eps
                         else animeXinScraper.fetchEpisodes(item.title, maxEpisodes = 300)
                     }
@@ -773,6 +803,7 @@ fun MediaDetailScreen(
     val playEpisode: (MediaEpisode) -> Unit = { ep ->
         scope.launch {
             val serverLabel = when {
+                asianRegion != null -> "${asianRegion.label} server"
                 isDonghuaItem -> "${selectedDonghuaServer.displayName} (${selectedDonghuaServer.providerName})"
                 isAnimeItem -> selectedAnimeServer.displayName
                 else -> selectedServer.displayName
@@ -1045,27 +1076,21 @@ fun MediaDetailScreen(
                     ep.episodeNumber
                 )
             } else if (isAstraSelected()) {
-                statusText = "Astra: extracting direct stream..."
-                val extracted = extractStreamFromEmbed(embedUrl, timeoutMs = 30_000L)
-                if (!extracted.isNullOrBlank() && extracted.isDirectPlayableStreamUrl()) {
-                    statusText = ""
-                    tryPlayStream(
-                        extracted,
-                        "${item.title} - ${ep.title}",
-                        if (isPremium) null else freeEpisodePreviewMs,
-                        null,
-                        null,
-                        ep.episodeNumber
-                    )
-                } else {
-                    statusText = "Astra direct stream unavailable. Loading embed..."
-                    tryPlayEmbed(
-                        embedUrl,
-                        "${item.title} - ${ep.title}",
-                        if (isPremium) null else freeMoviePreviewMs,
-                        ep.episodeNumber
-                    )
-                }
+                // vidsrc.sbs (Astra): straight to the visible WebView player.
+                // The hidden extraction could never start the nxsha player —
+                // its start overlay lives inside a cross-origin iframe the
+                // extractor's JS cannot click — so it burned 30 s and then the
+                // embed opened anyway. MaServerPlayerScreen now auto-taps the
+                // overlay with real center touches (verified: one tap starts
+                // the stream), so playback begins without hunting for a
+                // hidden play target.
+                statusText = "Loading Astra player..."
+                tryPlayEmbed(
+                    embedUrl,
+                    "${item.title} - ${ep.title}",
+                    if (isPremium) null else freeMoviePreviewMs,
+                    ep.episodeNumber
+                )
             } else {
                 tryPlayEmbed(
                     embedUrl,
@@ -1430,22 +1455,12 @@ fun MediaDetailScreen(
                                 return@launch
                             }
                             if (selectedServer == StreamServer.VIDSRC_SBS) {
+                                // Astra: straight to the visible WebView player —
+                                // the hidden extraction can't click the nxsha
+                                // start overlay (cross-origin iframe) and only
+                                // burned 30 s. MaServerPlayerScreen auto-taps it.
                                 val embedUrl = selectedServer.buildEmbedUrl(resolvedTmdbId, "movie", "1", "1")
-                                statusText = "Astra: extracting direct stream..."
-                                val extracted = extractStreamFromEmbed(embedUrl, timeoutMs = 30_000L)
-                                if (!extracted.isNullOrBlank() && extracted.isDirectPlayableStreamUrl()) {
-                                    statusText = ""
-                                    tryPlayStream(
-                                        extracted,
-                                        item.title,
-                                        if (isPremium) null else freeMoviePreviewMs,
-                                        null,
-                                        null,
-                                        0
-                                    )
-                                    return@launch
-                                }
-                                statusText = "Astra direct stream unavailable. Loading embed..."
+                                statusText = "Loading Astra player..."
                                 tryPlayEmbed(
                                     embedUrl,
                                     item.title,

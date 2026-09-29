@@ -183,14 +183,13 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
 ): TvBingeEpisode? {
     val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
     val trimmed = resolved.trim()
-    val playbackUrl = if (trimmed.contains("vidsrc.sbs/", ignoreCase = true)) {
-        runCatching { extractTvStreamFromEmbed(context, trimmed, timeoutMs = 30_000L)?.url }
-            .getOrNull()
-            ?.takeIf { isTvPlayableStreamUrl(it) }
-            ?: trimmed
-    } else {
-        trimmed
-    }
+    // vidsrc.sbs (Astra): play the embed directly in the WebView player.
+    // The old hidden-WebView extraction never worked — the player's start
+    // overlay lives inside a cross-origin iframe the extractor cannot click,
+    // so it burned 30 s and then (worse) sometimes captured an ABORTED mirror
+    // m3u8 that LibVLC then failed on. TvEmbedPlayer auto-taps the overlay
+    // with real center touches, so the embed reliably starts on its own.
+    val playbackUrl = trimmed
     val kind = deriveBingeKind(item, chapter, isDonghua)
     val isDonghuaVlcStream = isDonghua && isDonghuaworldVlcStreamUrl(playbackUrl)
     val isDirect = isLocalOfflineMediaUrl(playbackUrl) ||

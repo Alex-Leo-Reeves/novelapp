@@ -202,14 +202,18 @@ suspend fun pollTvPairStatus(pairId: String): TvPairPollState {
 
 // ── Content ─────────────────────────────────────────────────────────────────
 /**
- * ASIAN tab (TV): Chinese Movies + Indian + Filipino merged into one row.
+ * ASIAN tab (TV): Chinese Movies + Indian + Filipino merged into one row,
+ * plus the Chinese-genre rows (Wuxia & Martial Arts, Xianxia &
+ * Cultivation) the tab is expected to surface.
  *
  * The regions keep their own dedicated servers at playback time (the backend
  * resolves each title through the source that actually has it), so merging the
- * catalogs here costs nothing in reliability.
+ * catalogs here costs nothing in reliability. The genre rows carry
+ * `kind: "chinesemovies"` server-side, so they resolve through the same
+ * dedicated Chinese server as the main Chinese row.
  */
 suspend fun fetchAsianHome(page: Int = 1): List<UnifiedSearchResult> {
-    val types = listOf("chinesemovies", "indian", "filipino")
+    val types = listOf("chinesemovies", "indian", "filipino", "wuxia", "xianxia")
     return types.map { type -> fetchContentHome(type, page) }
         .let { groups ->
             val out = mutableListOf<UnifiedSearchResult>()

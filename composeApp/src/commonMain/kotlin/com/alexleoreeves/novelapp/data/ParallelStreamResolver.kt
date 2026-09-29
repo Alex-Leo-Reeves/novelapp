@@ -48,6 +48,10 @@ class ParallelStreamResolver(
     /** Dedicated donghua source (donghuaworld.com) — the donghua tab's primary. */
     private val donghuaApi: DonghuaApi
 ) {
+    // Device-side donghuaworld scrape: the backend's Render egress is
+    // 403-blocked by the site and its public relays are dead (60 s+ hangs),
+    // so the dedicated-donghua candidate resolves from the device first.
+    private val donghuaWorldScraper = DonghuaWorldScraper(httpClient)
 
     /**
      * Probes all viable endpoints in parallel for the given item and chapter,
@@ -100,10 +104,23 @@ class ParallelStreamResolver(
                 ?.takeIf { DonghuaApi.isDonghuaworldUrl(it) }
                 ?: item.detailPageUrl.takeIf { DonghuaApi.isDonghuaworldUrl(it) }
             val resolved = runCatching {
-                if (episodeUrl != null) {
-                    donghuaApi.resolveEpisodeStream(episodeUrl)
-                } else {
-                    donghuaApi.resolveByTitle(item.title, (chapterNumber ?: 1).coerceAtLeast(1))
+                // Device-side FIRST (bounded): the backend's donghuaworld
+                // route is 403-blocked from Render and used to hang this
+                // sweep for 60 s+. The device's residential IP answers in
+                // seconds; the backend stays as one bounded fallback.
+                val local = withTimeoutOrNull(25_000L) {
+                    if (episodeUrl != null) {
+                        donghuaWorldScraper.resolveEpisodeStream(episodeUrl)
+                    } else {
+                        donghuaWorldScraper.resolveByTitle(item.title, (chapterNumber ?: 1).coerceAtLeast(1))
+                    }
+                }
+                local ?: withTimeoutOrNull(15_000L) {
+                    if (episodeUrl != null) {
+                        donghuaApi.resolveEpisodeStream(episodeUrl)
+                    } else {
+                        donghuaApi.resolveByTitle(item.title, (chapterNumber ?: 1).coerceAtLeast(1))
+                    }
                 }
             }.getOrNull()
             val latency = io.ktor.util.date.getTimeMillis() - start

@@ -3,6 +3,8 @@ package com.alexleoreeves.novelapp.ui
 import android.annotation.SuppressLint
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebResourceRequest
@@ -257,6 +259,25 @@ actual fun MaServerPlayerScreen(
             playerPhase = PlayerPhase.READY
             hasError = true
             phaseMessage = "Failed to load player: no response"
+        }
+    }
+
+    // ── Auto-start taps ──────────────────────────────────────────────────
+    // Mirrors TvEmbedPlayer: click-gated embeds (vidsrc.sbs/Astra, VidLink…)
+    // render their start overlay INSIDE a cross-origin iframe, which injected
+    // main-frame JS cannot reach — a real center tap can (verified live: one
+    // tap flips the nxsha player from "Unable to play media." to playing).
+    // STABILIZATION_END_JS runs after every tap so a tap that lands after
+    // playback started (play/pause toggle) is immediately re-forced to play.
+    LaunchedEffect(playerPhase) {
+        if (playerPhase == PlayerPhase.READY) {
+            webViewRef ?: return@LaunchedEffect
+            for (step in 0 until 8) {
+                delay(if (step == 0) 300L else 1_500L)
+                val currentView = webViewRef ?: break
+                simulateCenterClick(currentView)
+                currentView.evaluateJavascript(STABILIZATION_END_JS, null)
+            }
         }
     }
 
@@ -805,6 +826,31 @@ actual fun MaServerPlayerScreen(
             }
         }
     }
+}
+
+/**
+ * Dispatches a real center tap into the WebView.
+ *
+ * Needed because every click-gated embed (vidsrc.sbs/Astra and friends)
+ * renders its start overlay INSIDE a cross-origin iframe: injected JS in the
+ * main frame cannot reach it (elementFromPoint returns the iframe element),
+ * and the user shouldn't have to hunt for a hidden play target. A native
+ * Motion-Event tap lands wherever the finger would — inside the iframe —
+ * which starts the player (verified against the live nxsha player: one
+ * center tap switches it from "Unable to play media." to playing).
+ */
+private fun simulateCenterClick(view: WebView) {
+    val w = view.width.takeIf { it > 0 } ?: 1920
+    val h = view.height.takeIf { it > 0 } ?: 1080
+    val cx = w / 2f
+    val cy = h / 2f
+    val eventTime = SystemClock.uptimeMillis()
+    val downEvent = MotionEvent.obtain(eventTime, eventTime, MotionEvent.ACTION_DOWN, cx, cy, 0)
+    val upEvent = MotionEvent.obtain(eventTime, eventTime + 100, MotionEvent.ACTION_UP, cx, cy, 0)
+    view.dispatchTouchEvent(downEvent)
+    view.dispatchTouchEvent(upEvent)
+    downEvent.recycle()
+    upEvent.recycle()
 }
 
 private const val MA_SERVER_USER_AGENT =

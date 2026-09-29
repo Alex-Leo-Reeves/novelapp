@@ -1583,6 +1583,8 @@ function normalizeContentType(type) {
     if (["nigerian", "nollywood", "naija"].includes(raw)) return "nigerian";
     if (["donghua", "chineseanime", "chineseanimation", "dongman", "donghua-anime", "chinesedrama"].includes(raw)) return "donghua";
     if (["chinesemovies", "chinesemovie", "chinese", "china", "cn"].includes(raw)) return "chinesemovies";
+    if (["wuxia", "martialarts", "martialartsfilms", "kungfu"].includes(raw)) return "wuxia";
+    if (["xianxia", "cultivation", "wuxiafantasy"].includes(raw)) return "xianxia";
     if (["indian", "india", "bollywood", "hindi", "in"].includes(raw)) return "indian";
     if (["filipino", "philippines", "pinoy", "tagalog", "ph"].includes(raw)) return "filipino";
     if (["comic", "comics"].includes(raw)) return "comic";
@@ -1670,7 +1672,7 @@ function tmdbRegionMatches(item, normalizedType) {
     if (!item) return false;
     const language = String(item.original_language || "").toLowerCase();
     const countries = Array.isArray(item.origin_country) ? item.origin_country.map((code) => String(code || "").toUpperCase()) : [];
-    if (normalizedType === "chinesemovies") {
+    if (normalizedType === "chinesemovies" || normalizedType === "wuxia" || normalizedType === "xianxia") {
         return language === "zh" || countries.includes("CN") || countries.includes("HK") || countries.includes("TW");
     }
     if (normalizedType === "indian") {
@@ -1684,7 +1686,8 @@ function tmdbRegionMatches(item, normalizedType) {
 
 function tmdbRegionBoost(item, normalizedType) {
     if (tmdbRegionMatches(item, normalizedType)) return 180;
-    if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino") return -220;
+    if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino" ||
+        normalizedType === "wuxia" || normalizedType === "xianxia") return -220;
     return 0;
 }
 
@@ -1817,9 +1820,12 @@ async function tmdbItems(type, query, page = 1) {
     if (!token && !key) return [];
     const normalizedType = normalizeContentType(type);
     // The Asian-tab regions are movie catalogs (discover/movie), so they must
-    // not be labelled "tv" or the detail page treats films as series.
+    // not be labelled "tv" or the detail page treats films as series. The two
+    // Chinese-genre rows (wuxia/xianxia) are movie-first too — their TV half
+    // is concatenated below.
     const mediaType = (normalizedType === "movies" || normalizedType === "chinesemovies" ||
-        normalizedType === "indian" || normalizedType === "filipino") ? "movie" : "tv";
+        normalizedType === "indian" || normalizedType === "filipino" ||
+        normalizedType === "wuxia" || normalizedType === "xianxia") ? "movie" : "tv";
     const headers = token ? { authorization: `Bearer ${token}`, accept: "application/json" } : { accept: "application/json" };
     const apiSuffix = key && !token ? `&api_key=${encodeURIComponent(key)}` : "";
 
@@ -1830,7 +1836,8 @@ async function tmdbItems(type, query, page = 1) {
         // finding results like "agency" (a movie) or "forever 2024" (a TV show/movie).
         // We then filter by media_type appropriately.
         if (normalizedType === "movies" || normalizedType === "classic" || normalizedType === "cartoon" || normalizedType === "kdrama" || normalizedType === "anime" ||
-            normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino") {
+            normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino" ||
+            normalizedType === "wuxia" || normalizedType === "xianxia") {
             endpoint = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
         } else {
             endpoint = `https://api.themoviedb.org/3/search/${mediaType}?query=${encodeURIComponent(query)}&page=${page}${apiSuffix}`;
@@ -1848,6 +1855,12 @@ async function tmdbItems(type, query, page = 1) {
     } else if (normalizedType === "chinesemovies") {
         // Asian tab — Chinese Movies: zh-language films + HK/TW co-productions.
         endpoint = `https://api.themoviedb.org/3/discover/movie?with_original_language=zh&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "wuxia") {
+        // Asian tab — Wuxia & Martial Arts: Chinese action (genre 28) films.
+        endpoint = `https://api.themoviedb.org/3/discover/movie?with_original_language=zh&with_genres=28&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+    } else if (normalizedType === "xianxia") {
+        // Asian tab — Xianxia & Cultivation: Chinese fantasy (genre 14) films.
+        endpoint = `https://api.themoviedb.org/3/discover/movie?with_original_language=zh&with_genres=14&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
     } else if (normalizedType === "indian") {
         // Asian tab — Indian: origin-country driven so every regional film
         // industry (Hindi/Tamil/Telugu/Malayalam/…) is included.
@@ -1873,10 +1886,15 @@ async function tmdbItems(type, query, page = 1) {
         __media_type: item.media_type || mediaType
     }));
 
-    if (!query && (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino")) {
+    if (!query && (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino" ||
+        normalizedType === "wuxia" || normalizedType === "xianxia")) {
         let tvEndpoint = "";
         if (normalizedType === "chinesemovies") {
             tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        } else if (normalizedType === "wuxia") {
+            tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&with_genres=28&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
+        } else if (normalizedType === "xianxia") {
+            tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_original_language=zh&with_genres=14&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
         } else if (normalizedType === "indian") {
             tvEndpoint = `https://api.themoviedb.org/3/discover/tv?with_origin_country=IN&sort_by=popularity.desc&include_adult=false&page=${page}${apiSuffix}`;
         } else if (normalizedType === "filipino") {
@@ -1932,7 +1950,8 @@ async function tmdbItems(type, query, page = 1) {
         results = results.filter(item => item.media_type === "tv");
     }
 
-    if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino") {
+    if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino" ||
+        normalizedType === "wuxia" || normalizedType === "xianxia") {
         const filteredRegional = results.filter((item) => tmdbRegionMatches(item, normalizedType));
         if (filteredRegional.length) results = filteredRegional;
     }
@@ -1949,11 +1968,16 @@ async function tmdbItems(type, query, page = 1) {
         return contentItem({
             id: `tmdb_${itemType}_${item.id}`,
             title: item.title || item.name || "Untitled",
-            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : normalizedType === "chinesemovies" ? "Chinese Movies" : normalizedType === "indian" ? "Indian" : normalizedType === "filipino" ? "Filipino" : normalizedType === "anime" ? (itemType === "movie" ? "Anime Movie" : "Anime Series") : "Movie",
+            subtitle: normalizedType === "kdrama" ? "K-Drama" : normalizedType === "cartoon" ? "Cartoon" : normalizedType === "classic" ? "Classic TV" : normalizedType === "donghua" ? "Donghua" : normalizedType === "chinesemovies" ? "Chinese Movies" : normalizedType === "wuxia" ? "Wuxia & Martial Arts" : normalizedType === "xianxia" ? "Xianxia & Cultivation" : normalizedType === "indian" ? "Indian" : normalizedType === "filipino" ? "Filipino" : normalizedType === "anime" ? (itemType === "movie" ? "Anime Movie" : "Anime Series") : "Movie",
             coverUrl: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "",
             detailUrl: `tmdb://${itemType}/${item.id}`,
             sourceName: "TMDB",
-            kind: normalizedType === "movies" ? "movie" : normalizedType,
+            // The two Chinese-genre rows play through the Chinese region's
+            // dedicated server, so their kind MUST be "chinesemovies" — the
+            // apps match on it to route playback (asianVideoCategory()).
+            kind: normalizedType === "movies" ? "movie" :
+                (normalizedType === "wuxia" || normalizedType === "xianxia") ? "chinesemovies" :
+                normalizedType,
             synopsis: item.overview || ""
         });
     });
@@ -2100,11 +2124,11 @@ async function contentHome(type, page = 1) {
         const live = await mangaUnified.mangaItems(mangadexItems, "", page).catch(() => []);
         return live.length ? live : fixtureItems(normalizedType);
     }
-    // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, Movies and the
-    // three Asian-tab regions (Chinese Movies / Indian / Filipino) all go
-    // through TMDB (same pipeline).
+    // Donghua, Anime, K-Drama, Cartoons, Classic TV, Nigerian, Movies, the
+    // three Asian-tab regions (Chinese Movies / Indian / Filipino) and the two
+    // Chinese-genre rows (wuxia / xianxia) all go through TMDB (same pipeline).
     if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian",
-         "chinesemovies", "indian", "filipino"].includes(normalizedType)) {
+         "chinesemovies", "indian", "filipino", "wuxia", "xianxia"].includes(normalizedType)) {
         const tmdb = await tmdbItems(normalizedType, "", page).catch(() => []);
         return tmdb.length ? tmdb : fixtureItems(normalizedType);
     }
@@ -2152,13 +2176,14 @@ async function contentSearch(type, query, page = 1) {
     }
 
     const normalizedType = normalizeContentType(type);
-    // Donghua, Anime, K-Drama, Cartoon, Classic, Movies, Nigerian and the three
-    // Asian-tab regions (Chinese Movies / Indian / Filipino): all go through the
-    // TMDB multi-pipeline. The regions MUST be listed here or a region search
+    // Donghua, Anime, K-Drama, Cartoon, Classic, Movies, Nigerian, the three
+    // Asian-tab regions (Chinese Movies / Indian / Filipino) and the two
+    // Chinese-genre rows (wuxia / xianxia): all go through the TMDB
+    // multi-pipeline. The regions MUST be listed here or a region search
     // falls through to the global "everything" sweep, which is what made an
     // English query inside a region return unrelated (often Chinese) titles.
     if (["anime", "donghua", "kdrama", "cartoon", "classic", "movies", "nigerian",
-         "chinesemovies", "indian", "filipino"].includes(normalizedType)) {
+         "chinesemovies", "indian", "filipino", "wuxia", "xianxia"].includes(normalizedType)) {
         // Search multiple TMDB pages for better coverage
         const pagePromises = [];
         const maxPages = normalizedType === "movies" ? 3 : 2;
