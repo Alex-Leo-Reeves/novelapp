@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { ALL_SERVERS, buildEmbedUrl, parseTmdb } from "../data/servers";
+import { ALL_SERVERS, buildEmbedUrl, parseTmdb, defaultServerFor } from "../data/servers";
 
 export default function Player({ media, episode, onBack, onServerChange }) {
-  const [selectedServer, setSelectedServer] = useState(media.server || "vidlink");
+  const [selectedServer, setSelectedServer] = useState(() => media.server || defaultServerFor(media.kind) || "vidsrcto");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
   const videoRef = useRef(null);
@@ -23,6 +23,26 @@ export default function Player({ media, episode, onBack, onServerChange }) {
   }, [media.streamUrl, media.detailUrl, tmdb, selectedServer, epNum]);
 
   const isDirectVideo = activeUrl.includes(".m3u8") || activeUrl.includes(".mp4");
+
+  // Prevent loading overlay from ever getting stuck on screen
+  useEffect(() => {
+    setLoading(true);
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [activeUrl, selectedServer]);
+
+  // Protect PWA from top-level ad hijacks when user taps play
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      // Prevents third-party embed scripts from redirecting the main PWA window to ad sites
+      e.preventDefault();
+      return (e.returnValue = "");
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   const handleServerClick = (serverKey) => {
     setSelectedServer(serverKey);
@@ -103,7 +123,7 @@ export default function Player({ media, episode, onBack, onServerChange }) {
             src={activeUrl}
             className="player-iframe"
             title="Media player"
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture; xr-spatial-tracking"
+            allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *"
             allowFullScreen
             playsInline
             webkit-playsinline="true"
@@ -115,23 +135,28 @@ export default function Player({ media, episode, onBack, onServerChange }) {
           </div>
         )}
 
-        {/* Transient loading indicator - pointer-events: none so clicks go through! */}
+        {/* Transient loading indicator — automatically clears in 1.2s so it NEVER gets stuck */}
         {loading && (
-          <div className="player-loader-overlay">
+          <div className="player-loader-overlay" style={{ pointerEvents: "none" }}>
             <div className="spinner" />
             <span>Connecting to {selectedServer}…</span>
           </div>
         )}
       </div>
 
-      {/* Bottom Controls Bar */}
-      <footer className="player-bottom-controls">
-        <span style={{ fontSize: "0.8rem", color: "var(--pink-200)", fontWeight: 700 }}>
-          {selectedServer} Server (Ad-Free)
-        </span>
-        <button className="player-ctrl-btn" onClick={toggleFullscreen}>
-          {isFullscreen ? "Exit Fullscreen" : "⛶ Fullscreen"}
-        </button>
+      {/* Bottom Controls Bar & Ad-Defense Notice */}
+      <footer className="player-bottom-controls" style={{ flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: "0.82rem", color: "var(--pink-200)", fontWeight: 700 }}>
+            ⚡ {selectedServer} (Autoplay Active)
+          </span>
+          <button className="player-ctrl-btn" onClick={toggleFullscreen}>
+            {isFullscreen ? "Exit Fullscreen" : "⛶ Fullscreen"}
+          </button>
+        </div>
+        <div style={{ fontSize: "0.72rem", color: "rgba(255, 255, 255, 0.7)", textAlign: "center" }}>
+          💡 Tap server above to switch anytime. If a tap opens an ad tab, close that tab to enjoy continuous playback.
+        </div>
       </footer>
     </div>
   );

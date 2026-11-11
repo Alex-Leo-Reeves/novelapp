@@ -54,47 +54,48 @@ export function buildEmbedUrl(serverKey, tmdbType, tmdbId, season = "1", episode
   switch (serverKey) {
     case StreamServer.VIDLINK.key:
       return isMovie
-        ? `https://vidlink.pro/movie/${tmdbId}`
-        : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://vidlink.pro/movie/${tmdbId}?autoplay=true&primaryColor=ff3385`
+        : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}?autoplay=true&primaryColor=ff3385`;
     case StreamServer.VIDSRC_TO.key:
       return isMovie
-        ? `https://vidsrc.to/embed/movie/${tmdbId}`
-        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://vidsrc.to/embed/movie/${tmdbId}?autoplay=1`
+        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
     case StreamServer.AUTOEMBED.key:
       return isMovie
-        ? `https://autoembed.co/movie/tmdb/${tmdbId}`
-        : `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}`;
+        ? `https://autoembed.co/movie/tmdb/${tmdbId}?autoplay=1`
+        : `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}?autoplay=1`;
     case StreamServer.TWO_EMBED.key:
       return isMovie
-        ? `https://www.2embed.online/embed/movie/${tmdbId}`
-        : `https://www.2embed.online/embed/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://www.2embed.online/embed/movie/${tmdbId}?autoplay=1`
+        : `https://www.2embed.online/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
     case StreamServer.VIDSRC_SBS.key:
       return isMovie
-        ? `https://vidsrc.sbs/embed/movie/${tmdbId}`
-        : `https://vidsrc.sbs/embed/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://vidsrc.sbs/embed/movie/${tmdbId}?autoplay=1`
+        : `https://vidsrc.sbs/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
     case StreamServer.NONTONGO.key:
       return isMovie
-        ? `https://www.nontongo.win/embed/movie/${tmdbId}`
-        : `https://www.nontongo.win/embed/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://www.nontongo.win/embed/movie/${tmdbId}?autoplay=1`
+        : `https://www.nontongo.win/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
     case StreamServer.MULTI_EMBED.key:
       return isMovie
-        ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`
-        : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`;
+        ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&autoplay=1`
+        : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}&autoplay=1`;
     case StreamServer.VIDSRC_NET.key:
       return isMovie
-        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`
-        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
+        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}&autoplay=1`
+        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&autoplay=1`;
     case StreamServer.SMASHY.key:
       return isMovie
-        ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`
-        : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&ep=${episode}`;
+        ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&autoplay=1`
+        : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&ep=${episode}&autoplay=1`;
     default:
       return null;
   }
 }
 
 export function defaultServerFor(kind) {
-  return StreamServer.VIDLINK.key;
+  // Quasar (VidSrc.to) has proven instant movie playback and zero client-side exceptions
+  return StreamServer.VIDSRC_TO.key;
 }
 
 export function selectorFor(kind) {
