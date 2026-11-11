@@ -179,9 +179,12 @@ suspend fun TvMediaRepository.resolveBingeEpisode(
     server: StreamServer?,
     donghuaServer: DonghuaServer?,
     animeServer: AnimeServer? = null,
-    isDonghua: Boolean
+    isDonghua: Boolean,
+    // false when the user explicitly chose a server (selector ON) — see
+    // TvMediaRepository.resolveStreamUrl.
+    regionAuto: Boolean = true
 ): TvBingeEpisode? {
-    val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer) ?: return null
+    val resolved = resolveStreamUrl(item, chapter, server, donghuaServer, animeServer, regionAuto) ?: return null
     val trimmed = resolved.trim()
     // vidsrc.sbs (Astra): play the embed directly in the WebView player.
     // The old hidden-WebView extraction never worked — the player's start

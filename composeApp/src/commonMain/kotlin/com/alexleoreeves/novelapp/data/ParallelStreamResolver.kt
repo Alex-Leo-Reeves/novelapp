@@ -331,25 +331,11 @@ class ParallelStreamResolver(
                 latencyMs = latency
             )
         }
-        candidates.add {
-            val start = io.ktor.util.date.getTimeMillis()
-            val url = StreamServer.AUTOEMBED.buildEmbedUrl(tmdbId, marker.mediaType, sNum, epNum)
-
-            val isAlive = runCatching {
-                httpClient.head(url).status.value != 404
-            }.getOrDefault(false)
-            if (!isAlive) return@add null
-
-            val latency = io.ktor.util.date.getTimeMillis() - start
-            ResolvedStreamResult(
-                url = url,
-                isDirect = false,
-                serverName = "AutoEmbed",
-                score = 610,
-                latencyMs = latency
-            )
-        }
-
+        // autoembed.co (Pulsar) removed from the sweep: live-verified dead
+        // chain (its inner nextgencloudfabric player 404s/blank; 2embed
+        // redirects straight into it). A dead fallback here meant a donghua
+        // resolve that missed the dedicated server silently opened a broken
+        // embed — the "embed may be blocked or unavailable" experience.
         runSweepAndPickBest(candidates)
     }
 
@@ -372,12 +358,16 @@ class ParallelStreamResolver(
         val candidates = mutableListOf<suspend () -> ResolvedStreamResult?>()
 
         // Multi-embed candidate sweeps
+        // autoembed.co (Pulsar) + 2embed.online (Comet) are REMOVED from the
+        // auto sweep: both are live-verified dead player chains (404/blank
+        // inner player; 2embed redirects into autoembed). Sweeping into them
+        // produced "opens a website / loads forever" — the sweep only offers
+        // chains that actually play. Explicitly PICKING either still works:
+        // the player detects the dead chain and fails over to Nebula.
         listOf(
             StreamServer.VIDLINK to 750,
             StreamServer.VIDSRC_SBS to 730,
             StreamServer.VIDSRC_TO to 720,
-            StreamServer.AUTOEMBED to 700,
-            StreamServer.TWO_EMBED_ONLINE to 680,
             StreamServer.NONTONGO to 650
         ).forEach { (server, baseScore) ->
             candidates.add {

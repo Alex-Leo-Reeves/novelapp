@@ -29,6 +29,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
+ * A download the user queued whose stream is still being resolved.
+ *
+ * It appears in the Downloads screen the instant Download is tapped; the long
+ * server walk (CinePro → embed scrape → probe) runs behind it with live status
+ * text instead of spamming the detail screen while the Downloads page stayed
+ * empty (the "scrapping embed ... stream found ... nothing there" bug).
+ */
+data class TvResolvingTask(
+    val taskId: String,
+    val parentId: String,
+    val parentTitle: String,
+    val title: String,
+    val coverUrl: String = "",
+    val episodeNumber: Int = 0,
+    val status: String = "Preparing download...",
+    val error: String? = null
+)
+
+/**
  * TV-side façade for the offline media cache.
  *
  * Constructs the port layer (Android Keystore crypto, internal+USB storage,
@@ -77,6 +96,33 @@ class TvMediaCacheController(private val context: Context) {
 
     /** Live task map from the engine — UI collects this. */
     val tasks: StateFlow<Map<String, DownloadTask>> = engine.tasks
+
+    // ── Resolving (queued, stream not yet found) tasks ──────────────────────
+    // Visible in Downloads immediately; the detail screen feeds status updates
+    // here while resolveDownloadPick runs in the background.
+    private val _resolving = MutableStateFlow<List<TvResolvingTask>>(emptyList())
+    val resolving: StateFlow<List<TvResolvingTask>> = _resolving
+
+    fun beginResolving(task: TvResolvingTask) {
+        _resolving.value = _resolving.value.filterNot { it.taskId == task.taskId } + task
+    }
+
+    fun updateResolving(taskId: String, status: String) {
+        _resolving.value = _resolving.value.map {
+            if (it.taskId == taskId) it.copy(status = status) else it
+        }
+    }
+
+    fun failResolving(taskId: String, error: String) {
+        _resolving.value = _resolving.value.map {
+            if (it.taskId == taskId) it.copy(status = "Failed", error = error) else it
+        }
+    }
+
+    /** Remove a resolving entry (success → replaced by the real task, or dismissed). */
+    fun finishResolving(taskId: String) {
+        _resolving.value = _resolving.value.filterNot { it.taskId == taskId }
+    }
 
     /** Indexed bundles discovered on mounted USB volumes. */
     val usbIndex: StateFlow<List<TvIndexedBundle>> = indexer.index

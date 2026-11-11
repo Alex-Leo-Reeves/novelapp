@@ -38,6 +38,7 @@ import com.alexleoreeves.novelapp.ui.theme.backgroundColor
 import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.coroutines.resume
 import java.io.ByteArrayInputStream
 
 /**
@@ -133,6 +134,23 @@ actual fun MaServerPlayerScreen(
     // Stabilization counter — used to prevent spamming reloads
     var stabilizeAttempts by remember { mutableStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    // READY but no media has actually played yet — vidlink's handshake takes
+    // 25-40 s live-measured; show an honest status instead of a dead spinner.
+    var waitingForPlayback by remember { mutableStateOf(false) }
+    // One automatic reload before the hard error overlay (transient net blips
+    // must not slam "The embed may be blocked or unavailable." immediately).
+    var errorReloads by remember { mutableStateOf(0) }
+    // Set when the current provider chain is dead and we switched to Nebula.
+    var failoverUrl by remember { mutableStateOf<String?>(null) }
+    val isClickGatedEmbed = remember(embedUrl) {
+        embedUrl.contains("vidsrc.sbs") || embedUrl.contains("vidsrc.su")
+    }
+    // autoembed.co (Pulsar) / 2embed.online (Comet) inner players are dead
+    // chains — live-verified: autoembed's nextgencloudfabric 404s/blank and
+    // 2embed redirects straight to autoembed.
+    val isDeadChainEmbed = remember(embedUrl) {
+        embedUrl.contains("autoembed") || embedUrl.contains("2embed.online")
+    }
 
     LaunchedEffect(embedUrl) {
         currentTitle = episodeTitle
@@ -262,21 +280,83 @@ actual fun MaServerPlayerScreen(
         }
     }
 
-    // ── Auto-start taps ──────────────────────────────────────────────────
-    // Mirrors TvEmbedPlayer: click-gated embeds (vidsrc.sbs/Astra, VidLink…)
-    // render their start overlay INSIDE a cross-origin iframe, which injected
-    // main-frame JS cannot reach — a real center tap can (verified live: one
-    // tap flips the nxsha player from "Unable to play media." to playing).
-    // STABILIZATION_END_JS runs after every tap so a tap that lands after
-    // playback started (play/pause toggle) is immediately re-forced to play.
+    // ── Auto-start ─────────────────────────────────────────────────────────
+    // Click-gated embeds (vidsrc.sbs/Astra) render their start overlay INSIDE
+    // a cross-origin iframe, which injected main-frame JS cannot reach — a
+    // real center tap can (verified live: one tap flips the nxsha player from
+    // "Unable to play media." to playing). ONLY those get taps.
+    //
+    // Every other provider must NOT be blindly tapped: on vidlink.pro (Nebula)
+    // the screen centre is an AD TRAP — a live-measured single tap navigated
+    // the whole page to stake.com, and the old router-embed exemption let the
+    // navigation through, hijacking the handshake. That, plus greedy JS click
+    // selectors hitting ad overlays, is what turned Nebula into "resolves then
+    // spins forever with no duration".
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.READY) {
             webViewRef ?: return@LaunchedEffect
+            // Auto taps (restored on request): real center touches start
+            // click-gated overlays on any provider (vidsrc.sbs, vidlink, …).
+            // The ad hijacks taps used to trigger (vidlink → stake.com,
+            // vidsrc.sbs → Play Store) are now stopped by the POST-LOAD
+            // NAVIGATION POLICY below — a tap can no longer drag the WebView
+            // to an ad site, so tapping everything is safe again.
             for (step in 0 until 8) {
                 delay(if (step == 0) 300L else 1_500L)
                 val currentView = webViewRef ?: break
                 simulateCenterClick(currentView)
                 currentView.evaluateJavascript(STABILIZATION_END_JS, null)
+            }
+            if (isClickGatedEmbed) return@LaunchedEffect
+            // Then the watchdog: nudge play via main-frame JS, watch until
+            // media REALLY plays (honest "Starting stream..." status) and fail
+            // dead chains over to Nebula instead of loading forever.
+            waitingForPlayback = true
+            var mediaStartedPlaying = false
+            for (step in 0 until 45) {
+                delay(if (step == 0) 500L else 1_500L)
+                val currentView = webViewRef ?: break
+                if (failoverUrl == null && isDeadChainEmbed && step == 14) {
+                    // ~22 s with zero video on a dead chain → switch to Nebula.
+                    val fallback = vidlinkFailoverFor(embedUrl)
+                    if (fallback != null) {
+                        failoverUrl = fallback
+                        waitingForPlayback = false
+                        phaseMessage = "Provider unavailable — switching to Nebula..."
+                        currentView.loadUrl(fallback)
+                        return@LaunchedEffect
+                    }
+                }
+                currentView.evaluateJavascript(STABILIZATION_END_JS, null)
+                if (step >= 2) {
+                    val state = evalJs(currentView, PROBE_PLAYING_JS)
+                    if (state.contains("\"1\"")) {
+                        mediaStartedPlaying = true
+                        waitingForPlayback = false
+                        break
+                    }
+                }
+            }
+            waitingForPlayback = false
+            if (!mediaStartedPlaying && failoverUrl == null) {
+                if (!embedUrl.contains("vidlink.pro")) {
+                    // Nothing played after ~70 s — try Nebula (the chain verified
+                    // to actually deliver media) for the same id/episode.
+                    val fallback = vidlinkFailoverFor(embedUrl)
+                    if (fallback != null) {
+                        failoverUrl = fallback
+                        phaseMessage = "Switching to Nebula..."
+                        webViewRef?.loadUrl(fallback)
+                    } else {
+                        hasError = true
+                        phaseMessage = "Stream not responding. Retry or pick another server."
+                    }
+                } else {
+                    // Already on Nebula and still nothing → actionable overlay,
+                    // not an eternal silent spinner.
+                    hasError = true
+                    phaseMessage = "Stream not responding. Retry or pick another server."
+                }
             }
         }
     }
@@ -340,22 +420,23 @@ actual fun MaServerPlayerScreen(
                                 val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
                                 if (isCloudflare) return false
                                 
-                                // If the page has already loaded (STABILIZING or READY), block ALL top-level navigations
-                                // EXCEPT if we are on a wrapper/router site or the URL contains "embed" or "player"
-                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !lowerUrl.contains("embed") && !lowerUrl.contains("player") && !lowerUrl.contains("stream")) {
-                                    return true // Block click-triggered website navigations
-                                }
-
-                                val reqHost = request.url?.host?.lowercase() ?: ""
-                                val embedHost = android.net.Uri.parse(embedUrl).host?.lowercase() ?: ""
-                                if (reqHost.isNotEmpty() && embedHost.isNotEmpty()) {
-                                    val isSameDomain = reqHost == embedHost || 
-                                                       reqHost.endsWith(".$embedHost") || 
-                                                       embedHost.endsWith(".$reqHost")
-                                    // If we are on a wrapper site or Router Embed (which routes to other providers), allow cross-domain
-                                    if (!isSameDomain && !isWrapperSite && !isRouterEmbed) {
-                                        return true // Block navigation
-                                    }
+                                // ── POST-LOAD NAVIGATION POLICY ─────────────────────────
+                                // After the first load, a top-level navigation may only stay
+                                // inside the embed's own provider flow. Everything else is an
+                                // ad hijack: vidlink's centre ad navigated the WebView to
+                                // stake.com (live-measured) and vidsrc.sbs ads to the Play
+                                // Store ("opened a webpage / took me to play store"). While
+                                // LOADING, the initial redirect chain may hop between
+                                // provider hosts (2embed → autoembed) but never elsewhere.
+                                val reqHost = (request.url?.host ?: "").lowercase()
+                                val embedHost = runCatching { android.net.Uri.parse(embedUrl).host.orEmpty().lowercase() }.getOrNull().orEmpty()
+                                val sameSiteNav = reqHost.isNotEmpty() && embedHost.isNotEmpty() &&
+                                    (reqHost == embedHost || reqHost.endsWith(".$embedHost") || embedHost.endsWith(".$reqHost"))
+                                val inProviderFlow = reqHost.isNotEmpty() && EMBED_FLOW_HOST_TOKENS.any { reqHost.contains(it) }
+                                if (playerPhase == PlayerPhase.LOADING) {
+                                    if (!sameSiteNav && !inProviderFlow && !isWrapperSite) return true
+                                } else {
+                                    if (!sameSiteNav && !inProviderFlow) return true
                                 }
                             }
 
@@ -515,8 +596,18 @@ actual fun MaServerPlayerScreen(
                                 // If an ad popup fails on main frame, we don't care
                                 val isRequestedHost = reqUrl == embedUrl || reqUrl.contains("cloudflare", ignoreCase = true)
                                 if (isRequestedHost) {
-                                    hasError = true
-                                    phaseMessage = "Failed to load player: $desc"
+                                    if (errorReloads < 1) {
+                                        // One automatic retry: a transient blip (ERR_TIMED_OUT /
+                                        // ERR_FAILED) must not slam the "embed may be blocked or
+                                        // unavailable" overlay in the user's face.
+                                        errorReloads++
+                                        playerPhase = PlayerPhase.LOADING
+                                        phaseMessage = "Retrying player..."
+                                        view?.reload()
+                                    } else {
+                                        hasError = true
+                                        phaseMessage = "Failed to load player: $desc"
+                                    }
                                 }
                             }
                         }
@@ -670,6 +761,31 @@ actual fun MaServerPlayerScreen(
                             Text("Back")
                         }
                     }
+                }
+            }
+        }
+
+        // ── Honest "Starting stream..." status ────────────────────────────
+        // Providers like Nebula (vidlink) need 25-40 s of handshake before the
+        // duration even appears (live-measured). Rather than a dead spinner,
+        // say what is happening while the watchdog keeps forcing play.
+        if (waitingForPlayback && playerPhase == PlayerPhase.READY && !previewExpired && !hasError) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color.Black.copy(alpha = 0.65f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 56.dp)
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Starting stream...", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -853,6 +969,64 @@ private fun simulateCenterClick(view: WebView) {
     upEvent.recycle()
 }
 
+/**
+ * Host tokens that belong to an embed provider's own routing/player flow.
+ * Top-level navigations between these are legitimate provider hops (e.g.
+ * 2embed.online redirects to autoembed.co on first load); anything outside
+ * this set after the page loaded is an ad hijack and is blocked.
+ */
+private val EMBED_FLOW_HOST_TOKENS = listOf(
+    "vidsrc", "vidlink", "autoembed", "2embed", "embed.su", "multiembed",
+    "nontongo", "smashystream", "dailymotion", "nxsha", "itsnitrox",
+    "vsembed", "cloudorchestranova", "nextgencloudfabric", "animexin",
+    "luciferdonghua", "donghuastream", "odysee", "ok.ru", "footybite",
+    "sportsurge", "scorebat", "watchwrestling", "vidcloud", "megacloud",
+    "mp4upload", "streamtape", "mixdrop", "challenges.cloudflare.com"
+)
+
+/** Evaluate JS in the page and await its JSON-encoded result. */
+private suspend fun evalJs(view: WebView, script: String): String =
+    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        try {
+            view.evaluateJavascript(script) { result -> cont.resume(result) }
+        } catch (t: Throwable) {
+            cont.resume("\"0\"")
+        }
+    }
+
+/** "1" when any main-frame <video> is genuinely playing, else "0". */
+private const val PROBE_PLAYING_JS =
+    "(function(){var vs=document.querySelectorAll('video');" +
+        "for(var i=0;i<vs.length;i++){var v=vs[i];" +
+        "if(!v.paused&&v.readyState>=2&&v.currentTime>0)return '1';}return '0';})()"
+
+/**
+ * Rebuild the Nebula (vidlink.pro) embed for the same TMDB id/type/episode an
+ * autoembed/2embed/vidsrc URL points at. Returns null when the URL shape is
+ * not recognized (the player then stays put and surfaces the retry overlay).
+ */
+private fun vidlinkFailoverFor(url: String): String? {
+    Regex("""movie/tmdb/(\d+)""").find(url)?.let {
+        return "https://vidlink.pro/movie/" + it.groupValues[1]
+    }
+    Regex("""/tv/tmdb/(\d+)-(\d+)-(\d+)""").find(url)?.let {
+        return "https://vidlink.pro/tv/" + it.groupValues[1] + "/" + it.groupValues[2] + "/" + it.groupValues[3]
+    }
+    Regex("""/embed/movie/(\d+)""").find(url)?.let {
+        return "https://vidlink.pro/movie/" + it.groupValues[1]
+    }
+    Regex("""/embed/tv/(\d+)/(\d+)/(\d+)""").find(url)?.let {
+        return "https://vidlink.pro/tv/" + it.groupValues[1] + "/" + it.groupValues[2] + "/" + it.groupValues[3]
+    }
+    Regex("""/movie/(\d+)""").find(url)?.let {
+        return "https://vidlink.pro/movie/" + it.groupValues[1]
+    }
+    Regex("""/tv/(\d+)/(\d+)/(\d+)""").find(url)?.let {
+        return "https://vidlink.pro/tv/" + it.groupValues[1] + "/" + it.groupValues[2] + "/" + it.groupValues[3]
+    }
+    return null
+}
+
 private const val MA_SERVER_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -917,11 +1091,15 @@ private const val STABILIZATION_START_JS = """
     setTimeout(function() { clearInterval(_checkInterval); }, 20000);
     
     function clickPlayButtons() {
+        // ONLY explicit play-button controls. The old list also clicked
+        // '[id*="play"]', '[class*="play"]', '[data-player]', '#start' and
+        // '.video-js' — greedy selectors that routinely matched AD overlays
+        // ("player-ads" etc.) and clicking those fired the redirect chains
+        // that hijacked the embed.
         var selectors = [
             '.play-button', '.jw-icon-display', '.vjs-big-play-button',
-            '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
-            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]',
-            'video', '.video-js', '[data-player]'
+            '.plyr__control--overlaid', 'button[aria-label="Play"]',
+            '.play-btn', '.btn-play'
         ];
         selectors.forEach(function(sel) {
             try {
@@ -942,10 +1120,13 @@ private const val STABILIZATION_END_JS = """
     window.__STABILIZING = false;
     
     function forcePlay() {
+        // Explicit play controls ONLY — '[id*="play"]'/'[class*="play"]'/
+        // '#start' matched ad overlays and clicking them triggered hijacks
+        // (see clickPlayButtons above).
         var selectors = [
             '.play-button', '.jw-icon-display', '.vjs-big-play-button',
-            '#start', '.plyr__control--overlaid', 'button[aria-label="Play"]',
-            '.play-btn', '.btn-play', '[id*="play"]', '[class*="play"]'
+            '.plyr__control--overlaid', 'button[aria-label="Play"]',
+            '.play-btn', '.btn-play'
         ];
         selectors.forEach(function(sel) {
             try {

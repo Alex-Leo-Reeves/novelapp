@@ -41,6 +41,19 @@ fun TvEmbedPlayer(
     var phaseMessage by remember { mutableStateOf("Loading player...") }
     var stabilizeAttempts by remember { mutableStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    // Provider-flow host tokens for the post-load navigation guard: top-level
+    // navigations between these are legitimate hops (2embed → autoembed …),
+    // anything else after load is an ad hijack and is blocked. This is what
+    // makes the restored blind auto-taps safe: a tap that hits an ad overlay
+    // can no longer navigate the WebView to stake.com / the Play Store.
+    val embedFlowHostTokens = remember(embedUrl) {
+        listOf(
+            "vidsrc", "vidlink", "autoembed", "2embed", "embed.su", "multiembed",
+            "nontongo", "smashystream", "dailymotion", "nxsha", "itsnitrox",
+            "vsembed", "cloudorchestranova", "nextgencloudfabric",
+            "challenges.cloudflare.com"
+        )
+    }
 
     val embedOrigin = remember(embedUrl) {
         runCatching {
@@ -130,8 +143,9 @@ fun TvEmbedPlayer(
     }
 
     // Clean audio gesture & autoplay loop: repeatedly dispatches center touches
-    // to start playback in cross-origin iframes (AutoEmbed, 2Embed, VidLink, VidSrc)
-    // and sets volume to maximum.
+    // (RESTORED on request — the post-load navigation policy below blocks any
+    // ad hijack they might trigger) plus main-frame JS that unmutes and force-
+    // plays every video the main frame can see.
     LaunchedEffect(playerPhase) {
         if (playerPhase == PlayerPhase.READY) {
             val view = webViewRef ?: return@LaunchedEffect
@@ -193,27 +207,25 @@ fun TvEmbedPlayer(
                                 val isWrapperSite = embedUrl.contains("luciferdonghua") || embedUrl.contains("donghuastream") ||
                                         embedUrl.contains("footybite") || embedUrl.contains("sportsurge") ||
                                         embedUrl.contains("scorebat") || embedUrl.contains("watchwrestling")
-                                val isRouterEmbed = embedUrl.contains("multiembed") || embedUrl.contains("autoembed") ||
-                                        embedUrl.contains("embed.su") || embedUrl.contains("vidlink") ||
-                                        embedUrl.contains("vidsrc") || embedUrl.contains("smashystream") ||
-                                        embedUrl.contains("2embed") || embedUrl.contains("nontongo")
 
                                 val isCloudflare = lowerUrl.contains("challenges.cloudflare.com") || lowerUrl.contains("cloudflare.com/cdn-cgi")
                                 if (isCloudflare) return false
 
-                                if (playerPhase != PlayerPhase.LOADING && !isWrapperSite && !isRouterEmbed && !request.url.toString().contains("embed")) {
-                                    return true
-                                }
-
-                                val reqHost = request.url?.host?.lowercase() ?: ""
-                                val embedHost = android.net.Uri.parse(embedUrl).host?.lowercase() ?: ""
-                                if (reqHost.isNotEmpty() && embedHost.isNotEmpty()) {
-                                    val isSameDomain = reqHost == embedHost ||
-                                            reqHost.endsWith(".$embedHost") ||
-                                            embedHost.endsWith(".$reqHost")
-                                    if (!isSameDomain && !isWrapperSite && !isRouterEmbed) {
-                                        return true
-                                    }
+                                // ── POST-LOAD NAVIGATION POLICY (mirrors phone) ────────
+                                // After the first load a top-level navigation may only stay
+                                // inside the embed's provider flow — everything else is an
+                                // ad hijack (vidlink's centre ad → stake.com, vidsrc.sbs
+                                // ads → Play Store). While LOADING, the initial redirect
+                                // chain may hop provider hosts but never arbitrary sites.
+                                val reqHost = (request.url?.host ?: "").lowercase()
+                                val embedHost = runCatching { android.net.Uri.parse(embedUrl).host.orEmpty().lowercase() }.getOrNull().orEmpty()
+                                val sameSiteNav = reqHost.isNotEmpty() && embedHost.isNotEmpty() &&
+                                        (reqHost == embedHost || reqHost.endsWith(".$embedHost") || embedHost.endsWith(".$reqHost"))
+                                val inProviderFlow = reqHost.isNotEmpty() && embedFlowHostTokens.any { reqHost.contains(it) }
+                                if (playerPhase == PlayerPhase.LOADING) {
+                                    if (!sameSiteNav && !inProviderFlow && !isWrapperSite) return true
+                                } else {
+                                    if (!sameSiteNav && !inProviderFlow) return true
                                 }
                             }
 
@@ -694,7 +706,10 @@ private const val CLEAN_AUDIO_UNMUTE_JS = """
                     }
                 } catch(e) {}
             });
-            var playButtons = doc.querySelectorAll('button, .play, .play-button, .jw-icon-display, .vjs-big-play-button, .jw-display-icon-display, [aria-label*="play" i]');
+            // Explicit play controls ONLY. The old selector clicked EVERY
+            // <button> plus anything whose aria-label contained "play" — that
+            // matched ad overlays and their clicks fired redirect hijacks.
+            var playButtons = doc.querySelectorAll('.play, .play-button, .jw-icon-display, .vjs-big-play-button, .jw-display-icon-display, .plyr__control--overlaid, button[aria-label="Play" i]');
             playButtons.forEach(function(btn) {
                 try { btn.click(); } catch(e) {}
             });

@@ -35,6 +35,7 @@ import androidx.compose.ui.focus.focusProperties
 import com.alexleoreeves.novelapp.data.mediacache.DownloadPhase
 import com.alexleoreeves.novelapp.data.mediacache.MediaServerCandidate
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
+import com.alexleoreeves.novelapp.tv.mediacache.TvResolvingTask
 import com.alexleoreeves.novelapp.tv.mediacache.UsbVolume
 import com.alexleoreeves.novelapp.tv.ui.components.TvEpisodeDownloadModal
 import androidx.activity.compose.BackHandler
@@ -132,6 +133,10 @@ fun TvDetailScreen(
 
     // Quality selection dialog: shown before storage dialog when user clicks download
     var pendingQualityChapter by remember { mutableStateOf<Chapter?>(null) }
+    // TaskId created the moment Download is tapped (see enqueueDownload) so the
+    // visible "Preparing download..." entry in Downloads transitions into the
+    // real engine task without a second id.
+    var pendingQualityTaskId by remember { mutableStateOf<String?>(null) }
     val qualityOptions = listOf(
         "1080p" to "Full HD • largest file",
         "720p" to "HD • balanced quality & size",
@@ -148,6 +153,8 @@ fun TvDetailScreen(
         errorMsg = null
         statusText = ""
         animeFallbackActive = false
+        // Never show the previous title's chapters while this one loads.
+        chapters = emptyList()
         try {
             val fetched = if (isVideoTitle) {
                 if (isDonghua) {
@@ -207,7 +214,10 @@ fun TvDetailScreen(
     suspend fun resolveDownloadPick(
         cache: TvMediaCacheController,
         ch: Chapter,
-        tmdbContext: Triple<String, String, String>?
+        tmdbContext: Triple<String, String, String>?,
+        // Statuses feed the visible "Preparing/Resolving" entry on the Downloads
+        // screen instead of spamming the detail screen (default kept for safety).
+        onStatus: (String) -> Unit = { statusText = it }
     ): TvDownloadPick? {
         val probed = HashSet<String>()
         val options = ArrayList<Triple<String, String, suspend () -> String?>>()
@@ -247,7 +257,7 @@ fun TvDetailScreen(
         }
 
         options.forEachIndexed { index, (serverId, serverName, resolve) ->
-            statusText = "Checking server ${index + 1}/${options.size} ($serverName) for downloads..."
+            onStatus("Checking server ${index + 1}/${options.size} ($serverName) for downloads...")
             // Every resolve is BOUNDED: a hung upstream (the blocked donghuaworld
             // resolve used to run for minutes) must never stall the queue here.
             val raw = runCatching { withTimeoutOrNull(45_000L) { resolve() } }.getOrNull()
@@ -260,7 +270,7 @@ fun TvDetailScreen(
                         // CinePro's TMDB sweep does not depend on the selected
                         // server — run it once (first option) instead of per server.
                         tmdbContext = if (index == 0) tmdbContext else null,
-                        onStatus = { msg: String -> statusText = msg },
+                        onStatus = onStatus,
                         context = context
                     )
                 }
@@ -281,18 +291,23 @@ fun TvDetailScreen(
 
     fun startDownloadToInternal(cache: TvMediaCacheController, ch: Chapter) {
         val title = ch.title.ifBlank { item.title }
-        val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        // Reuse the id created the moment Download was tapped so the same
+        // visible entry on the Downloads screen continues seamlessly.
+        val taskId = pendingQualityTaskId ?: "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        pendingQualityTaskId = null
         val containerExtension = "mp4"
-        statusText = "Finding a download-ready stream for \"$title\"..."
+        cache.updateResolving(taskId, "Finding a download-ready stream...")
+        statusText = "Downloading — see the Downloads screen."
         scope.launch {
+          try {
             val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
             val tmdbContext = if (isTmdb) {
                 Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
             } else null
 
-            val pick = resolveDownloadPick(cache, ch, tmdbContext)
+            val pick = resolveDownloadPick(cache, ch, tmdbContext) { msg -> cache.updateResolving(taskId, msg) }
             if (pick == null) {
-                statusText = "No server allows downloads for this title. Try another server on the title's page."
+                cache.failResolving(taskId, "No server allows downloads for this title.")
                 return@launch
             }
 
@@ -324,24 +339,37 @@ fun TvDetailScreen(
                 headersJson = pick.headersJson,
                 parentTitle = item.title
             )
-            statusText = "Download started — see Downloads (active queue)."
+            // The engine task exists now — hand the visible entry over to it
+            // (bytes/progress appear on the Downloads screen from here on).
+            cache.finishResolving(taskId)
+            statusText = "Downloading — see Downloads."
+          } catch (t: kotlinx.coroutines.CancellationException) {
+            throw t
+          } catch (t: Throwable) {
+            cache.failResolving(taskId, t.message ?: "Unknown error")
+            statusText = "Download failed: " + (t.message ?: "unknown error")
+          }
         }
     }
 
     fun startDownloadToUsb(cache: TvMediaCacheController, ch: Chapter, usbVolumeId: String, usbLabel: String) {
         val title = ch.title.ifBlank { item.title }
-        val taskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        // Same visible-entry handoff as startDownloadToInternal.
+        val taskId = pendingQualityTaskId ?: "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        pendingQualityTaskId = null
         val containerExtension = "mp4"
-        statusText = "Finding a download-ready stream for \"$title\" (to $usbLabel)..."
+        cache.updateResolving(taskId, "Finding a download-ready stream for $usbLabel...")
+        statusText = "Downloading to $usbLabel — see the Downloads screen."
         scope.launch {
+          try {
             val isTmdb = !item.isAnime && !isDonghua && item.id.matches(Regex("^\\d+$"))
             val tmdbContext = if (isTmdb) {
                 Triple(item.id, if (item.isVideo) "movie" else "tv", if (item.isVideo) "1:1" else "${ch.seasonNumber}:${ch.chapterNumber}")
             } else null
 
-            val pick = resolveDownloadPick(cache, ch, tmdbContext)
+            val pick = resolveDownloadPick(cache, ch, tmdbContext) { msg -> cache.updateResolving(taskId, msg) }
             if (pick == null) {
-                statusText = "No server allows downloads for this title. Try another server on the title's page."
+                cache.failResolving(taskId, "No server allows downloads for this title.")
                 return@launch
             }
 
@@ -358,8 +386,19 @@ fun TvDetailScreen(
                 headersJson = pick.headersJson,
                 parentTitle = item.title
             )
-            statusText = if (ok) "Download started — see Downloads (active queue)."
-                else "USB drive was removed. Download to internal storage instead."
+            if (ok) {
+                cache.finishResolving(taskId)
+                statusText = "Downloading — see Downloads."
+            } else {
+                cache.failResolving(taskId, "USB drive was removed.")
+                statusText = "USB drive was removed. Download to internal storage instead."
+            }
+          } catch (t: kotlinx.coroutines.CancellationException) {
+            throw t
+          } catch (t: Throwable) {
+            cache.failResolving(taskId, t.message ?: "Unknown error")
+            statusText = "Download failed: " + (t.message ?: "unknown error")
+          }
         }
     }
 
@@ -393,6 +432,23 @@ fun TvDetailScreen(
                 return
             }
         }
+        // Queue the download VISIBLY right now: the Downloads screen shows
+        // "Preparing download..." the instant the button is tapped and every
+        // later status (server walk, scrape, probe) feeds that entry — instead
+        // of scraping messages here while the Downloads page stayed empty.
+        val resolvingTaskId = "tv_${item.id}_${ch.chapterNumber}_${System.currentTimeMillis()}"
+        pendingQualityTaskId = resolvingTaskId
+        cache.beginResolving(
+            TvResolvingTask(
+                taskId = resolvingTaskId,
+                parentId = item.id,
+                parentTitle = item.title,
+                title = ch.title.ifBlank { item.title },
+                coverUrl = item.coverUrl,
+                episodeNumber = ch.chapterNumber,
+                status = "Preparing download..."
+            )
+        )
         // Show quality selection popup first
         pendingQualityChapter = ch
     }
@@ -442,15 +498,21 @@ fun TvDetailScreen(
                 }
                 val effectiveDonghuaServer = if (isDonghua) selectedDonghuaServer else null
 
-                val first = mediaRepo.resolveBingeEpisode(
-                    context = context,
-                    item = item,
-                    chapter = startChapter,
-                    server = effectiveStreamServer,
-                    donghuaServer = effectiveDonghuaServer,
-                    animeServer = effectiveAnimeServer,
-                    isDonghua = isDonghua
-                )
+                val first = runCatching {
+                    mediaRepo.resolveBingeEpisode(
+                        context = context,
+                        item = item,
+                        chapter = startChapter,
+                        server = effectiveStreamServer,
+                        donghuaServer = effectiveDonghuaServer,
+                        animeServer = effectiveAnimeServer,
+                        isDonghua = isDonghua,
+                        // Selector ON = the user's explicit choice — the region
+                        // branch must never hijack it (the "every server still
+                        // played the Indian server" bug).
+                        regionAuto = !showServerSelectors
+                    )
+                }.getOrNull()
                 if (first == null || first.url.isBlank()) {
                     statusText = "Stream unavailable. Try another server."
                     return@launch
@@ -465,7 +527,9 @@ fun TvDetailScreen(
                     item = item,
                     episodes = episodes,
                     serverName = when {
-                        asianRegion != null -> "${asianRegion.label} server"
+                        // Selector ON = the user's explicit choice — never label
+                        // it as the region server when it isn't.
+                        asianRegion != null && !showServerSelectors -> "${asianRegion.label} server"
                         animeFallbackActive -> selectedServer.displayName
                         isAnimeItem -> selectedAnimeServer.displayName
                         isDonghua -> selectedDonghuaServer.displayName
@@ -1010,7 +1074,11 @@ fun TvDetailScreen(
         val cache = mediaCache
         if (qualityChapter != null && cache != null) {
             AlertDialog(
-                onDismissRequest = { pendingQualityChapter = null },
+                onDismissRequest = {
+                    pendingQualityChapter = null
+                    pendingQualityTaskId?.let { mediaCache?.finishResolving(it) }
+                    pendingQualityTaskId = null
+                },
                 containerColor = Color(0xFF0E0E18),
                 title = {
                     Column {
@@ -1114,7 +1182,11 @@ fun TvDetailScreen(
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { pendingQualityChapter = null }) {
+                    TextButton(onClick = {
+                        pendingQualityChapter = null
+                        pendingQualityTaskId?.let { mediaCache?.finishResolving(it) }
+                        pendingQualityTaskId = null
+                    }) {
                         Text("Cancel", color = Color(0xFF00BFFF))
                     }
                 }
@@ -1125,7 +1197,11 @@ fun TvDetailScreen(
         val chapterForStorage = pendingStorageChapter
         if (chapterForStorage != null && cache != null) {
             AlertDialog(
-                onDismissRequest = { pendingStorageChapter = null },
+                onDismissRequest = {
+                    pendingStorageChapter = null
+                    pendingQualityTaskId?.let { mediaCache?.finishResolving(it) }
+                    pendingQualityTaskId = null
+                },
                 containerColor = Color(0xFF0E0E18),
                 title = {
                     Column {
@@ -1204,7 +1280,11 @@ fun TvDetailScreen(
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { pendingStorageChapter = null }) {
+                    TextButton(onClick = {
+                        pendingStorageChapter = null
+                        pendingQualityTaskId?.let { mediaCache?.finishResolving(it) }
+                        pendingQualityTaskId = null
+                    }) {
                         Text("Cancel", color = Color(0xFF00BFFF))
                     }
                 }

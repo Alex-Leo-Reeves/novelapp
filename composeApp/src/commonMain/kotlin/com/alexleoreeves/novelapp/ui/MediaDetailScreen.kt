@@ -79,7 +79,10 @@ fun MediaDetailScreen(
     val mediaType = parts.getOrNull(0) ?: "movie"
     val tmdbId = parts.getOrNull(1) ?: ""
 
-    var episodesList by remember { mutableStateOf<List<MediaEpisode>>(emptyList()) }
+    // Keyed on the title: a previous item's episodes must NEVER be visible (or
+    // playable) while the new title loads — that is how Dolce Amore ended up
+    // playing One Piece's episode list.
+    var episodesList by remember(item.detailPageUrl) { mutableStateOf<List<MediaEpisode>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
     var providerTmdbId by remember(item.detailPageUrl) { mutableStateOf("") }
@@ -631,9 +634,14 @@ fun MediaDetailScreen(
         providerTmdbId = ""
         providerTmdbType = "tv"
         isLoadingEpisodes = true
+        // Drop any previous title's episodes immediately (keying already resets
+        // on title change; this also covers server switches within one title).
+        episodesList = emptyList()
 
-        // Phase 1: Load episodes from the URL the item came from
-        val initialEpisodes = when {
+        // Phase 1: Load episodes from the URL the item came from.
+        // Wrapped: one thrown fetch used to kill this effect and leave the old
+        // episode list in place — playing another show's episodes.
+        val initialEpisodes = try { when {
             isDonghuaItem -> {
                 when (selectedDonghuaServer) {
                     DonghuaServer.DONGHUAWORLD -> {
@@ -724,7 +732,7 @@ fun MediaDetailScreen(
             isKimCartoonDetail -> cartoonScraper.fetchEpisodes(item.detailPageUrl)
             isWcoStreamDetail -> wcoStreamScraper.fetchEpisodes(item.detailPageUrl)
             else -> emptyList()
-        }
+        } } catch (t: Throwable) { emptyList() }
         episodesList = initialEpisodes
         if (isDonghuaItem && initialEpisodes.isNotEmpty()) {
             isMovieContent = false
@@ -802,22 +810,32 @@ fun MediaDetailScreen(
 
     val playEpisode: (MediaEpisode) -> Unit = { ep ->
         scope.launch {
+          try {
             val serverLabel = when {
-                asianRegion != null -> "${asianRegion.label} server"
+                // With the server selector ON the user's explicit choice wins:
+                // the region branch used to hijack playback first, which is why
+                // every server they picked still played "the Indian server".
+                asianRegion != null && !showServerSelectors -> "${asianRegion.label} server"
                 isDonghuaItem -> "${selectedDonghuaServer.displayName} (${selectedDonghuaServer.providerName})"
                 isAnimeItem -> selectedAnimeServer.displayName
                 else -> selectedServer.displayName
             }
             statusText = "Resolving stream via $serverLabel..."
 
-            val shouldResolveInParallel = !showServerSelectors && (isDonghuaItem || isAnimeItem || isTmdbDetail)
+            // TMDB embed items open the player IMMEDIATELY with the chosen (or
+            // default) server. The old parallel sweep HEAD-probed six provider
+            // hosts (4.5 s timeout each) before anything could open — the
+            // "first press takes too long to open the player" regression.
+            // The sweep stays for donghua/anime, which genuinely multi-source.
+            val shouldResolveInParallel = !showServerSelectors && (isDonghuaItem || isAnimeItem)
 
             // ── Asian tab regions: each has its own dedicated server ─────
             // Chinese Movies and Indian come back as a DIRECT public HLS URL
             // (AES-128, zero headers), so they go straight to ExoPlayer/AVPlayer
             // with no WebView. Filipino may fall back to an official YouTube
             // upload, which plays in the app's embed player.
-            if (isAsianItem && asianRegion != null) {
+            // AUTO only — never when the user explicitly picked a server.
+            if (isAsianItem && asianRegion != null && !showServerSelectors) {
                 statusText = "Resolving ${asianRegion.label} stream..."
                 val asianPlayback = runCatching {
                     asianApi.resolve(
@@ -1099,6 +1117,14 @@ fun MediaDetailScreen(
                     ep.episodeNumber
                 )
             }
+          } catch (t: kotlinx.coroutines.CancellationException) {
+            throw t
+          } catch (t: Throwable) {
+            // Never let a single failed attempt cancel this screen's scope —
+            // that is what made "all the other servers stop resolving" after
+            // one provider error: every later launch silently did nothing.
+            statusText = "Playback failed: " + (t.message ?: "unknown error") + ". Try another server."
+          }
         }
     }
 
@@ -1375,8 +1401,11 @@ fun MediaDetailScreen(
                 Button(
                     onClick = {
                         scope.launch {
+                          try {
                             val resolvedTmdbId = if (isTmdbDetail) tmdbId else providerTmdbId
-                            if (isAsianItem && asianRegion != null) {
+                            // Region server is AUTO only; with the selector ON the
+                            // user's explicit server choice is honored instead.
+                            if (isAsianItem && asianRegion != null && !showServerSelectors) {
                                 statusText = "Resolving ${asianRegion.label} stream..."
                                 val asianPlayback = runCatching {
                                     asianApi.resolve(
@@ -1476,6 +1505,11 @@ fun MediaDetailScreen(
                                 if (isPremium) null else freeMoviePreviewMs,
                                 0
                             )
+                          } catch (t: kotlinx.coroutines.CancellationException) {
+                            throw t
+                          } catch (t: Throwable) {
+                            statusText = "Playback failed: " + (t.message ?: "unknown error") + ". Try another server."
+                          }
                         }
                     },
                         modifier = Modifier.weight(1f).height(50.dp),

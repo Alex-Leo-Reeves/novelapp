@@ -1,0 +1,20 @@
+{
+  "name": "novelapp-ij-pwa",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A gift for IJ — iPhone-optimized PWA novel/anime viewer (pink, bright, light, fast). Copied from the Android novelapp, no kokoro, no ads.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}

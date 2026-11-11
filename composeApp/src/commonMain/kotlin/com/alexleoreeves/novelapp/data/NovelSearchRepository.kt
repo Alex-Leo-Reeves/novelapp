@@ -558,7 +558,13 @@ class NovelSearchRepository(
                                 media.genres.contains("Tagalog", ignoreCase = true)
                         }
                     }
-                        .ifEmpty { mediaResults }
+                        // Asian regions must NEVER keep the unfiltered hits: the
+                        // region filter above exists precisely because a stray
+                        // title from another part of the world (Dolce Amore, a
+                        // Philippine show) would otherwise be tagged as this
+                        // region and resolved on the wrong server. Empty here
+                        // lets the backend region search (Source 3) answer.
+                        .ifEmpty { if (category.isAsian) emptyList() else mediaResults }
                     results.addAll(filtered.map { it.toUnifiedVideo(category, "TMDB") })
                 }
             }

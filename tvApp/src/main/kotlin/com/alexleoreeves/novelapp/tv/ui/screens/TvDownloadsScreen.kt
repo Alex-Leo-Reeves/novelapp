@@ -23,6 +23,7 @@ import com.alexleoreeves.novelapp.data.mediacache.DownloadFailureReason
 import com.alexleoreeves.novelapp.data.mediacache.MediaAccessPolicy
 import com.alexleoreeves.novelapp.tv.mediacache.TvIndexedBundle
 import com.alexleoreeves.novelapp.tv.mediacache.TvMediaCacheController
+import com.alexleoreeves.novelapp.tv.mediacache.TvResolvingTask
 import com.alexleoreeves.novelapp.tv.platform.SavedUserAccount
 import com.alexleoreeves.novelapp.tv.ui.theme.Purple500
 
@@ -81,6 +82,8 @@ fun TvDownloadsScreen(
     }
 
     val tasks by mediaCache.tasks.collectAsState()
+    // Queued downloads whose stream is still resolving — shown immediately.
+    val resolving by mediaCache.resolving.collectAsState()
     val usbIndex by mediaCache.usbIndex.collectAsState()
     val completedCount = mediaCache.completedDownloadsCount()
     val completed = remember(completedCount) { mediaCache.listCompletedInternal() }
@@ -115,7 +118,7 @@ fun TvDownloadsScreen(
 
         Spacer(Modifier.height(2.dp))
 
-        if (tasks.isEmpty() && completed.isEmpty() && usbIndex.isEmpty()) {
+        if (tasks.isEmpty() && completed.isEmpty() && usbIndex.isEmpty() && resolving.isEmpty()) {
             EmptyDownloadsState()
         } else {
             LazyColumn(
@@ -125,9 +128,16 @@ fun TvDownloadsScreen(
                 // Active downloads, grouped under their title (series, novel,
                 // movie…) so Episodes 1 and 2 never appear as two flat rows at
                 // root — tap the title to expand its episodes.
+                // Resolving entries (queued, stream not found yet) are listed
+                // right at the top: the user sees "Downloading" the instant
+                // they tap Download, before any bytes flow.
+                val resolvingPending = resolving.filter { it.error == null }
                 val activeTasks = tasks.values.filter { !it.isTerminal }
-                if (activeTasks.isNotEmpty() && breadcrumb is DownloadBreadcrumb.Root) {
+                if ((activeTasks.isNotEmpty() || resolvingPending.isNotEmpty()) && breadcrumb is DownloadBreadcrumb.Root) {
                     item { SectionHeader("Active downloads") }
+                    items(resolvingPending, key = { "resolving_${it.taskId}" }) { rt ->
+                        ResolvingTaskRow(task = rt)
+                    }
                     activeTasks.groupBy { it.request.parentId }.forEach { (parentId, group) ->
                         val expanded = parentId in expandedTaskGroups
                         item(key = "active_group_$parentId") {
@@ -160,10 +170,16 @@ fun TvDownloadsScreen(
                     }
                 }
 
-                // Failed downloads at root — same title grouping.
+                // Failed downloads at root — same title grouping. Resolving
+                // entries whose stream never materialised land here with the
+                // resolver's reason and a dismiss action.
+                val resolvingFailed = resolving.filter { it.error != null }
                 val failedTasks = tasks.values.filter { it.phase == DownloadPhase.FAILED }
-                if (failedTasks.isNotEmpty() && breadcrumb is DownloadBreadcrumb.Root) {
+                if ((failedTasks.isNotEmpty() || resolvingFailed.isNotEmpty()) && breadcrumb is DownloadBreadcrumb.Root) {
                     item { SectionHeader("Failed") }
+                    items(resolvingFailed, key = { "resfailed_${it.taskId}" }) { rt ->
+                        ResolvingFailedRow(task = rt, onDismiss = { mediaCache.finishResolving(rt.taskId) })
+                    }
                     failedTasks.groupBy { it.request.parentId }.forEach { (parentId, group) ->
                         val groupKey = "f:$parentId"
                         val expanded = groupKey in expandedTaskGroups
@@ -1275,3 +1291,93 @@ private fun PlaceholderDownloads() {
         }
     }
 }
+
+/**
+ * A queued download that is still resolving its stream — shown the moment the
+ * user taps Download, carrying the resolver's live status instead of a hidden
+ * wait on the detail screen.
+ */
+@Composable
+private fun ResolvingTaskRow(task: TvResolvingTask) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF131320),
+        border = BorderStroke(1.dp, Color(0xFF00BFFF).copy(alpha = 0.35f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = Color(0xFF00BFFF)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    task.title,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    task.status,
+                    color = Color.White.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                "Downloading",
+                color = Color(0xFF00BFFF),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/** A resolving entry that never found a stream — Failed section + dismiss. */
+@Composable
+private fun ResolvingFailedRow(task: TvResolvingTask, onDismiss: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1A1012),
+        border = BorderStroke(1.dp, Color(0xFFFF6D6D).copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Default.ErrorOutline, null, tint = Color(0xFFFF6D6D), modifier = Modifier.size(18.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    task.title,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    task.error ?: "Failed",
+                    color = Color.White.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss", color = Color(0xFF00BFFF))
+            }
+        }
+    }
+}
+

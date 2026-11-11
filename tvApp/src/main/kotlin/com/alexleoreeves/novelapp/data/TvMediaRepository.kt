@@ -502,7 +502,11 @@ class TvMediaRepository {
         chapter: Chapter?,
         server: StreamServer?,
         donghuaServer: DonghuaServer?,
-        animeServer: AnimeServer? = null
+        animeServer: AnimeServer? = null,
+        // false = the user picked a server manually (selector ON); the region
+        // branch must not hijack their explicit choice — that is why every
+        // server still played "the Indian server".
+        regionAuto: Boolean = true
     ): String? {
         // Zero-UI Automated Parallel Sweep mode
         if (server == null && donghuaServer == null && animeServer == null) {
@@ -531,7 +535,7 @@ class TvMediaRepository {
         // Indian return a DIRECT public HLS playlist (zero headers), Filipino
         // may answer with an official YouTube upload for the embed player.
         val asianCategory = item.asianVideoCategory()
-        if (asianCategory != null) {
+        if (asianCategory != null && regionAuto) {
             val region = AsianApi.REGIONS.firstOrNull { it.key == asianCategory.asianRegionKey }
             if (region != null) {
                 val marker = parseTmdbPlaybackMarker(chapter?.url, item.detailPageUrl, chapter?.chapterNumber)

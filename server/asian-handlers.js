@@ -229,6 +229,66 @@ function titleKey(value) {
         .trim();
 }
 
+/**
+ * How well a candidate hit matches what we actually asked for.
+ *
+ * Returns a bonus >= 40 only when the titles REALLY correspond, 0 otherwise.
+ * Before this gate existed every hit received a position bonus (10, 9, 8...)
+ * regardless of similarity, so ikanbot's first fuzzy result for ANY query won
+ * and its stream was played - live-verified 2026-09-29: querying "Dolce Amore"
+ * returned matchedTitle (a completely unrelated Japanese anime) and the app
+ * played it. Position only orders genuinely matching titles, never creates one.
+ */
+function titleSimilarityBonus(queryKey, hitKey, wantedKey) {
+    if (!hitKey) return 0;
+    if (wantedKey && hitKey === wantedKey) return 100;
+    if (queryKey && hitKey === queryKey) return 95;
+    if (queryKey && Math.min(hitKey.length, queryKey.length) >= 3 &&
+        (queryKey.indexOf(hitKey) === 0 || hitKey.indexOf(queryKey) === 0)) return 70;
+    if (queryKey && Math.min(hitKey.length, queryKey.length) >= 4 &&
+        (hitKey.indexOf(queryKey) !== -1 || queryKey.indexOf(hitKey) !== -1)) return 40;
+
+    // CJK titles (Chinese/Japanese release names) - compare by shared
+    // han/kana characters so a Japanese query cannot match a Chinese title
+    // with zero overlap, while a typo in the real title still passes.
+    function cjkChars(value) {
+        const out = [];
+        const chars = Array.from(value);
+        for (let i = 0; i < chars.length; i++) {
+            const code = chars[i].codePointAt(0);
+            if ((code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3040 && code <= 0x30ff)) out.push(chars[i]);
+        }
+        return out;
+    }
+    const qChars = cjkChars(queryKey || "");
+    const hChars = cjkChars(hitKey);
+    if (qChars.length && hChars.length) {
+        let shared = 0;
+        for (let i = 0; i < qChars.length; i++) {
+            if (hChars.indexOf(qChars[i]) !== -1) shared++;
+        }
+        const shortest = Math.min(qChars.length, hChars.length);
+        if (shortest >= 2 && shared / shortest >= 0.5) return 55;
+        return 0;
+    }
+
+    // Latin word overlap - at least 60% of the words of the shorter title.
+    if (queryKey) {
+        const qWords = queryKey.split(" ").filter((w) => w.length > 1);
+        const hWords = hitKey.split(" ").filter((w) => w.length > 1);
+        if (qWords.length && hWords.length) {
+            let shared = 0;
+            for (let i = 0; i < qWords.length; i++) {
+                if (hWords.indexOf(qWords[i]) !== -1) shared++;
+            }
+            const shortest = Math.min(qWords.length, hWords.length);
+            if (shared / shortest >= 0.6) return 55;
+        }
+    }
+    return 0;
+}
+
+
 /** True for anything that must never reach a family app (Kids mode exists). */
 function isAdultTitle(value) {
     const lower = String(value === undefined || value === null ? "" : value).toLowerCase();
@@ -527,14 +587,20 @@ async function resolveRegionTitle(title, region, tmdbId, mediaType) {
         if (!hits.length) continue;
 
         const queryKey = titleKey(query);
-        const scored = hits.map(function (hit, index) {
+        const scored = [];
+        for (let index = 0; index < hits.length; index++) {
+            const hit = hits[index];
             const key = titleKey(hit.title);
-            let score = Math.max(0, 10 - index);
-            if (key && wanted && key === wanted) score += 100;
-            else if (key && wanted && (key.indexOf(wanted) === 0 || wanted.indexOf(key) === 0)) score += 70;
-            else if (key && queryKey && key.indexOf(queryKey) !== -1) score += 40;
-            return { hit: hit, score: score };
-        });
+            // HARD SIMILARITY GATE: a hit must really match the wanted or
+            // queried title (bonus >= 40) or it is discarded. The old score
+            // gave every hit a position bonus (10, 9, 8...) with no minimum,
+            // so ikanbot's top fuzzy result for ANY query won and its stream
+            // played - live-proven wrong-content bug. Position now only
+            // tie-breaks among hits that already passed the gate.
+            const bonus = titleSimilarityBonus(queryKey, key, wanted);
+            if (bonus < 40) continue;
+            scored.push({ hit: hit, score: bonus * 10 + Math.max(0, 10 - index) });
+        }
         scored.sort(function (a, b) {
             return b.score - a.score;
         });

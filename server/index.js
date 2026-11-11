@@ -1953,7 +1953,16 @@ async function tmdbItems(type, query, page = 1) {
     if (normalizedType === "chinesemovies" || normalizedType === "indian" || normalizedType === "filipino" ||
         normalizedType === "wuxia" || normalizedType === "xianxia") {
         const filteredRegional = results.filter((item) => tmdbRegionMatches(item, normalizedType));
-        if (filteredRegional.length) results = filteredRegional;
+        if (filteredRegional.length) {
+            results = filteredRegional;
+        } else if (query) {
+            // A region search must NOT fall back to the unfiltered multi-search
+            // results: that tagged every hit with this region's kind regardless
+            // of where it is from (live proof: "Dolce Amore" - a Philippine show -
+            // came back under type=indian with kind "indian", which made the app
+            // resolve it on the Indian server). Empty means "not in this region".
+            results = [];
+        }
     }
 
     if (query) {
@@ -2015,9 +2024,19 @@ async function tmdbBestMatch(type, title) {
     const items = await tmdbItems(type, query, 1).catch(() => []);
     const normalizedQuery = normalizeTitleKey(query);
     const compactQuery = compactTitleKey(query);
-    return items.find((item) => /^tmdb:\/\//.test(item.detailUrl) && normalizeTitleKey(item.title) === normalizedQuery) ||
-        items.find((item) => /^tmdb:\/\//.test(item.detailUrl) && compactTitleKey(item.title) === compactQuery) ||
-        items.find((item) => /^tmdb:\/\//.test(item.detailUrl)) ||
+    const tmdbItemsOnly = items.filter((item) => /^tmdb:\/\//.test(item.detailUrl));
+    return tmdbItemsOnly.find((item) => normalizeTitleKey(item.title) === normalizedQuery) ||
+        tmdbItemsOnly.find((item) => compactTitleKey(item.title) === compactQuery) ||
+        // Loose containment match ONLY. The old third fallback returned the
+        // FIRST TMDB result for any query that didn't match exactly, which
+        // silently bound a different show's id/chapters to the requested
+        // title (wrong-content playback). No plausible match -> null.
+        tmdbItemsOnly.find((item) => {
+            const key = normalizeTitleKey(item.title);
+            if (!key || !normalizedQuery) return false;
+            if (Math.min(key.length, normalizedQuery.length) < 4) return false;
+            return key.indexOf(normalizedQuery) !== -1 || normalizedQuery.indexOf(key) !== -1;
+        }) ||
         null;
 }
 
@@ -5419,6 +5438,41 @@ async function handleApi(request, response, pathname) {
   }
 }
 
+function serveIjStatic(request, response, pathname) {
+  // Serve the React PWA (iPhone) from the separate pwa-ij/dist folder.
+  // SPA fallback: any unknown /ij/* path returns index.html for client routing.
+  const IJ_DIR = path.join(process.cwd(), "pwa-ij", "dist");
+  let rel = pathname === "/ij" || pathname === "/ij/" ? "/index.html" : pathname.slice("/ij".length);
+  const safePath = path
+    .normalize(decodeURIComponent(rel))
+    .replace(/^(\.\.(\/|\\|$))+/, "");
+  let filePath = path.join(IJ_DIR, safePath === "/" ? "/index.html" : safePath);
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+      const subIndex = path.join(filePath, "index.html");
+      if (fs.existsSync(subIndex)) filePath = subIndex;
+    }
+  } catch (e) {}
+  const resolvedPath = (() => {
+    try {
+      return fs.existsSync(filePath) && fs.statSync(filePath).isFile() ? filePath : path.join(IJ_DIR, "index.html");
+    } catch (e) { return path.join(IJ_DIR, "index.html"); }
+  })();
+  const ext = path.extname(resolvedPath).toLowerCase();
+  const stat = fs.statSync(resolvedPath);
+  const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascript", ".css": "text/css",
+    ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+    ".woff2": "font/woff2", ".woff": "font/woff" };
+  response.writeHead(200, {
+    "content-type": MIME[ext] || "application/octet-stream",
+    "content-length": stat.size,
+    "cache-control": ext === ".html" ? "no-cache" : "public, max-age=86400, immutable",
+    "service-worker-allowed": "/ij/",
+  });
+  if (request.method === "HEAD") { response.end(); return; }
+  fs.createReadStream(resolvedPath).pipe(response);
+}
+
 function serveStatic(request, response, pathname) {
   // If the APK is not present on disk (Render deploy without LFS), redirect to GitHub Release
   const downloadRedirects = {
@@ -5591,6 +5645,11 @@ const server = http.createServer((request, response) => {
 
   if (url.pathname.startsWith("/api/")) {
     return handleApi(request, response, url.pathname);
+  }
+
+  // ── IJ PWA (iPhone) — served from the separate pwa-ij folder ──────────
+  if (url.pathname === "/ij" || url.pathname === "/ij/" || url.pathname.startsWith("/ij/")) {
+    return serveIjStatic(request, response, url.pathname);
   }
 
   return serveStatic(request, response, url.pathname);
