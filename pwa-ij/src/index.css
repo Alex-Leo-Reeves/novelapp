@@ -986,3 +986,100 @@ html, body {
   font-size: 0.85rem;
   color: var(--ink-muted);
 }
+
+/* ── TV App Categorized Rows on Discover ── */
+.home-row-section {
+  margin-bottom: 22px;
+}
+
+.home-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+
+.home-row-title {
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 800;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-row-see-all-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--pink-600);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.home-row-see-all-btn:active {
+  background: var(--pink-100);
+  transform: scale(0.95);
+}
+
+.home-row-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin: 0 -16px;
+  padding-left: 16px;
+  padding-right: 16px;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+}
+
+.home-row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.home-row-card-item {
+  flex: 0 0 135px;
+  width: 135px;
+  scroll-snap-align: start;
+}
+
+/* ── Load More Titles Button ── */
+.load-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 24px 0 16px 0;
+}
+
+.load-more-btn {
+  background: #ffffff;
+  border: 1.5px solid var(--pink-400);
+  color: var(--pink-600);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 800;
+  padding: 10px 24px;
+  border-radius: var(--radius-full);
+  box-shadow: 0 2px 8px rgba(255, 45, 120, 0.12);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.load-more-btn:active {
+  transform: scale(0.96);
+  background: var(--pink-50);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+

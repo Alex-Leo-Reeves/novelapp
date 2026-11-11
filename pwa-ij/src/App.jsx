@@ -14,7 +14,6 @@ export default function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [player, setPlayer] = useState({ open: false, media: null, episode: null });
   const [reader, setReader] = useState({ open: false, media: null, chapter: null, chapters: [] });
-  const [currentCategory, setCurrentCategory] = useState("anime");
 
   // Register PWA service worker
   useEffect(() => {
@@ -29,14 +28,14 @@ export default function App() {
   // Multi-tier backward button & swipe-back protection:
   // Never suddenly jump to home when user presses back from Player, Reader, or Detail!
   useEffect(() => {
-    const handlePopState = (event) => {
+    const handlePopState = () => {
       // 1. If video player is open, back closes player and leaves detail screen intact!
       if (player.open) {
         setPlayer({ open: false, media: null, episode: null });
         return;
       }
 
-      // 2. If novel reader is open, back closes reader and leaves detail screen intact!
+      // 2. If novel/manga reader is open, back closes reader and leaves detail screen intact!
       if (reader.open) {
         setReader({ open: false, media: null, chapter: null, chapters: [] });
         return;
@@ -60,9 +59,7 @@ export default function App() {
   const openMediaDetail = useCallback((mediaOrId, encodedId, category) => {
     const media = typeof mediaOrId === "object" ? mediaOrId : null;
     const enc = typeof mediaOrId === "object" ? encodedId : mediaOrId;
-    const cat = typeof mediaOrId === "object" ? category : encodedId;
-    if (cat) setCurrentCategory(cat);
-    navigate(`/media/${enc}`, { fromPath: route.path || "/", media });
+    navigate(`/media/${enc}`, { fromPath: route.path || "/", media, category });
   }, [navigate, route.path]);
 
   const openPlayer = useCallback((media, episode) => {
@@ -78,7 +75,6 @@ export default function App() {
 
   const closePlayer = useCallback(() => {
     setPlayer({ open: false, media: null, episode: null });
-    // Pop the history entry back to media detail without page reload
     if (window.location.pathname.includes("/play/")) {
       window.history.back();
     }
@@ -90,7 +86,7 @@ export default function App() {
     window.history.pushState(
       { screen: "reader", mediaId: media.id, chapNum },
       "",
-      `/ij/read/${encodeURIComponent(media.id || "novel")}/${chapNum}`
+      `/ij/read/${encodeURIComponent(media.id || "reading")}/${chapNum}`
     );
   }, []);
 
@@ -103,7 +99,12 @@ export default function App() {
 
   const isMediaDetail = route.path === "/media";
   const isFavorites = route.path === "/favorites";
-  const isNovelsTab = route.path === "/novels";
+
+  // Compute active type for Home view:
+  const activeHomeType = route.type ||
+    (route.path === "/novels" ? "novels" :
+     route.path === "/manga" ? "manga" :
+     "all");
 
   return (
     <ErrorBoundary>
@@ -125,9 +126,10 @@ export default function App() {
           <Home
             route={{
               ...route,
-              type: isNovelsTab ? "novels" : currentCategory,
+              type: activeHomeType,
             }}
             onSelectMedia={openMediaDetail}
+            onNavigateTab={navigate}
           />
         )}
 
@@ -163,10 +165,11 @@ export default function App() {
 function parseRoute(pathname, extraState = {}) {
   const base = "/ij";
   let p = pathname.startsWith(base) ? pathname.slice(base.length) : pathname;
-  if (!p || p === "/" || p === "") return { path: "/", ...extraState };
+  if (!p || p === "/" || p === "") return { path: "/", type: "all", ...extraState };
   if (p === "/favorites" || p === "/fav") return { path: "/favorites", ...extraState };
   if (p === "/novels") return { path: "/novels", type: "novels", ...extraState };
-  if (p === "/search") return { path: "/search", ...extraState };
+  if (p === "/manga") return { path: "/manga", type: "manga", ...extraState };
+  if (p === "/search") return { path: "/search", type: "all", ...extraState };
   if (p.startsWith("/media/")) {
     const parts = p.split("/").filter(Boolean);
     return { path: "/media", id: parts[1] || "", ...extraState };
@@ -179,5 +182,5 @@ function parseRoute(pathname, extraState = {}) {
     const parts = p.split("/").filter(Boolean);
     return { path: "/read", mediaId: parts[1], chapNum: parts[2] || "1", ...extraState };
   }
-  return { path: "/", ...extraState };
+  return { path: "/", type: "all", ...extraState };
 }

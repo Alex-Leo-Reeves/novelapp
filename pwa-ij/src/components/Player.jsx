@@ -103,12 +103,10 @@ export default function Player({ media, episode, onBack, onServerChange }) {
             src={activeUrl}
             className="player-iframe"
             title="Media player"
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture; xr-spatial-tracking"
             allowFullScreen
             playsInline
             webkit-playsinline="true"
-            // Sandbox prevents intrusive ads, popup tabs, and top redirects!
-            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
             onLoad={() => setLoading(false)}
           />
         ) : (
