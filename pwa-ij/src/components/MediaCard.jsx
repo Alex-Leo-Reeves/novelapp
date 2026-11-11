@@ -39,6 +39,7 @@ export default function MediaCard({ media, onPress }) {
             alt={media.title}
             className="card-cover-img"
             loading="lazy"
+            referrerPolicy="no-referrer"
             onError={(e) => {
               e.currentTarget.style.display = "none";
             }}
