@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { MEDIA_TYPES, homeContent, searchContent } from "../data/api";
+import { safeEncodeMedia } from "../data/codec";
 import MediaCard from "../components/MediaCard";
 
 export default function Home({ route, onSelectMedia }) {
@@ -135,12 +136,12 @@ export default function Home({ route, onSelectMedia }) {
               episodes: m.episodeCount || m.episodes || 12,
               server: m.sourceName || m.server || "Stream",
             };
-            const encoded = encodeURIComponent(btoa(JSON.stringify(payload)));
+            const encoded = safeEncodeMedia(payload);
             return (
               <MediaCard
                 key={m.id || m.detailUrl || m.title}
                 media={payload}
-                onPress={() => onSelectMedia(encoded, activeType)}
+                onPress={() => onSelectMedia(payload, encoded, activeType)}
               />
             );
           })}

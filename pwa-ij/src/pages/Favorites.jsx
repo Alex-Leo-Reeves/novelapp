@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { safeEncodeMedia } from "../data/codec";
 import MediaCard from "../components/MediaCard";
 
 export default function Favorites({ onSelectMedia }) {
@@ -35,12 +36,12 @@ export default function Favorites({ onSelectMedia }) {
       ) : (
         <div className="media-grid">
           {favs.map((m) => {
-            const encoded = encodeURIComponent(btoa(JSON.stringify(m)));
+            const encoded = safeEncodeMedia(m);
             return (
               <MediaCard
                 key={m.id || m.title}
                 media={m}
-                onPress={() => onSelectMedia(encoded, m.kind || "anime")}
+                onPress={() => onSelectMedia(m, encoded, m.kind || "anime")}
               />
             );
           })}

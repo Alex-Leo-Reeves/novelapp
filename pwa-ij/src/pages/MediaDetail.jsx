@@ -1,21 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { getChapters, getMediaStream } from "../data/api";
 import { ALL_SERVERS, defaultServerFor, parseMediaId, buildEmbedUrl, resolveTmdbFromAniList } from "../data/servers";
+import { safeDecodeMedia } from "../data/codec";
 
 export default function MediaDetail({ route, navigate, onOpenPlayer, onOpenReader }) {
-  let mediaPayload = null;
-  try {
-    mediaPayload = JSON.parse(decodeURIComponent(atob(decodeURIComponent(route.id || ""))));
-  } catch (e) {
-    mediaPayload = {
-      id: route.id || "",
-      title: route.id || "Media",
-      kind: "anime",
-      cover: "",
-      synopsis: "",
-      detailUrl: "",
-    };
-  }
+  const mediaPayload = route.media || safeDecodeMedia(route.id) || {
+    id: route.id || "",
+    title: route.id || "Media",
+    kind: "anime",
+    cover: "",
+    synopsis: "",
+    detailUrl: "",
+  };
 
   const kind = (mediaPayload.kind || "anime").toLowerCase();
   const isReadingContent = kind === "novels" || kind === "novel" || kind === "manga" || kind === "comic";

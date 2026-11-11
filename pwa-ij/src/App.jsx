@@ -8,6 +8,8 @@ import MediaDetail from "./pages/MediaDetail";
 import Favorites from "./pages/Favorites";
 import "./index.css";
 
+import ErrorBoundary from "./components/ErrorBoundary";
+
 export default function App() {
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [player, setPlayer] = useState({ open: false, media: null, episode: null });
@@ -55,9 +57,12 @@ export default function App() {
     setRoute(parseRoute(fullPath, state));
   }, []);
 
-  const openMediaDetail = useCallback((encodedId, category) => {
-    if (category) setCurrentCategory(category);
-    navigate(`/media/${encodedId}`, { fromPath: route.path || "/" });
+  const openMediaDetail = useCallback((mediaOrId, encodedId, category) => {
+    const media = typeof mediaOrId === "object" ? mediaOrId : null;
+    const enc = typeof mediaOrId === "object" ? encodedId : mediaOrId;
+    const cat = typeof mediaOrId === "object" ? category : encodedId;
+    if (cat) setCurrentCategory(cat);
+    navigate(`/media/${enc}`, { fromPath: route.path || "/", media });
   }, [navigate, route.path]);
 
   const openPlayer = useCallback((media, episode) => {
@@ -101,55 +106,57 @@ export default function App() {
   const isNovelsTab = route.path === "/novels";
 
   return (
-    <div className="app-shell">
-      {/* Header bar */}
-      <Header route={route} navigate={navigate} />
+    <ErrorBoundary>
+      <div className="app-shell">
+        {/* Header bar */}
+        <Header route={route} navigate={navigate} />
 
-      {/* Main Screen View */}
-      {isMediaDetail ? (
-        <MediaDetail
-          route={route}
-          navigate={navigate}
-          onOpenPlayer={openPlayer}
-          onOpenReader={openReader}
-        />
-      ) : isFavorites ? (
-        <Favorites onSelectMedia={openMediaDetail} />
-      ) : (
-        <Home
-          route={{
-            ...route,
-            type: isNovelsTab ? "novels" : currentCategory,
-          }}
-          onSelectMedia={openMediaDetail}
-        />
-      )}
+        {/* Main Screen View */}
+        {isMediaDetail ? (
+          <MediaDetail
+            route={route}
+            navigate={navigate}
+            onOpenPlayer={openPlayer}
+            onOpenReader={openReader}
+          />
+        ) : isFavorites ? (
+          <Favorites onSelectMedia={openMediaDetail} />
+        ) : (
+          <Home
+            route={{
+              ...route,
+              type: isNovelsTab ? "novels" : currentCategory,
+            }}
+            onSelectMedia={openMediaDetail}
+          />
+        )}
 
-      {/* Fixed Bottom Navigation (hidden when in MediaDetail for clean screen) */}
-      {!isMediaDetail && <BottomNav route={route} navigate={navigate} />}
+        {/* Fixed Bottom Navigation (hidden when in MediaDetail for clean screen) */}
+        {!isMediaDetail && <BottomNav route={route} navigate={navigate} />}
 
-      {/* Video Player Modal Overlay */}
-      {player.open && (
-        <Player
-          media={player.media}
-          episode={player.episode}
-          onBack={closePlayer}
-        />
-      )}
+        {/* Video Player Modal Overlay */}
+        {player.open && (
+          <Player
+            media={player.media}
+            episode={player.episode}
+            onBack={closePlayer}
+          />
+        )}
 
-      {/* Novel & Manga Reader Modal Overlay */}
-      {reader.open && (
-        <Reader
-          media={reader.media}
-          chapter={reader.chapter}
-          chapters={reader.chapters}
-          onBack={closeReader}
-          onSelectChapter={(nextChap) => {
-            setReader((prev) => ({ ...prev, chapter: nextChap }));
-          }}
-        />
-      )}
-    </div>
+        {/* Novel & Manga Reader Modal Overlay */}
+        {reader.open && (
+          <Reader
+            media={reader.media}
+            chapter={reader.chapter}
+            chapters={reader.chapters}
+            onBack={closeReader}
+            onSelectChapter={(nextChap) => {
+              setReader((prev) => ({ ...prev, chapter: nextChap }));
+            }}
+          />
+        )}
+      </div>
+    </ErrorBoundary>
   );
 }
 
