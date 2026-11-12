@@ -859,6 +859,141 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+/* ── Anti-Trap Touch Shield: Intercepts taps over iframe to stop ad popunders ── */
+.player-screen-touch-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-screen-touch-shield.is-hidden-mode {
+  background: transparent;
+}
+
+.player-screen-touch-shield.is-visible-mode {
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.player-shield-hud-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  animation: fadeIn 0.2s ease;
+  text-align: center;
+  padding: 0 16px;
+}
+
+.player-shield-pill {
+  background: rgba(18, 5, 14, 0.82);
+  border: 1px solid rgba(255, 51, 133, 0.4);
+  color: #ffb3d9;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shield-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #00ff88;
+  box-shadow: 0 0 8px #00ff88;
+  display: inline-block;
+}
+
+.player-shield-hint {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.player-shield-toggle-btn {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+  font-family: var(--font-display);
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 6px 16px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.15s ease;
+}
+
+.player-shield-toggle-btn:active {
+  background: var(--pink-500);
+  border-color: transparent;
+}
+
+.player-direct-touch-indicator {
+  position: absolute;
+  top: max(env(safe-area-inset-top), 14px);
+  right: max(env(safe-area-inset-right), 76px);
+  z-index: 40;
+  background: rgba(255, 45, 120, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 10px rgba(255, 45, 120, 0.5);
+  animation: pulse 2s infinite;
+}
+
+.player-reshield-btn {
+  background: #ffffff;
+  border: none;
+  color: var(--pink-600);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.player-shield-badge-btn {
+  background: rgba(255, 51, 133, 0.2);
+  border: 1px solid rgba(255, 51, 133, 0.4);
+  color: #ff99cc;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.player-shield-badge-btn:active {
+  background: var(--pink-500);
+  color: #ffffff;
+}
+
 .player-bottom-controls {
   flex-shrink: 0;
   display: flex;
