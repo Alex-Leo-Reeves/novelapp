@@ -8,8 +8,6 @@ export default function Player({ media, episode, onBack, onServerChange }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [directTouchMode, setDirectTouchMode] = useState(false);
-  const [directTouchCountdown, setDirectTouchCountdown] = useState(0);
   const [isLandscape, setIsLandscape] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.innerWidth > window.innerHeight;
@@ -18,40 +16,9 @@ export default function Player({ media, episode, onBack, onServerChange }) {
   const videoRef = useRef(null);
   const iframeRef = useRef(null);
   const hideTimerRef = useRef(null);
-  const directTouchTimerRef = useRef(null);
 
   const epNum = episode ? episode.number || 1 : 1;
   const tmdb = parseTmdb(media.detailUrl);
-
-  // Direct touch timer logic (lets user temporarily interact with iframe controls e.g. subtitles)
-  const enableDirectTouch = useCallback((seconds = 15) => {
-    setDirectTouchMode(true);
-    setDirectTouchCountdown(seconds);
-    if (directTouchTimerRef.current) clearInterval(directTouchTimerRef.current);
-
-    directTouchTimerRef.current = setInterval(() => {
-      setDirectTouchCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(directTouchTimerRef.current);
-          setDirectTouchMode(false);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  const disableDirectTouch = useCallback(() => {
-    if (directTouchTimerRef.current) clearInterval(directTouchTimerRef.current);
-    setDirectTouchMode(false);
-    setDirectTouchCountdown(0);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (directTouchTimerRef.current) clearInterval(directTouchTimerRef.current);
-    };
-  }, []);
 
   // Compute active stream or embed URL
   const activeUrl = React.useMemo(() => {
@@ -105,18 +72,13 @@ export default function Player({ media, episode, onBack, onServerChange }) {
     };
   }, [isFullscreen, isLandscape, resetHideTimer]);
 
-  // Handle taps on shield to toggle overlay controls without ever touching iframe
-  const handleShieldTap = (e) => {
+  // Pure logic: when controls are hidden, tapping wakes them up and prevents the tap from reaching iframe ad traps
+  const handleTapCapture = (e) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    if (controlsVisible) {
-      setControlsVisible(false);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    } else {
-      resetHideTimer();
-    }
+    resetHideTimer();
   };
 
   // Prevent loading overlay from ever getting stuck on screen (failsafe)
@@ -128,10 +90,20 @@ export default function Player({ media, episode, onBack, onServerChange }) {
     return () => clearTimeout(timer);
   }, [activeUrl, selectedServer]);
 
-  // Protect PWA from top-level ad hijacks when user taps play
+  // Pure logic: Auto-refocus window if an iframe tries to spawn a background popunder
+  useEffect(() => {
+    const handleBlur = () => {
+      setTimeout(() => {
+        try { window.focus(); } catch (_) {}
+      }, 50);
+    };
+    window.addEventListener("blur", handleBlur);
+    return () => window.removeEventListener("blur", handleBlur);
+  }, []);
+
+  // Protect PWA from top-level ad hijacks
   useEffect(() => {
     const handleBeforeUnload = (e) => {
-      // Prevents third-party embed scripts from redirecting the main PWA window to ad sites
       e.preventDefault();
       return (e.returnValue = "");
     };
@@ -237,60 +209,21 @@ export default function Player({ media, episode, onBack, onServerChange }) {
           </div>
         )}
 
-        {/* Anti-Trap Tap Shield:
-            When controls are hidden OR direct touch is not active,
-            intercepts all taps/clicks so they wake up the HUD instantly
-            WITHOUT EVER REACHING the iframe's ad-trapped click listeners! */}
-        {!directTouchMode && !loading && (
+        {/* Invisible Tap Capture (Pure Logic):
+            Only active when controls are hidden. Tapping screen wakes up controls
+            immediately on 1 tap, absorbing the click so the iframe never receives
+            repeated click events that trigger popunder ads!
+            Completely invisible: 0 UI elements, zero interference. */}
+        {!controlsVisible && !loading && (
           <div
-            className={`player-screen-touch-shield ${!controlsVisible ? "is-hidden-mode" : "is-visible-mode"}`}
-            onClick={handleShieldTap}
-            onTouchEnd={handleShieldTap}
-            aria-label="Toggle player controls"
-          >
-            {/* When controls are visible, show HUD center shield status and direct touch option */}
-            {controlsVisible && (
-              <div
-                className="player-shield-hud-center"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="player-shield-pill">
-                  <span className="shield-dot" /> 🛡️ Ad Shield Active • Taps Protected
-                </div>
-                <div className="player-shield-hint">
-                  Tapping screen shows/hides controls safely without ad traps
-                </div>
-                <button
-                  type="button"
-                  className="player-shield-toggle-btn"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    enableDirectTouch(15);
-                  }}
-                >
-                  🔓 Touch Video Directly (15s)
-                </button>
-              </div>
-            )}
-          </div>
+            className="player-tap-capture"
+            onClick={handleTapCapture}
+            onTouchEnd={handleTapCapture}
+            aria-label="Tap to show controls"
+          />
         )}
 
-        {/* Direct Touch Indicator when user unlocks the player for subtitles/scrubbing */}
-        {directTouchMode && (
-          <div className="player-direct-touch-indicator">
-            <span>🔓 Direct Touch ({directTouchCountdown}s)</span>
-            <button
-              type="button"
-              onClick={disableDirectTouch}
-              className="player-reshield-btn"
-            >
-              🛡️ Lock Shield
-            </button>
-          </div>
-        )}
-
-        {/* Loading Shield Overlay: Absorbs pointer & touch events to block ad traps! */}
+        {/* Loading Shield Overlay: Absorbs pointer & touch events to block ad traps during load */}
         {loading && (
           <div
             className="player-loader-overlay"
@@ -304,7 +237,6 @@ export default function Player({ media, episode, onBack, onServerChange }) {
             }}
           >
             <div className="spinner" />
-            <div className="player-loader-badge">🛡️ Ad Shield Active</div>
             <span>Connecting to {currentServerObj.displayName}…</span>
           </div>
         )}
@@ -312,37 +244,16 @@ export default function Player({ media, episode, onBack, onServerChange }) {
 
       {/* Bottom Controls Bar */}
       <footer className="player-bottom-controls">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: "0.82rem", color: "var(--pink-200)", fontWeight: 700 }}>
-              ⚡ {currentServerObj.displayName}
-            </span>
-            <button
-              type="button"
-              className="player-shield-badge-btn"
-              onClick={() => {
-                if (directTouchMode) disableDirectTouch();
-                else enableDirectTouch(15);
-              }}
-            >
-              {directTouchMode ? "🔓 Direct Touch" : "🛡️ Shielded"}
-            </button>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              className="player-ctrl-btn"
-              onClick={() => setControlsVisible(false)}
-            >
-              Hide Controls
-            </button>
-            <button className="player-ctrl-btn" onClick={toggleFullscreen}>
-              {isFullscreen ? "Exit Fullscreen" : "⛶ Fullscreen"}
-            </button>
-          </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: "0.82rem", color: "var(--pink-200)", fontWeight: 700 }}>
+            ⚡ {currentServerObj.displayName} Server
+          </span>
+          <button className="player-ctrl-btn" onClick={toggleFullscreen}>
+            {isFullscreen ? "Exit Fullscreen" : "⛶ Fullscreen"}
+          </button>
         </div>
         <div style={{ fontSize: "0.72rem", color: "rgba(255, 255, 255, 0.7)", textAlign: "center" }}>
-          💡 Tap screen once to toggle controls. Ad Shield blocks all popup traps!
+          💡 Tip: Rotate your iPhone or tap Fullscreen for edge-to-edge cinema playback.
         </div>
       </footer>
     </div>
