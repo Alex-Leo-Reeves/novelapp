@@ -8,7 +8,31 @@
   <meta name="apple-mobile-web-app-title" content="A gift for IJ ❤️" />
   <meta name="theme-color" content="#ff3385" />
   <meta name="description" content="A gift for IJ ❤️ — a bright, romantic pink iPhone-optimized PWA for novels, anime, and movies." />
-  <meta name="referrer" content="no-referrer" />
+  <meta name="referrer" content="origin-when-cross-origin" />
+  
+  <!-- Global AdShield: Stops popup windows and ad traps when tapping on mobile -->
+  <script>
+    (function() {
+      try {
+        var originalOpen = window.open;
+        window.open = function(url, target, features) {
+          // Block ad popups
+          console.warn('[AdShield] Blocked popup window.open:', url);
+          return null;
+        };
+        window.addEventListener('click', function(e) {
+          var t = e.target;
+          if (t && t.tagName === 'A' && (t.target === '_blank' || t.getAttribute('target') === '_blank')) {
+            if (!t.closest('#root')) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.warn('[AdShield] Blocked external ad tab');
+            }
+          }
+        }, true);
+      } catch (_) {}
+    })();
+  </script>
   
   <link rel="icon" type="image/svg+xml" href="/ij/favicon.svg" />
   <link rel="apple-touch-icon" href="/ij/icon.svg" />

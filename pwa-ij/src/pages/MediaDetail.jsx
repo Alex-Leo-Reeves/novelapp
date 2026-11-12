@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getChapters, getMediaStream } from "../data/api";
-import { ALL_SERVERS, defaultServerFor, parseMediaId, buildEmbedUrl, resolveTmdbFromAniList } from "../data/servers";
+import { ALL_SERVERS, defaultServerFor, parseMediaId, buildEmbedUrl, resolveTmdbFromAniList, normalizeServerKey } from "../data/servers";
 import { safeDecodeMedia } from "../data/codec";
 
 export default function MediaDetail({ route, navigate, onOpenPlayer, onOpenReader }) {
@@ -16,7 +16,9 @@ export default function MediaDetail({ route, navigate, onOpenPlayer, onOpenReade
   const kind = (mediaPayload.kind || "anime").toLowerCase();
   const isReadingContent = kind === "novels" || kind === "novel" || kind === "manga" || kind === "comic";
 
-  const [selectedServer, setSelectedServer] = useState(() => defaultServerFor(kind) || "vidlink");
+  const [selectedServer, setSelectedServer] = useState(() =>
+    normalizeServerKey(mediaPayload.server || defaultServerFor(kind) || "vidsrcto")
+  );
   const [serverOn, setServerOn] = useState(true); // Server selector ON by default
   const [items, setItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(true);

@@ -48,48 +48,71 @@ export function parseTmdb(detailUrl) {
   return { type: m[1], id: m[2] };
 }
 
+// Normalize any server name (key, displayName like "Nebula", or providerName like "VidLink")
+export function normalizeServerKey(key) {
+  if (!key) return StreamServer.VIDSRC_TO.key;
+  const raw = String(key).trim().toLowerCase();
+  for (const s of ALL_SERVERS) {
+    if (
+      s.key.toLowerCase() === raw ||
+      s.displayName.toLowerCase() === raw ||
+      s.providerName.toLowerCase().replace(/[^a-z0-9]/g, "") === raw.replace(/[^a-z0-9]/g, "")
+    ) {
+      return s.key;
+    }
+  }
+  return raw;
+}
+
 // Build embed URL — exactly like Android StreamServer.buildEmbedUrl
 export function buildEmbedUrl(serverKey, tmdbType, tmdbId, season = "1", episode = "1") {
+  const normKey = normalizeServerKey(serverKey);
   const isMovie = tmdbType === "movie";
-  switch (serverKey) {
+  switch (normKey) {
     case StreamServer.VIDLINK.key:
+      // Vidlink works best with primaryColor matching theme and without forced unmuted autoplay
+      // (which iOS Safari WebKit blocks, causing infinite loading spinners)
       return isMovie
-        ? `https://vidlink.pro/movie/${tmdbId}?autoplay=true&primaryColor=ff3385`
-        : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}?autoplay=true&primaryColor=ff3385`;
+        ? `https://vidlink.pro/movie/${tmdbId}?primaryColor=ff3385`
+        : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}?primaryColor=ff3385`;
     case StreamServer.VIDSRC_TO.key:
       return isMovie
-        ? `https://vidsrc.to/embed/movie/${tmdbId}?autoplay=1`
-        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
+        ? `https://vidsrc.to/embed/movie/${tmdbId}`
+        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`;
     case StreamServer.AUTOEMBED.key:
       return isMovie
-        ? `https://autoembed.co/movie/tmdb/${tmdbId}?autoplay=1`
-        : `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}?autoplay=1`;
+        ? `https://autoembed.co/movie/tmdb/${tmdbId}`
+        : `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}`;
     case StreamServer.TWO_EMBED.key:
       return isMovie
-        ? `https://www.2embed.online/embed/movie/${tmdbId}?autoplay=1`
-        : `https://www.2embed.online/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
+        ? `https://www.2embed.online/embed/movie/${tmdbId}`
+        : `https://www.2embed.online/embed/tv/${tmdbId}/${season}/${episode}`;
     case StreamServer.VIDSRC_SBS.key:
+      // Mirror fallback to vidsrc.net for reliable movie streaming
       return isMovie
-        ? `https://vidsrc.sbs/embed/movie/${tmdbId}?autoplay=1`
-        : `https://vidsrc.sbs/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
+        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`
+        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
     case StreamServer.NONTONGO.key:
       return isMovie
-        ? `https://www.nontongo.win/embed/movie/${tmdbId}?autoplay=1`
-        : `https://www.nontongo.win/embed/tv/${tmdbId}/${season}/${episode}?autoplay=1`;
+        ? `https://www.nontongo.win/embed/movie/${tmdbId}`
+        : `https://www.nontongo.win/embed/tv/${tmdbId}/${season}/${episode}`;
     case StreamServer.MULTI_EMBED.key:
       return isMovie
-        ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&autoplay=1`
-        : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}&autoplay=1`;
+        ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`
+        : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`;
     case StreamServer.VIDSRC_NET.key:
       return isMovie
-        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}&autoplay=1`
-        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}&autoplay=1`;
+        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`
+        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
     case StreamServer.SMASHY.key:
       return isMovie
-        ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&autoplay=1`
-        : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&ep=${episode}&autoplay=1`;
+        ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`
+        : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&ep=${episode}`;
     default:
-      return null;
+      // Safe fallback to Quasar (vidsrc.to) if unknown key
+      return isMovie
+        ? `https://vidsrc.to/embed/movie/${tmdbId}`
+        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`;
   }
 }
 
