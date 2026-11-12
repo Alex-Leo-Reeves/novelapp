@@ -70,15 +70,21 @@ export function buildEmbedUrl(serverKey, tmdbType, tmdbId, season = "1", episode
   const isMovie = tmdbType === "movie";
   switch (normKey) {
     case StreamServer.VIDLINK.key:
-      // Vidlink works best with primaryColor matching theme and without forced unmuted autoplay
-      // (which iOS Safari WebKit blocks, causing infinite loading spinners)
+      // Vidlink is clean, high-speed, and styled in romantic pink without ad popunders
       return isMovie
         ? `https://vidlink.pro/movie/${tmdbId}?primaryColor=ff3385`
         : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}?primaryColor=ff3385`;
     case StreamServer.VIDSRC_TO.key:
+      // Point to vidsrc.pm (Vidstack-based clean player) instead of vidsrc.to
+      // which eliminates createlouisville.org and tagivi.com ad-injection wrappers!
       return isMovie
-        ? `https://vidsrc.to/embed/movie/${tmdbId}`
-        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://vidsrc.pm/embed/movie/${tmdbId}`
+        : `https://vidsrc.pm/embed/tv/${tmdbId}/${season}/${episode}`;
+    case StreamServer.VIDSRC_SBS.key:
+      // Direct vidsrc.sh embed without outer ad wrappers
+      return isMovie
+        ? `https://vidsrc.sh/embed/movie/${tmdbId}/`
+        : `https://vidsrc.sh/embed/tv/${tmdbId}/${season}/${episode}/`;
     case StreamServer.AUTOEMBED.key:
       return isMovie
         ? `https://autoembed.co/movie/tmdb/${tmdbId}`
@@ -87,11 +93,6 @@ export function buildEmbedUrl(serverKey, tmdbType, tmdbId, season = "1", episode
       return isMovie
         ? `https://www.2embed.online/embed/movie/${tmdbId}`
         : `https://www.2embed.online/embed/tv/${tmdbId}/${season}/${episode}`;
-    case StreamServer.VIDSRC_SBS.key:
-      // Mirror fallback to vidsrc.net for reliable movie streaming
-      return isMovie
-        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`
-        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
     case StreamServer.NONTONGO.key:
       return isMovie
         ? `https://www.nontongo.win/embed/movie/${tmdbId}`
@@ -109,16 +110,16 @@ export function buildEmbedUrl(serverKey, tmdbType, tmdbId, season = "1", episode
         ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`
         : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&ep=${episode}`;
     default:
-      // Safe fallback to Quasar (vidsrc.to) if unknown key
+      // Safe fallback to clean VidLink or VidSrc.pm
       return isMovie
-        ? `https://vidsrc.to/embed/movie/${tmdbId}`
-        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`;
+        ? `https://vidlink.pro/movie/${tmdbId}?primaryColor=ff3385`
+        : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}?primaryColor=ff3385`;
   }
 }
 
 export function defaultServerFor(kind) {
-  // Quasar (VidSrc.to) has proven instant movie playback and zero client-side exceptions
-  return StreamServer.VIDSRC_TO.key;
+  // Nebula (VidLink) provides ad-free playback, custom theme, and instant start
+  return StreamServer.VIDLINK.key;
 }
 
 export function selectorFor(kind) {

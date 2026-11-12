@@ -10,24 +10,48 @@
   <meta name="description" content="A gift for IJ ❤️ — a bright, romantic pink iPhone-optimized PWA for novels, anime, and movies." />
   <meta name="referrer" content="origin-when-cross-origin" />
   
-  <!-- Global AdShield: Stops popup windows and ad traps when tapping on mobile -->
+  <!-- Global AdShield: Stops popup windows, ad traps, and background redirect traps -->
   <script>
     (function() {
       try {
         var originalOpen = window.open;
         window.open = function(url, target, features) {
-          // Block ad popups
           console.warn('[AdShield] Blocked popup window.open:', url);
           return null;
         };
+        try {
+          Object.defineProperty(window, 'open', {
+            configurable: false,
+            writable: false,
+            value: function(url) {
+              console.warn('[AdShield] Immutable blocked window.open:', url);
+              return null;
+            }
+          });
+        } catch (_) {}
+
+        // Prevent background ad popunders by immediately restoring focus to PWA
+        window.addEventListener('blur', function() {
+          setTimeout(function() {
+            try { window.focus(); } catch (_) {}
+          }, 50);
+        });
+
+        // Intercept any unwanted external target=_blank anchor clicks
         window.addEventListener('click', function(e) {
           var t = e.target;
-          if (t && t.tagName === 'A' && (t.target === '_blank' || t.getAttribute('target') === '_blank')) {
-            if (!t.closest('#root')) {
-              e.preventDefault();
-              e.stopPropagation();
-              console.warn('[AdShield] Blocked external ad tab');
+          while (t && t !== document.body) {
+            if (t.tagName === 'A') {
+              var target = t.getAttribute('target');
+              var href = t.getAttribute('href') || '';
+              if (target === '_blank' || (href.startsWith('http') && !href.includes(window.location.hostname))) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.warn('[AdShield] Blocked cross-origin ad link:', href);
+                return;
+              }
             }
+            t = t.parentElement;
           }
         }, true);
       } catch (_) {}
@@ -44,7 +68,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800;900&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600;1,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   
   <title>A gift for IJ ❤️</title>
-  <script type="module" crossorigin src="/ij/assets/index-BS-_8RR1.js"></script>
+  <script type="module" crossorigin src="/ij/assets/index-BlkB7kn4.js"></script>
   <link rel="stylesheet" crossorigin href="/ij/assets/index-r8N4nqii.css">
 </head>
 <body>
