@@ -1,6 +1,6 @@
 // Service Worker for "A gift for IJ ❤️" PWA.
 // Lightweight, fast runtime cache for static shell & assets.
-const CACHE_NAME = "ij-pwa-v2";
+const CACHE_NAME = "ij-pwa-v3";
 const SHELL_URL = "/ij/index.html";
 
 const PRECACHE_URLS = [

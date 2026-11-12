@@ -6,11 +6,41 @@ import Reader from "./components/Reader";
 import Home from "./pages/Home";
 import MediaDetail from "./pages/MediaDetail";
 import Favorites from "./pages/Favorites";
+import LockScreen from "./components/LockScreen";
 import "./index.css";
 
 import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
+  // Authentication: matches Ij desktop password ("micheal and ij" / "michael and ij")
+  // Automatically unlocks if user arrives from the authenticated Ij desktop page (?auth=...)
+  const [isUnlocked, setIsUnlocked] = useState(() => {
+    try {
+      // 1. If already authenticated in this session, keep unlocked
+      if (sessionStorage.getItem("ij_unlocked") === "true") {
+        return true;
+      }
+      // 2. If coming from the authenticated Ij desktop app
+      const params = new URLSearchParams(window.location.search);
+      const authParam = params.get("auth");
+      if (
+        authParam === "micheal_and_ij_sanctuary" ||
+        authParam === "micheal_and_ij" ||
+        authParam === "ij_verified"
+      ) {
+        sessionStorage.setItem("ij_unlocked", "true");
+        // Clean up URL query parameters so the address bar stays clean
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("auth");
+          window.history.replaceState({}, "", url.pathname + (url.search ? "?" + url.searchParams.toString() : "") + url.hash);
+        } catch (_) {}
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  });
+
   const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
   const [player, setPlayer] = useState({ open: false, media: null, episode: null });
   const [reader, setReader] = useState({ open: false, media: null, chapter: null, chapters: [] });
@@ -105,6 +135,10 @@ export default function App() {
     (route.path === "/novels" ? "novels" :
      route.path === "/manga" ? "manga" :
      "all");
+
+  if (!isUnlocked) {
+    return <LockScreen onUnlock={() => setIsUnlocked(true)} />;
+  }
 
   return (
     <ErrorBoundary>
