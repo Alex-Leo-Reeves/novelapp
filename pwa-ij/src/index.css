@@ -859,48 +859,57 @@ html, body {
   letter-spacing: 0.02em;
 }
 
-/* ── Invisible Tap Capture (Pure Logic, 0 UI footprint) ── */
-.player-tap-capture {
+/* ── Floating Back Button for Fullscreen / Cinema Mode ── */
+.player-floating-back-btn {
   position: absolute;
-  inset: 0;
-  z-index: 10;
-  background: transparent;
+  top: max(env(safe-area-inset-top), 14px);
+  left: max(env(safe-area-inset-left), 16px);
+  z-index: 50;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(18, 5, 14, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  touch-action: manipulation;
+  transition: all 0.15s ease;
 }
 
-.player-bottom-controls {
+.player-floating-back-btn:active {
+  background: var(--pink-500);
+  transform: scale(0.92);
+}
+
+/* ── Portrait Mode: Below Viewport Server Selector & Info ── */
+.player-below-viewport {
   flex-shrink: 0;
+  background: #0d0408;
+  padding: 10px 14px max(var(--sab), 12px) 14px;
+  border-top: 1px solid rgba(255, 45, 120, 0.15);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  align-items: stretch;
-  padding: 8px 16px max(var(--sab), 10px) 16px;
-  background: rgba(20, 5, 12, 0.92);
-  border-top: 1px solid rgba(255, 45, 120, 0.2);
-  z-index: 20;
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  gap: 8px;
 }
 
-.player-ctrl-btn {
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  color: #ffffff;
-  padding: 6px 14px;
-  border-radius: var(--radius-full);
-  font-family: var(--font-display);
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.player-ctrl-btn:active {
-  background: var(--pink-500);
+.player-tip-text {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
 }
 
 /* ══════════════════════════════════════════════════════════════════
    TRUE CINEMA FULLSCREEN & IPHONE EDGE-TO-EDGE LANDSCAPE VIEWING
+   Zero overlays or bottom bars to ensure 100% direct access to the
+   iframe player's controls and fullscreen toggle!
    ══════════════════════════════════════════════════════════════════ */
 .player-modal.fullscreen-mode,
 .player-modal.is-landscape {
@@ -938,75 +947,6 @@ html, body {
   height: 100dvh;
   border: none;
   display: block;
-}
-
-/* Floating overlay controls in landscape / fullscreen */
-.player-modal.fullscreen-mode .player-top-bar,
-.player-modal.is-landscape .player-top-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 25;
-  padding-top: max(env(safe-area-inset-top), 12px);
-  padding-left: max(env(safe-area-inset-left), 16px);
-  padding-right: max(env(safe-area-inset-right), 16px);
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
-  border-bottom: none;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  pointer-events: auto;
-}
-
-.player-modal.fullscreen-mode .player-server-selector-pill,
-.player-modal.is-landscape .player-server-selector-pill {
-  position: absolute;
-  top: calc(max(env(safe-area-inset-top), 12px) + 54px);
-  left: max(env(safe-area-inset-left), 16px);
-  right: max(env(safe-area-inset-right), 16px);
-  z-index: 25;
-  background: rgba(20, 5, 14, 0.8);
-  border-radius: var(--radius-full);
-  border: 1px solid rgba(255, 45, 120, 0.3);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  pointer-events: auto;
-}
-
-.player-modal.fullscreen-mode .player-bottom-controls,
-.player-modal.is-landscape .player-bottom-controls {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 25;
-  padding-bottom: max(env(safe-area-inset-bottom), 12px);
-  padding-left: max(env(safe-area-inset-left), 16px);
-  padding-right: max(env(safe-area-inset-right), 16px);
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
-  border-top: none;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  pointer-events: auto;
-}
-
-/* Auto-Hidden HUD State: Pure unencumbered edge-to-edge cinema */
-.player-modal.controls-hidden .player-top-bar {
-  opacity: 0;
-  transform: translateY(-100%);
-  pointer-events: none !important;
-}
-
-.player-modal.controls-hidden .player-server-selector-pill {
-  opacity: 0;
-  transform: translateY(-60%);
-  pointer-events: none !important;
-}
-
-.player-modal.controls-hidden .player-bottom-controls {
-  opacity: 0;
-  transform: translateY(100%);
-  pointer-events: none !important;
 }
 
 /* ── Novel & Manga Reader (No Kokoro) ── */

@@ -1,13 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { ALL_SERVERS, buildEmbedUrl, parseTmdb, defaultServerFor, normalizeServerKey } from "../data/servers";
 
 export default function Player({ media, episode, onBack, onServerChange }) {
   const [selectedServer, setSelectedServer] = useState(() =>
-    normalizeServerKey(media.server || defaultServerFor(media.kind) || "vidsrcto")
+    normalizeServerKey(media.server || defaultServerFor(media.kind) || "vidlink")
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [controlsVisible, setControlsVisible] = useState(true);
   const [isLandscape, setIsLandscape] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.innerWidth > window.innerHeight;
@@ -15,7 +14,6 @@ export default function Player({ media, episode, onBack, onServerChange }) {
 
   const videoRef = useRef(null);
   const iframeRef = useRef(null);
-  const hideTimerRef = useRef(null);
 
   const epNum = episode ? episode.number || 1 : 1;
   const tmdb = parseTmdb(media.detailUrl);
@@ -54,39 +52,12 @@ export default function Player({ media, episode, onBack, onServerChange }) {
     };
   }, []);
 
-  // Reset & manage controls auto-hide timer in landscape or fullscreen mode
-  const resetHideTimer = useCallback(() => {
-    setControlsVisible(true);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    if (isFullscreen || isLandscape) {
-      hideTimerRef.current = setTimeout(() => {
-        setControlsVisible(false);
-      }, 4000);
-    }
-  }, [isFullscreen, isLandscape]);
-
-  useEffect(() => {
-    resetHideTimer();
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, [isFullscreen, isLandscape, resetHideTimer]);
-
-  // Pure logic: when controls are hidden, tapping wakes them up and prevents the tap from reaching iframe ad traps
-  const handleTapCapture = (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    resetHideTimer();
-  };
-
   // Prevent loading overlay from ever getting stuck on screen (failsafe)
   useEffect(() => {
     setLoading(true);
     const timer = setTimeout(() => {
       setLoading(false);
-    }, 2200);
+    }, 1800);
     return () => clearTimeout(timer);
   }, [activeUrl, selectedServer]);
 
@@ -101,7 +72,7 @@ export default function Player({ media, episode, onBack, onServerChange }) {
     return () => window.removeEventListener("blur", handleBlur);
   }, []);
 
-  // Protect PWA from top-level ad hijacks
+  // Pure logic: Protect PWA from top-level ad hijacks / redirects
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       e.preventDefault();
@@ -115,7 +86,6 @@ export default function Player({ media, episode, onBack, onServerChange }) {
     const norm = normalizeServerKey(serverKey);
     setSelectedServer(norm);
     setLoading(true);
-    resetHideTimer();
     if (onServerChange) onServerChange(norm);
   };
 
@@ -125,58 +95,55 @@ export default function Player({ media, episode, onBack, onServerChange }) {
       videoRef.current.webkitEnterFullscreen();
       return;
     }
-    // For iframes on iPhone Safari, toggle fixed viewport CSS fullscreen
-    setIsFullscreen((prev) => {
-      const next = !prev;
-      resetHideTimer();
-      return next;
-    });
+    setIsFullscreen((prev) => !prev);
   };
 
   const currentServerObj = ALL_SERVERS.find((s) => s.key === selectedServer) || {
     displayName: selectedServer,
   };
 
+  const inCinemaMode = isFullscreen || isLandscape;
+
   return (
-    <div
-      className={`player-modal ${isFullscreen ? "fullscreen-mode" : ""} ${
-        isLandscape ? "is-landscape" : ""
-      } ${!controlsVisible ? "controls-hidden" : ""}`}
-    >
-      {/* Top Header Bar */}
-      <header className="player-top-bar">
-        <button className="player-back-btn" onClick={onBack} aria-label="Back to detail">
-          ← Back
-        </button>
-        <div className="player-info">
-          <div className="player-title">{media.title}</div>
-          <div className="player-subtitle">
-            {epNum > 0 ? `Episode ${epNum}` : "Feature Film"} • {currentServerObj.displayName}
-          </div>
-        </div>
+    <div className={`player-modal ${inCinemaMode ? "fullscreen-mode" : "portrait-mode"}`}>
+      {/* In Fullscreen/Cinema mode: only a tiny floating back button in top-left safe area,
+          zero overlapping bars or touch blockers so iframe player controls are 100% accessible! */}
+      {inCinemaMode && (
         <button
-          className="player-ctrl-btn"
-          onClick={toggleFullscreen}
-          aria-label={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          className="player-floating-back-btn"
+          onClick={() => {
+            if (isFullscreen) setIsFullscreen(false);
+            else onBack();
+          }}
+          aria-label="Exit fullscreen or back"
         >
-          {isFullscreen ? "✕ Exit" : "⛶ Full"}
+          ←
         </button>
-      </header>
+      )}
 
-      {/* Server Selector Chips */}
-      <div className="player-server-selector-pill">
-        {ALL_SERVERS.map((srv) => (
-          <button
-            key={srv.key}
-            onClick={() => handleServerClick(srv.key)}
-            className={`player-server-chip ${selectedServer === srv.key ? "active" : ""}`}
-          >
-            {srv.displayName}
+      {/* Top Header Bar (Only shown in Portrait Mode - sits cleanly above the video) */}
+      {!inCinemaMode && (
+        <header className="player-top-bar">
+          <button className="player-back-btn" onClick={onBack} aria-label="Back to detail">
+            ← Back
           </button>
-        ))}
-      </div>
+          <div className="player-info">
+            <div className="player-title">{media.title}</div>
+            <div className="player-subtitle">
+              {epNum > 0 ? `Episode ${epNum}` : "Feature Film"} • {currentServerObj.displayName}
+            </div>
+          </div>
+          <button
+            className="player-ctrl-btn"
+            onClick={toggleFullscreen}
+            aria-label="Fullscreen"
+          >
+            ⛶ Full
+          </button>
+        </header>
+      )}
 
-      {/* Video Viewport: Edge-to-Edge Fullscreen on iPhone */}
+      {/* Video Viewport: 100% Direct & Unobstructed Touch - ZERO overlay interference! */}
       <div className="player-viewport">
         {isDirectVideo ? (
           <video
@@ -205,57 +172,38 @@ export default function Player({ media, episode, onBack, onServerChange }) {
           />
         ) : (
           <div style={{ color: "#ffffff", textAlign: "center", padding: 20 }}>
-            No stream URL available. Try switching server above.
+            No stream URL available. Try switching server below.
           </div>
         )}
 
-        {/* Invisible Tap Capture (Pure Logic):
-            Only active when controls are hidden. Tapping screen wakes up controls
-            immediately on 1 tap, absorbing the click so the iframe never receives
-            repeated click events that trigger popunder ads!
-            Completely invisible: 0 UI elements, zero interference. */}
-        {!controlsVisible && !loading && (
-          <div
-            className="player-tap-capture"
-            onClick={handleTapCapture}
-            onTouchEnd={handleTapCapture}
-            aria-label="Tap to show controls"
-          />
-        )}
-
-        {/* Loading Shield Overlay: Absorbs pointer & touch events to block ad traps during load */}
+        {/* Temporary Loading indicator that automatically vanishes */}
         {loading && (
-          <div
-            className="player-loader-overlay"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onTouchStart={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-          >
+          <div className="player-loader-overlay">
             <div className="spinner" />
             <span>Connecting to {currentServerObj.displayName}…</span>
           </div>
         )}
       </div>
 
-      {/* Bottom Controls Bar */}
-      <footer className="player-bottom-controls">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "0.82rem", color: "var(--pink-200)", fontWeight: 700 }}>
-            ⚡ {currentServerObj.displayName} Server
-          </span>
-          <button className="player-ctrl-btn" onClick={toggleFullscreen}>
-            {isFullscreen ? "Exit Fullscreen" : "⛶ Fullscreen"}
-          </button>
+      {/* Server Selector Section (Positioned cleanly BELOW the video in portrait mode so it never blocks playback) */}
+      {!inCinemaMode && (
+        <div className="player-below-viewport">
+          <div className="player-server-selector-pill">
+            {ALL_SERVERS.map((srv) => (
+              <button
+                key={srv.key}
+                onClick={() => handleServerClick(srv.key)}
+                className={`player-server-chip ${selectedServer === srv.key ? "active" : ""}`}
+              >
+                {srv.displayName}
+              </button>
+            ))}
+          </div>
+          <div className="player-tip-text">
+            💡 Tap the player's fullscreen button or rotate your iPhone for edge-to-edge cinema playback.
+          </div>
         </div>
-        <div style={{ fontSize: "0.72rem", color: "rgba(255, 255, 255, 0.7)", textAlign: "center" }}>
-          💡 Tip: Rotate your iPhone or tap Fullscreen for edge-to-edge cinema playback.
-        </div>
-      </footer>
+      )}
     </div>
   );
 }
